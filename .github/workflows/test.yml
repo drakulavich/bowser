@@ -33,13 +33,13 @@ jobs:
           echo "Found: $BIN"
           test -x "$BIN"
           echo "path=$BIN" >> "$GITHUB_OUTPUT"
-      - name: E2E — data: URL smoke test
+      - name: E2E - data URL smoke test
         env:
           BOWSER_E2E: "1"
           BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
           BOWSER_CHROME_ARGS: "--no-sandbox"
         run: bun test tests/e2e.test.ts
-      - name: E2E — local todo app
+      - name: E2E - local todo app
         env:
           BOWSER_E2E: "1"
           BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
