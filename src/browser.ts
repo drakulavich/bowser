@@ -75,19 +75,21 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
 export function detectChromium(): string | undefined {
   const candidates = [
     process.env.BOWSER_CHROMIUM_PATH,
+    ...bowserCacheCandidates(),
     "/usr/bin/chromium-headless-shell",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ...playwrightCacheCandidates(),
   ].filter(Boolean) as string[];
 
+  const fs = require("node:fs") as typeof import("node:fs");
   for (const p of candidates) {
     try {
-      // statSync via Bun.file — fast enough at startup.
-      if (Bun.file(p).size >= 0) return p;
+      // Must exist and be a regular file (not a symlink to /dev/null etc).
+      const st = fs.statSync(p);
+      if (st.isFile() || st.isSymbolicLink()) return p;
     } catch {
       // keep scanning
     }
@@ -95,44 +97,41 @@ export function detectChromium(): string | undefined {
   return undefined;
 }
 
-/** Look inside Playwright's browser cache (~/.cache/ms-playwright) for a
- *  chrome-headless-shell install. We don't parse versions — we glob the
- *  directory and return the first match. */
-function playwrightCacheCandidates(): string[] {
-  const home = process.env.HOME;
-  if (!home) return [];
+/** Root of bowser's dedicated chromium cache. `bowser install` downloads into
+ *  here via Playwright's installer (with PLAYWRIGHT_BROWSERS_PATH pointed at
+ *  this directory). Nothing else on the machine writes to this path. */
+export function bowserCacheRoot(): string {
+  const home = process.env.HOME ?? "";
+  return `${home}/.bowser/chromium`;
+}
 
-  const roots = [
-    `${home}/.cache/ms-playwright`,
-    `${home}/Library/Caches/ms-playwright`,
-  ];
+/** Expand the bowser-owned cache into concrete executable candidate paths.
+ *  Layout mirrors Playwright's because we use Playwright's installer. */
+function bowserCacheCandidates(): string[] {
+  const root = bowserCacheRoot();
+  if (!root) return [];
+
   const out: string[] = [];
-
-  for (const root of roots) {
-    try {
-      const fs = require("node:fs") as typeof import("node:fs");
-      if (!fs.existsSync(root)) continue;
-      for (const entry of fs.readdirSync(root)) {
-        if (!entry.startsWith("chromium")) continue;
-        // Linux: chromium_headless_shell-XXXX/chrome-linux/headless_shell
-        //   or: chromium-XXXX/chrome-linux/chrome
-        // macOS: .../chrome-mac/Chromium.app/Contents/MacOS/Chromium
-        const base = `${root}/${entry}`;
-        out.push(
-          // Playwright chromium-headless-shell (what --only-shell installs)
-          `${base}/chrome-headless-shell-linux64/chrome-headless-shell`,
-          `${base}/chrome-headless-shell-mac-arm64/headless_shell`,
-          `${base}/chrome-headless-shell-mac/headless_shell`,
-          // Playwright full chromium
-          `${base}/chrome-linux64/chrome`,
-          `${base}/chrome-linux/chrome`,
-          `${base}/chrome-mac/Chromium.app/Contents/MacOS/Chromium`,
-          `${base}/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium`,
-        );
-      }
-    } catch {
-      // ignore
+  try {
+    const fs = require("node:fs") as typeof import("node:fs");
+    if (!fs.existsSync(root)) return [];
+    for (const entry of fs.readdirSync(root)) {
+      if (!entry.startsWith("chromium")) continue;
+      const base = `${root}/${entry}`;
+      out.push(
+        // chromium-headless-shell (what `bowser install` fetches)
+        `${base}/chrome-headless-shell-linux64/chrome-headless-shell`,
+        `${base}/chrome-headless-shell-mac-arm64/headless_shell`,
+        `${base}/chrome-headless-shell-mac/headless_shell`,
+        // Full chromium, in case someone installs the heavier build
+        `${base}/chrome-linux64/chrome`,
+        `${base}/chrome-linux/chrome`,
+        `${base}/chrome-mac/Chromium.app/Contents/MacOS/Chromium`,
+        `${base}/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium`,
+      );
     }
+  } catch {
+    // ignore
   }
   return out;
 }

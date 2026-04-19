@@ -18,6 +18,7 @@ import {
   cmdClick,
   cmdClose,
   cmdFill,
+  cmdInstall,
   cmdOpen,
   cmdSession,
   cmdSnap,
@@ -27,6 +28,7 @@ import {
 const HELP = `bowser — Bun-powered browser CLI for agents
 
 Commands:
+  install [--force]     download a headless Chromium into ~/.bowser/chromium
   open <url>            navigate and save state
   snap [-i]             capture a snapshot of interactive refs (@e1, @e2 ...)
   click <@ref>          click an element by ref
@@ -44,6 +46,7 @@ interface ParsedArgs {
   json: boolean;
   help: boolean;
   interactive: boolean;
+  force: boolean;
   command: string | undefined;
   positional: string[];
 }
@@ -54,6 +57,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     json: false,
     help: false,
     interactive: false,
+    force: false,
     command: undefined,
     positional: [],
   };
@@ -70,6 +74,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "-i":
       case "--interactive":
         out.interactive = true;
+        break;
+      case "--force":
+      case "-f":
+        out.force = true;
         break;
       case "-h":
       case "--help":
@@ -91,6 +99,8 @@ export async function run(argv: string[]): Promise<string> {
   const ctx: CommandContext = { session: args.session, json: args.json };
 
   switch (args.command) {
+    case "install":
+      return cmdInstall(ctx, { force: args.force });
     case "open":
       return cmdOpen(ctx, args.positional[0] ?? "");
     case "snap":

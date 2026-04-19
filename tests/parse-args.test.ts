@@ -16,6 +16,12 @@ describe("parseArgs", () => {
     expect(a.positional).toEqual(["https://example.com"]);
   });
 
+  test("--force / -f sets force flag", () => {
+    expect(parseArgs(["install", "--force"]).force).toBe(true);
+    expect(parseArgs(["install", "-f"]).force).toBe(true);
+    expect(parseArgs(["install"]).force).toBe(false);
+  });
+
   test("--session overrides default", () => {
     const a = parseArgs(["--session", "login", "open", "https://x.com"]);
     expect(a.session).toBe("login");

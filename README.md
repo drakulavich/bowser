@@ -25,9 +25,23 @@ git clone https://github.com/drakulavich/bowser.git
 cd bowser
 bun install
 bun link                     # exposes `bowser` on $PATH
+
+# Download a headless Chromium into ~/.bowser/chromium (skipped if one
+# is already available on the system).
+bowser install
 ```
 
-Requires Bun ≥ 1.3.12. On Linux/Windows, install a Chromium-based browser (`chromium-headless-shell`, Chrome, Edge, or Brave). macOS uses system WebKit — nothing extra needed.
+Requires Bun ≥ 1.3.12.
+
+### How Chromium is resolved
+
+Bowser looks for a Chromium/Chrome binary in this order and uses the first one found:
+
+1. `$BOWSER_CHROMIUM_PATH` (explicit override)
+2. `~/.bowser/chromium/...` (populated by `bowser install`)
+3. System-wide installs: `/usr/bin/chromium-headless-shell`, `/usr/bin/chromium`, `/usr/bin/google-chrome`, `/Applications/Google Chrome.app/...`, `/Applications/Chromium.app/...`
+
+If none of those exist, run `bowser install`. It uses Playwright's downloader under the hood but writes into Bowser's own cache — it won't touch your Playwright setup. Use `bowser install --force` to re-download even when a system Chrome is already present.
 
 ## Quickstart
 
@@ -61,6 +75,7 @@ bowser --json snap | jq '.refs[] | select(.role == "button")'
 
 | Command | Description |
 | --- | --- |
+| `install [--force]` | Download a headless Chromium into `~/.bowser/chromium` |
 | `open <url>` | Navigate to a URL and persist state |
 | `snap [-i]` | Capture interactive elements with stable CSS paths |
 | `click <@ref>` | Click a ref from the last snapshot |
