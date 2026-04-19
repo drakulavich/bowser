@@ -25,10 +25,16 @@ jobs:
           bun-version: latest
       - run: bun install
       - name: Install headless Chromium via Playwright
-        run: bunx --bun playwright install --only-shell chromium
+        run: bunx --bun playwright install --only-shell --with-deps chromium
+      - name: Resolve Chromium path
+        id: chromium
+        run: |
+          BIN=$(find "$HOME/.cache/ms-playwright" -type f -name chrome-headless-shell | head -n1)
+          echo "Found: $BIN"
+          test -x "$BIN"
+          echo "path=$BIN" >> "$GITHUB_OUTPUT"
       - name: Local e2e
         env:
-          # Playwright drops chrome-headless-shell under ~/.cache/ms-playwright
-          # which Bun.WebView auto-detects.
           BOWSER_E2E: "1"
+          BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
         run: bun test tests/e2e.test.ts tests/e2e-todo.test.ts
