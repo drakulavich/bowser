@@ -44,5 +44,4 @@ jobs:
           BOWSER_E2E: "1"
           BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
           BOWSER_CHROME_ARGS: "--no-sandbox"
-          BOWSER_CHROME_DEBUG: "1"
         run: bun test tests/e2e-todo.test.ts
