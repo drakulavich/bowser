@@ -1,0 +1,88 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Allow manual runs from the Actions UI (handy for re-publishing binaries
+  # against an already-pushed tag).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write # needed to create the GitHub Release + upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            asset: bowser-linux-x64
+          - os: macos-latest
+            target: bun-darwin-arm64
+            asset: bowser-macos-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            asset: bowser-macos-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - name: Compile single-file binary
+        run: |
+          mkdir -p dist
+          bun build src/cli.ts \
+            --compile \
+            --target=${{ matrix.target }} \
+            --outfile dist/${{ matrix.asset }}
+      - name: Smoke-test the binary
+        # On macOS runners the build is native-arch; skip the smoke-test for
+        # cross-compiled Linux build (ubuntu-latest IS x64, so it's fine there).
+        if: matrix.target != 'bun-darwin-x64' || runner.arch == 'X64'
+        run: ./dist/${{ matrix.asset }} --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List downloaded assets
+        run: ls -la dist
+      - name: Compute SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum bowser-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Bowser ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          files: |
+            dist/bowser-linux-x64
+            dist/bowser-macos-arm64
+            dist/bowser-macos-x64
+            dist/SHA256SUMS.txt
