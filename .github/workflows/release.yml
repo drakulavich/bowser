@@ -93,3 +93,29 @@ jobs:
             dist/bowser-macos-arm64
             dist/bowser-macos-x64
             dist/SHA256SUMS.txt
+
+  npm:
+    # Publish to npm as @drakulavich/bowser-cli. Requires NPM_TOKEN secret
+    # on the repo (Automation token with "Publish" permission).
+    needs: publish
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, '-') }} # skip prereleases like v0.1.0-rc.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify version matches tag
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG_VER="${TAG#v}"
+          if [ "$PKG" != "$TAG_VER" ]; then
+            echo "package.json version ($PKG) does not match tag ($TAG_VER)"
+            exit 1
+          fi
+      - name: Publish to npm
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
