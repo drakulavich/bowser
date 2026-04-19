@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bowser Todo</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.5rem; }
+    .row { display: flex; gap: .5rem; margin: 1rem 0; }
+    input[type=text] { flex: 1; padding: .5rem; font-size: 1rem; }
+    button { padding: .5rem 1rem; font-size: 1rem; cursor: pointer; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; align-items: center; gap: .5rem; padding: .25rem 0; border-bottom: 1px solid #eee; }
+    li.done label { text-decoration: line-through; opacity: .6; }
+    label { flex: 1; }
+    .count { color: #666; font-size: .9rem; }
+    .empty { color: #999; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Todos</h1>
+
+  <form class="row" id="add-form">
+    <input id="new-todo" type="text" placeholder="What needs doing?" aria-label="New todo" autocomplete="off" />
+    <button id="add-btn" type="submit">Add</button>
+  </form>
+
+  <ul id="list" aria-label="Todo list"></ul>
+
+  <div class="row">
+    <span id="count" class="count">0 items</span>
+    <button id="clear-btn" type="button">Clear completed</button>
+  </div>
+
+  <script>
+    const todos = [];
+    const listEl = document.getElementById("list");
+    const countEl = document.getElementById("count");
+    const newEl = document.getElementById("new-todo");
+
+    function render() {
+      listEl.innerHTML = "";
+      if (todos.length === 0) {
+        const li = document.createElement("li");
+        li.className = "empty";
+        li.textContent = "No todos yet";
+        listEl.appendChild(li);
+      } else {
+        todos.forEach((t, i) => {
+          const li = document.createElement("li");
+          if (t.done) li.className = "done";
+
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = t.done;
+          cb.setAttribute("aria-label", "Toggle " + t.text);
+          cb.addEventListener("change", () => {
+            todos[i].done = cb.checked;
+            render();
+          });
+
+          const label = document.createElement("label");
+          label.textContent = t.text;
+
+          li.appendChild(cb);
+          li.appendChild(label);
+          listEl.appendChild(li);
+        });
+      }
+      const remaining = todos.filter((t) => !t.done).length;
+      countEl.textContent = remaining + " item" + (remaining === 1 ? "" : "s") + " left";
+    }
+
+    document.getElementById("add-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = newEl.value.trim();
+      if (!text) return;
+      todos.push({ text, done: false });
+      newEl.value = "";
+      render();
+    });
+
+    document.getElementById("clear-btn").addEventListener("click", () => {
+      for (let i = todos.length - 1; i >= 0; i--) {
+        if (todos[i].done) todos.splice(i, 1);
+      }
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>
