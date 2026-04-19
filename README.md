@@ -20,18 +20,28 @@ Bowser takes the third path popularized by [Playwright's CLI](https://playwright
 ## Install
 
 ```bash
-# From source for now
+# From npm (requires Bun ≥ 1.3.12 on your PATH)
+npm install -g @drakulavich/bowser-cli
+
+# ...or directly from source
 git clone https://github.com/drakulavich/bowser.git
 cd bowser
 bun install
 bun link                     # exposes `bowser` on $PATH
+```
 
-# Download a headless Chromium into ~/.bowser/chromium (skipped if one
-# is already available on the system).
+Then fetch a headless Chromium into Bowser's own cache (skipped if a system
+Chromium is already available):
+
+```bash
 bowser install
 ```
 
-Requires Bun ≥ 1.3.12.
+Prebuilt single-file binaries for Linux (x64/arm64) and macOS (arm64/x64)
+are also attached to every GitHub Release — see
+[Releases](https://github.com/drakulavich/bowser/releases).
+
+Requires Bun ≥ 1.3.12 for the npm/source install.
 
 ### How Chromium is resolved
 

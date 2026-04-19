@@ -1,5 +1,5 @@
 {
-  "name": "@bowser/cli",
+  "name": "@drakulavich/bowser-cli",
   "version": "0.1.0",
   "description": "A Bun-native, token-efficient browser automation CLI for AI agents. Fuels your agent with web context.",
   "type": "module",
@@ -10,11 +10,30 @@
     "start": "bun run src/cli.ts",
     "test": "bun test",
     "build": "bun build src/cli.ts --compile --outfile dist/bowser",
-    "build:all": "bun run scripts/build-all.ts"
+    "preinstall": "node scripts/check-bun.js || true"
   },
   "engines": {
     "bun": ">=1.3.12"
   },
+  "files": [
+    "src/",
+    "skills/",
+    "scripts/check-bun.js",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drakulavich/bowser.git"
+  },
+  "bugs": {
+    "url": "https://github.com/drakulavich/bowser/issues"
+  },
+  "homepage": "https://github.com/drakulavich/bowser#readme",
   "keywords": [
     "browser",
     "automation",
