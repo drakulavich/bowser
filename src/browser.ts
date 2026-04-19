@@ -21,9 +21,21 @@ export interface Browser {
 export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
   const path = opts.executablePath ?? detectChromium();
 
-  const backend = path
-    ? ({ type: "chrome", path } as const)
-    : ("chrome" as const);
+  // Extra Chrome launch flags can be injected via BOWSER_CHROME_ARGS
+  // (space-separated). On CI (sandboxed containers, no user namespaces) you
+  // typically want BOWSER_CHROME_ARGS="--no-sandbox --disable-dev-shm-usage".
+  const extraArgv = (process.env.BOWSER_CHROME_ARGS ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const backend =
+    path || extraArgv.length > 0
+      ? ({
+          type: "chrome" as const,
+          ...(path ? { path } : {}),
+          ...(extraArgv.length ? { argv: extraArgv } : {}),
+        } as const)
+      : ("chrome" as const);
 
   // @ts-expect-error Bun.WebView is available in Bun >= 1.3.12 but not yet in
   // the public types bundled with @types/bun at the time of writing.
