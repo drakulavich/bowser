@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectChromium } from "../src/browser.ts";
-import { cmdClick, cmdOpen, cmdSnap } from "../src/commands.ts";
+import { cmdClick, cmdClose, cmdOpen, cmdSnap } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -36,6 +36,11 @@ runOrSkip("e2e: real Chromium", () => {
   });
 
   afterAll(async () => {
+    // Shut down the daemon + Chrome before cleanup so we don't leak processes
+    // into the next test file.
+    try {
+      await cmdClose({ session, json: true });
+    } catch {}
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });

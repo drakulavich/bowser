@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectChromium, openBrowser } from "../src/browser.ts";
-import { cmdClick, cmdFill, cmdOpen, cmdSnap } from "../src/commands.ts";
+import { cmdClick, cmdClose, cmdFill, cmdOpen, cmdSnap } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -50,6 +50,9 @@ runOrSkip("e2e: local todo app", () => {
   });
 
   afterAll(async () => {
+    try {
+      await cmdClose({ session, json: true });
+    } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
