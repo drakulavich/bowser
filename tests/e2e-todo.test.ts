@@ -88,25 +88,29 @@ runOrSkip("e2e: local todo app", () => {
     //    (In a real agent loop you'd just read the next snapshot — doing it
     //    this way here proves the DOM actually updated, not just our YAML.)
     {
-      await using view = new (Bun as any).WebView({
-        backend: { type: "chrome", path: detectChromium() },
-      });
-      await view.navigate(baseUrl);
-      // Replay the adds since a fresh view has empty state.
-      for (const text of ["buy milk", "write tests", "ship bowser"]) {
-        await view.click("#new-todo");
-        await view.type(text);
-        await view.click("#add-btn");
-      }
-      const items = (await view.evaluate(
-        "[...document.querySelectorAll('#list li label')].map(el => el.textContent)",
-      )) as string[];
-      expect(items).toEqual(["buy milk", "write tests", "ship bowser"]);
+      // Use openBrowser so BOWSER_CHROME_ARGS (e.g. --no-sandbox on CI) is
+      // honored — a raw `new Bun.WebView(...)` here would bypass it and crash.
+      const b = await openBrowser();
+      try {
+        await b.navigate(baseUrl);
+        // Replay the adds since a fresh view has empty state.
+        for (const text of ["buy milk", "write tests", "ship bowser"]) {
+          await b.click("#new-todo");
+          await b.type(text);
+          await b.click("#add-btn");
+        }
+        const items = (await b.evaluate(
+          "[...document.querySelectorAll('#list li label')].map(el => el.textContent)",
+        )) as string[];
+        expect(items).toEqual(["buy milk", "write tests", "ship bowser"]);
 
-      const remaining = await view.evaluate(
-        "document.getElementById('count').textContent",
-      );
-      expect(remaining).toBe("3 items left");
+        const remaining = await b.evaluate(
+          "document.getElementById('count').textContent",
+        );
+        expect(remaining).toBe("3 items left");
+      } finally {
+        await b.close();
+      }
     }
 
     // 5. Toggle the first todo via Bowser (checkbox is a new ref after re-snap).
