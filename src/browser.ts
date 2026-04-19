@@ -28,12 +28,17 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     .split(/\s+/)
     .filter(Boolean);
 
+  // BOWSER_CHROME_DEBUG=1 forwards Chrome stderr to our stderr so spawn
+  // failures in CI don't hide behind "Chrome process closed the pipe".
+  const debug = process.env.BOWSER_CHROME_DEBUG === "1";
+
   const backend =
-    path || extraArgv.length > 0
+    path || extraArgv.length > 0 || debug
       ? ({
           type: "chrome" as const,
           ...(path ? { path } : {}),
           ...(extraArgv.length ? { argv: extraArgv } : {}),
+          ...(debug ? { stderr: "inherit", stdout: "inherit" } : {}),
         } as const)
       : ("chrome" as const);
 

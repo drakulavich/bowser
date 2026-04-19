@@ -228,13 +228,25 @@ export async function connectOrSpawn(
 }
 
 async function spawnDaemon(session: string): Promise<void> {
-  const { ensureSessionDir } = await import("./state.ts");
+  const { ensureSessionDir, sessionDir } = await import("./state.ts");
   await ensureSessionDir(session);
   const entry = new URL("./daemon-main.ts", import.meta.url).pathname;
+
+  // When BOWSER_CHROME_DEBUG is set, capture daemon + Chrome stderr to a log
+  // file inside the session dir so spawn failures are diagnosable.
+  const debug = process.env.BOWSER_CHROME_DEBUG === "1";
+  let stdout: "ignore" | "inherit" = "ignore";
+  let stderr: "ignore" | "inherit" = "ignore";
+  if (debug) {
+    stdout = "inherit";
+    stderr = "inherit";
+    void sessionDir;
+  }
+
   Bun.spawn({
     cmd: [process.execPath, entry, session],
-    stdout: "ignore",
-    stderr: "ignore",
+    stdout,
+    stderr,
     stdin: "ignore",
     // Detach so the daemon survives the parent CLI exiting.
     // Bun inherits no ptty by default; this is effectively fire-and-forget.
