@@ -7,13 +7,20 @@ export interface BrowserOptions {
 }
 
 export interface Browser {
+  url: string;
+  title: string;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
   type(text: string): Promise<void>;
   press(key: string): Promise<void>;
-  url: string;
-  title: string;
+  hover(selector: string): Promise<void>;
+  select(selector: string, value: string): Promise<void>;
+  setChecked(selector: string, checked: boolean): Promise<void>;
+  screenshot(opts: { selector?: string; path?: string }): Promise<string | undefined>;
+  back(): Promise<void>;
+  forward(): Promise<void>;
+  reload(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -62,6 +69,57 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     click: (selector) => view.click(selector),
     type: (text) => view.type(text),
     press: (key) => view.press(key),
+    hover: async (selector) => {
+      await view.evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) throw new Error('hover: element not found');
+        const r = el.getBoundingClientRect();
+        const x = r.x + r.width / 2, y = r.y + r.height / 2;
+        el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: x, clientY: y }));
+        el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: x, clientY: y }));
+      })()`);
+    },
+    select: async (selector, value) => {
+      await view.evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) throw new Error('select: element not found');
+        el.value = ${JSON.stringify(value)};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+    },
+    setChecked: async (selector, checked) => {
+      await view.evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) throw new Error('check: element not found');
+        if (Boolean(el.checked) !== ${checked}) el.click();
+      })()`);
+    },
+    screenshot: async ({ selector: _sel, path }) => {
+      // Bun.WebView exposes screenshot() returning base64 PNG.
+      // Element-bounded screenshots are not supported in v1; we return full-page either way.
+      // (Selector reserved for a future CDP path.)
+      const data = await (view as { screenshot?: () => Promise<string> }).screenshot?.();
+      if (!data) throw new Error('screenshot: not supported by this Bun.WebView');
+      if (path) {
+        await Bun.write(path, Buffer.from(String(data), 'base64'));
+        return undefined;
+      }
+      return String(data);
+    },
+    back: async () => {
+      await view.evaluate("history.back()");
+    },
+    forward: async () => {
+      await view.evaluate("history.forward()");
+    },
+    reload: async () => {
+      if (typeof (view as { reload?: unknown }).reload === 'function') {
+        await (view as { reload: () => Promise<void> }).reload();
+      } else {
+        await view.evaluate("location.reload()");
+      }
+    },
     close: async () => {
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
