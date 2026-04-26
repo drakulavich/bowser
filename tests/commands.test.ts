@@ -7,16 +7,12 @@ import { join } from "node:path";
 
 import type { DaemonClient } from "../src/daemon.ts";
 import {
-  cmdClick,
-  cmdClose,
-  cmdFill,
-  cmdOpen,
-  cmdGoto,
-  cmdSnapshot,
-  cmdList,
-  cmdInstall,
+  cmdClick, cmdFill, cmdType, cmdPress, cmdHover, cmdSelect,
+  cmdCheck, cmdUncheck, cmdScreenshot, cmdHistory,
+  cmdClose, cmdOpen, cmdGoto, cmdSnapshot, cmdList, cmdInstall,
   type CommandContext,
 } from "../src/commands.ts";
+import { saveState } from "../src/state.ts";
 
 // Minimal DaemonClient stand-in with a scripted response map.
 function fakeClient(handlers: {
@@ -24,6 +20,15 @@ function fakeClient(handlers: {
   evaluate?: (expr: string) => unknown;
   click?: (selector: string) => void;
   type?: (text: string) => void;
+  press?: (key: string) => void;
+  hover?: (selector: string) => void;
+  select?: (selector: string, value: string) => void;
+  check?: (selector: string) => void;
+  uncheck?: (selector: string) => void;
+  screenshot?: (selector?: string, path?: string) => string | undefined;
+  back?: () => void;
+  forward?: () => void;
+  reload?: () => void;
   state?: () => { url: string; title: string };
 }) {
   const calls: Array<[string, unknown[]]> = [];
@@ -53,6 +58,32 @@ function fakeClient(handlers: {
         case "type":
           handlers.type?.(args[0] as string);
           return;
+        case "press":
+          handlers.press?.(args[0] as string);
+          return;
+        case "hover":
+          handlers.hover?.(args[0] as string);
+          return;
+        case "select":
+          handlers.select?.(args[0] as string, args[1] as string);
+          return;
+        case "check":
+          handlers.check?.(args[0] as string);
+          return;
+        case "uncheck":
+          handlers.uncheck?.(args[0] as string);
+          return;
+        case "screenshot":
+          return handlers.screenshot?.(args[0] as string | undefined, args[1] as string | undefined);
+        case "back":
+          handlers.back?.();
+          return;
+        case "forward":
+          handlers.forward?.();
+          return;
+        case "reload":
+          handlers.reload?.();
+          return;
         case "state":
           return handlers.state?.() ?? { url: currentUrl, title: currentTitle };
         default:
@@ -62,6 +93,21 @@ function fakeClient(handlers: {
     close() {},
   } as unknown as DaemonClient & { calls: typeof calls };
   return c;
+}
+
+async function seedRefs() {
+  await saveState({
+    name: "default",
+    url: "https://x",
+    title: "X",
+    refs: [
+      { id: "e1", selector: "a",        role: "link",     name: "Home",  tag: "a" },
+      { id: "e2", selector: "input",    role: "textbox",  name: "Email", tag: "input" },
+      { id: "e3", selector: "select",   role: "combobox", name: "Color", tag: "select" },
+      { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
+    ],
+    updatedAt: Date.now(),
+  });
 }
 
 let tmp: string;
@@ -246,5 +292,152 @@ describe("cmdFill", () => {
     );
     expect(clicked).toBe(true);
     expect(typed).toBe("bun@bowser.dev");
+  });
+});
+
+// Wave-2 action command tests — use the shared tmp HOME from beforeAll above.
+// seedRefs() writes to session "default"; each test uses its own session via ctx()
+// which has its own random session name — we seed "default" just to satisfy
+// loadState for the ref-lookup tests (those commands load state by ctx.session,
+// so we need to seed the right session name).
+
+describe("click", () => {
+  test("dispatches click on selector", async () => {
+    // Seed state for the current session so resolveRef works.
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({});
+    const out = await cmdClick({ ...ctx(), connect: async () => c }, "e1");
+    expect(out).toContain("clicked e1");
+    expect(c.calls).toContainEqual(["click", ["a"]]);
+  });
+});
+
+describe("fill", () => {
+  test("clicks, clears, types", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({});
+    await cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi");
+    const ops = c.calls.map((cl) => cl[0]);
+    expect(ops).toEqual(["click", "evaluate", "type"]);
+  });
+});
+
+describe("type", () => {
+  test("types into focused element", async () => {
+    const c = fakeClient({});
+    await cmdType({ ...ctx(), connect: async () => c }, "abc");
+    expect(c.calls).toContainEqual(["type", ["abc"]]);
+  });
+});
+
+describe("press", () => {
+  test("presses a key", async () => {
+    const c = fakeClient({});
+    await cmdPress({ ...ctx(), connect: async () => c }, "Enter");
+    expect(c.calls).toContainEqual(["press", ["Enter"]]);
+  });
+});
+
+describe("hover", () => {
+  test("hovers a ref", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({});
+    await cmdHover({ ...ctx(), connect: async () => c }, "e1");
+    expect(c.calls).toContainEqual(["hover", ["a"]]);
+  });
+});
+
+describe("select", () => {
+  test("selects a value", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({});
+    await cmdSelect({ ...ctx(), connect: async () => c }, "e3", "red");
+    expect(c.calls).toContainEqual(["select", ["select", "red"]]);
+  });
+});
+
+describe("check / uncheck", () => {
+  test("check sends check op", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({});
+    await cmdCheck({ ...ctx(), connect: async () => c }, "e4");
+    expect(c.calls).toContainEqual(["check", ["input.cb"]]);
+  });
+  test("uncheck sends uncheck op", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({});
+    await cmdUncheck({ ...ctx(), connect: async () => c }, "e4");
+    expect(c.calls).toContainEqual(["uncheck", ["input.cb"]]);
+  });
+});
+
+describe("screenshot", () => {
+  test("full-page returns base64 to stdout", async () => {
+    const c = fakeClient({ screenshot: () => "BASE64DATA" });
+    const out = await cmdScreenshot({ ...ctx(), connect: async () => c }, {});
+    expect(out).toBe("BASE64DATA");
+  });
+  test("--filename writes file", async () => {
+    const tmp = `/tmp/bowser-shot-${Date.now()}.png`;
+    const c = fakeClient({ screenshot: () => undefined });
+    const out = await cmdScreenshot(
+      { ...ctx({ flags: { filename: tmp } }), connect: async () => c },
+      { filename: tmp },
+    );
+    expect(out).toBe(`wrote ${tmp}`);
+  });
+});
+
+describe("history (go-back/go-forward/reload)", () => {
+  test("go-back", async () => {
+    const c = fakeClient({});
+    await cmdHistory({ ...ctx(), connect: async () => c }, "back");
+    expect(c.calls).toContainEqual(["back", []]);
+  });
+  test("go-forward", async () => {
+    const c = fakeClient({});
+    await cmdHistory({ ...ctx(), connect: async () => c }, "forward");
+    expect(c.calls).toContainEqual(["forward", []]);
+  });
+  test("reload", async () => {
+    const c = fakeClient({});
+    await cmdHistory({ ...ctx(), connect: async () => c }, "reload");
+    expect(c.calls).toContainEqual(["reload", []]);
   });
 });
