@@ -16,6 +16,8 @@ export interface Ref {
   role: string;
   name: string;
   tag: string;
+  href?: string;
+  value?: string;
 }
 
 export interface SessionState {
