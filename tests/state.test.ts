@@ -2,35 +2,28 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-// We can't easily override ~/.bowser at runtime without refactoring state.ts
-// to accept a root. Instead we verify resolveRef directly (pure) and leave
-// I/O to the integration test where a real session dir is fine.
-
 import { resolveRef, type SessionState } from "../src/state.ts";
 
+const state: SessionState = {
+  name: "t",
+  url: "https://x",
+  title: "x",
+  refs: [
+    { id: "e1", selector: "html > body > a", role: "link", name: "Home", tag: "a" },
+    { id: "e2", selector: "html > body > button", role: "button", name: "Go", tag: "button" },
+  ],
+  updatedAt: 0,
+};
+
 describe("resolveRef", () => {
-  const state: SessionState = {
-    name: "t",
-    url: "https://x",
-    title: "X",
-    updatedAt: 0,
-    refs: [
-      { id: "@e1", selector: "s1", role: "button", name: "Go", tag: "button" },
-      { id: "@e2", selector: "s2", role: "textbox", name: "Email", tag: "input" },
-    ],
-  };
-
-  test("finds existing ref", () => {
-    expect(resolveRef(state, "@e2").selector).toBe("s2");
+  test("resolves bare ref", () => {
+    expect(resolveRef(state, "e2").selector).toBe("html > body > button");
   });
-
-  test("rejects non-ref input", () => {
-    expect(() => resolveRef(state, "button.submit")).toThrow(/expected a ref/);
+  test("rejects ref with @ prefix", () => {
+    expect(() => resolveRef(state, "@e2")).toThrow(/expected a ref like 'e1'/);
   });
-
-  test("rejects unknown ref", () => {
-    expect(() => resolveRef(state, "@e99")).toThrow(/not found/);
+  test("throws for unknown ref", () => {
+    expect(() => resolveRef(state, "e9")).toThrow(/not found/);
   });
 });
 
@@ -39,8 +32,6 @@ describe("state roundtrip (real fs)", () => {
   let tmp: string;
 
   beforeAll(async () => {
-    // Redirect HOME so saveState writes into a temp dir and our test doesn't
-    // pollute the real ~/.bowser.
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-test-"));
     process.env.HOME = tmp;
@@ -58,7 +49,7 @@ describe("state roundtrip (real fs)", () => {
       url: "https://example.com/",
       title: "Example",
       updatedAt: 123,
-      refs: [{ id: "@e1", selector: "a", role: "link", name: "More", tag: "a" }],
+      refs: [{ id: "e1", selector: "a", role: "link", name: "More", tag: "a" }],
     };
     await saveState(s);
     const loaded = await loadState("roundtrip");

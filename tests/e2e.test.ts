@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectChromium } from "../src/browser.ts";
-import { cmdClick, cmdClose, cmdOpen, cmdSnap } from "../src/commands.ts";
+import { cmdClick, cmdClose, cmdOpen, cmdSnapshot } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -61,11 +61,11 @@ runOrSkip("e2e: real Chromium", () => {
   test("open → snap → click flow", async () => {
     await cmdOpen({ session, json: true }, dataUrl);
 
-    const yaml = await cmdSnap({ session, json: false });
+    const yaml = await cmdSnapshot({ session, json: false });
     // The snapshot should find our button, input, and link.
-    expect(yaml).toContain("role: button");
-    expect(yaml).toContain("role: textbox");
-    expect(yaml).toContain("role: link");
+    expect(yaml).toContain("button");
+    expect(yaml).toContain("textbox");
+    expect(yaml).toContain("link");
 
     const state = await loadState(session);
     const button = state?.refs.find((r) => r.role === "button");

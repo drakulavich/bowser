@@ -11,11 +11,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface Ref {
-  id: string; // "@e1"
-  selector: string; // CSS selector captured at snapshot time
+  id: string; // "e1", no '@' prefix (playwright-cli compatible)
+  selector: string;
   role: string;
   name: string;
   tag: string;
+  href?: string;
+  value?: string;
 }
 
 export interface SessionState {
@@ -58,25 +60,17 @@ export async function saveState(state: SessionState): Promise<void> {
   await Bun.write(statePath(state.name), JSON.stringify(state, null, 2));
 }
 
-export async function clearState(name: string): Promise<void> {
-  const path = statePath(name);
-  const file = Bun.file(path);
-  if (await file.exists()) {
-    await Bun.write(path, ""); // truncate; leave dir for future
-  }
-}
-
 export function resolveRef(state: SessionState, ref: string): Ref {
-  if (!ref.startsWith("@")) {
+  if (!/^e\d+$/.test(ref)) {
     throw new Error(
-      `expected a ref like '@e1', got '${ref}'. Run 'bowser snap -i' first.`,
+      `expected a ref like 'e1', got '${ref}'. Run 'bowser snapshot' first.`,
     );
   }
   const found = state.refs.find((r) => r.id === ref);
   if (!found) {
     throw new Error(
       `ref '${ref}' not found in last snapshot of session '${state.name}'. ` +
-        `Run 'bowser snap -i' to refresh.`,
+        `Run 'bowser snapshot' to refresh.`,
     );
   }
   return found;

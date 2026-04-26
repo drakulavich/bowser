@@ -23,6 +23,14 @@ export interface DaemonRequest {
     | "click"
     | "type"
     | "press"
+    | "hover"
+    | "select"
+    | "check"
+    | "uncheck"
+    | "screenshot"
+    | "back"
+    | "forward"
+    | "reload"
     | "state"
     | "ping"
     | "shutdown";
@@ -72,6 +80,28 @@ export async function startDaemon(session: string): Promise<void> {
         case "press":
           await browser.press(args[0] as string);
           return { id: req.id, ok: true };
+        case "hover":
+          await browser.hover(args[0] as string);
+          return { id: req.id, ok: true };
+        case "select":
+          await browser.select(args[0] as string, args[1] as string);
+          return { id: req.id, ok: true };
+        case "check":
+          await browser.setChecked(args[0] as string, true);
+          return { id: req.id, ok: true };
+        case "uncheck":
+          await browser.setChecked(args[0] as string, false);
+          return { id: req.id, ok: true };
+        case "screenshot": {
+          const r = await browser.screenshot({
+            selector: args[0] as string | undefined,
+            path: args[1] as string | undefined,
+          });
+          return { id: req.id, ok: true, result: r };
+        }
+        case "back":    await browser.back();    return { id: req.id, ok: true };
+        case "forward": await browser.forward(); return { id: req.id, ok: true };
+        case "reload":  await browser.reload();  return { id: req.id, ok: true };
         case "state":
           return {
             id: req.id,

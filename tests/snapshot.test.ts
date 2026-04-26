@@ -1,48 +1,40 @@
 import { describe, expect, test } from "bun:test";
-import { SNAPSHOT_SCRIPT, toYaml } from "../src/snapshot.ts";
+import { toYaml, toJson, type SnapshotResult } from "../src/snapshot.ts";
 
-describe("toYaml", () => {
-  test("renders empty snapshot", () => {
-    const yaml = toYaml({ url: "https://x", title: "X", refs: [] });
-    expect(yaml).toContain('url: "https://x"');
-    expect(yaml).toContain('title: "X"');
-    expect(yaml).toContain("refs:");
-  });
+const fixture: SnapshotResult = {
+  url: "https://example.com/",
+  title: "Example",
+  refs: [
+    { id: "e1", selector: "html > body > a",        role: "link",    name: "More info", tag: "a",        href: "/info" },
+    { id: "e2", selector: "html > body > button",   role: "button",  name: "Submit",    tag: "button" },
+    { id: "e3", selector: "html > body > input",    role: "textbox", name: "Email",     tag: "input",    value: "me@x" },
+    { id: "e4", selector: "html > body > input[2]", role: "checkbox",name: "Agree",     tag: "input" },
+  ],
+};
 
-  test("renders refs one per line", () => {
-    const yaml = toYaml({
-      url: "https://x",
-      title: "X",
-      refs: [
-        { id: "@e1", selector: "sel1", role: "button", name: "Submit", tag: "button" },
-        { id: "@e2", selector: "sel2", role: "textbox", name: "Email", tag: "input" },
-      ],
-    });
-    expect(yaml).toContain('{ id: @e1, role: button, name: "Submit" }');
-    expect(yaml).toContain('{ id: @e2, role: textbox, name: "Email" }');
-  });
-
-  test("escapes quotes in names", () => {
-    const yaml = toYaml({
-      url: "https://x",
-      title: 'Hello "world"',
-      refs: [],
-    });
-    expect(yaml).toContain('title: "Hello \\"world\\""');
+describe("toYaml (aria-tree)", () => {
+  test("matches golden", () => {
+    const expected =
+      `- generic:\n` +
+      `  - link "More info": [ref=e1] /info\n` +
+      `  - button "Submit": [ref=e2]\n` +
+      `  - textbox "Email": [ref=e3] "me@x"\n` +
+      `  - checkbox "Agree": [ref=e4]\n`;
+    expect(toYaml(fixture)).toBe(expected);
   });
 });
 
-describe("SNAPSHOT_SCRIPT", () => {
-  test("is a self-contained IIFE expression", () => {
-    // Must start with ( and end with )() so evaluate() can wrap it in `await (...)`.
-    expect(SNAPSHOT_SCRIPT.trim().startsWith("(")).toBe(true);
-    expect(SNAPSHOT_SCRIPT.trim().endsWith(")()")).toBe(true);
-  });
-
-  test("does not reference any out-of-scope identifiers", () => {
-    // Sanity check: no Node/Bun-only globals leaked into the page script.
-    expect(SNAPSHOT_SCRIPT).not.toContain("require(");
-    expect(SNAPSHOT_SCRIPT).not.toContain("process.");
-    expect(SNAPSHOT_SCRIPT).not.toContain("Bun.");
+describe("toJson", () => {
+  test("includes selector and optional fields", () => {
+    const obj = JSON.parse(toJson(fixture));
+    expect(obj.url).toBe("https://example.com/");
+    expect(obj.refs[0]).toEqual({
+      ref: "e1",
+      role: "link",
+      name: "More info",
+      selector: "html > body > a",
+      href: "/info",
+    });
+    expect(obj.refs[2].value).toBe("me@x");
   });
 });

@@ -1,53 +1,66 @@
 import { describe, expect, test } from "bun:test";
-import { parseArgs } from "../src/cli.ts";
+import { parse } from "../src/cli/parser.ts";
+import { SCHEMAS } from "../src/cli/schemas.ts";
 
-describe("parseArgs", () => {
-  test("defaults", () => {
-    const a = parseArgs([]);
-    expect(a.session).toBe("default");
-    expect(a.json).toBe(false);
-    expect(a.help).toBe(false);
-    expect(a.command).toBeUndefined();
+describe("parse", () => {
+  test("global session via -s=name", () => {
+    const r = parse(SCHEMAS, ["-s=app", "open", "https://x"]);
+    expect(r.session).toBe("app");
+    expect(r.command).toBe("open");
+    expect(r.positional).toEqual(["https://x"]);
   });
-
-  test("command + positional", () => {
-    const a = parseArgs(["open", "https://example.com"]);
-    expect(a.command).toBe("open");
-    expect(a.positional).toEqual(["https://example.com"]);
+  test("global session via -s name (space)", () => {
+    const r = parse(SCHEMAS, ["-s", "app", "open"]);
+    expect(r.session).toBe("app");
   });
-
-  test("--force / -f sets force flag", () => {
-    expect(parseArgs(["install", "--force"]).force).toBe(true);
-    expect(parseArgs(["install", "-f"]).force).toBe(true);
-    expect(parseArgs(["install"]).force).toBe(false);
+  test("global session via --session=name", () => {
+    const r = parse(SCHEMAS, ["--session=app", "open"]);
+    expect(r.session).toBe("app");
   });
-
-  test("--session overrides default", () => {
-    const a = parseArgs(["--session", "login", "open", "https://x.com"]);
-    expect(a.session).toBe("login");
-    expect(a.command).toBe("open");
-    expect(a.positional).toEqual(["https://x.com"]);
+  test("global session via --session name", () => {
+    const r = parse(SCHEMAS, ["--session", "app", "open"]);
+    expect(r.session).toBe("app");
   });
-
-  test("--json flag", () => {
-    const a = parseArgs(["--json", "snap"]);
-    expect(a.json).toBe(true);
-    expect(a.command).toBe("snap");
+  test("default session is 'default'", () => {
+    expect(parse(SCHEMAS, ["open"]).session).toBe("default");
   });
-
-  test("-i flag", () => {
-    const a = parseArgs(["snap", "-i"]);
-    expect(a.interactive).toBe(true);
+  test("--json is a global flag", () => {
+    expect(parse(SCHEMAS, ["--json", "snapshot"]).json).toBe(true);
   });
-
-  test("help flags", () => {
-    expect(parseArgs(["-h"]).help).toBe(true);
-    expect(parseArgs(["--help"]).help).toBe(true);
+  test("--filename=path on snapshot", () => {
+    const r = parse(SCHEMAS, ["snapshot", "--filename=out.yml"]);
+    expect(r.flags.filename).toBe("out.yml");
   });
-
-  test("fill with two positional args", () => {
-    const a = parseArgs(["fill", "@e5", "hello world"]);
-    expect(a.command).toBe("fill");
-    expect(a.positional).toEqual(["@e5", "hello world"]);
+  test("--filename path (space form)", () => {
+    const r = parse(SCHEMAS, ["snapshot", "--filename", "out.yml"]);
+    expect(r.flags.filename).toBe("out.yml");
+  });
+  test("install --force boolean flag", () => {
+    const r = parse(SCHEMAS, ["install", "--force"]);
+    expect(r.flags.force).toBe(true);
+  });
+  test("click <ref> positional", () => {
+    const r = parse(SCHEMAS, ["click", "e3"]);
+    expect(r.command).toBe("click");
+    expect(r.positional).toEqual(["e3"]);
+  });
+  test("fill <ref> <text> positionals", () => {
+    const r = parse(SCHEMAS, ["fill", "e1", "hello world"]);
+    expect(r.positional).toEqual(["e1", "hello world"]);
+  });
+  test("--help on a command sets help flag", () => {
+    expect(parse(SCHEMAS, ["snapshot", "--help"]).help).toBe(true);
+  });
+  test("-h sets help flag", () => {
+    expect(parse(SCHEMAS, ["-h"]).help).toBe(true);
+  });
+  test("unknown command throws", () => {
+    expect(() => parse(SCHEMAS, ["frob"])).toThrow(/unknown command/);
+  });
+  test("unknown flag for command throws", () => {
+    expect(() => parse(SCHEMAS, ["snapshot", "--bogus"])).toThrow(/unknown flag/);
+  });
+  test("--depth=N on snapshot is parsed (and ignored downstream)", () => {
+    expect(parse(SCHEMAS, ["snapshot", "--depth=3"]).flags.depth).toBe("3");
   });
 });

@@ -4,39 +4,78 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    name: unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
-      - run: bun install
+          bun-version: ">=1.3.12"
+      - run: bun install --frozen-lockfile
       - run: bun test
 
-  e2e:
+  build:
+    name: build single binary
     runs-on: ubuntu-latest
+    needs: unit
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
-      - run: bun install
-      - name: bowser install
-        run: bun src/cli.ts install
+          bun-version: ">=1.3.12"
+      - run: bun install --frozen-lockfile
+      - run: bun build src/cli.ts --compile --outfile dist/bowser
+      - run: ./dist/bowser --help
+
+  e2e:
+    name: e2e (real Chromium)
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ">=1.3.12"
+      - run: bun install --frozen-lockfile
+      - name: Install headless Chromium
+        # --force so the bowser-managed cache exists even when the runner
+        # already has a system Chrome (e2e tests redirect $HOME and won't
+        # find the system install).
+        run: bun src/cli.ts install --force
       - name: Install Chromium system deps
         # `bowser install` downloads the binary but not apt dependencies.
         # Piggyback on Playwright's install-deps since it's already available.
         run: bunx --bun playwright install-deps chromium
+      - name: Locate Chromium binary
+        id: chromium
+        # Tests redirect $HOME to a tmp dir before calling detectChromium(),
+        # so the bowser cache becomes invisible. Pass the absolute path
+        # explicitly via BOWSER_CHROMIUM_PATH instead.
+        run: |
+          path=$(find ~/.bowser/chromium -type f -name chrome-headless-shell | head -1)
+          test -n "$path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
       - name: E2E - data URL smoke test
         env:
           BOWSER_E2E: "1"
           BOWSER_CHROME_ARGS: "--no-sandbox"
+          BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
         run: bun test tests/e2e.test.ts
       - name: E2E - local todo app
         env:
           BOWSER_E2E: "1"
           BOWSER_CHROME_ARGS: "--no-sandbox"
+          BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
         run: bun test tests/e2e-todo.test.ts

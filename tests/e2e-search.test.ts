@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectChromium } from "../src/browser.ts";
-import { cmdClick, cmdFill, cmdOpen, cmdSnap } from "../src/commands.ts";
+import { cmdClick, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
 import { connectOrSpawn } from "../src/daemon.ts";
 import { loadState } from "../src/state.ts";
 
@@ -56,7 +56,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
     await Bun.sleep(2000);
 
     // 3. Snapshot the results page.
-    await cmdSnap({ session, json: false });
+    await cmdSnapshot({ session, json: false });
     const state = await loadState(session);
 
     // Look for any link whose name or selector points at openclaw/openclaw.
@@ -99,7 +99,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
     await cmdOpen({ session, json: true }, "https://github.com/search");
     await Bun.sleep(1500);
 
-    await cmdSnap({ session, json: false });
+    await cmdSnapshot({ session, json: false });
     const state = await loadState(session);
 
     const searchBox = state!.refs.find(
