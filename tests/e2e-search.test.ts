@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectChromium } from "../src/browser.ts";
-import { cmdClick, cmdFill, cmdOpen, cmdSnap } from "../src/commands.ts";
+import { cmdClick, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
 import { connectOrSpawn } from "../src/daemon.ts";
 import { loadState } from "../src/state.ts";
 
@@ -41,14 +41,14 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
 
   test("fill search box, submit, and find the OpenClaw repo link", async () => {
     // 1. Open GitHub's homepage.
-    await cmdOpen({ session, json: true }, "https://github.com");
+    await cmdOpen({ session, json: true, flags: {} }, "https://github.com");
 
     // 2. Snapshot — look for the search box. GitHub's header search has
     //    aria-label "Search or jump to…" or a visible "Search" trigger.
     //    We'll navigate directly to the search URL to avoid flakiness with
     //    the modal-based header search, but still demonstrate the fill flow.
     await cmdOpen(
-      { session, json: true },
+      { session, json: true, flags: {} },
       "https://github.com/search?q=OpenClaw&type=repositories",
     );
 
@@ -56,7 +56,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
     await Bun.sleep(2000);
 
     // 3. Snapshot the results page.
-    await cmdSnap({ session, json: false });
+    await cmdSnapshot({ session, json: false, flags: {} });
     const state = await loadState(session);
 
     // Look for any link whose name or selector points at openclaw/openclaw.
@@ -83,7 +83,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
     } else {
       // 4. Click it. We can't actually verify navigation here without another
       //    snap, but the click itself should not throw.
-      await cmdClick({ session, json: true }, target.id);
+      await cmdClick({ session, json: true, flags: {} }, target.id);
       console.log("Clicked:", target.id, target.name);
     }
 
@@ -96,10 +96,10 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
   test("interactive search flow: fill and submit via Enter", async () => {
     // This variant uses the actual fill + press Enter flow to exercise
     // keyboard input through the daemon.
-    await cmdOpen({ session, json: true }, "https://github.com/search");
+    await cmdOpen({ session, json: true, flags: {} }, "https://github.com/search");
     await Bun.sleep(1500);
 
-    await cmdSnap({ session, json: false });
+    await cmdSnapshot({ session, json: false, flags: {} });
     const state = await loadState(session);
 
     const searchBox = state!.refs.find(
@@ -115,7 +115,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
       return;
     }
 
-    await cmdFill({ session, json: true }, searchBox.id, "OpenClaw");
+    await cmdFill({ session, json: true, flags: {} }, searchBox.id, "OpenClaw");
 
     const client = await connectOrSpawn(session);
     try {

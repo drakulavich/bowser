@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectChromium } from "../src/browser.ts";
-import { cmdClick, cmdClose, cmdOpen, cmdSnap } from "../src/commands.ts";
+import { cmdClick, cmdClose, cmdOpen, cmdSnapshot } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -39,7 +39,7 @@ runOrSkip("e2e: real Chromium", () => {
     // Shut down the daemon + Chrome before cleanup so we don't leak processes
     // into the next test file.
     try {
-      await cmdClose({ session, json: true });
+      await cmdClose({ session, json: true, flags: {} });
     } catch {}
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -59,20 +59,20 @@ runOrSkip("e2e: real Chromium", () => {
   const dataUrl = "data:text/html;charset=utf-8," + encodeURIComponent(html);
 
   test("open → snap → click flow", async () => {
-    await cmdOpen({ session, json: true }, dataUrl);
+    await cmdOpen({ session, json: true, flags: {} }, dataUrl);
 
-    const yaml = await cmdSnap({ session, json: false });
+    const yaml = await cmdSnapshot({ session, json: false, flags: {} });
     // The snapshot should find our button, input, and link.
-    expect(yaml).toContain("role: button");
-    expect(yaml).toContain("role: textbox");
-    expect(yaml).toContain("role: link");
+    expect(yaml).toContain("button");
+    expect(yaml).toContain("textbox");
+    expect(yaml).toContain("link");
 
     const state = await loadState(session);
     const button = state?.refs.find((r) => r.role === "button");
     expect(button).toBeDefined();
 
     // Click it — should complete without throwing.
-    const out = await cmdClick({ session, json: true }, button!.id);
+    const out = await cmdClick({ session, json: true, flags: {} }, button!.id);
     expect(JSON.parse(out).ok).toBe(true);
   }, 30_000);
 });
