@@ -50,7 +50,10 @@ jobs:
           bun-version: ">=1.3.12"
       - run: bun install --frozen-lockfile
       - name: Install headless Chromium
-        run: bun src/cli.ts install
+        # --force so the bowser-managed cache exists even when the runner
+        # already has a system Chrome (e2e tests redirect $HOME and won't
+        # find the system install).
+        run: bun src/cli.ts install --force
       - name: Install Chromium system deps
         # `bowser install` downloads the binary but not apt dependencies.
         # Piggyback on Playwright's install-deps since it's already available.
