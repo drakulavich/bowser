@@ -179,8 +179,8 @@ function bowserCacheCandidates(): string[] {
       out.push(
         // chromium-headless-shell (what `bowser install` fetches)
         `${base}/chrome-headless-shell-linux64/chrome-headless-shell`,
-        `${base}/chrome-headless-shell-mac-arm64/headless_shell`,
-        `${base}/chrome-headless-shell-mac/headless_shell`,
+        `${base}/chrome-headless-shell-mac-arm64/chrome-headless-shell`,
+        `${base}/chrome-headless-shell-mac/chrome-headless-shell`,
         // Full chromium, in case someone installs the heavier build
         `${base}/chrome-linux64/chrome`,
         `${base}/chrome-linux/chrome`,
