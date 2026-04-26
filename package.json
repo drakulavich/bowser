@@ -1,7 +1,7 @@
 {
   "name": "@drakulavich/bowser-cli",
-  "version": "0.1.0",
-  "description": "A Bun-native, token-efficient browser automation CLI for AI agents. Fuels your agent with web context.",
+  "version": "0.2.0",
+  "description": "A Bun-native, drop-in command-compatible alternative to Microsoft playwright-cli for AI agents.",
   "type": "module",
   "bin": {
     "bowser": "./src/cli.ts"

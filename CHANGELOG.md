@@ -3,6 +3,33 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-04-26
+
+### Breaking
+
+- CLI surface is now command-compatible with Microsoft `playwright-cli` for the core agent loop. Existing `playwright-cli` skills work after replacing the binary name.
+- `bowser snap` is renamed `bowser snapshot`.
+- `bowser session show` and `bowser session list` are replaced by `bowser list`.
+- The `@` ref prefix is dropped: refs are now bare `eN` (e.g., `bowser click e3`).
+- `-i` / `--interactive` flag removed (snapshot output is always the aria-tree YAML).
+- Snapshot YAML changed: aria-tree style with `[ref=eN]` markers.
+
+### Added
+
+- New commands: `goto`, `type`, `press`, `hover`, `select`, `check`, `uncheck`, `screenshot`, `go-back`, `go-forward`, `reload`.
+- `--filename=path` for `snapshot` and `screenshot`.
+- Long-form `--session=<name>` accepted alongside short form `-s=<name>`.
+
+### Migration
+
+| 0.1.0 | 0.2.0 |
+|---|---|
+| `bowser snap -i` | `bowser snapshot` |
+| `bowser click @e3` | `bowser click e3` |
+| `bowser --session app open …` | `bowser -s=app open …` |
+| `bowser session list` | `bowser list` |
+| `bowser session show` | (gone) — use `bowser list` plus `cat ~/.bowser/sessions/<n>/state.json` |
+
 ## [0.1.0] — 2026-04-19
 
 First tagged release. An opinionated, Bun-native browser automation CLI for
