@@ -1,14 +1,15 @@
 # Bowser
 
-A Bun-native, token-efficient browser automation CLI for AI agents. Bowser fuels your agent with web context — clean, structured, and tiny in the context window.
+[![test](https://github.com/drakulavich/bowser/actions/workflows/test.yml/badge.svg)](https://github.com/drakulavich/bowser/actions/workflows/test.yml)
+[![npm](https://img.shields.io/npm/v/@drakulavich/bowser-cli.svg)](https://www.npmjs.com/package/@drakulavich/bowser-cli)
+
+A Bun-native, drop-in command-compatible alternative to Microsoft [`playwright-cli`](https://github.com/microsoft/playwright-cli) for AI agents. Same commands, same flag syntax, same snapshot YAML — replace `playwright` with `bowser` and existing playwright-cli skills work unchanged.
 
 Built on [`Bun.WebView`](https://bun.com/docs/runtime/webview) (new in Bun 1.3.12), so on macOS there's nothing to install beyond Bun itself, and on Linux / Windows it drives any installed Chrome / Chromium / Edge over the DevTools Protocol.
 
 ## Why
 
-Bowser is a **drop-in command-compatible alternative to Microsoft [`playwright-cli`](https://github.com/microsoft/playwright-cli)** for the core agent loop. Same commands, same flag syntax, same snapshot YAML — replace `playwright` with `bowser` and existing playwright-cli skills work unchanged.
-
-What sets it apart:
+What sets it apart from `playwright-cli`:
 
 - **Bun-native.** Single static binary via `bun build --compile`. Fast cold start. No Node / npm / Playwright install dance.
 - **Token-efficient.** Capabilities are shell commands, not MCP tool schemas. A skill description of a few hundred tokens covers the whole API.
@@ -46,7 +47,7 @@ Bowser looks for a Chromium/Chrome binary in this order and uses the first one f
 
 1. `$BOWSER_CHROMIUM_PATH` (explicit override)
 2. `~/.bowser/chromium/...` (populated by `bowser install`)
-3. System-wide installs: `/usr/bin/chromium-headless-shell`, `/usr/bin/chromium`, `/usr/bin/google-chrome`, `/Applications/Google Chrome.app/...`, `/Applications/Chromium.app/...`
+3. System-wide installs: `/usr/bin/chromium-headless-shell`, `/usr/bin/chromium`, `/usr/bin/chromium-browser`, `/usr/bin/google-chrome`, `/Applications/Google Chrome.app/...`, `/Applications/Chromium.app/...`
 
 If none of those exist, run `bowser install`. It uses Playwright's downloader under the hood but writes into Bowser's own cache — it won't touch your Playwright setup. Use `bowser install --force` to re-download even when a system Chrome is already present.
 
@@ -86,7 +87,7 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `install [--force]` | Download a headless Chromium |
 | `open [url]` | Start session; navigate if URL given |
 | `goto <url>` | Navigate within current session |
-| `snapshot [--filename=f]` | aria-tree YAML of interactive refs |
+| `snapshot [--filename=f] [--depth=N]` | aria-tree YAML of interactive refs (`--depth` accepted, flat in v0.2) |
 | `click <ref>` | Click an element |
 | `fill <ref> <text>` | Focus, clear, type |
 | `type <text>` | Type into focused element |
@@ -149,6 +150,10 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [ ] `eval`, `run-code`, `dialog-accept`/`dismiss`, `resize`
 - [ ] MCP bridge subcommand for non-CLI clients
 - [ ] Agent skill published to [agentskills.io](https://agentskills.io)
+
+## Migrating from 0.1.0
+
+The `0.2.0` release is a clean break: `snap → snapshot`, `@e3 → e3`, `--session → -s=`, `session list → list`. See [`CHANGELOG.md`](./CHANGELOG.md) for the full migration table.
 
 ## License
 
