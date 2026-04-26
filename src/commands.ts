@@ -4,7 +4,7 @@
 
 import { bowserCacheRoot, detectChromium } from "./browser.ts";
 import { connectOrSpawn, socketPath, type DaemonClient } from "./daemon.ts";
-import { SNAPSHOT_SCRIPT, toYaml, type SnapshotResult } from "./snapshot.ts";
+import { toJson, toYaml, SNAPSHOT_SCRIPT, type SnapshotResult } from "./snapshot.ts";
 import {
   ensureSessionDir,
   loadState,
@@ -17,6 +17,7 @@ import { mkdir, unlink } from "node:fs/promises";
 export interface CommandContext {
   session: string;
   json: boolean;
+  flags: Record<string, string | boolean>;
   // Injected in tests.
   connect?: typeof connectOrSpawn;
 }
@@ -38,48 +39,52 @@ async function withClient<T>(
   }
 }
 
-export async function cmdOpen(
-  ctx: CommandContext,
-  url: string,
-): Promise<string> {
-  if (!url) throw new Error("usage: bowser open <url>");
+export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string> {
   await ensureSessionDir(ctx.session);
-
   return withClient(ctx, async (c) => {
-    await c.request("navigate", [url]);
+    if (url) await c.request("navigate", [url]);
     const state = (await c.request("state")) as { url: string; title: string };
     const next: SessionState = {
-      name: ctx.session,
-      url: state.url,
-      title: state.title,
-      refs: [],
-      updatedAt: Date.now(),
+      name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
     };
     await saveState(next);
     return ctx.json
       ? JSON.stringify({ ok: true, url: state.url, title: state.title })
-      : `opened ${state.url}  "${state.title}"`;
+      : (url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`);
   });
 }
 
-export async function cmdSnap(
-  ctx: CommandContext,
-  _opts: { interactive?: boolean } = {},
-): Promise<string> {
-  const prev = await loadState(ctx.session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
+export async function cmdGoto(ctx: CommandContext, url: string): Promise<string> {
+  if (!url) throw new Error("usage: bowser goto <url>");
+  return withClient(ctx, async (c) => {
+    await c.request("navigate", [url]);
+    const state = (await c.request("state")) as { url: string; title: string };
+    const prev = (await loadState(ctx.session)) ?? {
+      name: ctx.session, url: "", title: "", refs: [], updatedAt: 0,
+    };
+    await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
+    return ctx.json
+      ? JSON.stringify({ ok: true, url: state.url })
+      : `navigated to ${state.url}`;
+  });
+}
 
+export async function cmdSnapshot(
+  ctx: CommandContext,
+  opts: { filename?: string; depth?: string } = {},
+): Promise<string> {
   return withClient(ctx, async (c) => {
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
-    const next: SessionState = {
-      name: ctx.session,
-      url: snap.url,
-      title: snap.title,
-      refs: snap.refs,
-      updatedAt: Date.now(),
-    };
-    await saveState(next);
-    return ctx.json ? JSON.stringify(snap) : toYaml(snap);
+    await saveState({
+      name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
+    });
+    const out = ctx.json ? toJson(snap) : toYaml(snap);
+    if (opts.filename) {
+      await Bun.write(opts.filename, out);
+      return `wrote ${opts.filename}`;
+    }
+    // toYaml ends with a newline; trim it because the CLI layer adds one.
+    return out.endsWith("\n") ? out.slice(0, -1) : out;
   });
 }
 
@@ -159,17 +164,7 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
     : `closed session '${ctx.session}'`;
 }
 
-export async function cmdSession(
-  ctx: CommandContext,
-  sub: "list" | "show",
-): Promise<string> {
-  const state = await loadState(ctx.session);
-  if (sub === "show") {
-    if (!state) return ctx.json ? "null" : "(empty)";
-    return ctx.json
-      ? JSON.stringify(state, null, 2)
-      : `session ${state.name}\n  url:   ${state.url}\n  title: ${state.title}\n  refs:  ${state.refs.length}`;
-  }
+export async function cmdList(ctx: CommandContext): Promise<string> {
   const { readdir } = await import("node:fs/promises");
   const { homedir } = await import("node:os");
   const { join } = await import("node:path");
@@ -191,13 +186,16 @@ export interface InstallOptions {
   force?: boolean;
   /** Swap stdio (for tests). Default: inherit so the user sees download progress. */
   spawn?: (cmd: string[], env: Record<string, string>) => Promise<number>;
+  /** Override chromium detection (for tests). */
+  detect?: () => string | undefined;
 }
 
 export async function cmdInstall(
   ctx: CommandContext,
   opts: InstallOptions = {},
 ): Promise<string> {
-  const existing = detectChromium();
+  const detect = opts.detect ?? detectChromium;
+  const existing = detect();
   if (existing && !opts.force) {
     const msg = `chromium already available at ${existing} (use --force to reinstall)`;
     return ctx.json ? JSON.stringify({ ok: true, path: existing, skipped: true }) : msg;
@@ -232,7 +230,7 @@ export async function cmdInstall(
     throw new Error(`playwright install exited with code ${code}`);
   }
 
-  const path = detectChromium();
+  const path = detect();
   if (!path) {
     throw new Error(
       `install finished but no chromium binary was found under ${cacheRoot}`,
