@@ -121,3 +121,14 @@ npm publish --access public
 **Change snapshot output**: edit `src/snapshot.ts`, update the golden in `tests/snapshot.test.ts`, then update `tests/e2e*.test.ts` substring matchers.
 
 **Bump Bun requirement**: `package.json` `engines.bun`, README install instructions, both workflow `setup-bun` `bun-version` constraints.
+
+## Gotchas (lessons learned)
+
+- **Headless-shell binary name.** Playwright's distribution names the binary `chrome-headless-shell` on every platform, including `chrome-headless-shell-mac-arm64/`. An older `headless_shell` filename appears in some docs and was previously hardcoded — `detectChromium()` silently failed on macOS as a result. If you touch `bowserCacheCandidates()`, check the actual layout under `~/.bowser/chromium/chromium_headless_shell-*/`.
+- **`JSON.stringify(selector)` is mandatory in evaluate-shims.** `src/browser.ts` and `src/commands.ts` build small IIFE strings injected into the page (`document.querySelector(${JSON.stringify(selector)})`). Skipping `JSON.stringify` introduces a quoting/injection bug — selectors with quotes in attribute values would break or execute attacker-controlled code via `bowser fill`.
+- **`gh auth setup-git` if push to `.github/workflows/` is rejected.** A default OAuth token without the `workflow` scope refuses to push workflow file changes (`refusing to allow an OAuth App to create or update workflow ... without 'workflow' scope`). `gh auth setup-git` switches git's credential helper to gh's scoped token.
+- **Squash-merge after local commits on `main` causes divergence.** If you committed to local `main` before branching (e.g. design/plan docs), squash-merging the branch produces a single commit on `origin/main` that subsumes them. Local `main` will diverge. Resolve with `git reset --hard origin/main`, not a merge.
+- **Test fixtures pattern.** `tests/commands.test.ts` defines an inline `fakeClient(handlers)` factory at the top — no separate `tests/fixtures/fake-daemon.ts`. Tests that need refs seed them via `saveState({ name: session, refs: [...], ... })` per test. Add new ops to `fakeClient`'s switch when introducing daemon ops.
+- **Tests redirect `process.env.HOME`** to a tmp dir via `beforeAll`, then restore it. This means anything that reads `~/...` (including `detectChromium`'s cache scan) sees the tmp HOME. Use `BOWSER_CHROMIUM_PATH` to bypass.
+- **Live-internet e2e is brittle.** `tests/e2e-search.test.ts` drives `github.com` and breaks when GitHub renames a CSS class or changes search box markup. Don't gate releases on it; gated behind `BOWSER_E2E_NET=1` for that reason.
+- **Bun version 1.3.11 vs 1.3.12.** `Bun.WebView` only exists in ≥ 1.3.12. Local devs on 1.3.11 will hit confusing failures inside the daemon. The `engines.bun` and CI `bun-version` constraints catch this; don't loosen them.
