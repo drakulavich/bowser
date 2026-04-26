@@ -36,7 +36,7 @@ describe("cmdInstall", () => {
     process.env.BOWSER_CHROMIUM_PATH = "/bin/sh";
     let spawned = false;
     const out = await cmdInstall(
-      { session: "default", json: true, flags: {} },
+      { session: "default", json: true },
       {
         spawn: async () => {
           spawned = true;
@@ -70,7 +70,7 @@ describe("cmdInstall", () => {
     delete process.env.BOWSER_CHROMIUM_PATH;
 
     const out = await cmdInstall(
-      { session: "default", json: true, flags: {} },
+      { session: "default", json: true },
       { force: true, spawn: fakeSpawn },
     );
 
@@ -86,7 +86,7 @@ describe("cmdInstall", () => {
     // exists on the test machine.
     await expect(
       cmdInstall(
-        { session: "default", json: true, flags: {} },
+        { session: "default", json: true },
         { force: true, spawn: async () => 1 },
       ),
     ).rejects.toThrow(/exited with code 1/);

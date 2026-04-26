@@ -39,7 +39,7 @@ runOrSkip("e2e: real Chromium", () => {
     // Shut down the daemon + Chrome before cleanup so we don't leak processes
     // into the next test file.
     try {
-      await cmdClose({ session, json: true, flags: {} });
+      await cmdClose({ session, json: true });
     } catch {}
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -59,9 +59,9 @@ runOrSkip("e2e: real Chromium", () => {
   const dataUrl = "data:text/html;charset=utf-8," + encodeURIComponent(html);
 
   test("open → snap → click flow", async () => {
-    await cmdOpen({ session, json: true, flags: {} }, dataUrl);
+    await cmdOpen({ session, json: true }, dataUrl);
 
-    const yaml = await cmdSnapshot({ session, json: false, flags: {} });
+    const yaml = await cmdSnapshot({ session, json: false });
     // The snapshot should find our button, input, and link.
     expect(yaml).toContain("button");
     expect(yaml).toContain("textbox");
@@ -72,7 +72,7 @@ runOrSkip("e2e: real Chromium", () => {
     expect(button).toBeDefined();
 
     // Click it — should complete without throwing.
-    const out = await cmdClick({ session, json: true, flags: {} }, button!.id);
+    const out = await cmdClick({ session, json: true }, button!.id);
     expect(JSON.parse(out).ok).toBe(true);
   }, 30_000);
 });

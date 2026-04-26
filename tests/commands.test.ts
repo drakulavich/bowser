@@ -130,7 +130,6 @@ beforeEach(() => { session = "s-" + Math.random().toString(36).slice(2, 8); });
 const ctx = (overrides: Partial<CommandContext> = {}): CommandContext => ({
   session,
   json: false,
-  flags: {},
   ...overrides,
 });
 
@@ -177,7 +176,7 @@ describe("snapshot", () => {
       }),
     });
     const out = await cmdSnapshot(
-      { ...ctx({ flags: { filename: tmp } }), connect: async () => c },
+      { ...ctx(), connect: async () => c },
       { filename: tmp },
     );
     expect(out).toBe(`wrote ${tmp}`);
@@ -417,7 +416,7 @@ describe("screenshot", () => {
     const tmp = `/tmp/bowser-shot-${Date.now()}.png`;
     const c = fakeClient({ screenshot: () => undefined });
     const out = await cmdScreenshot(
-      { ...ctx({ flags: { filename: tmp } }), connect: async () => c },
+      { ...ctx(), connect: async () => c },
       { filename: tmp },
     );
     expect(out).toBe(`wrote ${tmp}`);

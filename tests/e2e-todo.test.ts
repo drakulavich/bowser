@@ -51,7 +51,7 @@ runOrSkip("e2e: local todo app", () => {
 
   afterAll(async () => {
     try {
-      await cmdClose({ session, json: true, flags: {} });
+      await cmdClose({ session, json: true });
     } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
@@ -62,10 +62,10 @@ runOrSkip("e2e: local todo app", () => {
 
   test("add, toggle, and clear todos end-to-end", async () => {
     // 1. Open the app.
-    await cmdOpen({ session, json: true, flags: {} }, baseUrl);
+    await cmdOpen({ session, json: true }, baseUrl);
 
     // 2. First snapshot — we should see the input, Add button, and Clear button.
-    const snap1 = await cmdSnapshot({ session, json: false, flags: {} });
+    const snap1 = await cmdSnapshot({ session, json: false });
     expect(snap1).toContain('"New todo": [ref=');
     expect(snap1).toContain('"Add": [ref=');
     expect(snap1).toContain('"Clear completed": [ref=');
@@ -78,10 +78,10 @@ runOrSkip("e2e: local todo app", () => {
 
     // 3. Add three todos via fill + click.
     for (const text of ["buy milk", "write tests", "ship bowser"]) {
-      await cmdFill({ session, json: true, flags: {} }, inputRef.id, text);
-      await cmdClick({ session, json: true, flags: {} }, addRef.id);
+      await cmdFill({ session, json: true }, inputRef.id, text);
+      await cmdClick({ session, json: true }, addRef.id);
       // The form submit re-renders; re-snap so new checkboxes show up.
-      await cmdSnapshot({ session, json: false, flags: {} });
+      await cmdSnapshot({ session, json: false });
     }
 
     // 4. Verify all three exist on the page via a direct evaluate.
@@ -114,20 +114,20 @@ runOrSkip("e2e: local todo app", () => {
     }
 
     // 5. Toggle the first todo via Bowser (checkbox is a new ref after re-snap).
-    const snap2 = await cmdSnapshot({ session, json: false, flags: {} });
+    const snap2 = await cmdSnapshot({ session, json: false });
     expect(snap2).toContain('"Toggle buy milk": [ref=');
     const state2 = await loadState(session);
     const toggleFirst = state2!.refs.find((r) => r.name === "Toggle buy milk")!;
-    await cmdClick({ session, json: true, flags: {} }, toggleFirst.id);
+    await cmdClick({ session, json: true }, toggleFirst.id);
 
     // 6. Click "Clear completed" and verify "buy milk" is gone.
-    await cmdSnapshot({ session, json: false, flags: {} });
+    await cmdSnapshot({ session, json: false });
     const state3 = await loadState(session);
     const clearRef = state3!.refs.find((r) => r.name === "Clear completed")!;
-    await cmdClick({ session, json: true, flags: {} }, clearRef.id);
+    await cmdClick({ session, json: true }, clearRef.id);
 
     // Re-snap once more to capture the resulting DOM.
-    const snap4 = await cmdSnapshot({ session, json: false, flags: {} });
+    const snap4 = await cmdSnapshot({ session, json: false });
     expect(snap4).not.toContain('"Toggle buy milk": [ref=');
     expect(snap4).toContain('"Toggle write tests": [ref=');
     expect(snap4).toContain('"Toggle ship bowser": [ref=');

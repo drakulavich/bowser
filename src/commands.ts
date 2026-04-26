@@ -12,12 +12,13 @@ import {
   saveState,
   type SessionState,
 } from "./state.ts";
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, readdir, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export interface CommandContext {
   session: string;
   json: boolean;
-  flags: Record<string, string | boolean>;
   // Injected in tests.
   connect?: typeof connectOrSpawn;
 }
@@ -39,6 +40,16 @@ async function withClient<T>(
   }
 }
 
+function emptyState(name: string): SessionState {
+  return { name, url: "", title: "", refs: [], updatedAt: 0 };
+}
+
+async function loadRef(session: string, ref: string) {
+  const prev = await loadState(session);
+  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
+  return { prev, target: resolveRef(prev, ref) };
+}
+
 export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string> {
   await ensureSessionDir(ctx.session);
   return withClient(ctx, async (c) => {
@@ -56,12 +67,10 @@ export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string
 
 export async function cmdGoto(ctx: CommandContext, url: string): Promise<string> {
   if (!url) throw new Error("usage: bowser goto <url>");
+  const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withClient(ctx, async (c) => {
     await c.request("navigate", [url]);
     const state = (await c.request("state")) as { url: string; title: string };
-    const prev = (await loadState(ctx.session)) ?? {
-      name: ctx.session, url: "", title: "", refs: [], updatedAt: 0,
-    };
     await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
     return ctx.json
       ? JSON.stringify({ ok: true, url: state.url })
@@ -92,10 +101,7 @@ export async function cmdClick(
   ctx: CommandContext,
   ref: string,
 ): Promise<string> {
-  const prev = await loadState(ctx.session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
-  const target = resolveRef(prev, ref);
-
+  const { prev, target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("click", [target.selector]);
     const state = (await c.request("state")) as { url: string; title: string };
@@ -112,14 +118,10 @@ export async function cmdFill(
   text: string,
 ): Promise<string> {
   if (text === undefined) throw new Error("usage: bowser fill <ref> <text>");
-  const prev = await loadState(ctx.session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
-  const target = resolveRef(prev, ref);
-
+  const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("click", [target.selector]);
-    // Clear any existing value before typing. Use JSON.stringify so selectors
-    // with quotes are safe.
+    // JSON.stringify so selectors with quotes are safely embedded.
     const clearExpr = `(() => { const el = document.querySelector(${JSON.stringify(target.selector)}); if (el && 'value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); } })()`;
     await c.request("evaluate", [clearExpr]);
     await c.request("type", [text]);
@@ -145,9 +147,7 @@ export async function cmdPress(ctx: CommandContext, key: string): Promise<string
 }
 
 export async function cmdHover(ctx: CommandContext, ref: string): Promise<string> {
-  const prev = await loadState(ctx.session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
-  const target = resolveRef(prev, ref);
+  const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("hover", [target.selector]);
     return ctx.json ? JSON.stringify({ ok: true, ref }) : `hovered ${ref}`;
@@ -156,9 +156,7 @@ export async function cmdHover(ctx: CommandContext, ref: string): Promise<string
 
 export async function cmdSelect(ctx: CommandContext, ref: string, value: string): Promise<string> {
   if (value === undefined) throw new Error("usage: bowser select <ref> <value>");
-  const prev = await loadState(ctx.session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
-  const target = resolveRef(prev, ref);
+  const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("select", [target.selector, value]);
     return ctx.json ? JSON.stringify({ ok: true, ref, value }) : `selected ${ref} -> "${value}"`;
@@ -166,9 +164,7 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
 }
 
 export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string> {
-  const prev = await loadState(ctx.session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
-  const target = resolveRef(prev, ref);
+  const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("check", [target.selector]);
     return ctx.json ? JSON.stringify({ ok: true, ref }) : `checked ${ref}`;
@@ -176,9 +172,7 @@ export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string
 }
 
 export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<string> {
-  const prev = await loadState(ctx.session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
-  const target = resolveRef(prev, ref);
+  const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("uncheck", [target.selector]);
     return ctx.json ? JSON.stringify({ ok: true, ref }) : `unchecked ${ref}`;
@@ -189,12 +183,7 @@ export async function cmdScreenshot(
   ctx: CommandContext,
   opts: { ref?: string; filename?: string } = {},
 ): Promise<string> {
-  let selector: string | undefined;
-  if (opts.ref) {
-    const prev = await loadState(ctx.session);
-    if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
-    selector = resolveRef(prev, opts.ref).selector;
-  }
+  const selector = opts.ref ? (await loadRef(ctx.session, opts.ref)).target.selector : undefined;
   return withClient(ctx, async (c) => {
     const data = (await c.request("screenshot", [selector, opts.filename])) as string | undefined;
     if (opts.filename) return ctx.json ? JSON.stringify({ ok: true, filename: opts.filename }) : `wrote ${opts.filename}`;
@@ -206,12 +195,10 @@ export async function cmdHistory(
   ctx: CommandContext,
   which: "back" | "forward" | "reload",
 ): Promise<string> {
+  const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withClient(ctx, async (c) => {
     await c.request(which, []);
     const state = (await c.request("state")) as { url: string; title: string };
-    const prev = (await loadState(ctx.session)) ?? {
-      name: ctx.session, url: "", title: "", refs: [], updatedAt: 0,
-    };
     await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
     return ctx.json
       ? JSON.stringify({ ok: true, url: state.url })
@@ -239,15 +226,7 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
     await unlink(socketPath(ctx.session));
   } catch {}
 
-  // Reset state.
-  const name = prev?.name ?? ctx.session;
-  await saveState({
-    name,
-    url: "",
-    title: "",
-    refs: [],
-    updatedAt: Date.now(),
-  });
+  await saveState({ ...emptyState(prev?.name ?? ctx.session), updatedAt: Date.now() });
 
   return ctx.json
     ? JSON.stringify({ ok: true, session: ctx.session })
@@ -255,9 +234,6 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
 }
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
-  const { readdir } = await import("node:fs/promises");
-  const { homedir } = await import("node:os");
-  const { join } = await import("node:path");
   const root = join(homedir(), ".bowser", "sessions");
   try {
     const names = await readdir(root);

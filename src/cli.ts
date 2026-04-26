@@ -40,7 +40,7 @@ export async function run(argv: string[]): Promise<string> {
   if (args.help && !args.command) return HELP;
   if (!args.command) return HELP;
 
-  const ctx: CommandContext = { session: args.session, json: args.json, flags: args.flags };
+  const ctx: CommandContext = { session: args.session, json: args.json };
   const [p0, p1] = args.positional;
 
   switch (args.command) {

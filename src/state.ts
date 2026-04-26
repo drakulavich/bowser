@@ -60,14 +60,6 @@ export async function saveState(state: SessionState): Promise<void> {
   await Bun.write(statePath(state.name), JSON.stringify(state, null, 2));
 }
 
-export async function clearState(name: string): Promise<void> {
-  const path = statePath(name);
-  const file = Bun.file(path);
-  if (await file.exists()) {
-    await Bun.write(path, ""); // truncate; leave dir for future
-  }
-}
-
 export function resolveRef(state: SessionState, ref: string): Ref {
   if (!/^e\d+$/.test(ref)) {
     throw new Error(
