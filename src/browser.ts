@@ -39,18 +39,17 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
   // failures in CI don't hide behind "Chrome process closed the pipe".
   const debug = process.env.BOWSER_CHROME_DEBUG === "1";
 
-  const backend =
-    path || extraArgv.length > 0 || debug
-      ? ({
-          type: "chrome" as const,
-          ...(path ? { path } : {}),
-          ...(extraArgv.length ? { argv: extraArgv } : {}),
-          ...(debug ? { stderr: "inherit", stdout: "inherit" } : {}),
-        } as const)
-      : ("chrome" as const);
+  const backend: {
+    type: "chrome";
+    path?: string;
+    argv?: string[];
+    stderr?: "inherit" | "ignore";
+    stdout?: "inherit" | "ignore";
+  } = { type: "chrome" };
+  if (path) backend.path = path;
+  if (extraArgv.length) backend.argv = extraArgv;
+  if (debug) { backend.stderr = "inherit"; backend.stdout = "inherit"; }
 
-  // @ts-expect-error Bun.WebView is available in Bun >= 1.3.12 but not yet in
-  // the public types bundled with @types/bun at the time of writing.
   const view = new Bun.WebView({
     backend,
     width: opts.width ?? 1280,
@@ -95,10 +94,7 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
         if (Boolean(el.checked) !== ${checked}) el.click();
       })()`);
     },
-    screenshot: async ({ selector: _sel, path }) => {
-      // Bun.WebView exposes screenshot() returning base64 PNG.
-      // Element-bounded screenshots are not supported in v1; we return full-page either way.
-      // (Selector reserved for a future CDP path.)
+    screenshot: async ({ path }) => {
       const data = await (view as { screenshot?: () => Promise<string> }).screenshot?.();
       if (!data) throw new Error('screenshot: not supported by this Bun.WebView');
       if (path) {
@@ -167,12 +163,9 @@ export function bowserCacheRoot(): string {
  *  Layout mirrors Playwright's because we use Playwright's installer. */
 function bowserCacheCandidates(): string[] {
   const root = bowserCacheRoot();
-  if (!root) return [];
-
   const out: string[] = [];
   try {
     const fs = require("node:fs") as typeof import("node:fs");
-    if (!fs.existsSync(root)) return [];
     for (const entry of fs.readdirSync(root)) {
       if (!entry.startsWith("chromium")) continue;
       const base = `${root}/${entry}`;

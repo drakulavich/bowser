@@ -49,6 +49,19 @@ export function socketPath(session: string): string {
   return join(homedir(), ".bowser", "sessions", session, "sock");
 }
 
+/** Consume newline-delimited frames from a buffer, calling onLine for each
+ *  complete line. Returns the unconsumed remainder. */
+function consumeLines(buf: string, onLine: (line: string) => void): string {
+  let s = buf;
+  let idx: number;
+  while ((idx = s.indexOf("\n")) !== -1) {
+    const line = s.slice(0, idx);
+    s = s.slice(idx + 1);
+    if (line) onLine(line);
+  }
+  return s;
+}
+
 export async function startDaemon(session: string): Promise<void> {
   const sock = socketPath(session);
   // Clean up any stale socket file.
@@ -126,38 +139,22 @@ export async function startDaemon(session: string): Promise<void> {
     }
   }
 
+  const buffers = new WeakMap<object, string>();
   Bun.listen({
     unix: sock,
     socket: {
       data(socket, data) {
-        // Requests are newline-delimited. Accumulate partial data on
-        // socket.data and process complete lines.
-        const existing = ((socket as { data?: string }).data ?? "") + data.toString();
-        const lines = existing.split("\n");
-        const remainder = lines.pop() ?? "";
-        (socket as { data?: string }).data = remainder;
-        for (const line of lines) {
-          if (!line) continue;
+        const next = consumeLines((buffers.get(socket) ?? "") + data.toString(), (line) => {
           let req: DaemonRequest;
           try {
             req = JSON.parse(line) as DaemonRequest;
           } catch (err) {
-            socket.write(
-              JSON.stringify({
-                id: -1,
-                ok: false,
-                error: "invalid JSON: " + String(err),
-              }) + "\n",
-            );
-            continue;
+            socket.write(JSON.stringify({ id: -1, ok: false, error: "invalid JSON: " + String(err) }) + "\n");
+            return;
           }
-          handle(req).then((res) => {
-            socket.write(JSON.stringify(res) + "\n");
-          });
-        }
-      },
-      open(socket) {
-        (socket as { data?: string }).data = "";
+          handle(req).then((res) => socket.write(JSON.stringify(res) + "\n"));
+        });
+        buffers.set(socket, next);
       },
       error(_socket, err) {
         console.error("[bowser daemon] socket error:", err.message);
@@ -181,17 +178,16 @@ export class DaemonClient {
 
   async connect(): Promise<void> {
     const self = this;
+    const rejectPending = (msg: string) => {
+      for (const [id, cb] of self.pending) cb({ id, ok: false, error: msg });
+      self.pending.clear();
+    };
     // @ts-expect-error Bun.connect unix option
     this.sock = await Bun.connect({
       unix: this.path,
       socket: {
         data(_s, data) {
-          self.buf += data.toString();
-          let idx: number;
-          while ((idx = self.buf.indexOf("\n")) !== -1) {
-            const line = self.buf.slice(0, idx);
-            self.buf = self.buf.slice(idx + 1);
-            if (!line) continue;
+          self.buf = consumeLines(self.buf + data.toString(), (line) => {
             try {
               const res = JSON.parse(line) as DaemonResponse;
               const cb = self.pending.get(res.id);
@@ -202,8 +198,10 @@ export class DaemonClient {
             } catch {
               // swallow
             }
-          }
+          });
         },
+        close: () => rejectPending("daemon disconnected"),
+        error: (_s, err) => rejectPending(err.message),
       },
     });
   }
@@ -244,12 +242,13 @@ export async function connectOrSpawn(
     // Poll until the socket is listening.
     const start = Date.now();
     while (Date.now() - start < 5000) {
+      const c = new DaemonClient(sock);
       try {
-        const c = new DaemonClient(sock);
         await c.connect();
         await c.request("ping");
         return c;
       } catch {
+        c.close();
         await Bun.sleep(50);
       }
     }
@@ -258,27 +257,17 @@ export async function connectOrSpawn(
 }
 
 async function spawnDaemon(session: string): Promise<void> {
-  const { ensureSessionDir, sessionDir } = await import("./state.ts");
+  const { ensureSessionDir } = await import("./state.ts");
   await ensureSessionDir(session);
   const entry = new URL("./daemon-main.ts", import.meta.url).pathname;
-
-  // When BOWSER_CHROME_DEBUG is set, capture daemon + Chrome stderr to a log
-  // file inside the session dir so spawn failures are diagnosable.
   const debug = process.env.BOWSER_CHROME_DEBUG === "1";
-  let stdout: "ignore" | "inherit" = "ignore";
-  let stderr: "ignore" | "inherit" = "ignore";
-  if (debug) {
-    stdout = "inherit";
-    stderr = "inherit";
-    void sessionDir;
-  }
+  const io = debug ? "inherit" : "ignore";
 
   Bun.spawn({
     cmd: [process.execPath, entry, session],
-    stdout,
-    stderr,
+    stdout: io,
+    stderr: io,
     stdin: "ignore",
     // Detach so the daemon survives the parent CLI exiting.
-    // Bun inherits no ptty by default; this is effectively fire-and-forget.
   });
 }

@@ -45,11 +45,8 @@ function statePath(name: string): string {
 }
 
 export async function loadState(name: string): Promise<SessionState | null> {
-  const path = statePath(name);
-  const file = Bun.file(path);
-  if (!(await file.exists())) return null;
   try {
-    return (await file.json()) as SessionState;
+    return (await Bun.file(statePath(name)).json()) as SessionState;
   } catch {
     return null;
   }

@@ -23,16 +23,12 @@ export interface CommandContext {
   connect?: typeof connectOrSpawn;
 }
 
-function connector(ctx: CommandContext): typeof connectOrSpawn {
-  return ctx.connect ?? connectOrSpawn;
-}
-
 async function withClient<T>(
   ctx: CommandContext,
   fn: (c: DaemonClient) => Promise<T>,
   opts: { spawn?: boolean } = {},
 ): Promise<T> {
-  const client = await connector(ctx)(ctx.session, opts);
+  const client = await (ctx.connect ?? connectOrSpawn)(ctx.session, opts);
   try {
     return await fn(client);
   } finally {
@@ -41,7 +37,7 @@ async function withClient<T>(
 }
 
 function emptyState(name: string): SessionState {
-  return { name, url: "", title: "", refs: [], updatedAt: 0 };
+  return { name, url: "", title: "", refs: [], updatedAt: Date.now() };
 }
 
 async function loadRef(session: string, ref: string) {
@@ -50,18 +46,26 @@ async function loadRef(session: string, ref: string) {
   return { prev, target: resolveRef(prev, ref) };
 }
 
+async function refreshState(c: DaemonClient, prev: SessionState): Promise<{ url: string; title: string }> {
+  const state = (await c.request("state")) as { url: string; title: string };
+  await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
+  return state;
+}
+
+function reply(ctx: CommandContext, json: object, human: string): string {
+  return ctx.json ? JSON.stringify(json) : human;
+}
+
 export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string> {
   await ensureSessionDir(ctx.session);
   return withClient(ctx, async (c) => {
     if (url) await c.request("navigate", [url]);
-    const state = (await c.request("state")) as { url: string; title: string };
-    const next: SessionState = {
-      name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
-    };
-    await saveState(next);
-    return ctx.json
-      ? JSON.stringify({ ok: true, url: state.url, title: state.title })
-      : (url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`);
+    const state = await refreshState(c, emptyState(ctx.session));
+    return reply(
+      ctx,
+      { ok: true, url: state.url, title: state.title },
+      url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`,
+    );
   });
 }
 
@@ -70,11 +74,8 @@ export async function cmdGoto(ctx: CommandContext, url: string): Promise<string>
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withClient(ctx, async (c) => {
     await c.request("navigate", [url]);
-    const state = (await c.request("state")) as { url: string; title: string };
-    await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
-    return ctx.json
-      ? JSON.stringify({ ok: true, url: state.url })
-      : `navigated to ${state.url}`;
+    const state = await refreshState(c, prev);
+    return reply(ctx, { ok: true, url: state.url }, `navigated to ${state.url}`);
   });
 }
 
@@ -84,9 +85,7 @@ export async function cmdSnapshot(
 ): Promise<string> {
   return withClient(ctx, async (c) => {
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
-    await saveState({
-      name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
-    });
+    await saveState({ ...emptyState(ctx.session), url: snap.url, title: snap.title, refs: snap.refs });
     const out = ctx.json ? toJson(snap) : toYaml(snap);
     if (opts.filename) {
       await Bun.write(opts.filename, out);
@@ -97,26 +96,16 @@ export async function cmdSnapshot(
   });
 }
 
-export async function cmdClick(
-  ctx: CommandContext,
-  ref: string,
-): Promise<string> {
+export async function cmdClick(ctx: CommandContext, ref: string): Promise<string> {
   const { prev, target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("click", [target.selector]);
-    const state = (await c.request("state")) as { url: string; title: string };
-    await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
-    return ctx.json
-      ? JSON.stringify({ ok: true, ref, url: state.url })
-      : `clicked ${ref} (${target.role} "${target.name}")`;
+    const state = await refreshState(c, prev);
+    return reply(ctx, { ok: true, ref, url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
   });
 }
 
-export async function cmdFill(
-  ctx: CommandContext,
-  ref: string,
-  text: string,
-): Promise<string> {
+export async function cmdFill(ctx: CommandContext, ref: string, text: string): Promise<string> {
   if (text === undefined) throw new Error("usage: bowser fill <ref> <text>");
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
@@ -125,16 +114,14 @@ export async function cmdFill(
     const clearExpr = `(() => { const el = document.querySelector(${JSON.stringify(target.selector)}); if (el && 'value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); } })()`;
     await c.request("evaluate", [clearExpr]);
     await c.request("type", [text]);
-    return ctx.json
-      ? JSON.stringify({ ok: true, ref, text })
-      : `filled ${ref} (${target.role} "${target.name}")`;
+    return reply(ctx, { ok: true, ref, text }, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
 
 export async function cmdType(ctx: CommandContext, text: string): Promise<string> {
   return withClient(ctx, async (c) => {
     await c.request("type", [text]);
-    return ctx.json ? JSON.stringify({ ok: true, text }) : `typed "${text}"`;
+    return reply(ctx, { ok: true, text }, `typed "${text}"`);
   });
 }
 
@@ -142,7 +129,7 @@ export async function cmdPress(ctx: CommandContext, key: string): Promise<string
   if (!key) throw new Error("usage: bowser press <key>");
   return withClient(ctx, async (c) => {
     await c.request("press", [key]);
-    return ctx.json ? JSON.stringify({ ok: true, key }) : `pressed ${key}`;
+    return reply(ctx, { ok: true, key }, `pressed ${key}`);
   });
 }
 
@@ -150,7 +137,7 @@ export async function cmdHover(ctx: CommandContext, ref: string): Promise<string
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("hover", [target.selector]);
-    return ctx.json ? JSON.stringify({ ok: true, ref }) : `hovered ${ref}`;
+    return reply(ctx, { ok: true, ref }, `hovered ${ref}`);
   });
 }
 
@@ -159,7 +146,7 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("select", [target.selector, value]);
-    return ctx.json ? JSON.stringify({ ok: true, ref, value }) : `selected ${ref} -> "${value}"`;
+    return reply(ctx, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
   });
 }
 
@@ -167,7 +154,7 @@ export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("check", [target.selector]);
-    return ctx.json ? JSON.stringify({ ok: true, ref }) : `checked ${ref}`;
+    return reply(ctx, { ok: true, ref }, `checked ${ref}`);
   });
 }
 
@@ -175,7 +162,7 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("uncheck", [target.selector]);
-    return ctx.json ? JSON.stringify({ ok: true, ref }) : `unchecked ${ref}`;
+    return reply(ctx, { ok: true, ref }, `unchecked ${ref}`);
   });
 }
 
@@ -186,7 +173,7 @@ export async function cmdScreenshot(
   const selector = opts.ref ? (await loadRef(ctx.session, opts.ref)).target.selector : undefined;
   return withClient(ctx, async (c) => {
     const data = (await c.request("screenshot", [selector, opts.filename])) as string | undefined;
-    if (opts.filename) return ctx.json ? JSON.stringify({ ok: true, filename: opts.filename }) : `wrote ${opts.filename}`;
+    if (opts.filename) return reply(ctx, { ok: true, filename: opts.filename }, `wrote ${opts.filename}`);
     return data ?? "";
   });
 }
@@ -198,20 +185,19 @@ export async function cmdHistory(
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withClient(ctx, async (c) => {
     await c.request(which, []);
-    const state = (await c.request("state")) as { url: string; title: string };
-    await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
-    return ctx.json
-      ? JSON.stringify({ ok: true, url: state.url })
-      : (which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`);
+    const state = await refreshState(c, prev);
+    return reply(
+      ctx,
+      { ok: true, url: state.url },
+      which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`,
+    );
   });
 }
 
 export async function cmdClose(ctx: CommandContext): Promise<string> {
-  const prev = await loadState(ctx.session);
-
   // Try to gracefully shut down the daemon. If it's not running, that's fine.
   try {
-    const client = await connector(ctx)(ctx.session, { spawn: false });
+    const client = await (ctx.connect ?? connectOrSpawn)(ctx.session, { spawn: false });
     try {
       await client.request("shutdown");
     } finally {
@@ -221,16 +207,10 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
     // no daemon; that's ok
   }
 
-  // Remove the socket file.
-  try {
-    await unlink(socketPath(ctx.session));
-  } catch {}
+  try { await unlink(socketPath(ctx.session)); } catch {}
+  await saveState(emptyState(ctx.session));
 
-  await saveState({ ...emptyState(prev?.name ?? ctx.session), updatedAt: Date.now() });
-
-  return ctx.json
-    ? JSON.stringify({ ok: true, session: ctx.session })
-    : `closed session '${ctx.session}'`;
+  return reply(ctx, { ok: true, session: ctx.session }, `closed session '${ctx.session}'`);
 }
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
@@ -263,8 +243,11 @@ export async function cmdInstall(
   const detect = opts.detect ?? detectChromium;
   const existing = detect();
   if (existing && !opts.force) {
-    const msg = `chromium already available at ${existing} (use --force to reinstall)`;
-    return ctx.json ? JSON.stringify({ ok: true, path: existing, skipped: true }) : msg;
+    return reply(
+      ctx,
+      { ok: true, path: existing, skipped: true },
+      `chromium already available at ${existing} (use --force to reinstall)`,
+    );
   }
 
   const cacheRoot = bowserCacheRoot();
@@ -303,7 +286,5 @@ export async function cmdInstall(
     );
   }
 
-  return ctx.json
-    ? JSON.stringify({ ok: true, path })
-    : `installed chromium to ${path}`;
+  return reply(ctx, { ok: true, path }, `installed chromium to ${path}`);
 }

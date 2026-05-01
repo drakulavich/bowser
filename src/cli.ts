@@ -44,7 +44,7 @@ export async function run(argv: string[]): Promise<string> {
   const [p0, p1] = args.positional;
 
   switch (args.command) {
-    case "install":    return cmdInstall(ctx, { force: Boolean(args.flags.force) });
+    case "install":    return cmdInstall(ctx, { force: args.flags.force === true });
     case "open":       return cmdOpen(ctx, p0);
     case "goto":       return cmdGoto(ctx, p0 ?? "");
     case "close":      return cmdClose(ctx);
