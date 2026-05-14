@@ -11,6 +11,10 @@ All notable changes to this project are documented here. This project follows
   `localstorage-delete`, `localstorage-clear` — read and write the current
   page's `localStorage` from the CLI. Implemented via `evaluate` against the
   live page; selectors and values are JSON-escaped before injection.
+- `sessionstorage-list`, `sessionstorage-get`, `sessionstorage-set`,
+  `sessionstorage-delete`, `sessionstorage-clear` — same shape as the
+  `localstorage-*` commands, targeting `sessionStorage`. Internally the
+  two areas share a single storage helper in `src/commands.ts`.
 - `bowser snapshot` now renders landmark nesting (`main`, `navigation`,
   `header`, `footer`, `section`, `article`, `aside`, `form`, `dialog`,
   `list`, `region`, …) as parent nodes in the aria-tree YAML.

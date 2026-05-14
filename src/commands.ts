@@ -241,21 +241,22 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
     : `closed session '${ctx.session}'`;
 }
 
-// localStorage commands. All implemented via `evaluate` against the live page,
-// so they require an open page in the session. Values are always strings —
-// that's the localStorage API surface, no JSON encoding is implied.
+// Web Storage commands (localStorage and sessionStorage). Implemented via
+// `evaluate` against the live page, so they require an open page in the
+// session. Values are always strings — that's the Storage API surface, no
+// JSON encoding is implied.
 
-function lsScript(body: string): string {
-  // Wrap in a try/catch so a SecurityError (e.g. on `about:blank` or pages
-  // where storage is disabled) surfaces as a readable daemon error rather
-  // than a bare DOMException.
-  return `(() => { try { ${body} } catch (e) { throw new Error('localStorage: ' + (e && e.message || e)); } })()`;
+// Wraps a body in a try/catch so a SecurityError (e.g. on `about:blank` or
+// pages where storage is disabled) surfaces as a readable daemon error rather
+// than a bare DOMException.
+function storageScript(area: "localStorage" | "sessionStorage", body: string): string {
+  return `(() => { try { ${body} } catch (e) { throw new Error('${area}: ' + (e && e.message || e)); } })()`;
 }
 
-export async function cmdLocalStorageList(ctx: CommandContext): Promise<string> {
+async function storageList(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
     const entries = (await c.request("evaluate", [
-      lsScript(`const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o;`),
+      storageScript(area, `const o = {}; for (let i = 0; i < ${area}.length; i++) { const k = ${area}.key(i); o[k] = ${area}.getItem(k); } return o;`),
     ])) as Record<string, string> | null;
     const obj = entries ?? {};
     if (ctx.json) return JSON.stringify(obj);
@@ -265,48 +266,78 @@ export async function cmdLocalStorageList(ctx: CommandContext): Promise<string> 
   });
 }
 
-export async function cmdLocalStorageGet(ctx: CommandContext, key: string): Promise<string> {
-  if (!key) throw new Error("usage: bowser localstorage-get <key>");
+async function storageGet(
+  ctx: CommandContext,
+  area: "localStorage" | "sessionStorage",
+  command: string,
+  key: string,
+): Promise<string> {
+  if (!key) throw new Error(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     const val = (await c.request("evaluate", [
-      lsScript(`return localStorage.getItem(${JSON.stringify(key)});`),
+      storageScript(area, `return ${area}.getItem(${JSON.stringify(key)});`),
     ])) as string | null;
     if (ctx.json) return JSON.stringify({ ok: true, key, value: val });
     return val ?? "";
   });
 }
 
-export async function cmdLocalStorageSet(
+async function storageSet(
   ctx: CommandContext,
+  area: "localStorage" | "sessionStorage",
+  command: string,
   key: string,
   value: string,
 ): Promise<string> {
-  if (!key) throw new Error("usage: bowser localstorage-set <key> <value>");
-  if (value === undefined) throw new Error("usage: bowser localstorage-set <key> <value>");
+  if (!key) throw new Error(`usage: bowser ${command} <key> <value>`);
+  if (value === undefined) throw new Error(`usage: bowser ${command} <key> <value>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [
-      lsScript(`localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)});`),
+      storageScript(area, `${area}.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)});`),
     ]);
     return ctx.json ? JSON.stringify({ ok: true, key, value }) : `set ${key}`;
   });
 }
 
-export async function cmdLocalStorageDelete(ctx: CommandContext, key: string): Promise<string> {
-  if (!key) throw new Error("usage: bowser localstorage-delete <key>");
+async function storageDelete(
+  ctx: CommandContext,
+  area: "localStorage" | "sessionStorage",
+  command: string,
+  key: string,
+): Promise<string> {
+  if (!key) throw new Error(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [
-      lsScript(`localStorage.removeItem(${JSON.stringify(key)});`),
+      storageScript(area, `${area}.removeItem(${JSON.stringify(key)});`),
     ]);
     return ctx.json ? JSON.stringify({ ok: true, key }) : `deleted ${key}`;
   });
 }
 
-export async function cmdLocalStorageClear(ctx: CommandContext): Promise<string> {
+async function storageClear(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
-    await c.request("evaluate", [lsScript(`localStorage.clear();`)]);
+    await c.request("evaluate", [storageScript(area, `${area}.clear();`)]);
     return ctx.json ? JSON.stringify({ ok: true }) : "cleared";
   });
 }
+
+export const cmdLocalStorageList = (ctx: CommandContext) => storageList(ctx, "localStorage");
+export const cmdLocalStorageGet = (ctx: CommandContext, key: string) =>
+  storageGet(ctx, "localStorage", "localstorage-get", key);
+export const cmdLocalStorageSet = (ctx: CommandContext, key: string, value: string) =>
+  storageSet(ctx, "localStorage", "localstorage-set", key, value);
+export const cmdLocalStorageDelete = (ctx: CommandContext, key: string) =>
+  storageDelete(ctx, "localStorage", "localstorage-delete", key);
+export const cmdLocalStorageClear = (ctx: CommandContext) => storageClear(ctx, "localStorage");
+
+export const cmdSessionStorageList = (ctx: CommandContext) => storageList(ctx, "sessionStorage");
+export const cmdSessionStorageGet = (ctx: CommandContext, key: string) =>
+  storageGet(ctx, "sessionStorage", "sessionstorage-get", key);
+export const cmdSessionStorageSet = (ctx: CommandContext, key: string, value: string) =>
+  storageSet(ctx, "sessionStorage", "sessionstorage-set", key, value);
+export const cmdSessionStorageDelete = (ctx: CommandContext, key: string) =>
+  storageDelete(ctx, "sessionStorage", "sessionstorage-delete", key);
+export const cmdSessionStorageClear = (ctx: CommandContext) => storageClear(ctx, "sessionStorage");
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
   const root = join(homedir(), ".bowser", "sessions");

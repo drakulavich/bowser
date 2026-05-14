@@ -53,6 +53,11 @@ Do **not** use for static HTTP fetches.
 | `bowser localstorage-set <key> <value>` | Write a `localStorage` entry |
 | `bowser localstorage-delete <key>` | Remove a `localStorage` entry |
 | `bowser localstorage-clear` | Clear all `localStorage` entries |
+| `bowser sessionstorage-list` | List `sessionStorage` entries (`key=value` lines, or JSON) |
+| `bowser sessionstorage-get <key>` | Read a `sessionStorage` value |
+| `bowser sessionstorage-set <key> <value>` | Write a `sessionStorage` entry |
+| `bowser sessionstorage-delete <key>` | Remove a `sessionStorage` entry |
+| `bowser sessionstorage-clear` | Clear all `sessionStorage` entries |
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 

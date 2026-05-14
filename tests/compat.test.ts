@@ -28,6 +28,11 @@ const CASES: { argv: string[]; expect: { command: string; session?: string; posi
   { argv: ["localstorage-set", "tok", "val"],                 expect: { command: "localstorage-set",    positional: ["tok", "val"] } },
   { argv: ["localstorage-delete", "tok"],                     expect: { command: "localstorage-delete", positional: ["tok"] } },
   { argv: ["localstorage-clear"],                             expect: { command: "localstorage-clear" } },
+  { argv: ["sessionstorage-list"],                            expect: { command: "sessionstorage-list" } },
+  { argv: ["sessionstorage-get", "tok"],                      expect: { command: "sessionstorage-get",    positional: ["tok"] } },
+  { argv: ["sessionstorage-set", "tok", "val"],               expect: { command: "sessionstorage-set",    positional: ["tok", "val"] } },
+  { argv: ["sessionstorage-delete", "tok"],                   expect: { command: "sessionstorage-delete", positional: ["tok"] } },
+  { argv: ["sessionstorage-clear"],                           expect: { command: "sessionstorage-clear" } },
 ];
 
 describe("playwright-cli compat parse table", () => {
