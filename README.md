@@ -99,6 +99,11 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions |
 | `close` | End the current session |
+| `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
+| `localstorage-get <key>` | Read a `localStorage` value |
+| `localstorage-set <key> <value>` | Write a `localStorage` entry |
+| `localstorage-delete <key>` | Remove a `localStorage` entry |
+| `localstorage-clear` | Clear all `localStorage` entries |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 
@@ -144,6 +149,10 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [x] playwright-cli command compatibility for the core agent loop
 - [x] Snapshot nesting honoring `--depth=N`
 - [ ] Storage commands (`cookie-*`, `localstorage-*`, `state-save`/`load`)
+  - [x] `localstorage-{list,get,set,delete,clear}`
+  - [ ] `sessionstorage-*` (same shape, against `sessionStorage`)
+  - [ ] `cookie-*` (needs CDP for HttpOnly cookies)
+  - [ ] `state-save` / `state-load` (storage state JSON dump/restore)
 - [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
 - [ ] Network mocking (`route`, `unroute`)
 - [ ] Tracing / video / PDF output

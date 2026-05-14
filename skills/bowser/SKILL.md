@@ -48,6 +48,11 @@ Do **not** use for static HTTP fetches.
 | `bowser list` | Enumerate sessions |
 | `bowser close` | End the current session |
 | `bowser install [--force]` | Download headless Chromium |
+| `bowser localstorage-list` | List `localStorage` entries (`key=value` lines, or JSON) |
+| `bowser localstorage-get <key>` | Read a `localStorage` value |
+| `bowser localstorage-set <key> <value>` | Write a `localStorage` entry |
+| `bowser localstorage-delete <key>` | Remove a `localStorage` entry |
+| `bowser localstorage-clear` | Clear all `localStorage` entries |
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 

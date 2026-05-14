@@ -5,6 +5,8 @@ import {
   cmdInstall, cmdOpen, cmdGoto, cmdClose, cmdSnapshot, cmdClick,
   cmdFill, cmdType, cmdPress, cmdHover, cmdSelect, cmdCheck,
   cmdUncheck, cmdScreenshot, cmdHistory, cmdList,
+  cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
+  cmdLocalStorageDelete, cmdLocalStorageClear,
   type CommandContext,
 } from "./commands.ts";
 
@@ -29,6 +31,11 @@ Commands:
   go-forward
   reload
   list                               list sessions
+  localstorage-list                  list all localStorage entries
+  localstorage-get <key>             read a localStorage value
+  localstorage-set <key> <value>     write a localStorage entry
+  localstorage-delete <key>          remove a localStorage entry
+  localstorage-clear                 clear all localStorage entries
 
 Global flags:
   -s, --session <name>     session name (default: "default")
@@ -68,6 +75,11 @@ export async function run(argv: string[]): Promise<string> {
     case "go-forward": return cmdHistory(ctx, "forward");
     case "reload":     return cmdHistory(ctx, "reload");
     case "list":       return cmdList(ctx);
+    case "localstorage-list":   return cmdLocalStorageList(ctx);
+    case "localstorage-get":    return cmdLocalStorageGet(ctx, p0 ?? "");
+    case "localstorage-set":    return cmdLocalStorageSet(ctx, p0 ?? "", p1 ?? "");
+    case "localstorage-delete": return cmdLocalStorageDelete(ctx, p0 ?? "");
+    case "localstorage-clear":  return cmdLocalStorageClear(ctx);
     default:           throw new Error(`unknown command: ${args.command}`);
   }
 }

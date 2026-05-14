@@ -7,6 +7,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- `localstorage-list`, `localstorage-get`, `localstorage-set`,
+  `localstorage-delete`, `localstorage-clear` — read and write the current
+  page's `localStorage` from the CLI. Implemented via `evaluate` against the
+  live page; selectors and values are JSON-escaped before injection.
 - `bowser snapshot` now renders landmark nesting (`main`, `navigation`,
   `header`, `footer`, `section`, `article`, `aside`, `form`, `dialog`,
   `list`, `region`, …) as parent nodes in the aria-tree YAML.

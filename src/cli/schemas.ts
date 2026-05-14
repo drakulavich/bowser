@@ -25,5 +25,10 @@ export const SCHEMAS: Schemas = {
     { name: "go-forward",  positional: [],                                                   flags: [] },
     { name: "reload",      positional: [],                                                   flags: [] },
     { name: "list",        positional: [],                                                   flags: [] },
+    { name: "localstorage-list",   positional: [],                                                                       flags: [] },
+    { name: "localstorage-get",    positional: [{ name: "key", required: true }],                                        flags: [] },
+    { name: "localstorage-set",    positional: [{ name: "key", required: true }, { name: "value", required: true }],     flags: [] },
+    { name: "localstorage-delete", positional: [{ name: "key", required: true }],                                        flags: [] },
+    { name: "localstorage-clear",  positional: [],                                                                       flags: [] },
   ],
 };

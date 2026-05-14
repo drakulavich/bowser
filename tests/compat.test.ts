@@ -23,6 +23,11 @@ const CASES: { argv: string[]; expect: { command: string; session?: string; posi
   { argv: ["reload"],                                         expect: { command: "reload" } },
   { argv: ["list"],                                           expect: { command: "list" } },
   { argv: ["install", "--force"],                             expect: { command: "install",    flags: { force: true } } },
+  { argv: ["localstorage-list"],                              expect: { command: "localstorage-list" } },
+  { argv: ["localstorage-get", "tok"],                        expect: { command: "localstorage-get",    positional: ["tok"] } },
+  { argv: ["localstorage-set", "tok", "val"],                 expect: { command: "localstorage-set",    positional: ["tok", "val"] } },
+  { argv: ["localstorage-delete", "tok"],                     expect: { command: "localstorage-delete", positional: ["tok"] } },
+  { argv: ["localstorage-clear"],                             expect: { command: "localstorage-clear" } },
 ];
 
 describe("playwright-cli compat parse table", () => {

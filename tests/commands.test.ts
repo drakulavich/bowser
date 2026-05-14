@@ -10,6 +10,8 @@ import {
   cmdClick, cmdFill, cmdType, cmdPress, cmdHover, cmdSelect,
   cmdCheck, cmdUncheck, cmdScreenshot, cmdHistory,
   cmdClose, cmdOpen, cmdGoto, cmdSnapshot, cmdList, cmdInstall,
+  cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
+  cmdLocalStorageDelete, cmdLocalStorageClear,
   type CommandContext,
 } from "../src/commands.ts";
 import { saveState } from "../src/state.ts";
@@ -443,6 +445,88 @@ describe("screenshot", () => {
       { filename: tmp },
     );
     expect(out).toBe(`wrote ${tmp}`);
+  });
+});
+
+describe("localstorage", () => {
+  test("list returns empty string when no entries", async () => {
+    const c = fakeClient({ evaluate: () => ({}) });
+    const out = await cmdLocalStorageList({ ...ctx(), connect: async () => c });
+    expect(out).toBe("");
+  });
+
+  test("list renders k=v lines", async () => {
+    const c = fakeClient({ evaluate: () => ({ token: "abc", theme: "dark" }) });
+    const out = await cmdLocalStorageList({ ...ctx(), connect: async () => c });
+    expect(out.split("\n").sort()).toEqual(["theme=dark", "token=abc"]);
+  });
+
+  test("list --json returns object", async () => {
+    const c = fakeClient({ evaluate: () => ({ token: "abc" }) });
+    const out = await cmdLocalStorageList({ ...ctx({ json: true }), connect: async () => c });
+    expect(JSON.parse(out)).toEqual({ token: "abc" });
+  });
+
+  test("get returns raw value", async () => {
+    const c = fakeClient({ evaluate: () => "abc" });
+    const out = await cmdLocalStorageGet({ ...ctx(), connect: async () => c }, "token");
+    expect(out).toBe("abc");
+    const expr = c.calls[0]![1][0] as string;
+    expect(expr).toContain(`localStorage.getItem(\"token\")`);
+  });
+
+  test("get missing key returns empty string", async () => {
+    const c = fakeClient({ evaluate: () => null });
+    const out = await cmdLocalStorageGet({ ...ctx(), connect: async () => c }, "token");
+    expect(out).toBe("");
+  });
+
+  test("get --json includes null for missing key", async () => {
+    const c = fakeClient({ evaluate: () => null });
+    const out = await cmdLocalStorageGet({ ...ctx({ json: true }), connect: async () => c }, "missing");
+    expect(JSON.parse(out)).toEqual({ ok: true, key: "missing", value: null });
+  });
+
+  test("get rejects empty key", async () => {
+    await expect(cmdLocalStorageGet(ctx(), "")).rejects.toThrow(/usage:/);
+  });
+
+  test("set sends setItem evaluate with JSON-escaped key/value", async () => {
+    const c = fakeClient({ evaluate: () => undefined });
+    const out = await cmdLocalStorageSet(
+      { ...ctx(), connect: async () => c },
+      "tok",
+      `va"l`,
+    );
+    expect(out).toBe("set tok");
+    const expr = c.calls[0]![1][0] as string;
+    expect(expr).toContain(`localStorage.setItem(\"tok\", \"va\\\"l\")`);
+  });
+
+  test("set rejects missing args", async () => {
+    await expect(cmdLocalStorageSet(ctx(), "", "v")).rejects.toThrow(/usage:/);
+  });
+
+  test("delete sends removeItem evaluate", async () => {
+    const c = fakeClient({ evaluate: () => undefined });
+    const out = await cmdLocalStorageDelete({ ...ctx(), connect: async () => c }, "tok");
+    expect(out).toBe("deleted tok");
+    const expr = c.calls[0]![1][0] as string;
+    expect(expr).toContain(`localStorage.removeItem(\"tok\")`);
+  });
+
+  test("clear sends clear evaluate", async () => {
+    const c = fakeClient({ evaluate: () => undefined });
+    const out = await cmdLocalStorageClear({ ...ctx(), connect: async () => c });
+    expect(out).toBe("cleared");
+    const expr = c.calls[0]![1][0] as string;
+    expect(expr).toContain(`localStorage.clear()`);
+  });
+
+  test("clear --json", async () => {
+    const c = fakeClient({ evaluate: () => undefined });
+    const out = await cmdLocalStorageClear({ ...ctx({ json: true }), connect: async () => c });
+    expect(JSON.parse(out)).toEqual({ ok: true });
   });
 });
 
