@@ -156,7 +156,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [ ] Storage commands (`cookie-*`, `localstorage-*`, `state-save`/`load`)
   - [x] `localstorage-{list,get,set,delete,clear}`
   - [x] `sessionstorage-{list,get,set,delete,clear}`
-  - [ ] `cookie-*` (needs CDP for HttpOnly cookies)
+  - [ ] `cookie-*` (needs CDP for HttpOnly cookies — see [design](./docs/superpowers/specs/2026-05-14-cdp-cookies-design.md))
   - [ ] `state-save` / `state-load` (storage state JSON dump/restore)
 - [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
 - [ ] Network mocking (`route`, `unroute`)
