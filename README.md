@@ -87,7 +87,7 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `install [--force]` | Download a headless Chromium |
 | `open [url]` | Start session; navigate if URL given |
 | `goto <url>` | Navigate within current session |
-| `snapshot [--filename=f] [--depth=N]` | aria-tree YAML of interactive refs (`--depth` accepted, flat in v0.2) |
+| `snapshot [--filename=f] [--depth=N]` | aria-tree YAML of interactive refs; `--depth=N` clips landmark nesting (`N=1` is flat, default is unbounded) |
 | `click <ref>` | Click an element |
 | `fill <ref> <text>` | Focus, clear, type |
 | `type <text>` | Type into focused element |
@@ -142,7 +142,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 
 - [x] Persistent session daemon over Unix socket
 - [x] playwright-cli command compatibility for the core agent loop
-- [ ] Snapshot nesting honoring `--depth=N`
+- [x] Snapshot nesting honoring `--depth=N`
 - [ ] Storage commands (`cookie-*`, `localstorage-*`, `state-save`/`load`)
 - [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
 - [ ] Network mocking (`route`, `unroute`)

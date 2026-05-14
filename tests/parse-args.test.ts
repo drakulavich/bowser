@@ -60,7 +60,7 @@ describe("parse", () => {
   test("unknown flag for command throws", () => {
     expect(() => parse(SCHEMAS, ["snapshot", "--bogus"])).toThrow(/unknown flag/);
   });
-  test("--depth=N on snapshot is parsed (and ignored downstream)", () => {
+  test("--depth=N on snapshot is parsed", () => {
     expect(parse(SCHEMAS, ["snapshot", "--depth=3"]).flags.depth).toBe("3");
   });
 });
