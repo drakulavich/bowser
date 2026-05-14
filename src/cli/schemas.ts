@@ -30,5 +30,10 @@ export const SCHEMAS: Schemas = {
     { name: "localstorage-set",    positional: [{ name: "key", required: true }, { name: "value", required: true }],     flags: [] },
     { name: "localstorage-delete", positional: [{ name: "key", required: true }],                                        flags: [] },
     { name: "localstorage-clear",  positional: [],                                                                       flags: [] },
+    { name: "sessionstorage-list",   positional: [],                                                                       flags: [] },
+    { name: "sessionstorage-get",    positional: [{ name: "key", required: true }],                                        flags: [] },
+    { name: "sessionstorage-set",    positional: [{ name: "key", required: true }, { name: "value", required: true }],     flags: [] },
+    { name: "sessionstorage-delete", positional: [{ name: "key", required: true }],                                        flags: [] },
+    { name: "sessionstorage-clear",  positional: [],                                                                       flags: [] },
   ],
 };

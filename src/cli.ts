@@ -7,6 +7,8 @@ import {
   cmdUncheck, cmdScreenshot, cmdHistory, cmdList,
   cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
   cmdLocalStorageDelete, cmdLocalStorageClear,
+  cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
+  cmdSessionStorageDelete, cmdSessionStorageClear,
   type CommandContext,
 } from "./commands.ts";
 
@@ -36,6 +38,11 @@ Commands:
   localstorage-set <key> <value>     write a localStorage entry
   localstorage-delete <key>          remove a localStorage entry
   localstorage-clear                 clear all localStorage entries
+  sessionstorage-list                list all sessionStorage entries
+  sessionstorage-get <key>           read a sessionStorage value
+  sessionstorage-set <key> <value>   write a sessionStorage entry
+  sessionstorage-delete <key>        remove a sessionStorage entry
+  sessionstorage-clear               clear all sessionStorage entries
 
 Global flags:
   -s, --session <name>     session name (default: "default")
@@ -80,6 +87,11 @@ export async function run(argv: string[]): Promise<string> {
     case "localstorage-set":    return cmdLocalStorageSet(ctx, p0 ?? "", p1 ?? "");
     case "localstorage-delete": return cmdLocalStorageDelete(ctx, p0 ?? "");
     case "localstorage-clear":  return cmdLocalStorageClear(ctx);
+    case "sessionstorage-list":   return cmdSessionStorageList(ctx);
+    case "sessionstorage-get":    return cmdSessionStorageGet(ctx, p0 ?? "");
+    case "sessionstorage-set":    return cmdSessionStorageSet(ctx, p0 ?? "", p1 ?? "");
+    case "sessionstorage-delete": return cmdSessionStorageDelete(ctx, p0 ?? "");
+    case "sessionstorage-clear":  return cmdSessionStorageClear(ctx);
     default:           throw new Error(`unknown command: ${args.command}`);
   }
 }

@@ -104,6 +104,11 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `localstorage-set <key> <value>` | Write a `localStorage` entry |
 | `localstorage-delete <key>` | Remove a `localStorage` entry |
 | `localstorage-clear` | Clear all `localStorage` entries |
+| `sessionstorage-list` | List all `sessionStorage` entries (`key=value` per line, or JSON with `--json`) |
+| `sessionstorage-get <key>` | Read a `sessionStorage` value |
+| `sessionstorage-set <key> <value>` | Write a `sessionStorage` entry |
+| `sessionstorage-delete <key>` | Remove a `sessionStorage` entry |
+| `sessionstorage-clear` | Clear all `sessionStorage` entries |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 
@@ -150,7 +155,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [x] Snapshot nesting honoring `--depth=N`
 - [ ] Storage commands (`cookie-*`, `localstorage-*`, `state-save`/`load`)
   - [x] `localstorage-{list,get,set,delete,clear}`
-  - [ ] `sessionstorage-*` (same shape, against `sessionStorage`)
+  - [x] `sessionstorage-{list,get,set,delete,clear}`
   - [ ] `cookie-*` (needs CDP for HttpOnly cookies)
   - [ ] `state-save` / `state-load` (storage state JSON dump/restore)
 - [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
