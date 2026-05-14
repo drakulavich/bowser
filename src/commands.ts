@@ -241,6 +241,73 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
     : `closed session '${ctx.session}'`;
 }
 
+// localStorage commands. All implemented via `evaluate` against the live page,
+// so they require an open page in the session. Values are always strings —
+// that's the localStorage API surface, no JSON encoding is implied.
+
+function lsScript(body: string): string {
+  // Wrap in a try/catch so a SecurityError (e.g. on `about:blank` or pages
+  // where storage is disabled) surfaces as a readable daemon error rather
+  // than a bare DOMException.
+  return `(() => { try { ${body} } catch (e) { throw new Error('localStorage: ' + (e && e.message || e)); } })()`;
+}
+
+export async function cmdLocalStorageList(ctx: CommandContext): Promise<string> {
+  return withClient(ctx, async (c) => {
+    const entries = (await c.request("evaluate", [
+      lsScript(`const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o;`),
+    ])) as Record<string, string> | null;
+    const obj = entries ?? {};
+    if (ctx.json) return JSON.stringify(obj);
+    const keys = Object.keys(obj);
+    if (keys.length === 0) return "";
+    return keys.map((k) => `${k}=${obj[k]}`).join("\n");
+  });
+}
+
+export async function cmdLocalStorageGet(ctx: CommandContext, key: string): Promise<string> {
+  if (!key) throw new Error("usage: bowser localstorage-get <key>");
+  return withClient(ctx, async (c) => {
+    const val = (await c.request("evaluate", [
+      lsScript(`return localStorage.getItem(${JSON.stringify(key)});`),
+    ])) as string | null;
+    if (ctx.json) return JSON.stringify({ ok: true, key, value: val });
+    return val ?? "";
+  });
+}
+
+export async function cmdLocalStorageSet(
+  ctx: CommandContext,
+  key: string,
+  value: string,
+): Promise<string> {
+  if (!key) throw new Error("usage: bowser localstorage-set <key> <value>");
+  if (value === undefined) throw new Error("usage: bowser localstorage-set <key> <value>");
+  return withClient(ctx, async (c) => {
+    await c.request("evaluate", [
+      lsScript(`localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)});`),
+    ]);
+    return ctx.json ? JSON.stringify({ ok: true, key, value }) : `set ${key}`;
+  });
+}
+
+export async function cmdLocalStorageDelete(ctx: CommandContext, key: string): Promise<string> {
+  if (!key) throw new Error("usage: bowser localstorage-delete <key>");
+  return withClient(ctx, async (c) => {
+    await c.request("evaluate", [
+      lsScript(`localStorage.removeItem(${JSON.stringify(key)});`),
+    ]);
+    return ctx.json ? JSON.stringify({ ok: true, key }) : `deleted ${key}`;
+  });
+}
+
+export async function cmdLocalStorageClear(ctx: CommandContext): Promise<string> {
+  return withClient(ctx, async (c) => {
+    await c.request("evaluate", [lsScript(`localStorage.clear();`)]);
+    return ctx.json ? JSON.stringify({ ok: true }) : "cleared";
+  });
+}
+
 export async function cmdList(ctx: CommandContext): Promise<string> {
   const root = join(homedir(), ".bowser", "sessions");
   try {
