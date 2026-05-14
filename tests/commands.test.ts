@@ -193,6 +193,29 @@ describe("snapshot", () => {
     const obj = JSON.parse(out);
     expect(obj.refs[0].ref).toBe("e1");
   });
+  test("--depth=N is honored — depth=1 flattens nested refs", async () => {
+    const c = fakeClient({
+      evaluate: () => ({
+        url: "https://x", title: "X",
+        refs: [
+          { id: "e1", selector: "a", role: "link", name: "Home", tag: "a", href: "/",
+            path: [{ role: "navigation", name: "Primary" }] },
+        ],
+      }),
+    });
+    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { depth: "1" });
+    // depth=1 → flat. No "navigation" parent line.
+    expect(out).not.toContain("navigation");
+    expect(out).toContain(`- link "Home": [ref=e1]`);
+  });
+  test("--depth=0 rejected as user error", async () => {
+    const c = fakeClient({
+      evaluate: () => ({ url: "u", title: "t", refs: [] }),
+    });
+    await expect(
+      cmdSnapshot({ ...ctx(), connect: async () => c }, { depth: "0" }),
+    ).rejects.toThrow(/usage:/);
+  });
 });
 
 describe("close", () => {

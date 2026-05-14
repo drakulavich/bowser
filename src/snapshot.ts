@@ -16,6 +16,8 @@ import type { Ref } from "./state.ts";
 // one-shot mode re-navigates between commands.
 export const SNAPSHOT_SCRIPT = `(() => {
   const INTERACTIVE = 'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=checkbox],[role=tab],[role=menuitem],[contenteditable="true"]';
+  const LANDMARK_TAGS = { main: 'main', nav: 'navigation', header: 'banner', footer: 'contentinfo', section: 'region', article: 'article', aside: 'complementary', form: 'form', dialog: 'dialog', ul: 'list', ol: 'list' };
+  const LANDMARK_ROLES = new Set(['main','navigation','banner','contentinfo','region','article','complementary','form','dialog','list','menu','menubar','tablist','search','group']);
   function cssPath(el) {
     if (el.id && /^[A-Za-z][\\w-]*$/.test(el.id)) {
       const byId = document.querySelectorAll('#' + el.id);
@@ -63,6 +65,29 @@ export const SNAPSHOT_SCRIPT = `(() => {
     if (tag === 'select') return 'combobox';
     return tag;
   }
+  function landmarkInfo(el) {
+    // Returns {role, name} when el is a landmark container, else null.
+    const explicit = el.getAttribute('role');
+    if (explicit && LANDMARK_ROLES.has(explicit)) {
+      return { role: explicit, name: accName(el).slice(0, 80) };
+    }
+    const tag = el.tagName.toLowerCase();
+    const implied = LANDMARK_ROLES.has(tag) ? tag : LANDMARK_TAGS[tag];
+    if (implied) return { role: implied, name: accName(el).slice(0, 80) };
+    return null;
+  }
+  function landmarkPath(el) {
+    // Closest-first walk up to <body>, collecting landmark ancestors.
+    // Reversed at the end so root-most landmark is first.
+    const out = [];
+    let p = el.parentElement;
+    while (p && p !== document.body && p !== document.documentElement) {
+      const info = landmarkInfo(p);
+      if (info) out.push(info);
+      p = p.parentElement;
+    }
+    return out.reverse();
+  }
   const refs = []; let i = 0;
   for (const el of document.querySelectorAll(INTERACTIVE)) {
     if (!visible(el)) continue;
@@ -73,6 +98,7 @@ export const SNAPSHOT_SCRIPT = `(() => {
       role: role(el),
       name: accName(el).slice(0, 120),
       tag: el.tagName.toLowerCase(),
+      path: landmarkPath(el),
     };
     if (el.tagName === 'A' && el.getAttribute('href')) r.href = el.getAttribute('href');
     if ('value' in el && el.value) r.value = String(el.value).slice(0, 120);
@@ -91,15 +117,62 @@ function escapeQuoted(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-/** Render an aria-tree-flavored YAML matching playwright-cli `snapshot`. */
-export function toYaml(snap: SnapshotResult): string {
+function indent(level: number): string {
+  return "  ".repeat(level);
+}
+
+function refLine(r: Ref, level: number): string {
+  let line = `${indent(level)}- ${r.role} "${escapeQuoted(r.name)}": [ref=${r.id}]`;
+  if (r.href) line += ` ${r.href}`;
+  else if (r.value) line += ` "${escapeQuoted(r.value)}"`;
+  return line;
+}
+
+/**
+ * Render aria-tree-flavored YAML matching playwright-cli `snapshot`.
+ *
+ * Refs carry a `path` of landmark ancestors (e.g. `main`, `navigation`,
+ * `form`, `list`). We render those landmarks as parent nodes, with refs as
+ * leaves. `depth` clips the path: depth=1 is flat (root only), depth=2
+ * permits one level of landmark nesting, etc. Default (undefined) is no clip.
+ */
+export function toYaml(snap: SnapshotResult, depth?: number): string {
+  const maxAncestors =
+    typeof depth === "number" && depth >= 1 ? depth - 1 : Infinity;
   const out: string[] = ["- generic:"];
+
+  // Walk refs in order, maintaining a stack of currently-open landmark nodes.
+  // When the next ref's clipped path shares a prefix with the open stack, we
+  // reuse it; otherwise we close back to the shared prefix and open new nodes.
+  const openStack: { role: string; name: string }[] = [];
+
   for (const r of snap.refs) {
-    let line = `  - ${r.role} "${escapeQuoted(r.name)}": [ref=${r.id}]`;
-    if (r.href) line += ` ${r.href}`;
-    else if (r.value) line += ` "${escapeQuoted(r.value)}"`;
-    out.push(line);
+    const fullPath = r.path ?? [];
+    const path = fullPath.slice(0, maxAncestors);
+
+    // Find shared prefix length with openStack.
+    let shared = 0;
+    while (
+      shared < openStack.length &&
+      shared < path.length &&
+      openStack[shared]!.role === path[shared]!.role &&
+      openStack[shared]!.name === path[shared]!.name
+    ) {
+      shared++;
+    }
+    // Pop divergent suffix and push new nodes.
+    openStack.length = shared;
+    for (let k = shared; k < path.length; k++) {
+      const node = path[k]!;
+      // Level of this landmark node: 1 (under "- generic:") + k.
+      out.push(`${indent(1 + k)}- ${node.role} "${escapeQuoted(node.name)}":`);
+      openStack.push(node);
+    }
+    // Ref leaf level: 1 + openStack.length (children of the deepest open node,
+    // or of "- generic:" when stack is empty).
+    out.push(refLine(r, 1 + openStack.length));
   }
+
   return out.join("\n") + "\n";
 }
 
@@ -114,6 +187,7 @@ export function toJson(snap: SnapshotResult): string {
     };
     if (r.href) o.href = r.href;
     if (r.value) o.value = r.value;
+    if (r.path && r.path.length > 0) o.path = r.path;
     return o;
   });
   return JSON.stringify({ url: snap.url, title: snap.title, refs });

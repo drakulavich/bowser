@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `bowser snapshot` now renders landmark nesting (`main`, `navigation`,
+  `header`, `footer`, `section`, `article`, `aside`, `form`, `dialog`,
+  `list`, `region`, …) as parent nodes in the aria-tree YAML.
+- `--depth=N` is honored: `--depth=1` reproduces the flat v0.2 output;
+  `--depth=2` keeps only the outermost landmark; default (omitted) is
+  unbounded. `--depth=0` is rejected as a user error.
+
+### Changed
+
+- The snapshot script returns a `path` array per ref (landmark ancestors,
+  root-most first). `Ref.path` is optional in `state.json`; older state
+  files without it remain valid and render flat.
+
 ## [0.2.0] — 2026-04-26
 
 ### Breaking

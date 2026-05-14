@@ -18,6 +18,8 @@ export interface Ref {
   tag: string;
   href?: string;
   value?: string;
+  /** Landmark ancestors (root-most first) for nested snapshot rendering. */
+  path?: Array<{ role: string; name: string }>;
 }
 
 export interface SessionState {

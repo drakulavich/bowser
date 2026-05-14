@@ -82,12 +82,20 @@ export async function cmdSnapshot(
   ctx: CommandContext,
   opts: { filename?: string; depth?: string } = {},
 ): Promise<string> {
+  let depth: number | undefined;
+  if (opts.depth !== undefined) {
+    const n = Number(opts.depth);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error(`usage: --depth=N requires a positive integer (got '${opts.depth}')`);
+    }
+    depth = n;
+  }
   return withClient(ctx, async (c) => {
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
     await saveState({
       name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
     });
-    const out = ctx.json ? toJson(snap) : toYaml(snap);
+    const out = ctx.json ? toJson(snap) : toYaml(snap, depth);
     if (opts.filename) {
       await Bun.write(opts.filename, out);
       return `wrote ${opts.filename}`;
