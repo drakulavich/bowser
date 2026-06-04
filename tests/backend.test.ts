@@ -5,7 +5,7 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { hasExplicitChromium, bowserCacheRoot, resolveBackend, toBunBackend } from "../src/browser.ts";
+import { hasExplicitChromium, bowserCacheRoot, resolveBackend, toBunBackend, assertValidBackendEnv } from "../src/browser.ts";
 
 describe("hasExplicitChromium", () => {
   let tmp: string;
@@ -130,5 +130,31 @@ describe("toBunBackend", () => {
 
   test("chrome with debug -> inherits stdio", () => {
     expect(toBunBackend({ kind: "chrome", debug: true })).toEqual({ type: "chrome", stderr: "inherit", stdout: "inherit" });
+  });
+});
+
+describe("assertValidBackendEnv", () => {
+  test("no-op when BOWSER_BACKEND is unset", () => {
+    expect(() => assertValidBackendEnv({}, "darwin")).not.toThrow();
+  });
+
+  test("no-op when BOWSER_BACKEND is empty (treated as unset)", () => {
+    expect(() => assertValidBackendEnv({ BOWSER_BACKEND: "" }, "linux")).not.toThrow();
+  });
+
+  test("no-op for webkit on macOS", () => {
+    expect(() => assertValidBackendEnv({ BOWSER_BACKEND: "webkit" }, "darwin")).not.toThrow();
+  });
+
+  test("no-op for chrome on any platform", () => {
+    expect(() => assertValidBackendEnv({ BOWSER_BACKEND: "chrome" }, "linux")).not.toThrow();
+  });
+
+  test("throws for an invalid value", () => {
+    expect(() => assertValidBackendEnv({ BOWSER_BACKEND: "firefox" }, "darwin")).toThrow("invalid BOWSER_BACKEND");
+  });
+
+  test("throws for webkit off-macOS", () => {
+    expect(() => assertValidBackendEnv({ BOWSER_BACKEND: "webkit" }, "linux")).toThrow("only supported on macOS");
   });
 });

@@ -33,6 +33,27 @@ function chromeBackend(
   };
 }
 
+/** Validate the BOWSER_BACKEND override without any detection or I/O. Throws the
+ *  same errors resolveBackend() surfaces for a bad override. The parent CLI calls
+ *  this before spawning the detached daemon, so a typo'd value fails fast with a
+ *  clear message instead of being swallowed by the daemon and seen only as a
+ *  "did not start in time" timeout. */
+export function assertValidBackendEnv(
+  env: Record<string, string | undefined> = process.env,
+  platform: string = process.platform,
+): void {
+  const override = env.BOWSER_BACKEND;
+  if (override === undefined || override === "") return;
+  if (override !== "webkit" && override !== "chrome") {
+    throw new Error(
+      `invalid BOWSER_BACKEND='${override}' (expected 'webkit' or 'chrome')`,
+    );
+  }
+  if (override === "webkit" && platform !== "darwin") {
+    throw new Error("BOWSER_BACKEND=webkit is only supported on macOS");
+  }
+}
+
 /** Decide which Bun.WebView backend to use. Pure: all inputs injectable.
  *  Order: explicit BOWSER_BACKEND > macOS-without-explicit-chromium=webkit >
  *  chrome. See docs/superpowers/specs/2026-06-04-macos-webkit-backend-design.md. */
@@ -42,21 +63,11 @@ export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
   const hasExplicit = deps.hasExplicitChromium ?? hasExplicitChromium;
   const detect = deps.detectChromium ?? detectChromium;
 
+  assertValidBackendEnv(env, platform);
+
   const override = env.BOWSER_BACKEND;
-  if (override !== undefined && override !== "") {
-    if (override !== "webkit" && override !== "chrome") {
-      throw new Error(
-        `invalid BOWSER_BACKEND='${override}' (expected 'webkit' or 'chrome')`,
-      );
-    }
-    if (override === "webkit") {
-      if (platform !== "darwin") {
-        throw new Error("BOWSER_BACKEND=webkit is only supported on macOS");
-      }
-      return { kind: "webkit" };
-    }
-    return chromeBackend(env, detect);
-  }
+  if (override === "webkit") return { kind: "webkit" };
+  if (override === "chrome") return chromeBackend(env, detect);
 
   if (platform === "darwin" && !hasExplicit()) {
     return { kind: "webkit" };
