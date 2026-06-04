@@ -155,6 +155,25 @@ export function detectChromium(): string | undefined {
   return undefined;
 }
 
+/** True iff the user explicitly opted into Chromium: BOWSER_CHROMIUM_PATH points
+ *  at a real file, or the bowser-managed cache (`bowser install`) holds a binary.
+ *  Deliberately excludes system Chrome paths — those are a valid chrome *path*
+ *  but must NOT trigger the macOS webkit→chrome switch. */
+export function hasExplicitChromium(): boolean {
+  const fs = require("node:fs") as typeof import("node:fs");
+  const exists = (p: string | undefined): boolean => {
+    if (!p) return false;
+    try {
+      const st = fs.statSync(p);
+      return st.isFile() || st.isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+  if (exists(process.env.BOWSER_CHROMIUM_PATH)) return true;
+  return bowserCacheCandidates().some(exists);
+}
+
 /** Root of bowser's dedicated chromium cache. `bowser install` downloads into
  *  here via Playwright's installer (with PLAYWRIGHT_BROWSERS_PATH pointed at
  *  this directory). Nothing else on the machine writes to this path. */
