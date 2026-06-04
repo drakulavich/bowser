@@ -95,35 +95,22 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-/** Open a real Bun.WebView against an installed Chromium. */
+/** Open a Bun.WebView. Backend selection: native WebKit on macOS (unless an
+ *  explicit Chromium is installed via `bowser install` or BOWSER_CHROMIUM_PATH),
+ *  chrome elsewhere. opts.executablePath always forces chrome with that binary;
+ *  BOWSER_BACKEND overrides all auto-detection. */
 export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
-  const path = opts.executablePath ?? detectChromium();
-
-  // Extra Chrome launch flags can be injected via BOWSER_CHROME_ARGS
-  // (space-separated). On CI (sandboxed containers, no user namespaces) you
-  // typically want BOWSER_CHROME_ARGS="--no-sandbox --disable-dev-shm-usage".
-  const extraArgv = (process.env.BOWSER_CHROME_ARGS ?? "")
-    .split(/\s+/)
-    .filter(Boolean);
-
-  // BOWSER_CHROME_DEBUG=1 forwards Chrome stderr to our stderr so spawn
-  // failures in CI don't hide behind "Chrome process closed the pipe".
-  const debug = process.env.BOWSER_CHROME_DEBUG === "1";
-
-  const backend =
-    path || extraArgv.length > 0 || debug
-      ? ({
-          type: "chrome" as const,
-          ...(path ? { path } : {}),
-          ...(extraArgv.length ? { argv: extraArgv } : {}),
-          ...(debug ? { stderr: "inherit", stdout: "inherit" } : {}),
-        } as const)
-      : ("chrome" as const);
+  // Choose webkit (native macOS) vs chrome. An explicit executablePath always
+  // forces chrome with that exact binary (the detect fn is unused here because
+  // pathOverride short-circuits it); otherwise resolveBackend() decides.
+  const spec = opts.executablePath
+    ? chromeBackend(process.env, () => undefined, opts.executablePath)
+    : resolveBackend();
 
   // @ts-expect-error Bun.WebView is available in Bun >= 1.3.12 but not yet in
   // the public types bundled with @types/bun at the time of writing.
   const view = new Bun.WebView({
-    backend,
+    backend: toBunBackend(spec),
     width: opts.width ?? 1280,
     height: opts.height ?? 800,
   });
