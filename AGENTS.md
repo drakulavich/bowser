@@ -107,6 +107,12 @@ npm publish --access public
 - **TDD discipline** for new functionality: write the test, see it fail, implement minimally, see it pass, commit. Plans live in `docs/superpowers/plans/`.
 - **Don't mock the daemon for e2e** — those tests must hit a real WebView. Unit tests use the inline `fakeClient` helper.
 - **Bun-native, not Node-native**: prefer `Bun.file`, `Bun.write`, `Bun.spawn`, `Bun.connect`. Avoid adding npm dependencies; the package is intentionally devDep-only.
+- **Backend selection lives in `resolveBackend()`** (`src/browser.ts`). macOS
+  defaults to native `webkit`; it switches to `chrome` only on *explicit* opt-in
+  (`hasExplicitChromium()` — bowser cache or `BOWSER_CHROMIUM_PATH`), never on
+  incidental system Chrome. `BOWSER_BACKEND=webkit|chrome` overrides. Keep the
+  trigger (cache/env) distinct from the chrome *path* resolver (`detectChromium()`,
+  which may use system Chrome).
 
 ## Common tasks
 

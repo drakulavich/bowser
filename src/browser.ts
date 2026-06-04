@@ -6,6 +6,91 @@ export interface BrowserOptions {
   height?: number;
 }
 
+export type Backend =
+  | { kind: "webkit" }
+  | { kind: "chrome"; path?: string; argv?: string[]; debug?: boolean };
+
+export interface ResolveBackendDeps {
+  platform?: string;
+  env?: Record<string, string | undefined>;
+  hasExplicitChromium?: () => boolean;
+  detectChromium?: () => string | undefined;
+}
+
+function chromeBackend(
+  env: Record<string, string | undefined>,
+  detect: () => string | undefined,
+  pathOverride?: string,
+): Backend {
+  const path = pathOverride ?? detect();
+  const argv = (env.BOWSER_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean);
+  const debug = env.BOWSER_CHROME_DEBUG === "1";
+  return {
+    kind: "chrome",
+    ...(path ? { path } : {}),
+    ...(argv.length ? { argv } : {}),
+    ...(debug ? { debug: true } : {}),
+  };
+}
+
+/** Validate the BOWSER_BACKEND override without any detection or I/O. Throws the
+ *  same errors resolveBackend() surfaces for a bad override. The parent CLI calls
+ *  this before spawning the detached daemon, so a typo'd value fails fast with a
+ *  clear message instead of being swallowed by the daemon and seen only as a
+ *  "did not start in time" timeout. */
+export function assertValidBackendEnv(
+  env: Record<string, string | undefined> = process.env,
+  platform: string = process.platform,
+): void {
+  const override = env.BOWSER_BACKEND;
+  if (override === undefined || override === "") return;
+  if (override !== "webkit" && override !== "chrome") {
+    throw new Error(
+      `invalid BOWSER_BACKEND='${override}' (expected 'webkit' or 'chrome')`,
+    );
+  }
+  if (override === "webkit" && platform !== "darwin") {
+    throw new Error("BOWSER_BACKEND=webkit is only supported on macOS");
+  }
+}
+
+/** Decide which Bun.WebView backend to use. Pure: all inputs injectable.
+ *  Order: explicit BOWSER_BACKEND > macOS-without-explicit-chromium=webkit >
+ *  chrome. See docs/superpowers/specs/2026-06-04-macos-webkit-backend-design.md. */
+export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  // Thread the resolved env into the default detectors so an injected
+  // `deps.env` governs the webkit/chrome switch and the chrome path
+  // consistently — not just chromeBackend's argv/debug parsing.
+  const hasExplicit = deps.hasExplicitChromium ?? (() => hasExplicitChromium(env));
+  const detect = deps.detectChromium ?? (() => detectChromium(env));
+
+  assertValidBackendEnv(env, platform);
+
+  const override = env.BOWSER_BACKEND;
+  if (override === "webkit") return { kind: "webkit" };
+  if (override === "chrome") return chromeBackend(env, detect);
+
+  if (platform === "darwin" && !hasExplicit()) {
+    return { kind: "webkit" };
+  }
+  return chromeBackend(env, detect);
+}
+
+/** Map our Backend union to the value Bun.WebView's `backend` field accepts:
+ *  a bare string when there's nothing to tune, an object otherwise. */
+export function toBunBackend(b: Backend): unknown {
+  if (b.kind === "webkit") return "webkit";
+  if (!b.path && !b.argv && !b.debug) return "chrome";
+  return {
+    type: "chrome",
+    ...(b.path ? { path: b.path } : {}),
+    ...(b.argv ? { argv: b.argv } : {}),
+    ...(b.debug ? { stderr: "inherit", stdout: "inherit" } : {}),
+  };
+}
+
 export interface Browser {
   url: string;
   title: string;
@@ -24,35 +109,25 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-/** Open a real Bun.WebView against an installed Chromium. */
+/** Open a Bun.WebView. Backend precedence (highest first):
+ *  1. opts.executablePath — forces chrome with that exact binary.
+ *  2. BOWSER_BACKEND=webkit|chrome — overrides auto-detection.
+ *  3. Auto: native WebKit on macOS (unless an explicit Chromium is installed via
+ *     `bowser install` or BOWSER_CHROMIUM_PATH), chrome elsewhere.
+ *  Note: a programmatic opts.executablePath wins over BOWSER_BACKEND — a chromium
+ *  binary path can't drive the webkit engine, so chrome is the only valid choice. */
 export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
-  const path = opts.executablePath ?? detectChromium();
-
-  // Extra Chrome launch flags can be injected via BOWSER_CHROME_ARGS
-  // (space-separated). On CI (sandboxed containers, no user namespaces) you
-  // typically want BOWSER_CHROME_ARGS="--no-sandbox --disable-dev-shm-usage".
-  const extraArgv = (process.env.BOWSER_CHROME_ARGS ?? "")
-    .split(/\s+/)
-    .filter(Boolean);
-
-  // BOWSER_CHROME_DEBUG=1 forwards Chrome stderr to our stderr so spawn
-  // failures in CI don't hide behind "Chrome process closed the pipe".
-  const debug = process.env.BOWSER_CHROME_DEBUG === "1";
-
-  const backend =
-    path || extraArgv.length > 0 || debug
-      ? ({
-          type: "chrome" as const,
-          ...(path ? { path } : {}),
-          ...(extraArgv.length ? { argv: extraArgv } : {}),
-          ...(debug ? { stderr: "inherit", stdout: "inherit" } : {}),
-        } as const)
-      : ("chrome" as const);
+  // Choose webkit (native macOS) vs chrome. An explicit executablePath always
+  // forces chrome with that exact binary (the detect fn is unused here because
+  // pathOverride short-circuits it); otherwise resolveBackend() decides.
+  const spec = opts.executablePath
+    ? chromeBackend(process.env, () => undefined, opts.executablePath)
+    : resolveBackend();
 
   // @ts-expect-error Bun.WebView is available in Bun >= 1.3.12 but not yet in
   // the public types bundled with @types/bun at the time of writing.
   const view = new Bun.WebView({
-    backend,
+    backend: toBunBackend(spec),
     width: opts.width ?? 1280,
     height: opts.height ?? 800,
   });
@@ -130,10 +205,12 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
 
 /** Look in a handful of standard locations. Bun does its own detection too,
  *  but being explicit gives better error messages. */
-export function detectChromium(): string | undefined {
+export function detectChromium(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
   const candidates = [
-    process.env.BOWSER_CHROMIUM_PATH,
-    ...bowserCacheCandidates(),
+    env.BOWSER_CHROMIUM_PATH,
+    ...bowserCacheCandidates(env),
     "/usr/bin/chromium-headless-shell",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
@@ -155,18 +232,43 @@ export function detectChromium(): string | undefined {
   return undefined;
 }
 
+/** True iff the user explicitly opted into Chromium: BOWSER_CHROMIUM_PATH points
+ *  at a real file, or the bowser-managed cache (`bowser install`) holds a binary.
+ *  Deliberately excludes system Chrome paths — those are a valid chrome *path*
+ *  but must NOT trigger the macOS webkit→chrome switch. */
+export function hasExplicitChromium(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const fs = require("node:fs") as typeof import("node:fs");
+  const exists = (p: string | undefined): boolean => {
+    if (!p) return false;
+    try {
+      const st = fs.statSync(p);
+      return st.isFile() || st.isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+  if (exists(env.BOWSER_CHROMIUM_PATH)) return true;
+  return bowserCacheCandidates(env).some(exists);
+}
+
 /** Root of bowser's dedicated chromium cache. `bowser install` downloads into
  *  here via Playwright's installer (with PLAYWRIGHT_BROWSERS_PATH pointed at
  *  this directory). Nothing else on the machine writes to this path. */
-export function bowserCacheRoot(): string {
-  const home = process.env.HOME ?? "";
+export function bowserCacheRoot(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const home = env.HOME ?? "";
   return `${home}/.bowser/chromium`;
 }
 
 /** Expand the bowser-owned cache into concrete executable candidate paths.
  *  Layout mirrors Playwright's because we use Playwright's installer. */
-function bowserCacheCandidates(): string[] {
-  const root = bowserCacheRoot();
+function bowserCacheCandidates(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const root = bowserCacheRoot(env);
   if (!root) return [];
 
   const out: string[] = [];

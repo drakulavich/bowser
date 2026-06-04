@@ -13,7 +13,7 @@
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { openBrowser, type Browser } from "./browser.ts";
+import { openBrowser, assertValidBackendEnv, type Browser } from "./browser.ts";
 
 export interface DaemonRequest {
   id: number;
@@ -239,6 +239,11 @@ export async function connectOrSpawn(
     return client;
   } catch {
     if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
+    // Validate backend config in the parent before spawning: the daemon opens
+    // the browser (and would throw on a bad BOWSER_BACKEND) before it ever opens
+    // its socket, so that error is invisible to us and shows up only as the
+    // "did not start in time" timeout below. Fail fast with the real message.
+    assertValidBackendEnv();
     // Spawn a detached daemon process.
     await spawnDaemon(session);
     // Poll until the socket is listening.
