@@ -6,3 +6,7 @@ bun.lockb
 .bowser/
 tmp/
 /coverage/
+.omc/
+.codegraph/
+# CocoIndex Code (ccc)
+/.cocoindex_code/
