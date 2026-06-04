@@ -5,7 +5,7 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { hasExplicitChromium, bowserCacheRoot } from "../src/browser.ts";
+import { hasExplicitChromium, bowserCacheRoot, resolveBackend } from "../src/browser.ts";
 
 describe("hasExplicitChromium", () => {
   let tmp: string;
@@ -47,5 +47,66 @@ describe("hasExplicitChromium", () => {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "chrome-headless-shell"), "#!/bin/sh\n");
     expect(hasExplicitChromium()).toBe(true);
+  });
+});
+
+describe("resolveBackend", () => {
+  const noChromium = () => false;
+  const yesChromium = () => true;
+  const noDetect = () => undefined;
+  const detectPath = () => "/path/to/chrome";
+
+  test("macOS, no explicit chromium -> webkit", () => {
+    expect(
+      resolveBackend({ platform: "darwin", env: {}, hasExplicitChromium: noChromium, detectChromium: noDetect }),
+    ).toEqual({ kind: "webkit" });
+  });
+
+  test("macOS, explicit chromium -> chrome with detected path", () => {
+    expect(
+      resolveBackend({ platform: "darwin", env: {}, hasExplicitChromium: yesChromium, detectChromium: detectPath }),
+    ).toEqual({ kind: "chrome", path: "/path/to/chrome" });
+  });
+
+  test("linux -> chrome regardless of explicit chromium", () => {
+    expect(
+      resolveBackend({ platform: "linux", env: {}, hasExplicitChromium: noChromium, detectChromium: noDetect }),
+    ).toEqual({ kind: "chrome" });
+  });
+
+  test("BOWSER_BACKEND=webkit wins over explicit chromium on macOS", () => {
+    expect(
+      resolveBackend({ platform: "darwin", env: { BOWSER_BACKEND: "webkit" }, hasExplicitChromium: yesChromium, detectChromium: detectPath }),
+    ).toEqual({ kind: "webkit" });
+  });
+
+  test("BOWSER_BACKEND=chrome wins over webkit default on macOS", () => {
+    expect(
+      resolveBackend({ platform: "darwin", env: { BOWSER_BACKEND: "chrome" }, hasExplicitChromium: noChromium, detectChromium: detectPath }),
+    ).toEqual({ kind: "chrome", path: "/path/to/chrome" });
+  });
+
+  test("BOWSER_BACKEND=webkit on non-macOS throws", () => {
+    expect(() =>
+      resolveBackend({ platform: "linux", env: { BOWSER_BACKEND: "webkit" }, hasExplicitChromium: noChromium, detectChromium: noDetect }),
+    ).toThrow("only supported on macOS");
+  });
+
+  test("invalid BOWSER_BACKEND throws", () => {
+    expect(() =>
+      resolveBackend({ platform: "darwin", env: { BOWSER_BACKEND: "firefox" }, hasExplicitChromium: noChromium, detectChromium: noDetect }),
+    ).toThrow("invalid BOWSER_BACKEND");
+  });
+
+  test("chrome carries argv + debug from env", () => {
+    expect(
+      resolveBackend({ platform: "linux", env: { BOWSER_CHROME_ARGS: "--no-sandbox --foo", BOWSER_CHROME_DEBUG: "1" }, hasExplicitChromium: noChromium, detectChromium: noDetect }),
+    ).toEqual({ kind: "chrome", argv: ["--no-sandbox", "--foo"], debug: true });
+  });
+
+  test("webkit ignores chrome-only env args (no flip to chrome)", () => {
+    expect(
+      resolveBackend({ platform: "darwin", env: { BOWSER_CHROME_ARGS: "--no-sandbox" }, hasExplicitChromium: noChromium, detectChromium: noDetect }),
+    ).toEqual({ kind: "webkit" });
   });
 });

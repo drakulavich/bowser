@@ -6,6 +6,64 @@ export interface BrowserOptions {
   height?: number;
 }
 
+export type Backend =
+  | { kind: "webkit" }
+  | { kind: "chrome"; path?: string; argv?: string[]; debug?: boolean };
+
+export interface ResolveBackendDeps {
+  platform?: string;
+  env?: Record<string, string | undefined>;
+  hasExplicitChromium?: () => boolean;
+  detectChromium?: () => string | undefined;
+}
+
+function chromeBackend(
+  env: Record<string, string | undefined>,
+  detect: () => string | undefined,
+  pathOverride?: string,
+): Backend {
+  const path = pathOverride ?? detect();
+  const argv = (env.BOWSER_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean);
+  const debug = env.BOWSER_CHROME_DEBUG === "1";
+  return {
+    kind: "chrome",
+    ...(path ? { path } : {}),
+    ...(argv.length ? { argv } : {}),
+    ...(debug ? { debug: true } : {}),
+  };
+}
+
+/** Decide which Bun.WebView backend to use. Pure: all inputs injectable.
+ *  Order: explicit BOWSER_BACKEND > macOS-without-explicit-chromium=webkit >
+ *  chrome. See docs/superpowers/specs/2026-06-04-macos-webkit-backend-design.md. */
+export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  const hasExplicit = deps.hasExplicitChromium ?? hasExplicitChromium;
+  const detect = deps.detectChromium ?? detectChromium;
+
+  const override = env.BOWSER_BACKEND;
+  if (override !== undefined && override !== "") {
+    if (override !== "webkit" && override !== "chrome") {
+      throw new Error(
+        `invalid BOWSER_BACKEND='${override}' (expected 'webkit' or 'chrome')`,
+      );
+    }
+    if (override === "webkit") {
+      if (platform !== "darwin") {
+        throw new Error("BOWSER_BACKEND=webkit is only supported on macOS");
+      }
+      return { kind: "webkit" };
+    }
+    return chromeBackend(env, detect);
+  }
+
+  if (platform === "darwin" && !hasExplicit()) {
+    return { kind: "webkit" };
+  }
+  return chromeBackend(env, detect);
+}
+
 export interface Browser {
   url: string;
   title: string;
