@@ -60,8 +60,11 @@ export function assertValidBackendEnv(
 export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
-  const hasExplicit = deps.hasExplicitChromium ?? hasExplicitChromium;
-  const detect = deps.detectChromium ?? detectChromium;
+  // Thread the resolved env into the default detectors so an injected
+  // `deps.env` governs the webkit/chrome switch and the chrome path
+  // consistently — not just chromeBackend's argv/debug parsing.
+  const hasExplicit = deps.hasExplicitChromium ?? (() => hasExplicitChromium(env));
+  const detect = deps.detectChromium ?? (() => detectChromium(env));
 
   assertValidBackendEnv(env, platform);
 
@@ -106,10 +109,13 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-/** Open a Bun.WebView. Backend selection: native WebKit on macOS (unless an
- *  explicit Chromium is installed via `bowser install` or BOWSER_CHROMIUM_PATH),
- *  chrome elsewhere. opts.executablePath always forces chrome with that binary;
- *  BOWSER_BACKEND overrides all auto-detection. */
+/** Open a Bun.WebView. Backend precedence (highest first):
+ *  1. opts.executablePath — forces chrome with that exact binary.
+ *  2. BOWSER_BACKEND=webkit|chrome — overrides auto-detection.
+ *  3. Auto: native WebKit on macOS (unless an explicit Chromium is installed via
+ *     `bowser install` or BOWSER_CHROMIUM_PATH), chrome elsewhere.
+ *  Note: a programmatic opts.executablePath wins over BOWSER_BACKEND — a chromium
+ *  binary path can't drive the webkit engine, so chrome is the only valid choice. */
 export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
   // Choose webkit (native macOS) vs chrome. An explicit executablePath always
   // forces chrome with that exact binary (the detect fn is unused here because
@@ -199,10 +205,12 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
 
 /** Look in a handful of standard locations. Bun does its own detection too,
  *  but being explicit gives better error messages. */
-export function detectChromium(): string | undefined {
+export function detectChromium(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
   const candidates = [
-    process.env.BOWSER_CHROMIUM_PATH,
-    ...bowserCacheCandidates(),
+    env.BOWSER_CHROMIUM_PATH,
+    ...bowserCacheCandidates(env),
     "/usr/bin/chromium-headless-shell",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
@@ -228,7 +236,9 @@ export function detectChromium(): string | undefined {
  *  at a real file, or the bowser-managed cache (`bowser install`) holds a binary.
  *  Deliberately excludes system Chrome paths — those are a valid chrome *path*
  *  but must NOT trigger the macOS webkit→chrome switch. */
-export function hasExplicitChromium(): boolean {
+export function hasExplicitChromium(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
   const fs = require("node:fs") as typeof import("node:fs");
   const exists = (p: string | undefined): boolean => {
     if (!p) return false;
@@ -239,22 +249,26 @@ export function hasExplicitChromium(): boolean {
       return false;
     }
   };
-  if (exists(process.env.BOWSER_CHROMIUM_PATH)) return true;
-  return bowserCacheCandidates().some(exists);
+  if (exists(env.BOWSER_CHROMIUM_PATH)) return true;
+  return bowserCacheCandidates(env).some(exists);
 }
 
 /** Root of bowser's dedicated chromium cache. `bowser install` downloads into
  *  here via Playwright's installer (with PLAYWRIGHT_BROWSERS_PATH pointed at
  *  this directory). Nothing else on the machine writes to this path. */
-export function bowserCacheRoot(): string {
-  const home = process.env.HOME ?? "";
+export function bowserCacheRoot(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const home = env.HOME ?? "";
   return `${home}/.bowser/chromium`;
 }
 
 /** Expand the bowser-owned cache into concrete executable candidate paths.
  *  Layout mirrors Playwright's because we use Playwright's installer. */
-function bowserCacheCandidates(): string[] {
-  const root = bowserCacheRoot();
+function bowserCacheCandidates(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const root = bowserCacheRoot(env);
   if (!root) return [];
 
   const out: string[] = [];

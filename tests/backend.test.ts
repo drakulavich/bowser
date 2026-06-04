@@ -109,6 +109,15 @@ describe("resolveBackend", () => {
       resolveBackend({ platform: "darwin", env: { BOWSER_CHROME_ARGS: "--no-sandbox" }, hasExplicitChromium: noChromium, detectChromium: noDetect }),
     ).toEqual({ kind: "webkit" });
   });
+
+  test("injected env BOWSER_CHROMIUM_PATH drives the switch without injecting detectors", () => {
+    // darwin + an existing explicit chromium path supplied ONLY via deps.env
+    // (no hasExplicitChromium/detectChromium injected) must resolve to chrome.
+    // /bin/sh is a real file on macOS/Linux, so the default detectors see it.
+    expect(
+      resolveBackend({ platform: "darwin", env: { BOWSER_CHROMIUM_PATH: "/bin/sh" } }),
+    ).toEqual({ kind: "chrome", path: "/bin/sh" });
+  });
 });
 
 describe("toBunBackend", () => {
