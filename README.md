@@ -41,6 +41,23 @@ are also attached to every GitHub Release — see
 
 Requires Bun ≥ 1.3.12 for the npm/source install.
 
+### Browser backend
+
+On macOS, bowser uses the native `WKWebView` engine by default — nothing to install.
+It switches to Chrome/Chromium automatically if you opted in by running
+`bowser install` (which caches a headless Chromium under `~/.bowser/chromium`) or by
+setting `BOWSER_CHROMIUM_PATH`. On Linux and Windows it always uses Chrome/Chromium.
+
+Override the choice with `BOWSER_BACKEND`:
+
+| Value | Effect |
+| --- | --- |
+| `BOWSER_BACKEND=webkit` | Force native WebKit (macOS only; errors elsewhere). |
+| `BOWSER_BACKEND=chrome` | Force Chrome/Chromium. |
+
+**Note:** `screenshot` may be unsupported on the WebKit backend. If you need
+screenshots on macOS, use `BOWSER_BACKEND=chrome` or run `bowser install`.
+
 ### How Chromium is resolved
 
 Bowser looks for a Chromium/Chrome binary in this order and uses the first one found:
