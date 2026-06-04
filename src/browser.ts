@@ -64,6 +64,19 @@ export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
   return chromeBackend(env, detect);
 }
 
+/** Map our Backend union to the value Bun.WebView's `backend` field accepts:
+ *  a bare string when there's nothing to tune, an object otherwise. */
+export function toBunBackend(b: Backend): unknown {
+  if (b.kind === "webkit") return "webkit";
+  if (!b.path && !b.argv && !b.debug) return "chrome";
+  return {
+    type: "chrome",
+    ...(b.path ? { path: b.path } : {}),
+    ...(b.argv ? { argv: b.argv } : {}),
+    ...(b.debug ? { stderr: "inherit", stdout: "inherit" } : {}),
+  };
+}
+
 export interface Browser {
   url: string;
   title: string;

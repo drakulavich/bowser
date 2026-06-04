@@ -5,7 +5,7 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { hasExplicitChromium, bowserCacheRoot, resolveBackend } from "../src/browser.ts";
+import { hasExplicitChromium, bowserCacheRoot, resolveBackend, toBunBackend } from "../src/browser.ts";
 
 describe("hasExplicitChromium", () => {
   let tmp: string;
@@ -108,5 +108,27 @@ describe("resolveBackend", () => {
     expect(
       resolveBackend({ platform: "darwin", env: { BOWSER_CHROME_ARGS: "--no-sandbox" }, hasExplicitChromium: noChromium, detectChromium: noDetect }),
     ).toEqual({ kind: "webkit" });
+  });
+});
+
+describe("toBunBackend", () => {
+  test("webkit -> 'webkit' string", () => {
+    expect(toBunBackend({ kind: "webkit" })).toBe("webkit");
+  });
+
+  test("bare chrome -> 'chrome' string", () => {
+    expect(toBunBackend({ kind: "chrome" })).toBe("chrome");
+  });
+
+  test("chrome with path -> object form", () => {
+    expect(toBunBackend({ kind: "chrome", path: "/p" })).toEqual({ type: "chrome", path: "/p" });
+  });
+
+  test("chrome with argv -> object form", () => {
+    expect(toBunBackend({ kind: "chrome", argv: ["--no-sandbox"] })).toEqual({ type: "chrome", argv: ["--no-sandbox"] });
+  });
+
+  test("chrome with debug -> inherits stdio", () => {
+    expect(toBunBackend({ kind: "chrome", debug: true })).toEqual({ type: "chrome", stderr: "inherit", stdout: "inherit" });
   });
 });
