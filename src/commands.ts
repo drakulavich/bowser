@@ -10,10 +10,10 @@ import {
   loadState,
   resolveRef,
   saveState,
+  sessionsRoot,
   type SessionState,
 } from "./state.ts";
 import { mkdir, readdir, unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface CommandContext {
@@ -249,9 +249,33 @@ async function closeOne(ctx: CommandContext, session: string): Promise<string> {
     : `closed session '${session}'`;
 }
 
-// Implemented in Task 4 — temporary stub so the module compiles.
-async function closeAll(_ctx: CommandContext): Promise<string> {
-  throw new Error("usage: close --all is not yet implemented");
+async function closeAll(ctx: CommandContext): Promise<string> {
+  let names: string[] = [];
+  try {
+    const entries = await readdir(sessionsRoot(), { withFileTypes: true });
+    names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    // no sessions root; nothing to close
+  }
+  const closed: string[] = [];
+  const failed: string[] = [];
+  for (const name of names) {
+    try {
+      await closeOne(ctx, name);
+      closed.push(name);
+    } catch {
+      failed.push(name); // best-effort: keep closing the rest
+    }
+  }
+  if (ctx.json) return JSON.stringify({ ok: failed.length === 0, closed, failed });
+  if (closed.length === 0 && failed.length === 0) return "no sessions to close";
+  const parts: string[] = [];
+  if (closed.length > 0) {
+    const word = closed.length === 1 ? "session" : "sessions";
+    parts.push(`closed ${closed.length} ${word}: ${closed.join(", ")}`);
+  }
+  if (failed.length > 0) parts.push(`failed: ${failed.join(", ")}`);
+  return parts.join("; ");
 }
 
 // Web Storage commands (localStorage and sessionStorage). Implemented via
@@ -353,9 +377,9 @@ export const cmdSessionStorageDelete = (ctx: CommandContext, key: string) =>
 export const cmdSessionStorageClear = (ctx: CommandContext) => storageClear(ctx, "sessionStorage");
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
-  const root = join(homedir(), ".bowser", "sessions");
   try {
-    const names = await readdir(root);
+    const entries = await readdir(sessionsRoot(), { withFileTypes: true });
+    const names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
     return ctx.json ? JSON.stringify(names) : names.join("\n");
   } catch {
     return ctx.json ? "[]" : "";

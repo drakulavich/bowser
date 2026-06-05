@@ -239,6 +239,20 @@ describe("close", () => {
     expect(closed?.url).toBe("");
     expect(await loadState(session)).toBeNull();
   });
+
+  test("--all closes every session under the sessions root", async () => {
+    // Seed two sessions on disk (saveState creates ~/.bowser/sessions/<name>/).
+    await saveState({ name: "a", url: "x", title: "", refs: [], updatedAt: Date.now() });
+    await saveState({ name: "b", url: "y", title: "", refs: [], updatedAt: Date.now() });
+    const c = fakeClient({});
+    const out = await cmdClose({ ...ctx(), connect: async () => c }, { all: true });
+    expect(out).toMatch(/^closed \d+ sessions?: /);
+    expect(out).toContain("a");
+    expect(out).toContain("b");
+    // both were cleared (emptyState url is "")
+    expect((await loadState("a"))?.url).toBe("");
+    expect((await loadState("b"))?.url).toBe("");
+  });
 });
 
 describe("list", () => {
