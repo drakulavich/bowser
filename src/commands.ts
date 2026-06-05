@@ -44,9 +44,11 @@ function emptyState(name: string): SessionState {
   return { name, url: "", title: "", refs: [], updatedAt: 0 };
 }
 
-/** A real navigation that lands on about:blank means the page never committed
- *  (a WebKit-backend quirk seen with query-string URLs). Fail loud rather than
- *  report a false success. */
+/** Fail loud when a real navigation still reports about:blank. The daemon's
+ *  state op resolves the URL via realUrl() (which falls back to location.href),
+ *  so reaching here with about:blank means BOTH the url getter and location.href
+ *  agree the page never committed — a genuine load failure, not the chrome
+ *  getter quirk (which realUrl already corrects). */
 function assertNavigated(requested: string, finalUrl: string): void {
   if (requested && requested !== "about:blank" && finalUrl === "about:blank") {
     throw new Error(`navigate: page did not load ${requested} (ended on about:blank)`);

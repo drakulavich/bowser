@@ -91,9 +91,27 @@ export function toBunBackend(b: Backend): unknown {
   };
 }
 
+/** Resolve the committed page URL. Bun.WebView's `view.url` returns "about:blank"
+ *  on the chrome backend even after a successful navigation to a query-string URL
+ *  (the page loaded; only the getter is wrong). When `viewUrl` is blank/empty, fall
+ *  back to evaluating location.href, which is correct on both backends. */
+export async function resolveUrl(
+  viewUrl: string,
+  evalHref: () => Promise<unknown>,
+): Promise<string> {
+  if (viewUrl && viewUrl !== "about:blank") return viewUrl;
+  try {
+    const loc = await evalHref();
+    return typeof loc === "string" && loc ? loc : viewUrl;
+  } catch {
+    return viewUrl;
+  }
+}
+
 export interface Browser {
   url: string;
   title: string;
+  realUrl(): Promise<string>;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
@@ -139,6 +157,7 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     get title() {
       return view.title as string;
     },
+    realUrl: () => resolveUrl(view.url as string, () => view.evaluate("location.href")),
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
     click: (selector) => view.click(selector),

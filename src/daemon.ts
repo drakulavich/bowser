@@ -116,7 +116,7 @@ export async function startDaemon(session: string): Promise<void> {
           return {
             id: req.id,
             ok: true,
-            result: { url: browser.url, title: browser.title },
+            result: { url: await browser.realUrl(), title: browser.title },
           };
         case "shutdown":
           // Respond first, then exit.

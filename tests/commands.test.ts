@@ -166,6 +166,21 @@ describe("goto", () => {
   });
 });
 
+describe("open (assertNavigated guard)", () => {
+  test("open errors when a real URL ends on about:blank", async () => {
+    const c = fakeClient({ state: () => ({ url: "about:blank", title: "" }) });
+    await expect(
+      cmdOpen({ ...ctx(), connect: async () => c }, "https://example.com/?q=1"),
+    ).rejects.toThrow(/did not load/i);
+  });
+
+  test("open does NOT throw when the URL resolves correctly", async () => {
+    const c = fakeClient({ state: () => ({ url: "https://example.com/?q=1", title: "T" }) });
+    const out = await cmdOpen({ ...ctx(), connect: async () => c }, "https://example.com/?q=1");
+    expect(out).toContain("https://example.com/?q=1");
+  });
+});
+
 describe("snapshot", () => {
   test("emits aria-tree YAML to stdout", async () => {
     const c = fakeClient({
