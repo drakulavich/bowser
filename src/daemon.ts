@@ -14,6 +14,7 @@ import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openBrowser, assertValidBackendEnv, type Browser } from "./browser.ts";
+import { createSerializer, withTimeout } from "./serialize.ts";
 
 export interface DaemonRequest {
   id: number;
@@ -47,6 +48,15 @@ export interface DaemonResponse {
 export function socketPath(session: string): string {
   // Use a short path — Unix socket names have a ~104-char limit on macOS.
   return join(homedir(), ".bowser", "sessions", session, "sock");
+}
+
+/** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
+ *  (set to 0 to disable). Guards a wedged WebKit call from hanging forever. */
+function opTimeoutMs(): number {
+  const raw = process.env.BOWSER_OP_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return 30000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 30000;
 }
 
 export async function startDaemon(session: string): Promise<void> {
@@ -126,6 +136,9 @@ export async function startDaemon(session: string): Promise<void> {
     }
   }
 
+  const serialize = createSerializer();
+  const timeoutMs = opTimeoutMs();
+
   Bun.listen({
     unix: sock,
     socket: {
@@ -151,8 +164,28 @@ export async function startDaemon(session: string): Promise<void> {
             );
             continue;
           }
-          handle(req).then((res) => {
-            socket.write(JSON.stringify(res) + "\n");
+          // Serialize on the UNDERLYING op (not the timeout): the WebView lock is
+          // held until handle(req) actually settles, so a timed-out-but-still-
+          // running op can never overlap the next one. withTimeout only governs
+          // how soon we answer the client. (A genuinely wedged op therefore holds
+          // the queue until it drains — an unrecoverable WebView is killed via
+          // `close`/process exit, not by overlapping a new op onto it.)
+          serialize(() => {
+            const underlying = handle(req);
+            withTimeout(underlying, timeoutMs, req.op).then(
+              (res) => {
+                socket.write(JSON.stringify(res) + "\n");
+              },
+              (err) => {
+                // handle() catches its own errors; this path is for timeouts.
+                const msg = err instanceof Error ? err.message : String(err);
+                socket.write(JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
+              },
+            );
+            return underlying;
+          }).catch(() => {
+            // handle() never rejects; this guards against an unhandled rejection
+            // if that ever changes. The client response is written above.
           });
         }
       },
