@@ -5,7 +5,7 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { hasExplicitChromium, bowserCacheRoot, resolveBackend, toBunBackend, assertValidBackendEnv } from "../src/browser.ts";
+import { hasExplicitChromium, bowserCacheRoot, resolveBackend, toBunBackend, assertValidBackendEnv, isLikelyPng } from "../src/browser.ts";
 
 describe("hasExplicitChromium", () => {
   let tmp: string;
@@ -165,5 +165,31 @@ describe("assertValidBackendEnv", () => {
 
   test("throws for webkit off-macOS", () => {
     expect(() => assertValidBackendEnv({ BOWSER_BACKEND: "webkit" }, "linux")).toThrow("only supported on macOS");
+  });
+});
+
+describe("isLikelyPng", () => {
+  const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  test("accepts a buffer with the PNG signature and plausible length", () => {
+    const buf = new Uint8Array([...PNG_SIG, ...new Array(40).fill(0)]);
+    expect(isLikelyPng(buf)).toBe(true);
+  });
+
+  test("rejects a 32-byte buffer even with correct signature (one below the 33-byte floor)", () => {
+    const buf = new Uint8Array([...PNG_SIG, ...new Array(24).fill(0)]); // 8 + 24 = 32
+    expect(isLikelyPng(buf)).toBe(false);
+  });
+
+  test("rejects a 7-byte stub (the dogfooding bug)", () => {
+    expect(isLikelyPng(new Uint8Array(7))).toBe(false);
+  });
+
+  test("rejects an empty buffer", () => {
+    expect(isLikelyPng(new Uint8Array(0))).toBe(false);
+  });
+
+  test("rejects correct length but wrong magic bytes", () => {
+    expect(isLikelyPng(new Uint8Array(64))).toBe(false);
   });
 });

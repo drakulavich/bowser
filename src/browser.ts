@@ -174,10 +174,19 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
       // Bun.WebView exposes screenshot() returning base64 PNG.
       // Element-bounded screenshots are not supported in v1; we return full-page either way.
       // (Selector reserved for a future CDP path.)
+      // NOTE: Bun 1.3.13's Bun.WebView.screenshot() returns only a ~9-byte stub
+      // on both backends (capture appears unimplemented upstream). isLikelyPng()
+      // below rejects that so we fail loud instead of writing a broken file.
       const data = await (view as { screenshot?: () => Promise<string> }).screenshot?.();
       if (!data) throw new Error('screenshot: not supported by this Bun.WebView');
+      const buf = Buffer.from(String(data), 'base64');
+      if (!isLikelyPng(buf)) {
+        throw new Error(
+          'screenshot: Bun.WebView returned an empty image — screenshot capture is not supported by this Bun.WebView version (affects both the chrome and webkit backends)',
+        );
+      }
       if (path) {
-        await Bun.write(path, Buffer.from(String(data), 'base64'));
+        await Bun.write(path, buf);
         return undefined;
       }
       return String(data);
@@ -201,6 +210,19 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
       await view.close?.();
     },
   };
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** Cheap sanity check that `bytes` is a real PNG: the 8-byte signature plus a
+ *  plausible minimum length (a 1x1 PNG is ~67 bytes; the broken capture writes
+ *  only a few bytes). Used to fail loud instead of saving a broken screenshot. */
+export function isLikelyPng(bytes: Uint8Array): boolean {
+  if (bytes.length < 33) return false; // 8-byte sig + 25-byte IHDR chunk floor
+  for (let i = 0; i < PNG_SIGNATURE.length; i++) {
+    if (bytes[i] !== PNG_SIGNATURE[i]) return false;
+  }
+  return true;
 }
 
 /** Look in a handful of standard locations. Bun does its own detection too,
