@@ -44,6 +44,15 @@ function emptyState(name: string): SessionState {
   return { name, url: "", title: "", refs: [], updatedAt: 0 };
 }
 
+/** A real navigation that lands on about:blank means the page never committed
+ *  (a WebKit-backend quirk seen with query-string URLs). Fail loud rather than
+ *  report a false success. */
+function assertNavigated(requested: string, finalUrl: string): void {
+  if (requested && requested !== "about:blank" && finalUrl === "about:blank") {
+    throw new Error(`navigate: page did not load ${requested} (ended on about:blank)`);
+  }
+}
+
 async function loadRef(session: string, ref: string) {
   const prev = await loadState(session);
   if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
@@ -55,6 +64,7 @@ export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string
   return withClient(ctx, async (c) => {
     if (url) await c.request("navigate", [url]);
     const state = (await c.request("state")) as { url: string; title: string };
+    if (url) assertNavigated(url, state.url);
     const next: SessionState = {
       name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
     };
@@ -71,6 +81,7 @@ export async function cmdGoto(ctx: CommandContext, url: string): Promise<string>
   return withClient(ctx, async (c) => {
     await c.request("navigate", [url]);
     const state = (await c.request("state")) as { url: string; title: string };
+    assertNavigated(url, state.url);
     await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
     return ctx.json
       ? JSON.stringify({ ok: true, url: state.url })

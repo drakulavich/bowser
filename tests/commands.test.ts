@@ -158,6 +158,12 @@ describe("goto", () => {
     expect(out).toContain("https://y");
     expect(c.calls).toContainEqual(["navigate", ["https://y"]]);
   });
+  test("goto errors when a real URL ends on about:blank", async () => {
+    const c = fakeClient({ state: () => ({ url: "about:blank", title: "X" }) });
+    await expect(
+      cmdGoto({ ...ctx(), connect: async () => c }, "https://example.com/?q=1"),
+    ).rejects.toThrow(/did not load/i);
+  });
 });
 
 describe("snapshot", () => {
