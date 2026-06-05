@@ -55,8 +55,7 @@ Override the choice with `BOWSER_BACKEND`:
 | `BOWSER_BACKEND=webkit` | Force native WebKit (macOS only; errors elsewhere). |
 | `BOWSER_BACKEND=chrome` | Force Chrome/Chromium. |
 
-**Note:** `screenshot` may be unsupported on the WebKit backend. If you need
-screenshots on macOS, use `BOWSER_BACKEND=chrome` or run `bowser install`.
+**Note:** `screenshot` is currently unsupported — `Bun.WebView.screenshot()` returns an empty image on both the chrome and webkit backends in current Bun. bowser detects this and errors clearly instead of writing a broken file. Tracked upstream; will be removed once Bun fixes it.
 
 ### How Chromium is resolved
 
@@ -115,7 +114,8 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `screenshot [ref] [--filename=f]` | Full-page or element screenshot |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions |
-| `close` | End the current session |
+| `close [name]` | End a session (defaults to `--session`; positional name overrides) |
+| `close --all` | Close every open session |
 | `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
 | `localstorage-get <key>` | Read a `localStorage` value |
 | `localstorage-set <key> <value>` | Write a `localStorage` entry |
@@ -136,6 +136,18 @@ Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 3. `bowser click e3` resolves the ref from state and dispatches the click via the daemon, using `Bun.WebView`'s built-in actionability auto-wait — no polling, no hard-coded timeouts.
 
 Because selectors are stable paths (not injected `data-` attributes), they survive page reloads between commands.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `BOWSER_BACKEND` | `webkit` or `chrome` — override the auto-selected browser backend. |
+| `BOWSER_CHROMIUM_PATH` | Explicit path to a `chrome-headless-shell` binary; bypasses auto-detection. |
+| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Bounds a wedged daemon operation — if the browser hangs, the command exits with a timeout error instead of blocking forever. |
+
+## Known limitations
+
+- **Screenshots are unsupported.** `Bun.WebView.screenshot()` returns a ~9-byte stub (not a valid PNG) on both the chrome and webkit backends in current Bun (≤ 1.3.13). bowser validates the result and errors loudly instead of writing a broken file. Tracked upstream; the `screenshot` command will work once Bun ships a real implementation.
 
 ## Tests
 

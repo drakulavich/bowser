@@ -28,6 +28,42 @@ All notable changes to this project are documented here. This project follows
   root-most first). `Ref.path` is optional in `state.json`; older state
   files without it remain valid and render flat.
 
+### Fixed
+
+- **Daemon operation serialization** (`#1`/`#3`/`#4`): the daemon now runs
+  all operations one at a time through a promise-chain serializer
+  (`src/serialize.ts`). Concurrent `evaluate()` calls into the single
+  `Bun.WebView` no longer race or deadlock. A per-op timeout (controlled by
+  `BOWSER_OP_TIMEOUT_MS`, default 30 s) surfaces wedged operations as a
+  clear error instead of hanging.
+- **`close [name]`** (`#6`): the positional session name is now honoured —
+  `bowser close other-session` closes the named session rather than
+  defaulting to `--session`.
+- **`goto`/`open` URL reporting** (`#5`): on the chrome backend,
+  `view.url` was returning `about:blank` even after a successful
+  query-string navigation. The daemon now resolves the real URL via
+  `location.href` (`realUrl()`) and fails loud when the page genuinely did
+  not load.
+- **Test hermeticity**: `sessionsRoot()` in `src/state.ts` now reads
+  `process.env.HOME` at call time (matching `bowserCacheRoot()`), so tests
+  that redirect `$HOME` via `process.env.HOME` see the temporary directory
+  correctly.
+
+### Added
+
+- **`close --all`** (`#7`): closes every open session in one command.
+- **`BOWSER_OP_TIMEOUT_MS`** environment variable: sets the per-operation
+  timeout in milliseconds (default `30000`; `0` disables). Useful when
+  automating slow pages that would otherwise hang indefinitely.
+
+### Known limitations
+
+- **`screenshot` is unsupported** (`#2`): `Bun.WebView.screenshot()` returns
+  a ~9-byte stub on both the chrome and webkit backends in Bun ≤ 1.3.13 —
+  screenshot capture is not yet implemented upstream. bowser now validates
+  the PNG (`isLikelyPng()`) and exits with a clear error instead of writing
+  a broken file. Will be removed once Bun ships a working implementation.
+
 ## [0.2.0] — 2026-04-26
 
 ### Breaking
