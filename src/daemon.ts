@@ -169,23 +169,33 @@ export async function startDaemon(session: string): Promise<void> {
           // how soon we answer the client. (A genuinely wedged op therefore holds
           // the queue until it drains — an unrecoverable WebView is killed via
           // `close`/process exit, not by overlapping a new op onto it.)
-          serialize(() => {
-            const underlying = handle(req);
-            withTimeout(underlying, timeoutMs, req.op).then(
-              (res) => {
-                socket.write(JSON.stringify(res) + "\n");
-              },
-              (err) => {
-                // handle() catches its own errors; this path is for timeouts.
-                const msg = err instanceof Error ? err.message : String(err);
-                socket.write(JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
-              },
-            );
-            return underlying;
-          }).catch(() => {
-            // handle() never rejects; this guards against an unhandled rejection
-            // if that ever changes. The client response is written above.
-          });
+          if (req.op === "shutdown") {
+            // Shutdown must NOT queue behind a wedged op — its job is to kill a
+            // possibly-stuck daemon. Dispatch it directly, bypassing the serializer.
+            // Any queued or in-flight ops are abandoned — intended forced teardown.
+            handle(req).then((res) => {
+              socket.write(JSON.stringify(res) + "\n");
+            }).catch(() => {
+              // handle() never rejects; mirrors the guard on the serialized path.
+            });
+          } else {
+            serialize(() => {
+              const underlying = handle(req);
+              withTimeout(underlying, timeoutMs, req.op).then(
+                (res) => {
+                  socket.write(JSON.stringify(res) + "\n");
+                },
+                (err) => {
+                  // handle() catches its own errors; this path is for timeouts.
+                  const msg = err instanceof Error ? err.message : String(err);
+                  socket.write(JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
+                },
+              );
+              return underlying;
+            }).catch(() => {
+              // handle() never rejects; guards against an unhandled rejection.
+            });
+          }
         }
       },
       open(socket) {
