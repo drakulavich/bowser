@@ -16,7 +16,7 @@ import {
   cmdSessionStorageDelete, cmdSessionStorageClear,
   type CommandContext,
 } from "../src/commands.ts";
-import { saveState } from "../src/state.ts";
+import { saveState, loadState } from "../src/state.ts";
 
 // Minimal DaemonClient stand-in with a scripted response map.
 function fakeClient(handlers: {
@@ -227,6 +227,17 @@ describe("close", () => {
     const c = fakeClient({});
     const out = await cmdClose({ ...ctx(), connect: async () => c });
     expect(out).toContain(`closed session '${session}'`);
+  });
+  test("closes the session named by the positional, not --session default", async () => {
+    const c = fakeClient({});
+    // Seed 'dog1' with non-empty state and leave ctx()'s random session absent.
+    await saveState({ name: "dog1", url: "u", title: "t", refs: [], updatedAt: 1 });
+    const out = await cmdClose({ ...ctx(), connect: async () => c }, { name: "dog1" });
+    expect(out).toContain("closed session 'dog1'");
+    // 'dog1' state was cleared (emptyState has url ""), ctx session was never touched.
+    const closed = await loadState("dog1");
+    expect(closed?.url).toBe("");
+    expect(await loadState(session)).toBeNull();
   });
 });
 

@@ -61,7 +61,7 @@ export async function run(argv: string[]): Promise<string> {
     case "install":    return cmdInstall(ctx, { force: Boolean(args.flags.force) });
     case "open":       return cmdOpen(ctx, p0);
     case "goto":       return cmdGoto(ctx, p0 ?? "");
-    case "close":      return cmdClose(ctx);
+    case "close":      return cmdClose(ctx, { name: p0, all: Boolean(args.flags.all) });
     case "snapshot":   return cmdSnapshot(ctx, {
       filename: args.flags.filename as string | undefined,
       depth: args.flags.depth as string | undefined,

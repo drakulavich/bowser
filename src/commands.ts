@@ -214,12 +214,20 @@ export async function cmdHistory(
   });
 }
 
-export async function cmdClose(ctx: CommandContext): Promise<string> {
-  const prev = await loadState(ctx.session);
+export async function cmdClose(
+  ctx: CommandContext,
+  opts: { name?: string; all?: boolean } = {},
+): Promise<string> {
+  if (opts.all) return closeAll(ctx);
+  return closeOne(ctx, opts.name ?? ctx.session);
+}
+
+async function closeOne(ctx: CommandContext, session: string): Promise<string> {
+  const prev = await loadState(session);
 
   // Try to gracefully shut down the daemon. If it's not running, that's fine.
   try {
-    const client = await connector(ctx)(ctx.session, { spawn: false });
+    const client = await connector(ctx)(session, { spawn: false });
     try {
       await client.request("shutdown");
     } finally {
@@ -231,14 +239,19 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
 
   // Remove the socket file.
   try {
-    await unlink(socketPath(ctx.session));
+    await unlink(socketPath(session));
   } catch {}
 
-  await saveState({ ...emptyState(prev?.name ?? ctx.session), updatedAt: Date.now() });
+  await saveState({ ...emptyState(prev?.name ?? session), updatedAt: Date.now() });
 
   return ctx.json
-    ? JSON.stringify({ ok: true, session: ctx.session })
-    : `closed session '${ctx.session}'`;
+    ? JSON.stringify({ ok: true, session })
+    : `closed session '${session}'`;
+}
+
+// Implemented in Task 4 — temporary stub so the module compiles.
+async function closeAll(_ctx: CommandContext): Promise<string> {
+  throw new Error("usage: close --all is not yet implemented");
 }
 
 // Web Storage commands (localStorage and sessionStorage). Implemented via

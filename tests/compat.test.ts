@@ -22,6 +22,8 @@ const CASES: { argv: string[]; expect: { command: string; session?: string; posi
   { argv: ["go-forward"],                                     expect: { command: "go-forward" } },
   { argv: ["reload"],                                         expect: { command: "reload" } },
   { argv: ["list"],                                           expect: { command: "list" } },
+  { argv: ["close", "dog1"],                                  expect: { command: "close",      positional: ["dog1"] } },
+  { argv: ["close", "--all"],                                 expect: { command: "close",      flags: { all: true } } },
   { argv: ["install", "--force"],                             expect: { command: "install",    flags: { force: true } } },
   { argv: ["localstorage-list"],                              expect: { command: "localstorage-list" } },
   { argv: ["localstorage-get", "tok"],                        expect: { command: "localstorage-get",    positional: ["tok"] } },
