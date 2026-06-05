@@ -19,6 +19,36 @@ describe("socketPath", () => {
   });
 });
 
+describe("spawned daemon HOME propagation", () => {
+  // Regression guard for the e2e "did not start in time" failure: the daemon is
+  // spawned via Bun.spawn, and the e2e suite redirects process.env.HOME *after*
+  // process startup. Without an explicit `env`, Bun.spawn inherits the OS environ
+  // captured at startup and ignores that runtime mutation — so the daemon resolved
+  // socketPath() against the real HOME while the client used the redirected one,
+  // and they never met. spawnDaemon must pass `env: { ...process.env }` so a child
+  // sees the live HOME. This asserts that exact propagation without needing Chromium.
+  test("a child spawned like the daemon sees a runtime HOME mutation", async () => {
+    const orig = process.env.HOME;
+    const redirected = `/tmp/bowser-home-prop-${Date.now()}`;
+    process.env.HOME = redirected;
+    try {
+      // Mirror spawnDaemon's Bun.spawn options (the load-bearing part: env).
+      const child = Bun.spawn({
+        cmd: [process.execPath, "-e", "process.stdout.write(process.env.HOME ?? '')"],
+        stdout: "pipe",
+        stderr: "ignore",
+        stdin: "ignore",
+        env: { ...process.env },
+      });
+      const seen = await new Response(child.stdout).text();
+      await child.exited;
+      expect(seen).toBe(redirected);
+    } finally {
+      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+    }
+  });
+});
+
 describe("connectOrSpawn backend validation", () => {
   let origBackend: string | undefined;
 

@@ -325,6 +325,14 @@ async function spawnDaemon(session: string): Promise<void> {
     stdout,
     stderr,
     stdin: "ignore",
+    // Pass the LIVE process.env. Without an explicit `env`, Bun.spawn inherits
+    // the OS environment block captured at *this* process's startup and ignores
+    // runtime mutations of process.env — so a redirected HOME (set after launch,
+    // e.g. by the e2e tests' beforeAll) would NOT reach the daemon. The daemon
+    // would then resolve sessionsRoot()/socketPath() against the real HOME while
+    // the client used the redirected one, and the two would never meet (the
+    // client times out in connectOrSpawn with "did not start in time").
+    env: { ...process.env },
     // Detach so the daemon survives the parent CLI exiting.
     // Bun inherits no ptty by default; this is effectively fire-and-forget.
   });
