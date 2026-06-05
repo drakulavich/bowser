@@ -5,7 +5,19 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { connectOrSpawn } from "../src/daemon.ts";
+import { connectOrSpawn, socketPath } from "../src/daemon.ts";
+
+describe("socketPath", () => {
+  test("resolves under process.env.HOME at call time", () => {
+    const orig = process.env.HOME;
+    process.env.HOME = "/tmp/bowser-sockpath-test";
+    try {
+      expect(socketPath("sess")).toBe("/tmp/bowser-sockpath-test/.bowser/sessions/sess/sock");
+    } finally {
+      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+    }
+  });
+});
 
 describe("connectOrSpawn backend validation", () => {
   let origBackend: string | undefined;

@@ -11,10 +11,10 @@
 // Ops mirror the Browser interface in browser.ts.
 
 import { unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { openBrowser, assertValidBackendEnv, type Browser } from "./browser.ts";
 import { createSerializer, withTimeout } from "./serialize.ts";
+import { sessionsRoot } from "./state.ts";
 
 export interface DaemonRequest {
   id: number;
@@ -47,7 +47,7 @@ export interface DaemonResponse {
 
 export function socketPath(session: string): string {
   // Use a short path — Unix socket names have a ~104-char limit on macOS.
-  return join(process.env.HOME || homedir(), ".bowser", "sessions", session, "sock");
+  return join(sessionsRoot(), session, "sock");
 }
 
 /** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
