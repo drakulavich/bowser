@@ -200,15 +200,41 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   });
 }
 
+/** Find a non-colliding path: returns `base` if free, else base-1, base-2, …
+ *  (suffix inserted before the extension). `exists` is injected for testing.
+ *  Best-effort: there is a small check-then-write window, acceptable for a
+ *  single-user CLI. */
+export async function nextAvailablePath(
+  base: string,
+  exists: (p: string) => Promise<boolean>,
+): Promise<string> {
+  if (!(await exists(base))) return base;
+  const slash = base.lastIndexOf("/");
+  const dot = base.lastIndexOf(".");
+  // Only treat as an extension when the dot is inside the basename and not its
+  // first char (so "shot.png" -> "shot"+".png", but "/tmp/.foo" stays whole).
+  const hasExt = dot > slash + 1;
+  const stem = hasExt ? base.slice(0, dot) : base;
+  const ext = hasExt ? base.slice(dot) : "";
+  for (let i = 1; ; i++) {
+    const cand = `${stem}-${i}${ext}`;
+    if (!(await exists(cand))) return cand;
+  }
+}
+
 export async function cmdScreenshot(
   ctx: CommandContext,
-  opts: { ref?: string; filename?: string } = {},
+  opts: { filename?: string } = {},
 ): Promise<string> {
-  const selector = opts.ref ? (await loadRef(ctx.session, opts.ref)).target.selector : undefined;
+  // Full-page only. The default name auto-increments so repeated screenshots
+  // don't clobber each other; an explicit --filename writes exactly there.
+  const filename =
+    opts.filename ??
+    (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
   return withClient(ctx, async (c) => {
-    const data = (await c.request("screenshot", [selector, opts.filename])) as string | undefined;
-    if (opts.filename) return ctx.json ? JSON.stringify({ ok: true, filename: opts.filename }) : `wrote ${opts.filename}`;
-    return data ?? "";
+    const b64 = (await c.request("screenshot", [])) as string;
+    await Bun.write(filename, Buffer.from(b64, "base64"));
+    return ctx.json ? JSON.stringify({ ok: true, filename }) : `wrote ${filename}`;
   });
 }
 

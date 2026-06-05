@@ -17,7 +17,6 @@ const CASES: { argv: string[]; expect: { command: string; session?: string; posi
   { argv: ["uncheck", "e4"],                                  expect: { command: "uncheck",    positional: ["e4"] } },
   { argv: ["screenshot"],                                     expect: { command: "screenshot" } },
   { argv: ["screenshot", "--filename=shot.png"],              expect: { command: "screenshot", flags: { filename: "shot.png" } } },
-  { argv: ["screenshot", "e2", "--filename=el.png"],          expect: { command: "screenshot", positional: ["e2"], flags: { filename: "el.png" } } },
   { argv: ["go-back"],                                        expect: { command: "go-back" } },
   { argv: ["go-forward"],                                     expect: { command: "go-forward" } },
   { argv: ["reload"],                                         expect: { command: "reload" } },

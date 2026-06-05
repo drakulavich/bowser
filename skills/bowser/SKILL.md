@@ -43,7 +43,7 @@ Do **not** use for static HTTP fetches.
 | `bowser hover <ref>` | Hover an element |
 | `bowser select <ref> <value>` | Choose a `<select>` option |
 | `bowser check <ref>` / `uncheck <ref>` | Toggle a checkbox/radio |
-| `bowser screenshot [ref] [--filename=f]` | Full-page or element screenshot |
+| `bowser screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser list` | Enumerate sessions |
 | `bowser close [name]` | End a session (defaults to `--session`; positional name overrides) |

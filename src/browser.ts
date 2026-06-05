@@ -120,7 +120,7 @@ export interface Browser {
   hover(selector: string): Promise<void>;
   select(selector: string, value: string): Promise<void>;
   setChecked(selector: string, checked: boolean): Promise<void>;
-  screenshot(opts: { selector?: string; path?: string }): Promise<string | undefined>;
+  screenshot(): Promise<string>; // base64-encoded PNG (full page)
   back(): Promise<void>;
   forward(): Promise<void>;
   reload(): Promise<void>;
@@ -189,26 +189,16 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
         if (Boolean(el.checked) !== ${checked}) el.click();
       })()`);
     },
-    screenshot: async ({ selector: _sel, path }) => {
-      // Bun.WebView exposes screenshot() returning base64 PNG.
-      // Element-bounded screenshots are not supported in v1; we return full-page either way.
-      // (Selector reserved for a future CDP path.)
-      // NOTE: Bun 1.3.13's Bun.WebView.screenshot() returns only a ~9-byte stub
-      // on both backends (capture appears unimplemented upstream). isLikelyPng()
-      // below rejects that so we fail loud instead of writing a broken file.
-      const data = await (view as { screenshot?: () => Promise<string> }).screenshot?.();
+    screenshot: async () => {
+      // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
+      // Element-bounded screenshots are not supported in v1.
+      const data = await (view as { screenshot?: () => Promise<Blob | string> }).screenshot?.();
       if (!data) throw new Error('screenshot: not supported by this Bun.WebView');
-      const buf = Buffer.from(String(data), 'base64');
-      if (!isLikelyPng(buf)) {
-        throw new Error(
-          'screenshot: Bun.WebView returned an empty image — screenshot capture is not supported by this Bun.WebView version (affects both the chrome and webkit backends)',
-        );
+      const bytes = await pngBytesFrom(data);
+      if (!isLikelyPng(bytes)) {
+        throw new Error('screenshot: WebView returned an empty/invalid image');
       }
-      if (path) {
-        await Bun.write(path, buf);
-        return undefined;
-      }
-      return String(data);
+      return Buffer.from(bytes).toString('base64');
     },
     back: async () => {
       await view.evaluate("history.back()");

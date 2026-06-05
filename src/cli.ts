@@ -28,7 +28,7 @@ Commands:
   select <ref> <value>
   check <ref>
   uncheck <ref>
-  screenshot [ref] [--filename=f]
+  screenshot [--filename=f]         full-page screenshot (PNG)
   go-back
   go-forward
   reload
@@ -75,7 +75,6 @@ export async function run(argv: string[]): Promise<string> {
     case "check":      return cmdCheck(ctx, p0 ?? "");
     case "uncheck":    return cmdUncheck(ctx, p0 ?? "");
     case "screenshot": return cmdScreenshot(ctx, {
-      ref: p0,
       filename: args.flags.filename as string | undefined,
     });
     case "go-back":    return cmdHistory(ctx, "back");

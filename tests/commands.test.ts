@@ -29,7 +29,7 @@ function fakeClient(handlers: {
   select?: (selector: string, value: string) => void;
   check?: (selector: string) => void;
   uncheck?: (selector: string) => void;
-  screenshot?: (selector?: string, path?: string) => string | undefined;
+  screenshot?: (selector?: string) => string;
   back?: () => void;
   forward?: () => void;
   reload?: () => void;
@@ -78,7 +78,7 @@ function fakeClient(handlers: {
           handlers.uncheck?.(args[0] as string);
           return;
         case "screenshot":
-          return handlers.screenshot?.(args[0] as string | undefined, args[1] as string | undefined);
+          return handlers.screenshot?.(args[0] as string | undefined);
         case "back":
           handlers.back?.();
           return;
@@ -480,19 +480,45 @@ describe("check / uncheck", () => {
 });
 
 describe("screenshot", () => {
-  test("full-page returns base64 to stdout", async () => {
-    const c = fakeClient({ screenshot: () => "BASE64DATA" });
-    const out = await cmdScreenshot({ ...ctx(), connect: async () => c }, {});
-    expect(out).toBe("BASE64DATA");
+  const PNG_B64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  test("--filename decodes the base64 and writes a real PNG at the given path", async () => {
+    const tmpFile = join(tmp, `shot-${Date.now()}.png`);
+    const c = fakeClient({ screenshot: () => PNG_B64 });
+    const out = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: tmpFile });
+    expect(out).toBe(`wrote ${tmpFile}`);
+    const written = new Uint8Array(await Bun.file(tmpFile).arrayBuffer());
+    expect([...written.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   });
-  test("--filename writes file", async () => {
-    const tmp = `/tmp/bowser-shot-${Date.now()}.png`;
-    const c = fakeClient({ screenshot: () => undefined });
-    const out = await cmdScreenshot(
-      { ...ctx(), connect: async () => c },
-      { filename: tmp },
-    );
-    expect(out).toBe(`wrote ${tmp}`);
+
+  test("no --filename writes a default screenshot-<session>.png in the cwd", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const session = "shotdefault";
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
+      expect(out).toBe("wrote screenshot-shotdefault.png");
+      expect(await Bun.file(join(tmp, "screenshot-shotdefault.png")).exists()).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  test("no --filename auto-increments when the default file already exists", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const session = "shotinc";
+      await Bun.write(join(tmp, "screenshot-shotinc.png"), "existing");
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
+      expect(out).toBe("wrote screenshot-shotinc-1.png");
+      expect(await Bun.file(join(tmp, "screenshot-shotinc-1.png")).exists()).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
   });
 });
 

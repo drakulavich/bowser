@@ -103,10 +103,9 @@ export async function startDaemon(session: string): Promise<void> {
           await browser.setChecked(args[0] as string, false);
           return { id: req.id, ok: true };
         case "screenshot": {
-          const r = await browser.screenshot({
-            selector: args[0] as string | undefined,
-            path: args[1] as string | undefined,
-          });
+          // Browser returns base64 PNG; the CLI writes the file (so a relative
+          // --filename resolves against the user's cwd, not the daemon's).
+          const r = await browser.screenshot();
           return { id: req.id, ok: true, result: r };
         }
         case "back":    await browser.back();    return { id: req.id, ok: true };

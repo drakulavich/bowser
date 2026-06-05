@@ -111,7 +111,7 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `hover <ref>` | Hover an element |
 | `select <ref> <value>` | Choose a `<select>` option |
 | `check <ref>` / `uncheck <ref>` | Toggle a checkbox |
-| `screenshot [ref] [--filename=f]` | Full-page or element screenshot |
+| `screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions |
 | `close [name]` | End a session (defaults to `--session`; positional name overrides) |

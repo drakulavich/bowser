@@ -20,7 +20,7 @@ export const SCHEMAS: Schemas = {
     { name: "select",      positional: [{ name: "ref", required: true }, { name: "value", required: true }], flags: [] },
     { name: "check",       positional: [{ name: "ref", required: true }],                    flags: [] },
     { name: "uncheck",     positional: [{ name: "ref", required: true }],                    flags: [] },
-    { name: "screenshot",  positional: [{ name: "ref", required: false }],                   flags: [{ name: "filename", kind: "string" }] },
+    { name: "screenshot",  positional: [],                                                   flags: [{ name: "filename", kind: "string" }] },
     { name: "go-back",     positional: [],                                                   flags: [] },
     { name: "go-forward",  positional: [],                                                   flags: [] },
     { name: "reload",      positional: [],                                                   flags: [] },
