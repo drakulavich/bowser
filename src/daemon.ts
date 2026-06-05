@@ -104,10 +104,18 @@ export async function startDaemon(session: string): Promise<void> {
           await browser.setChecked(args[0] as string, false);
           return { id: req.id, ok: true };
         case "screenshot": {
-          // Browser returns base64 PNG; the CLI writes the file (so a relative
-          // --filename resolves against the user's cwd, not the daemon's).
-          const r = await browser.screenshot();
-          return { id: req.id, ok: true, result: r };
+          // When the CLI passes an absolute path, the daemon writes the PNG
+          // itself so the ~140 KB base64 never crosses the socket. With no path,
+          // return base64 — reserved for a future --stdout / programmatic caller
+          // (today cmdScreenshot always sends a path); safe to transmit since
+          // socketWriteAll handles backpressure.
+          const path = args[0] as string | undefined;
+          const b64 = await browser.screenshot();
+          if (path) {
+            await Bun.write(path, Buffer.from(b64, "base64"));
+            return { id: req.id, ok: true, result: { path } };
+          }
+          return { id: req.id, ok: true, result: b64 };
         }
         case "back":    await browser.back();    return { id: req.id, ok: true };
         case "forward": await browser.forward(); return { id: req.id, ok: true };
