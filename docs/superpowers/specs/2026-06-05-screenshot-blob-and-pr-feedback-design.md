@@ -55,9 +55,35 @@ and returns the base64 string as `result`.
 **`src/commands.ts` `cmdScreenshot`:**
 - Still resolves `opts.ref` → selector for forward-compat, but selector is unused
   by the browser (full-page); keep current behavior (no error).
-- Receives base64 from the daemon. When `opts.filename`: `await Bun.write(filename,
-  Buffer.from(base64, "base64"))` **in the CLI process**, then report `wrote <filename>`.
-  When no filename: return the base64 string (existing behavior — print to stdout).
+- Receives base64 from the daemon and **always writes a file** in the CLI process
+  (resolving against the user's cwd). No base64 is ever printed to stdout.
+- **Explicit `--filename`** writes exactly there (overwrites — a deliberate path).
+- **No `--filename`** uses the default `screenshot-<session>.png`, but
+  **auto-increments to avoid clobbering** an existing file:
+  `screenshot-<session>.png` → `screenshot-<session>-1.png` → `-2` → … until a
+  free name. A pure helper handles the search:
+  ```ts
+  // src/commands.ts (or co-located): testable via an injected `exists`.
+  export async function nextAvailablePath(
+    base: string,
+    exists: (p: string) => Promise<boolean>,
+  ): Promise<string> {
+    if (!(await exists(base))) return base;
+    const dot = base.lastIndexOf(".");
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : "";
+    for (let i = 1; ; i++) {
+      const cand = `${stem}-${i}${ext}`;
+      if (!(await exists(cand))) return cand;
+    }
+  }
+  ```
+  ```ts
+  const filename = opts.filename
+    ?? (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
+  await Bun.write(filename, Buffer.from(base64, "base64"));
+  return ctx.json ? JSON.stringify({ ok: true, filename }) : `wrote ${filename}`;
+  ```
 
 **Tests:**
 - `tests/screenshot.test.ts` (new): `pngBytesFrom` with a `Blob` (construct
@@ -116,7 +142,6 @@ now-unused `homedir` import from daemon.ts if nothing else uses it.
 ## Out of scope
 
 - Element-bounded (selector) screenshots — still full-page only.
-- Changing the no-`--filename` behavior (still prints base64 to stdout).
 - A client-side `DaemonClient.request` timeout (the shutdown bypass resolves the
   reported regression without it).
 
