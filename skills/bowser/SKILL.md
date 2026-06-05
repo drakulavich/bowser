@@ -108,7 +108,7 @@ bowser install                            # one-time Chromium download
 - **Backend**: macOS defaults to native WebKit; `bowser install` or
   `BOWSER_CHROMIUM_PATH` switches to Chromium. Force with
   `BOWSER_BACKEND=webkit|chrome`.
-- **`screenshot` is unsupported** — `Bun.WebView.screenshot()` returns an empty image on both backends in current Bun; bowser errors clearly instead of writing a broken file. Tracked upstream.
+- **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
 - **`BOWSER_OP_TIMEOUT_MS`** — per-operation timeout in ms (default `30000`; `0` disables). Set higher if a slow page causes timeout errors.
 - **"ref 'eN' not found"** — snapshot is stale. Run `bowser snapshot`.
 - **"no open page"** — call `bowser open <url>` first.

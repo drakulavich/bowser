@@ -48,6 +48,14 @@ All notable changes to this project are documented here. This project follows
   `process.env.HOME` at call time (matching `bowserCacheRoot()`), so tests
   that redirect `$HOME` via `process.env.HOME` see the temporary directory
   correctly.
+- **`screenshot` now writes a valid PNG** (`#2`): decode the `Blob`
+  returned by `Bun.WebView.screenshot()` (the old code stringified it to
+  `"[object Blob]"`); the CLI writes the file so a relative `--filename`
+  resolves against the user's cwd; default name auto-increments.
+- **`shutdown` bypasses the op serializer** so `close` always works
+  against a stuck daemon even when an operation is wedged in the serializer.
+- **`socketPath` reuses `sessionsRoot()`** (`src/daemon.ts`) instead of
+  re-computing the sessions root independently.
 
 ### Added
 
@@ -55,14 +63,6 @@ All notable changes to this project are documented here. This project follows
 - **`BOWSER_OP_TIMEOUT_MS`** environment variable: sets the per-operation
   timeout in milliseconds (default `30000`; `0` disables). Useful when
   automating slow pages that would otherwise hang indefinitely.
-
-### Known limitations
-
-- **`screenshot` is unsupported** (`#2`): `Bun.WebView.screenshot()` returns
-  a ~9-byte stub on both the chrome and webkit backends in Bun ≤ 1.3.13 —
-  screenshot capture is not yet implemented upstream. bowser now validates
-  the PNG (`isLikelyPng()`) and exits with a clear error instead of writing
-  a broken file. Will be removed once Bun ships a working implementation.
 
 ## [0.2.0] — 2026-04-26
 

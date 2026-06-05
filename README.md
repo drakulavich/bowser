@@ -55,7 +55,11 @@ Override the choice with `BOWSER_BACKEND`:
 | `BOWSER_BACKEND=webkit` | Force native WebKit (macOS only; errors elsewhere). |
 | `BOWSER_BACKEND=chrome` | Force Chrome/Chromium. |
 
-**Note:** `screenshot` is currently unsupported — `Bun.WebView.screenshot()` returns an empty image on both the chrome and webkit backends in current Bun. bowser detects this and errors clearly instead of writing a broken file. Tracked upstream; will be removed once Bun fixes it.
+Screenshots are written as PNG files. `bowser screenshot --filename out.png` writes
+to `out.png` (relative paths resolve against your current directory); without
+`--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
+if that file already exists. Captures are full-page (element-bounded screenshots are
+not supported yet).
 
 ### How Chromium is resolved
 
@@ -144,10 +148,6 @@ Because selectors are stable paths (not injected `data-` attributes), they survi
 | `BOWSER_BACKEND` | `webkit` or `chrome` — override the auto-selected browser backend. |
 | `BOWSER_CHROMIUM_PATH` | Explicit path to a `chrome-headless-shell` binary; bypasses auto-detection. |
 | `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Bounds a wedged daemon operation — if the browser hangs, the command exits with a timeout error instead of blocking forever. |
-
-## Known limitations
-
-- **Screenshots are unsupported.** `Bun.WebView.screenshot()` returns a ~9-byte stub (not a valid PNG) on both the chrome and webkit backends in current Bun (≤ 1.3.13). bowser validates the result and errors loudly instead of writing a broken file. Tracked upstream; the `screenshot` command will work once Bun ships a real implementation.
 
 ## Tests
 

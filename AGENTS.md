@@ -141,4 +141,7 @@ npm publish --access public
 - **Daemon serializes operations.** `startDaemon` in `src/daemon.ts` runs every incoming request through a promise-chain serializer (`src/serialize.ts`) with a `BOWSER_OP_TIMEOUT_MS` budget. A single `Bun.WebView` cannot handle concurrent `evaluate()` calls safely. Do not reintroduce a bare `handle(req).then(...)` dispatch; always route through the serializer.
 - **`sessionsRoot()` must be call-time, not module-time.** `src/state.ts` resolves the sessions root from `process.env.HOME` inside the function body (`sessionsRoot()`), not in a module-level `const`. A module-level snapshot captures the real home before test `beforeAll` hooks redirect `process.env.HOME` to a tmp dir, breaking test hermeticity. Mirrors the same pattern as `bowserCacheRoot()`.
 - **`view.url` returns `about:blank` on chrome after query-string navigations.** The daemon `state` op reports the real URL via `realUrl()`, which resolves `location.href` from inside the page instead of trusting `Bun.WebView`'s `view.url` getter. Don't replace `realUrl()` calls with `view.url` reads.
-- **`Bun.WebView.screenshot()` is broken on both backends.** It returns a ~9-byte stub (not a valid PNG) in Bun ≤ 1.3.13. `isLikelyPng()` in `src/browser.ts` guards the output and fails loud. Don't remove this guard until the upstream Bun issue is resolved.
+- **`Bun.WebView.screenshot()` returns a `Blob`, not a base64 string.** Decode it
+  via `pngBytesFrom()` (`src/browser.ts`) — `String(blob)` is `"[object Blob]"`,
+  which silently produced the old 7-byte "PNG". `cmdScreenshot` writes the file in
+  the CLI process; `browser.screenshot()` only returns base64.
