@@ -14,6 +14,7 @@ import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { openBrowser, assertValidBackendEnv, type Browser } from "./browser.ts";
 import { createSerializer, withTimeout } from "./serialize.ts";
+import { socketWriteAll, flushSocket, type WritableSocket } from "./socket-write.ts";
 import { sessionsRoot } from "./state.ts";
 
 export interface DaemonRequest {
@@ -154,7 +155,8 @@ export async function startDaemon(session: string): Promise<void> {
           try {
             req = JSON.parse(line) as DaemonRequest;
           } catch (err) {
-            socket.write(
+            socketWriteAll(
+              socket as unknown as WritableSocket,
               JSON.stringify({
                 id: -1,
                 ok: false,
@@ -174,7 +176,7 @@ export async function startDaemon(session: string): Promise<void> {
             // possibly-stuck daemon. Dispatch it directly, bypassing the serializer.
             // Any queued or in-flight ops are abandoned — intended forced teardown.
             handle(req).then((res) => {
-              socket.write(JSON.stringify(res) + "\n");
+              socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
             }).catch(() => {
               // handle() never rejects; mirrors the guard on the serialized path.
             });
@@ -183,12 +185,12 @@ export async function startDaemon(session: string): Promise<void> {
               const underlying = handle(req);
               withTimeout(underlying, timeoutMs, req.op).then(
                 (res) => {
-                  socket.write(JSON.stringify(res) + "\n");
+                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
                 },
                 (err) => {
                   // handle() catches its own errors; this path is for timeouts.
                   const msg = err instanceof Error ? err.message : String(err);
-                  socket.write(JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
+                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
                 },
               );
               return underlying;
@@ -200,6 +202,9 @@ export async function startDaemon(session: string): Promise<void> {
       },
       open(socket) {
         (socket as { data?: string }).data = "";
+      },
+      drain(socket) {
+        flushSocket(socket as unknown as WritableSocket);
       },
       error(_socket, err) {
         console.error("[bowser daemon] socket error:", err.message);
@@ -246,6 +251,9 @@ export class DaemonClient {
             }
           }
         },
+        drain(s) {
+          flushSocket(s as unknown as WritableSocket);
+        },
       },
     });
   }
@@ -259,7 +267,7 @@ export class DaemonClient {
         if (res.ok) resolve(res.result);
         else reject(new Error(res.error ?? "daemon error"));
       });
-      this.sock!.write(line);
+      socketWriteAll(this.sock! as unknown as WritableSocket, line);
     });
   }
 
