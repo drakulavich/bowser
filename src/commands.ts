@@ -10,10 +10,10 @@ import {
   loadState,
   resolveRef,
   saveState,
+  sessionsRoot,
   type SessionState,
 } from "./state.ts";
 import { mkdir, readdir, unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface CommandContext {
@@ -44,6 +44,17 @@ function emptyState(name: string): SessionState {
   return { name, url: "", title: "", refs: [], updatedAt: 0 };
 }
 
+/** Fail loud when a real navigation still reports about:blank. The daemon's
+ *  state op resolves the URL via realUrl() (which falls back to location.href),
+ *  so reaching here with about:blank means BOTH the url getter and location.href
+ *  agree the page never committed — a genuine load failure, not the chrome
+ *  getter quirk (which realUrl already corrects). */
+function assertNavigated(requested: string, finalUrl: string): void {
+  if (requested && requested !== "about:blank" && finalUrl === "about:blank") {
+    throw new Error(`navigate: page did not load ${requested} (ended on about:blank)`);
+  }
+}
+
 async function loadRef(session: string, ref: string) {
   const prev = await loadState(session);
   if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
@@ -55,6 +66,7 @@ export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string
   return withClient(ctx, async (c) => {
     if (url) await c.request("navigate", [url]);
     const state = (await c.request("state")) as { url: string; title: string };
+    if (url) assertNavigated(url, state.url);
     const next: SessionState = {
       name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
     };
@@ -71,6 +83,7 @@ export async function cmdGoto(ctx: CommandContext, url: string): Promise<string>
   return withClient(ctx, async (c) => {
     await c.request("navigate", [url]);
     const state = (await c.request("state")) as { url: string; title: string };
+    assertNavigated(url, state.url);
     await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
     return ctx.json
       ? JSON.stringify({ ok: true, url: state.url })
@@ -187,15 +200,41 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   });
 }
 
+/** Find a non-colliding path: returns `base` if free, else base-1, base-2, …
+ *  (suffix inserted before the extension). `exists` is injected for testing.
+ *  Best-effort: there is a small check-then-write window, acceptable for a
+ *  single-user CLI. */
+export async function nextAvailablePath(
+  base: string,
+  exists: (p: string) => Promise<boolean>,
+): Promise<string> {
+  if (!(await exists(base))) return base;
+  const slash = base.lastIndexOf("/");
+  const dot = base.lastIndexOf(".");
+  // Only treat as an extension when the dot is inside the basename and not its
+  // first char (so "shot.png" -> "shot"+".png", but "/tmp/.foo" stays whole).
+  const hasExt = dot > slash + 1;
+  const stem = hasExt ? base.slice(0, dot) : base;
+  const ext = hasExt ? base.slice(dot) : "";
+  for (let i = 1; ; i++) {
+    const cand = `${stem}-${i}${ext}`;
+    if (!(await exists(cand))) return cand;
+  }
+}
+
 export async function cmdScreenshot(
   ctx: CommandContext,
-  opts: { ref?: string; filename?: string } = {},
+  opts: { filename?: string } = {},
 ): Promise<string> {
-  const selector = opts.ref ? (await loadRef(ctx.session, opts.ref)).target.selector : undefined;
+  // Full-page only. The default name auto-increments so repeated screenshots
+  // don't clobber each other; an explicit --filename writes exactly there.
+  const filename =
+    opts.filename ??
+    (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
   return withClient(ctx, async (c) => {
-    const data = (await c.request("screenshot", [selector, opts.filename])) as string | undefined;
-    if (opts.filename) return ctx.json ? JSON.stringify({ ok: true, filename: opts.filename }) : `wrote ${opts.filename}`;
-    return data ?? "";
+    const b64 = (await c.request("screenshot", [])) as string;
+    await Bun.write(filename, Buffer.from(b64, "base64"));
+    return ctx.json ? JSON.stringify({ ok: true, filename }) : `wrote ${filename}`;
   });
 }
 
@@ -214,12 +253,20 @@ export async function cmdHistory(
   });
 }
 
-export async function cmdClose(ctx: CommandContext): Promise<string> {
-  const prev = await loadState(ctx.session);
+export async function cmdClose(
+  ctx: CommandContext,
+  opts: { name?: string; all?: boolean } = {},
+): Promise<string> {
+  if (opts.all) return closeAll(ctx);
+  return closeOne(ctx, opts.name ?? ctx.session);
+}
+
+async function closeOne(ctx: CommandContext, session: string): Promise<string> {
+  const prev = await loadState(session);
 
   // Try to gracefully shut down the daemon. If it's not running, that's fine.
   try {
-    const client = await connector(ctx)(ctx.session, { spawn: false });
+    const client = await connector(ctx)(session, { spawn: false });
     try {
       await client.request("shutdown");
     } finally {
@@ -231,14 +278,43 @@ export async function cmdClose(ctx: CommandContext): Promise<string> {
 
   // Remove the socket file.
   try {
-    await unlink(socketPath(ctx.session));
+    await unlink(socketPath(session));
   } catch {}
 
-  await saveState({ ...emptyState(prev?.name ?? ctx.session), updatedAt: Date.now() });
+  await saveState({ ...emptyState(prev?.name ?? session), updatedAt: Date.now() });
 
   return ctx.json
-    ? JSON.stringify({ ok: true, session: ctx.session })
-    : `closed session '${ctx.session}'`;
+    ? JSON.stringify({ ok: true, session })
+    : `closed session '${session}'`;
+}
+
+async function closeAll(ctx: CommandContext): Promise<string> {
+  let names: string[] = [];
+  try {
+    const entries = await readdir(sessionsRoot(), { withFileTypes: true });
+    names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    // no sessions root; nothing to close
+  }
+  const closed: string[] = [];
+  const failed: string[] = [];
+  for (const name of names) {
+    try {
+      await closeOne(ctx, name);
+      closed.push(name);
+    } catch {
+      failed.push(name); // best-effort: keep closing the rest
+    }
+  }
+  if (ctx.json) return JSON.stringify({ ok: failed.length === 0, closed, failed });
+  if (closed.length === 0 && failed.length === 0) return "no sessions to close";
+  const parts: string[] = [];
+  if (closed.length > 0) {
+    const word = closed.length === 1 ? "session" : "sessions";
+    parts.push(`closed ${closed.length} ${word}: ${closed.join(", ")}`);
+  }
+  if (failed.length > 0) parts.push(`failed: ${failed.join(", ")}`);
+  return parts.join("; ");
 }
 
 // Web Storage commands (localStorage and sessionStorage). Implemented via
@@ -340,9 +416,9 @@ export const cmdSessionStorageDelete = (ctx: CommandContext, key: string) =>
 export const cmdSessionStorageClear = (ctx: CommandContext) => storageClear(ctx, "sessionStorage");
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
-  const root = join(homedir(), ".bowser", "sessions");
   try {
-    const names = await readdir(root);
+    const entries = await readdir(sessionsRoot(), { withFileTypes: true });
+    const names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
     return ctx.json ? JSON.stringify(names) : names.join("\n");
   } catch {
     return ctx.json ? "[]" : "";

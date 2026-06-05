@@ -43,10 +43,11 @@ Do **not** use for static HTTP fetches.
 | `bowser hover <ref>` | Hover an element |
 | `bowser select <ref> <value>` | Choose a `<select>` option |
 | `bowser check <ref>` / `uncheck <ref>` | Toggle a checkbox/radio |
-| `bowser screenshot [ref] [--filename=f]` | Full-page or element screenshot |
+| `bowser screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser list` | Enumerate sessions |
-| `bowser close` | End the current session |
+| `bowser close [name]` | End a session (defaults to `--session`; positional name overrides) |
+| `bowser close --all` | Close every open session |
 | `bowser install [--force]` | Download headless Chromium |
 | `bowser localstorage-list` | List `localStorage` entries (`key=value` lines, or JSON) |
 | `bowser localstorage-get <key>` | Read a `localStorage` value |
@@ -106,7 +107,9 @@ bowser install                            # one-time Chromium download
 
 - **Backend**: macOS defaults to native WebKit; `bowser install` or
   `BOWSER_CHROMIUM_PATH` switches to Chromium. Force with
-  `BOWSER_BACKEND=webkit|chrome`. `screenshot` may require the chrome backend.
+  `BOWSER_BACKEND=webkit|chrome`.
+- **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
+- **`BOWSER_OP_TIMEOUT_MS`** — per-operation timeout in ms (default `30000`; `0` disables). Set higher if a slow page causes timeout errors.
 - **"ref 'eN' not found"** — snapshot is stale. Run `bowser snapshot`.
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.

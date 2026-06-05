@@ -16,7 +16,7 @@ import {
   cmdSessionStorageDelete, cmdSessionStorageClear,
   type CommandContext,
 } from "../src/commands.ts";
-import { saveState } from "../src/state.ts";
+import { saveState, loadState } from "../src/state.ts";
 
 // Minimal DaemonClient stand-in with a scripted response map.
 function fakeClient(handlers: {
@@ -29,7 +29,7 @@ function fakeClient(handlers: {
   select?: (selector: string, value: string) => void;
   check?: (selector: string) => void;
   uncheck?: (selector: string) => void;
-  screenshot?: (selector?: string, path?: string) => string | undefined;
+  screenshot?: (selector?: string) => string;
   back?: () => void;
   forward?: () => void;
   reload?: () => void;
@@ -78,7 +78,7 @@ function fakeClient(handlers: {
           handlers.uncheck?.(args[0] as string);
           return;
         case "screenshot":
-          return handlers.screenshot?.(args[0] as string | undefined, args[1] as string | undefined);
+          return handlers.screenshot?.(args[0] as string | undefined);
         case "back":
           handlers.back?.();
           return;
@@ -158,6 +158,27 @@ describe("goto", () => {
     expect(out).toContain("https://y");
     expect(c.calls).toContainEqual(["navigate", ["https://y"]]);
   });
+  test("goto errors when a real URL ends on about:blank", async () => {
+    const c = fakeClient({ state: () => ({ url: "about:blank", title: "X" }) });
+    await expect(
+      cmdGoto({ ...ctx(), connect: async () => c }, "https://example.com/?q=1"),
+    ).rejects.toThrow(/did not load/i);
+  });
+});
+
+describe("open (assertNavigated guard)", () => {
+  test("open errors when a real URL ends on about:blank", async () => {
+    const c = fakeClient({ state: () => ({ url: "about:blank", title: "" }) });
+    await expect(
+      cmdOpen({ ...ctx(), connect: async () => c }, "https://example.com/?q=1"),
+    ).rejects.toThrow(/did not load/i);
+  });
+
+  test("open does NOT throw when the URL resolves correctly", async () => {
+    const c = fakeClient({ state: () => ({ url: "https://example.com/?q=1", title: "T" }) });
+    const out = await cmdOpen({ ...ctx(), connect: async () => c }, "https://example.com/?q=1");
+    expect(out).toContain("https://example.com/?q=1");
+  });
 });
 
 describe("snapshot", () => {
@@ -227,6 +248,31 @@ describe("close", () => {
     const c = fakeClient({});
     const out = await cmdClose({ ...ctx(), connect: async () => c });
     expect(out).toContain(`closed session '${session}'`);
+  });
+  test("closes the session named by the positional, not --session default", async () => {
+    const c = fakeClient({});
+    // Seed 'dog1' with non-empty state and leave ctx()'s random session absent.
+    await saveState({ name: "dog1", url: "u", title: "t", refs: [], updatedAt: 1 });
+    const out = await cmdClose({ ...ctx(), connect: async () => c }, { name: "dog1" });
+    expect(out).toContain("closed session 'dog1'");
+    // 'dog1' state was cleared (emptyState has url ""), ctx session was never touched.
+    const closed = await loadState("dog1");
+    expect(closed?.url).toBe("");
+    expect(await loadState(session)).toBeNull();
+  });
+
+  test("--all closes every session under the sessions root", async () => {
+    // Seed two sessions on disk (saveState creates ~/.bowser/sessions/<name>/).
+    await saveState({ name: "a", url: "x", title: "", refs: [], updatedAt: Date.now() });
+    await saveState({ name: "b", url: "y", title: "", refs: [], updatedAt: Date.now() });
+    const c = fakeClient({});
+    const out = await cmdClose({ ...ctx(), connect: async () => c }, { all: true });
+    expect(out).toMatch(/^closed \d+ sessions?: /);
+    expect(out).toContain("a");
+    expect(out).toContain("b");
+    // both were cleared (emptyState url is "")
+    expect((await loadState("a"))?.url).toBe("");
+    expect((await loadState("b"))?.url).toBe("");
   });
 });
 
@@ -434,19 +480,45 @@ describe("check / uncheck", () => {
 });
 
 describe("screenshot", () => {
-  test("full-page returns base64 to stdout", async () => {
-    const c = fakeClient({ screenshot: () => "BASE64DATA" });
-    const out = await cmdScreenshot({ ...ctx(), connect: async () => c }, {});
-    expect(out).toBe("BASE64DATA");
+  const PNG_B64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  test("--filename decodes the base64 and writes a real PNG at the given path", async () => {
+    const tmpFile = join(tmp, `shot-${Date.now()}.png`);
+    const c = fakeClient({ screenshot: () => PNG_B64 });
+    const out = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: tmpFile });
+    expect(out).toBe(`wrote ${tmpFile}`);
+    const written = new Uint8Array(await Bun.file(tmpFile).arrayBuffer());
+    expect([...written.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   });
-  test("--filename writes file", async () => {
-    const tmp = `/tmp/bowser-shot-${Date.now()}.png`;
-    const c = fakeClient({ screenshot: () => undefined });
-    const out = await cmdScreenshot(
-      { ...ctx(), connect: async () => c },
-      { filename: tmp },
-    );
-    expect(out).toBe(`wrote ${tmp}`);
+
+  test("no --filename writes a default screenshot-<session>.png in the cwd", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const session = "shotdefault";
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
+      expect(out).toBe("wrote screenshot-shotdefault.png");
+      expect(await Bun.file(join(tmp, "screenshot-shotdefault.png")).exists()).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  test("no --filename auto-increments when the default file already exists", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const session = "shotinc";
+      await Bun.write(join(tmp, "screenshot-shotinc.png"), "existing");
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
+      expect(out).toBe("wrote screenshot-shotinc-1.png");
+      expect(await Bun.file(join(tmp, "screenshot-shotinc-1.png")).exists()).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
   });
 });
 

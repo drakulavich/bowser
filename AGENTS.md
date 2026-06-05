@@ -138,3 +138,10 @@ npm publish --access public
 - **Tests redirect `process.env.HOME`** to a tmp dir via `beforeAll`, then restore it. This means anything that reads `~/...` (including `detectChromium`'s cache scan) sees the tmp HOME. Use `BOWSER_CHROMIUM_PATH` to bypass.
 - **Live-internet e2e is brittle.** `tests/e2e-search.test.ts` drives `github.com` and breaks when GitHub renames a CSS class or changes search box markup. Don't gate releases on it; gated behind `BOWSER_E2E_NET=1` for that reason.
 - **Bun version 1.3.11 vs 1.3.12.** `Bun.WebView` only exists in ≥ 1.3.12. Local devs on 1.3.11 will hit confusing failures inside the daemon. The `engines.bun` and CI `bun-version` constraints catch this; don't loosen them.
+- **Daemon serializes operations.** `startDaemon` in `src/daemon.ts` runs every incoming request through a promise-chain serializer (`src/serialize.ts`) with a `BOWSER_OP_TIMEOUT_MS` budget. A single `Bun.WebView` cannot handle concurrent `evaluate()` calls safely. Do not reintroduce a bare `handle(req).then(...)` dispatch; always route through the serializer.
+- **`sessionsRoot()` must be call-time, not module-time.** `src/state.ts` resolves the sessions root from `process.env.HOME` inside the function body (`sessionsRoot()`), not in a module-level `const`. A module-level snapshot captures the real home before test `beforeAll` hooks redirect `process.env.HOME` to a tmp dir, breaking test hermeticity. Mirrors the same pattern as `bowserCacheRoot()`.
+- **`view.url` returns `about:blank` on chrome after query-string navigations.** The daemon `state` op reports the real URL via `realUrl()`, which resolves `location.href` from inside the page instead of trusting `Bun.WebView`'s `view.url` getter. Don't replace `realUrl()` calls with `view.url` reads.
+- **`Bun.WebView.screenshot()` returns a `Blob`, not a base64 string.** Decode it
+  via `pngBytesFrom()` (`src/browser.ts`) — `String(blob)` is `"[object Blob]"`,
+  which silently produced the old 7-byte "PNG". `cmdScreenshot` writes the file in
+  the CLI process; `browser.screenshot()` only returns base64.

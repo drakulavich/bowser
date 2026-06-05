@@ -28,7 +28,7 @@ Commands:
   select <ref> <value>
   check <ref>
   uncheck <ref>
-  screenshot [ref] [--filename=f]
+  screenshot [--filename=f]         full-page screenshot (PNG)
   go-back
   go-forward
   reload
@@ -61,7 +61,7 @@ export async function run(argv: string[]): Promise<string> {
     case "install":    return cmdInstall(ctx, { force: Boolean(args.flags.force) });
     case "open":       return cmdOpen(ctx, p0);
     case "goto":       return cmdGoto(ctx, p0 ?? "");
-    case "close":      return cmdClose(ctx);
+    case "close":      return cmdClose(ctx, { name: p0, all: Boolean(args.flags.all) });
     case "snapshot":   return cmdSnapshot(ctx, {
       filename: args.flags.filename as string | undefined,
       depth: args.flags.depth as string | undefined,
@@ -75,7 +75,6 @@ export async function run(argv: string[]): Promise<string> {
     case "check":      return cmdCheck(ctx, p0 ?? "");
     case "uncheck":    return cmdUncheck(ctx, p0 ?? "");
     case "screenshot": return cmdScreenshot(ctx, {
-      ref: p0,
       filename: args.flags.filename as string | undefined,
     });
     case "go-back":    return cmdHistory(ctx, "back");

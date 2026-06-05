@@ -30,10 +30,15 @@ export interface SessionState {
   updatedAt: number;
 }
 
-const ROOT = join(homedir(), ".bowser", "sessions");
+/** Root of per-session state, resolved at call time from process.env.HOME so
+ *  tests that redirect HOME stay isolated. A module-level const would capture
+ *  the real home at import (before beforeAll runs). Mirrors bowserCacheRoot(). */
+export function sessionsRoot(): string {
+  return join(process.env.HOME || homedir(), ".bowser", "sessions");
+}
 
 export function sessionDir(name: string): string {
-  return join(ROOT, name);
+  return join(sessionsRoot(), name);
 }
 
 export async function ensureSessionDir(name: string): Promise<string> {

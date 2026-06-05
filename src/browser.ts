@@ -91,9 +91,27 @@ export function toBunBackend(b: Backend): unknown {
   };
 }
 
+/** Resolve the committed page URL. Bun.WebView's `view.url` returns "about:blank"
+ *  on the chrome backend even after a successful navigation to a query-string URL
+ *  (the page loaded; only the getter is wrong). When `viewUrl` is blank/empty, fall
+ *  back to evaluating location.href, which is correct on both backends. */
+export async function resolveUrl(
+  viewUrl: string,
+  evalHref: () => Promise<unknown>,
+): Promise<string> {
+  if (viewUrl && viewUrl !== "about:blank") return viewUrl;
+  try {
+    const loc = await evalHref();
+    return typeof loc === "string" && loc ? loc : viewUrl;
+  } catch {
+    return viewUrl;
+  }
+}
+
 export interface Browser {
   url: string;
   title: string;
+  realUrl(): Promise<string>;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
@@ -102,7 +120,7 @@ export interface Browser {
   hover(selector: string): Promise<void>;
   select(selector: string, value: string): Promise<void>;
   setChecked(selector: string, checked: boolean): Promise<void>;
-  screenshot(opts: { selector?: string; path?: string }): Promise<string | undefined>;
+  screenshot(): Promise<string>; // base64-encoded PNG (full page)
   back(): Promise<void>;
   forward(): Promise<void>;
   reload(): Promise<void>;
@@ -139,6 +157,7 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     get title() {
       return view.title as string;
     },
+    realUrl: () => resolveUrl(view.url as string, () => view.evaluate("location.href")),
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
     click: (selector) => view.click(selector),
@@ -170,17 +189,16 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
         if (Boolean(el.checked) !== ${checked}) el.click();
       })()`);
     },
-    screenshot: async ({ selector: _sel, path }) => {
-      // Bun.WebView exposes screenshot() returning base64 PNG.
-      // Element-bounded screenshots are not supported in v1; we return full-page either way.
-      // (Selector reserved for a future CDP path.)
-      const data = await (view as { screenshot?: () => Promise<string> }).screenshot?.();
+    screenshot: async () => {
+      // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
+      // Element-bounded screenshots are not supported in v1.
+      const data = await (view as { screenshot?: () => Promise<Blob | string> }).screenshot?.();
       if (!data) throw new Error('screenshot: not supported by this Bun.WebView');
-      if (path) {
-        await Bun.write(path, Buffer.from(String(data), 'base64'));
-        return undefined;
+      const bytes = await pngBytesFrom(data);
+      if (!isLikelyPng(bytes)) {
+        throw new Error('screenshot: WebView returned an empty/invalid image');
       }
-      return String(data);
+      return Buffer.from(bytes).toString('base64');
     },
     back: async () => {
       await view.evaluate("history.back()");
@@ -201,6 +219,27 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
       await view.close?.();
     },
   };
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** Cheap sanity check that `bytes` is a real PNG: the 8-byte signature plus a
+ *  plausible minimum length (a 1x1 PNG is ~67 bytes; the broken capture writes
+ *  only a few bytes). Used to fail loud instead of saving a broken screenshot. */
+export function isLikelyPng(bytes: Uint8Array): boolean {
+  if (bytes.length < 33) return false; // 8-byte sig + 25-byte IHDR chunk floor
+  for (let i = 0; i < PNG_SIGNATURE.length; i++) {
+    if (bytes[i] !== PNG_SIGNATURE[i]) return false;
+  }
+  return true;
+}
+
+/** Decode whatever Bun.WebView.screenshot() returns into raw PNG bytes.
+ *  Current Bun returns a Blob (type image/png); we also accept a base64 string
+ *  defensively in case the API shape changes. */
+export async function pngBytesFrom(data: Blob | string): Promise<Uint8Array> {
+  if (typeof data === "string") return new Uint8Array(Buffer.from(data, "base64"));
+  return new Uint8Array(await data.arrayBuffer());
 }
 
 /** Look in a handful of standard locations. Bun does its own detection too,

@@ -55,8 +55,11 @@ Override the choice with `BOWSER_BACKEND`:
 | `BOWSER_BACKEND=webkit` | Force native WebKit (macOS only; errors elsewhere). |
 | `BOWSER_BACKEND=chrome` | Force Chrome/Chromium. |
 
-**Note:** `screenshot` may be unsupported on the WebKit backend. If you need
-screenshots on macOS, use `BOWSER_BACKEND=chrome` or run `bowser install`.
+Screenshots are written as PNG files. `bowser screenshot --filename out.png` writes
+to `out.png` (relative paths resolve against your current directory); without
+`--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
+if that file already exists. Captures are full-page (element-bounded screenshots are
+not supported yet).
 
 ### How Chromium is resolved
 
@@ -112,10 +115,11 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `hover <ref>` | Hover an element |
 | `select <ref> <value>` | Choose a `<select>` option |
 | `check <ref>` / `uncheck <ref>` | Toggle a checkbox |
-| `screenshot [ref] [--filename=f]` | Full-page or element screenshot |
+| `screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions |
-| `close` | End the current session |
+| `close [name]` | End a session (defaults to `--session`; positional name overrides) |
+| `close --all` | Close every open session |
 | `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
 | `localstorage-get <key>` | Read a `localStorage` value |
 | `localstorage-set <key> <value>` | Write a `localStorage` entry |
@@ -136,6 +140,14 @@ Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 3. `bowser click e3` resolves the ref from state and dispatches the click via the daemon, using `Bun.WebView`'s built-in actionability auto-wait — no polling, no hard-coded timeouts.
 
 Because selectors are stable paths (not injected `data-` attributes), they survive page reloads between commands.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `BOWSER_BACKEND` | `webkit` or `chrome` — override the auto-selected browser backend. |
+| `BOWSER_CHROMIUM_PATH` | Explicit path to a `chrome-headless-shell` binary; bypasses auto-detection. |
+| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Bounds a wedged daemon operation — if the browser hangs, the command exits with a timeout error instead of blocking forever. |
 
 ## Tests
 
