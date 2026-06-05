@@ -244,6 +244,14 @@ export function isLikelyPng(bytes: Uint8Array): boolean {
   return true;
 }
 
+/** Decode whatever Bun.WebView.screenshot() returns into raw PNG bytes.
+ *  Current Bun returns a Blob (type image/png); we also accept a base64 string
+ *  defensively in case the API shape changes. */
+export async function pngBytesFrom(data: Blob | string): Promise<Uint8Array> {
+  if (typeof data === "string") return new Uint8Array(Buffer.from(data, "base64"));
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 /** Look in a handful of standard locations. Bun does its own detection too,
  *  but being explicit gives better error messages. */
 export function detectChromium(
