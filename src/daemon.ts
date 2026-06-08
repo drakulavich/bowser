@@ -323,7 +323,18 @@ export async function connectOrSpawn(
 async function spawnDaemon(session: string): Promise<void> {
   const { ensureSessionDir, sessionDir } = await import("./state.ts");
   await ensureSessionDir(session);
-  const entry = new URL("./daemon-main.ts", import.meta.url).pathname;
+
+  // When running as a compiled single-file binary, import.meta.url points to
+  // a virtual /$bunfs/root/ path that Bun.spawn cannot execute. In that case
+  // re-invoke the binary itself with a hidden --daemon flag; cli.ts intercepts
+  // it before the normal command dispatcher and starts the daemon directly.
+  // Use includes(), not startsWith(): Bun reports this module's import.meta.url
+  // as "file:///$bunfs/root/..." (with a file:// scheme), so a startsWith check
+  // misses it and silently falls through to the broken, unspawnable path.
+  const isCompiled = import.meta.url.includes("/$bunfs/");
+  const cmd: string[] = isCompiled
+    ? [process.execPath, "--daemon", session]
+    : [process.execPath, new URL("./daemon-main.ts", import.meta.url).pathname, session];
 
   // When BOWSER_CHROME_DEBUG is set, capture daemon + Chrome stderr to a log
   // file inside the session dir so spawn failures are diagnosable.
@@ -337,7 +348,7 @@ async function spawnDaemon(session: string): Promise<void> {
   }
 
   Bun.spawn({
-    cmd: [process.execPath, entry, session],
+    cmd,
     stdout,
     stderr,
     stdin: "ignore",
