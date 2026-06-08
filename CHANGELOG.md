@@ -56,6 +56,19 @@ All notable changes to this project are documented here. This project follows
   against a stuck daemon even when an operation is wedged in the serializer.
 - **`socketPath` reuses `sessionsRoot()`** (`src/daemon.ts`) instead of
   re-computing the sessions root independently.
+- **`screenshot` no longer hangs** (`#9`): the daemon ignored Bun's
+  partial-write socket contract, so any response larger than the ~8 KB send
+  buffer (a ~140 KB base64 PNG) was truncated mid-flight and the client hung
+  until timeout. Socket writes now buffer the unsent remainder and flush it on
+  `drain` (`src/socket-write.ts`), fixing every command in both directions
+  (large snapshots and `localstorage`/`fill` values too). Screenshots are
+  additionally written daemon-side and only the path is returned, keeping the
+  PNG payload off the socket entirely.
+- **Compiled-binary daemon spawn** (`#9`): a `bun build --compile` binary
+  could not start its daemon — `import.meta.url` is a virtual `/$bunfs/` path
+  that `Bun.spawn` cannot execute. The binary now re-invokes itself with a
+  hidden `--daemon` flag. This path was never exercised by `bun test` (which
+  runs in-process); a CI step now drives the real binary end-to-end.
 
 ### Added
 

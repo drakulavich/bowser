@@ -143,5 +143,22 @@ npm publish --access public
 - **`view.url` returns `about:blank` on chrome after query-string navigations.** The daemon `state` op reports the real URL via `realUrl()`, which resolves `location.href` from inside the page instead of trusting `Bun.WebView`'s `view.url` getter. Don't replace `realUrl()` calls with `view.url` reads.
 - **`Bun.WebView.screenshot()` returns a `Blob`, not a base64 string.** Decode it
   via `pngBytesFrom()` (`src/browser.ts`) — `String(blob)` is `"[object Blob]"`,
-  which silently produced the old 7-byte "PNG". `cmdScreenshot` writes the file in
-  the CLI process; `browser.screenshot()` only returns base64.
+  which silently produced the old 7-byte "PNG". `browser.screenshot()` returns
+  base64; the daemon (not the CLI) writes the PNG file when `cmdScreenshot` passes
+  an absolute path, so the large payload never crosses the socket (see #9).
+- **`socket.write()` does partial writes — never ignore its return value.** Bun's
+  low-level socket `write()` returns the bytes actually accepted and silently drops
+  the rest under backpressure (~8 KB send buffer on macOS Unix sockets). Route every
+  daemon/client socket write through `socketWriteAll()` (`src/socket-write.ts`) and
+  keep the `drain` handlers wired in both `Bun.listen` and `Bun.connect`. A raw
+  `socket.write(bigString)` truncates any payload over the buffer size — this is what
+  made `screenshot` (a ~140 KB base64 PNG) hang for 30 s before timing out (#9).
+- **Compiled-binary daemon spawn re-invokes the binary with `--daemon`.** In a
+  `bun build --compile` binary, `import.meta.url` is `file:///$bunfs/root/...` — a
+  virtual path `Bun.spawn` can't execute. `spawnDaemon()` detects this with
+  `import.meta.url.includes("/$bunfs/")` (NOT `startsWith`, the `file://` scheme
+  defeats it) and spawns `[execPath, "--daemon", session]`; `cli.ts` intercepts
+  `--daemon` as the first thing in `import.meta.main` and calls `startDaemon()`
+  WITHOUT `process.exit()` (the keepalive interval holds the process open — exiting
+  tears the daemon down the instant its socket is ready). `bun test` runs in-process
+  and never exercises this path; the e2e CI job drives the real binary to guard it.
