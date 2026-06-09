@@ -37,5 +37,44 @@ export const SCHEMAS: Schemas = {
     { name: "sessionstorage-clear",  positional: [],                                                                       flags: [] },
     { name: "eval",     positional: [{ name: "expression", required: true }],                                               flags: [] },
     { name: "run-code", positional: [{ name: "code", required: true }],                                                     flags: [] },
+    {
+      name: "cookie-list",
+      positional: [],
+      flags: [
+        { name: "domain", kind: "string" },
+        { name: "url",    kind: "string" },
+      ],
+    },
+    {
+      name: "cookie-get",
+      positional: [{ name: "name", required: true }],
+      flags: [
+        { name: "domain", kind: "string" },
+        { name: "url",    kind: "string" },
+      ],
+    },
+    {
+      name: "cookie-set",
+      positional: [{ name: "name", required: true }, { name: "value", required: true }],
+      flags: [
+        { name: "domain",    kind: "string" },
+        { name: "url",       kind: "string" },
+        { name: "path",      kind: "string" },
+        { name: "http-only", kind: "boolean" },
+        { name: "secure",    kind: "boolean" },
+        { name: "same-site", kind: "string" },
+        { name: "expires",   kind: "string" },
+      ],
+    },
+    {
+      name: "cookie-delete",
+      positional: [{ name: "name", required: true }],
+      flags: [
+        { name: "domain", kind: "string" },
+        { name: "url",    kind: "string" },
+        { name: "path",   kind: "string" },
+      ],
+    },
+    { name: "cookie-clear", positional: [], flags: [] },
   ],
 };
