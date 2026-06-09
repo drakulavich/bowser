@@ -5,6 +5,8 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-09
+
 ### Added
 
 - `localstorage-list`, `localstorage-get`, `localstorage-set`,
@@ -21,6 +23,10 @@ All notable changes to this project are documented here. This project follows
 - `--depth=N` is honored: `--depth=1` reproduces the flat v0.2 output;
   `--depth=2` keeps only the outermost landmark; default (omitted) is
   unbounded. `--depth=0` is rejected as a user error.
+- **`close --all`** (`#7`): closes every open session in one command.
+- **`BOWSER_OP_TIMEOUT_MS`** environment variable: sets the per-operation
+  timeout in milliseconds (default `30000`; `0` disables). Useful when
+  automating slow pages that would otherwise hang indefinitely.
 
 ### Changed
 
@@ -76,13 +82,6 @@ All notable changes to this project are documented here. This project follows
   `bun test` masked it (the runner force-exits); the real binary did not. The
   spawned process is now unref'd, and the compiled-binary CI step wraps each
   command in `timeout` so a regression fails fast instead of burning the job.
-
-### Added
-
-- **`close --all`** (`#7`): closes every open session in one command.
-- **`BOWSER_OP_TIMEOUT_MS`** environment variable: sets the per-operation
-  timeout in milliseconds (default `30000`; `0` disables). Useful when
-  automating slow pages that would otherwise hang indefinitely.
 
 ## [0.2.0] — 2026-04-26
 
