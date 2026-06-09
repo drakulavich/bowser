@@ -162,3 +162,12 @@ npm publish --access public
   WITHOUT `process.exit()` (the keepalive interval holds the process open — exiting
   tears the daemon down the instant its socket is ready). `bun test` runs in-process
   and never exercises this path; the e2e CI job drives the real binary to guard it.
+- **`spawnDaemon()` MUST `proc.unref()` the spawned daemon.** Bun keeps the
+  parent's event loop open until a spawned child exits — but the daemon runs
+  forever (keepalive interval), so without `unref()` a daemon-spawning command
+  (`bowser open` on a fresh session) prints its result and then hangs forever
+  instead of returning to the shell. `bun test` masks this completely (the test
+  runner force-exits the process regardless of open handles), so no unit test can
+  catch it — the compiled-binary CI step is the guard, and each of its commands is
+  wrapped in `timeout` because an un-unref'd regression otherwise burns the full
+  6 h job budget before GitHub cancels it.

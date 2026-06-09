@@ -69,6 +69,13 @@ All notable changes to this project are documented here. This project follows
   that `Bun.spawn` cannot execute. The binary now re-invokes itself with a
   hidden `--daemon` flag. This path was never exercised by `bun test` (which
   runs in-process); a CI step now drives the real binary end-to-end.
+- **Daemon-spawning commands no longer hang** (`#9`): `spawnDaemon()` never
+  `unref()`'d the detached daemon subprocess, so Bun kept the parent CLI's event
+  loop open waiting for a child that runs forever — `bowser open` on a fresh
+  session printed its result and then hung instead of returning to the shell.
+  `bun test` masked it (the runner force-exits); the real binary did not. The
+  spawned process is now unref'd, and the compiled-binary CI step wraps each
+  command in `timeout` so a regression fails fast instead of burning the job.
 
 ### Added
 

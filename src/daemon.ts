@@ -351,7 +351,7 @@ async function spawnDaemon(session: string): Promise<void> {
     void sessionDir;
   }
 
-  Bun.spawn({
+  const proc = Bun.spawn({
     cmd,
     stdout,
     stderr,
@@ -367,4 +367,11 @@ async function spawnDaemon(session: string): Promise<void> {
     // Detach so the daemon survives the parent CLI exiting.
     // Bun inherits no ptty by default; this is effectively fire-and-forget.
   });
+  // Don't let the spawned daemon keep THIS process alive. Bun keeps the parent's
+  // event loop open until a child exits — but the daemon runs forever (keepalive
+  // interval), so without unref() a daemon-spawning command (e.g. `bowser open`
+  // on a fresh session) prints its result and then hangs indefinitely instead of
+  // returning to the shell. `bun test` masks this (the test runner force-exits);
+  // the real binary does not. unref() lets the short-lived CLI exit immediately.
+  proc.unref();
 }
