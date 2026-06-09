@@ -16,6 +16,7 @@ import { openBrowser, assertValidBackendEnv, type Browser } from "./browser.ts";
 import { createSerializer, withTimeout } from "./serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "./socket-write.ts";
 import { sessionsRoot } from "./state.ts";
+import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
 
 export interface DaemonRequest {
   id: number;
@@ -35,7 +36,11 @@ export interface DaemonRequest {
     | "reload"
     | "state"
     | "ping"
-    | "shutdown";
+    | "shutdown"
+    | "cookie-get-all"
+    | "cookie-set"
+    | "cookie-delete"
+    | "cookie-clear";
   args?: unknown[];
 }
 
@@ -126,6 +131,36 @@ export async function startDaemon(session: string): Promise<void> {
             ok: true,
             result: { url: await browser.realUrl(), title: browser.title },
           };
+        // --- Cookie ops (chrome backend only; require Bun.WebView.cdp()) ---
+        case "cookie-get-all": {
+          // args[0]: optional url string[] to scope the query
+          const urls = args[0] as string[] | undefined;
+          const method = urls && urls.length > 0
+            ? "Network.getCookies"
+            : "Network.getAllCookies";
+          const params = urls && urls.length > 0 ? { urls } : undefined;
+          const res = await browser.cdp(method, params) as { cookies: Cookie[] };
+          return { id: req.id, ok: true, result: res.cookies };
+        }
+        case "cookie-set": {
+          const param = args[0] as CookieParam;
+          const res = await browser.cdp("Network.setCookie", param as unknown as Record<string, unknown>) as { success: boolean };
+          return { id: req.id, ok: true, result: { success: res.success } };
+        }
+        case "cookie-delete": {
+          const name = args[0] as string;
+          const opts = (args[1] ?? {}) as DeleteCookieOptions;
+          const deleteParams: Record<string, unknown> = { name };
+          if (opts.url) deleteParams.url = opts.url;
+          if (opts.domain) deleteParams.domain = opts.domain;
+          if (opts.path) deleteParams.path = opts.path;
+          await browser.cdp("Network.deleteCookies", deleteParams);
+          return { id: req.id, ok: true };
+        }
+        case "cookie-clear": {
+          await browser.cdp("Network.clearBrowserCookies");
+          return { id: req.id, ok: true };
+        }
         case "shutdown":
           // Respond first, then exit.
           queueMicrotask(async () => {
