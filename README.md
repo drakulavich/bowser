@@ -130,6 +130,8 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `sessionstorage-set <key> <value>` | Write a `sessionStorage` entry |
 | `sessionstorage-delete <key>` | Remove a `sessionStorage` entry |
 | `sessionstorage-clear` | Clear all `sessionStorage` entries |
+| `eval <expression>` | Evaluate a JS expression in the current page; prints the result |
+| `run-code <code>` | Run multi-statement JS in the current page; wrap in an IIFE, use `return` to produce a value |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 
@@ -190,7 +192,8 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
 - [ ] Network mocking (`route`, `unroute`)
 - [ ] Tracing / video / PDF output
-- [ ] `eval`, `run-code`, `dialog-accept`/`dismiss`, `resize`
+- [x] `eval`, `run-code`
+- [ ] `dialog-accept`/`dismiss`, `resize`
 - [ ] MCP bridge subcommand for non-CLI clients
 - [ ] Agent skill published to [agentskills.io](https://agentskills.io)
 

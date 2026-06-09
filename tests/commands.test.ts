@@ -14,6 +14,7 @@ import {
   cmdLocalStorageDelete, cmdLocalStorageClear,
   cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
   cmdSessionStorageDelete, cmdSessionStorageClear,
+  cmdEval, cmdRunCode,
   type CommandContext,
 } from "../src/commands.ts";
 import { saveState, loadState } from "../src/state.ts";
@@ -732,5 +733,90 @@ describe("history (go-back/go-forward/reload)", () => {
     const c = fakeClient({});
     await cmdHistory({ ...ctx(), connect: async () => c }, "reload");
     expect(c.calls).toContainEqual(["reload", []]);
+  });
+});
+
+describe("eval", () => {
+  test("string result is printed as-is", async () => {
+    const c = fakeClient({ evaluate: () => "hello" });
+    const out = await cmdEval({ ...ctx(), connect: async () => c }, "document.title");
+    expect(out).toBe("hello");
+    expect(c.calls[0]).toEqual(["evaluate", ["document.title"]]);
+  });
+
+  test("object result is JSON.stringified", async () => {
+    const c = fakeClient({ evaluate: () => ({ a: 1 }) });
+    const out = await cmdEval({ ...ctx(), connect: async () => c }, "window.obj");
+    expect(out).toBe('{"a":1}');
+  });
+
+  test("undefined result prints empty string", async () => {
+    const c = fakeClient({ evaluate: () => undefined });
+    const out = await cmdEval({ ...ctx(), connect: async () => c }, "void 0");
+    expect(out).toBe("");
+  });
+
+  test("null result prints empty string", async () => {
+    const c = fakeClient({ evaluate: () => null });
+    const out = await cmdEval({ ...ctx(), connect: async () => c }, "null");
+    expect(out).toBe("");
+  });
+
+  test("--json wraps result in { ok, result }", async () => {
+    const c = fakeClient({ evaluate: () => 42 });
+    const out = await cmdEval({ ...ctx({ json: true }), connect: async () => c }, "1+1");
+    expect(JSON.parse(out)).toEqual({ ok: true, result: 42 });
+  });
+
+  test("empty expression throws usage error", async () => {
+    await expect(cmdEval(ctx(), "")).rejects.toThrow(/^usage: bowser eval/);
+  });
+
+  test("missing expression throws usage error", async () => {
+    await expect(cmdEval(ctx(), undefined as unknown as string)).rejects.toThrow(/^usage: bowser eval/);
+  });
+});
+
+describe("run-code", () => {
+  test("wraps code in IIFE before sending to evaluate", async () => {
+    const c = fakeClient({ evaluate: () => 2 });
+    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 1+1");
+    expect(out).toBe("2");
+    const expr = c.calls[0]![1][0] as string;
+    expect(expr).toContain("return 1+1");
+    expect(expr).toContain("() => {");
+    expect(expr).toContain("})()");
+  });
+
+  test("string result is printed as-is", async () => {
+    const c = fakeClient({ evaluate: () => "hi" });
+    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 'hi'");
+    expect(out).toBe("hi");
+  });
+
+  test("object result is JSON.stringified", async () => {
+    const c = fakeClient({ evaluate: () => [1, 2, 3] });
+    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return [1,2,3]");
+    expect(out).toBe("[1,2,3]");
+  });
+
+  test("undefined result prints empty string", async () => {
+    const c = fakeClient({ evaluate: () => undefined });
+    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "1+1");
+    expect(out).toBe("");
+  });
+
+  test("--json wraps result in { ok, result }", async () => {
+    const c = fakeClient({ evaluate: () => "x" });
+    const out = await cmdRunCode({ ...ctx({ json: true }), connect: async () => c }, "return 'x'");
+    expect(JSON.parse(out)).toEqual({ ok: true, result: "x" });
+  });
+
+  test("empty code throws usage error", async () => {
+    await expect(cmdRunCode(ctx(), "")).rejects.toThrow(/^usage: bowser run-code/);
+  });
+
+  test("missing code throws usage error", async () => {
+    await expect(cmdRunCode(ctx(), undefined as unknown as string)).rejects.toThrow(/^usage: bowser run-code/);
   });
 });

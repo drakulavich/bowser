@@ -59,6 +59,8 @@ Do **not** use for static HTTP fetches.
 | `bowser sessionstorage-set <key> <value>` | Write a `sessionStorage` entry |
 | `bowser sessionstorage-delete <key>` | Remove a `sessionStorage` entry |
 | `bowser sessionstorage-clear` | Clear all `sessionStorage` entries |
+| `bowser eval <expression>` | Evaluate a JS expression in the current page; prints the result |
+| `bowser run-code <code>` | Run multi-statement JS; wrap in IIFE, use `return` to produce a value |
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 

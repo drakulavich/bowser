@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **`eval <expression>`** — evaluate a JS expression in the current page and print the result.
+  String results are printed as-is; other values are `JSON.stringify`'d; `undefined`/`null` prints nothing.
+  `--json` wraps output in `{ ok, result }`. Uses the existing `evaluate` daemon op; no new protocol op needed.
+- **`run-code <code>`** — run multi-statement JS in the current page by wrapping the user code in an
+  IIFE (`(() => { <code> })()`), enabling `return` statements and variable declarations. Same output rules as `eval`.
+
 ## [0.3.0] — 2026-06-09
 
 ### Added

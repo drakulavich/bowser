@@ -400,6 +400,34 @@ async function storageClear(ctx: CommandContext, area: "localStorage" | "session
   });
 }
 
+// Evaluate commands — run a JS expression or code block in the current page.
+// Both use the existing `evaluate` daemon op; no new daemon op is needed.
+
+function formatEvalResult(result: unknown): string {
+  if (result === undefined || result === null) return "";
+  if (typeof result === "string") return result;
+  return JSON.stringify(result);
+}
+
+export async function cmdEval(ctx: CommandContext, expression: string): Promise<string> {
+  if (!expression) throw new Error("usage: bowser eval <expression>");
+  return withClient(ctx, async (c) => {
+    const result = await c.request("evaluate", [expression]);
+    if (ctx.json) return JSON.stringify({ ok: true, result });
+    return formatEvalResult(result);
+  });
+}
+
+export async function cmdRunCode(ctx: CommandContext, code: string): Promise<string> {
+  if (!code) throw new Error("usage: bowser run-code <code>");
+  const wrapped = `(() => { ${code} })()`;
+  return withClient(ctx, async (c) => {
+    const result = await c.request("evaluate", [wrapped]);
+    if (ctx.json) return JSON.stringify({ ok: true, result });
+    return formatEvalResult(result);
+  });
+}
+
 export const cmdLocalStorageList = (ctx: CommandContext) => storageList(ctx, "localStorage");
 export const cmdLocalStorageGet = (ctx: CommandContext, key: string) =>
   storageGet(ctx, "localStorage", "localstorage-get", key);
