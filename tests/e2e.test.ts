@@ -10,8 +10,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium } from "../src/browser.ts";
-import { cmdClick, cmdClose, cmdOpen, cmdSnapshot } from "../src/commands.ts";
+import { detectChromium, isLikelyPng } from "../src/browser.ts";
+import { cmdClick, cmdClose, cmdOpen, cmdScreenshot, cmdSnapshot } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -74,5 +74,27 @@ runOrSkip("e2e: real Chromium", () => {
     // Click it — should complete without throwing.
     const out = await cmdClick({ session, json: true }, button!.id);
     expect(JSON.parse(out).ok).toBe(true);
+  }, 30_000);
+
+  test("screenshot writes a valid, non-truncated PNG file", async () => {
+    await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(html)}`);
+    const file = join(tmp, "e2e-shot.png");
+    const out = await cmdScreenshot({ session, json: false }, { filename: file });
+    expect(out).toBe(`wrote ${file}`);
+    const bytes = new Uint8Array(await Bun.file(file).arrayBuffer());
+    expect(isLikelyPng(bytes)).toBe(true);
+    expect(bytes.length).toBeGreaterThan(1000); // a real capture, not a stub
+  }, 30_000);
+
+  test("a >8 KB snapshot response survives the socket (backpressure)", async () => {
+    // Use buttons so the aria-tree snapshot script captures them (it only
+    // records interactive elements; plain <li> nodes are invisible to it).
+    const items = Array.from({ length: 500 }, (_, i) => `<button>item-${i}</button>`).join("");
+    const big = `<html><head><title>Big</title></head><body>${items}</body></html>`;
+    await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(big)}`);
+    const yaml = await cmdSnapshot({ session, json: false });
+    expect(yaml.length).toBeGreaterThan(8192);
+    expect(yaml).toContain("item-0");
+    expect(yaml).toContain("item-499"); // the tail proves nothing was truncated
   }, 30_000);
 });

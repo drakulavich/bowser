@@ -14,7 +14,7 @@ import {
   type SessionState,
 } from "./state.ts";
 import { mkdir, readdir, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export interface CommandContext {
   session: string;
@@ -231,9 +231,12 @@ export async function cmdScreenshot(
   const filename =
     opts.filename ??
     (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
+  // Resolve against the CLI's cwd and let the daemon write the file. The daemon
+  // runs with a different cwd, and its PNG payload (~140 KB base64) must not be
+  // shipped back over the socket — so we hand it an absolute target path.
+  const abs = resolve(process.cwd(), filename);
   return withClient(ctx, async (c) => {
-    const b64 = (await c.request("screenshot", [])) as string;
-    await Bun.write(filename, Buffer.from(b64, "base64"));
+    await c.request("screenshot", [abs]);
     return ctx.json ? JSON.stringify({ ok: true, filename }) : `wrote ${filename}`;
   });
 }

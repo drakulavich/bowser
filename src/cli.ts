@@ -96,13 +96,33 @@ export async function run(argv: string[]): Promise<string> {
 }
 
 if (import.meta.main) {
-  try {
-    const out = await run(process.argv.slice(2));
-    if (out) console.log(out);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`bowser: ${msg}`);
-    const userError = /^(usage:|unknown command|expected a ref|ref '.*' not found|no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
-    process.exit(userError ? 1 : 2);
+  // Hidden entry point used when the compiled binary re-spawns itself as a
+  // daemon (import.meta.url is virtual /$bunfs/... in a compiled binary, so
+  // the normal `bun daemon-main.ts` path is unavailable). This MUST stay the
+  // first branch in import.meta.main; any code above it would also run inside
+  // the daemon process.
+  if (process.argv[2] === "--daemon") {
+    const session = process.argv[3];
+    if (!session) {
+      console.error("daemon-main: missing session name");
+      process.exit(1);
+    }
+    const { startDaemon } = await import("./daemon.ts");
+    // Mirror daemon-main.ts: startDaemon sets up the socket listener and a
+    // keepalive interval, then resolves. Do NOT process.exit() here — that
+    // would tear the daemon down the instant its socket is ready (the bug that
+    // made the compiled binary's "did not start in time"). The keepalive holds
+    // the process open; the `else` keeps us out of the command dispatcher.
+    await startDaemon(session);
+  } else {
+    try {
+      const out = await run(process.argv.slice(2));
+      if (out) console.log(out);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`bowser: ${msg}`);
+      const userError = /^(usage:|unknown command|expected a ref|ref '.*' not found|no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
+      process.exit(userError ? 1 : 2);
+    }
   }
 }

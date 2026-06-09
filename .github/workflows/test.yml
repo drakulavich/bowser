@@ -79,3 +79,20 @@ jobs:
           BOWSER_CHROME_ARGS: "--no-sandbox"
           BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
         run: bun test tests/e2e-todo.test.ts
+      - name: E2E - compiled binary daemon + screenshot
+        # The unit/e2e suites run in-process via `bun test` and never exercise
+        # the COMPILED binary's daemon-spawn path (it re-invokes itself with a
+        # hidden --daemon flag). This step drives the real single-file binary
+        # end-to-end so a regression in that path fails CI instead of shipping.
+        env:
+          BOWSER_CHROME_ARGS: "--no-sandbox"
+          BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
+        run: |
+          bun build src/cli.ts --compile --outfile dist/bowser
+          # Wrap each command in `timeout`: a daemon-spawning command that fails
+          # to unref its child would hang forever (it once burned the full 6 h job
+          # budget). The guard turns a regression into a fast, clear failure.
+          timeout 60 ./dist/bowser open "data:text/html,<h1>ci</h1>" --session ci-smoke
+          timeout 60 ./dist/bowser screenshot --session ci-smoke --filename /tmp/ci-smoke.png
+          timeout 60 ./dist/bowser close --session ci-smoke
+          file /tmp/ci-smoke.png | grep -q "PNG image data"

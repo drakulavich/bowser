@@ -14,6 +14,7 @@ import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { openBrowser, assertValidBackendEnv, type Browser } from "./browser.ts";
 import { createSerializer, withTimeout } from "./serialize.ts";
+import { socketWriteAll, flushSocket, type WritableSocket } from "./socket-write.ts";
 import { sessionsRoot } from "./state.ts";
 
 export interface DaemonRequest {
@@ -103,10 +104,18 @@ export async function startDaemon(session: string): Promise<void> {
           await browser.setChecked(args[0] as string, false);
           return { id: req.id, ok: true };
         case "screenshot": {
-          // Browser returns base64 PNG; the CLI writes the file (so a relative
-          // --filename resolves against the user's cwd, not the daemon's).
-          const r = await browser.screenshot();
-          return { id: req.id, ok: true, result: r };
+          // When the CLI passes an absolute path, the daemon writes the PNG
+          // itself so the ~140 KB base64 never crosses the socket. With no path,
+          // return base64 — reserved for a future --stdout / programmatic caller
+          // (today cmdScreenshot always sends a path); safe to transmit since
+          // socketWriteAll handles backpressure.
+          const path = args[0] as string | undefined;
+          const b64 = await browser.screenshot();
+          if (path) {
+            await Bun.write(path, Buffer.from(b64, "base64"));
+            return { id: req.id, ok: true, result: { path } };
+          }
+          return { id: req.id, ok: true, result: b64 };
         }
         case "back":    await browser.back();    return { id: req.id, ok: true };
         case "forward": await browser.forward(); return { id: req.id, ok: true };
@@ -154,7 +163,8 @@ export async function startDaemon(session: string): Promise<void> {
           try {
             req = JSON.parse(line) as DaemonRequest;
           } catch (err) {
-            socket.write(
+            socketWriteAll(
+              socket as unknown as WritableSocket,
               JSON.stringify({
                 id: -1,
                 ok: false,
@@ -174,7 +184,7 @@ export async function startDaemon(session: string): Promise<void> {
             // possibly-stuck daemon. Dispatch it directly, bypassing the serializer.
             // Any queued or in-flight ops are abandoned — intended forced teardown.
             handle(req).then((res) => {
-              socket.write(JSON.stringify(res) + "\n");
+              socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
             }).catch(() => {
               // handle() never rejects; mirrors the guard on the serialized path.
             });
@@ -183,12 +193,12 @@ export async function startDaemon(session: string): Promise<void> {
               const underlying = handle(req);
               withTimeout(underlying, timeoutMs, req.op).then(
                 (res) => {
-                  socket.write(JSON.stringify(res) + "\n");
+                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
                 },
                 (err) => {
                   // handle() catches its own errors; this path is for timeouts.
                   const msg = err instanceof Error ? err.message : String(err);
-                  socket.write(JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
+                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
                 },
               );
               return underlying;
@@ -201,8 +211,15 @@ export async function startDaemon(session: string): Promise<void> {
       open(socket) {
         (socket as { data?: string }).data = "";
       },
-      error(_socket, err) {
+      drain(socket) {
+        flushSocket(socket as unknown as WritableSocket);
+      },
+      error(socket, err) {
         console.error("[bowser daemon] socket error:", err.message);
+        // Close the socket so its WriteQueue (`_wq` in socket-write.ts) can't
+        // strand buffered chunks on a peer that will never fire `drain` again.
+        // socket-write.ts delegates this cleanup to us by contract.
+        socket.end();
       },
     },
   });
@@ -246,6 +263,9 @@ export class DaemonClient {
             }
           }
         },
+        drain(s) {
+          flushSocket(s as unknown as WritableSocket);
+        },
       },
     });
   }
@@ -259,7 +279,7 @@ export class DaemonClient {
         if (res.ok) resolve(res.result);
         else reject(new Error(res.error ?? "daemon error"));
       });
-      this.sock!.write(line);
+      socketWriteAll(this.sock! as unknown as WritableSocket, line);
     });
   }
 
@@ -307,7 +327,18 @@ export async function connectOrSpawn(
 async function spawnDaemon(session: string): Promise<void> {
   const { ensureSessionDir, sessionDir } = await import("./state.ts");
   await ensureSessionDir(session);
-  const entry = new URL("./daemon-main.ts", import.meta.url).pathname;
+
+  // When running as a compiled single-file binary, import.meta.url points to
+  // a virtual /$bunfs/root/ path that Bun.spawn cannot execute. In that case
+  // re-invoke the binary itself with a hidden --daemon flag; cli.ts intercepts
+  // it before the normal command dispatcher and starts the daemon directly.
+  // Use includes(), not startsWith(): Bun reports this module's import.meta.url
+  // as "file:///$bunfs/root/..." (with a file:// scheme), so a startsWith check
+  // misses it and silently falls through to the broken, unspawnable path.
+  const isCompiled = import.meta.url.includes("/$bunfs/");
+  const cmd: string[] = isCompiled
+    ? [process.execPath, "--daemon", session]
+    : [process.execPath, new URL("./daemon-main.ts", import.meta.url).pathname, session];
 
   // When BOWSER_CHROME_DEBUG is set, capture daemon + Chrome stderr to a log
   // file inside the session dir so spawn failures are diagnosable.
@@ -320,8 +351,8 @@ async function spawnDaemon(session: string): Promise<void> {
     void sessionDir;
   }
 
-  Bun.spawn({
-    cmd: [process.execPath, entry, session],
+  const proc = Bun.spawn({
+    cmd,
     stdout,
     stderr,
     stdin: "ignore",
@@ -336,4 +367,11 @@ async function spawnDaemon(session: string): Promise<void> {
     // Detach so the daemon survives the parent CLI exiting.
     // Bun inherits no ptty by default; this is effectively fire-and-forget.
   });
+  // Don't let the spawned daemon keep THIS process alive. Bun keeps the parent's
+  // event loop open until a child exits — but the daemon runs forever (keepalive
+  // interval), so without unref() a daemon-spawning command (e.g. `bowser open`
+  // on a fresh session) prints its result and then hangs indefinitely instead of
+  // returning to the shell. `bun test` masks this (the test runner force-exits);
+  // the real binary does not. unref() lets the short-lived CLI exit immediately.
+  proc.unref();
 }

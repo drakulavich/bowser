@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import type { DaemonClient } from "../src/daemon.ts";
 import {
@@ -77,8 +77,17 @@ function fakeClient(handlers: {
         case "uncheck":
           handlers.uncheck?.(args[0] as string);
           return;
-        case "screenshot":
-          return handlers.screenshot?.(args[0] as string | undefined);
+        case "screenshot": {
+          // Mirror the real daemon: when given a path, write the PNG and return
+          // just { path }; otherwise return base64.
+          const path = args[0] as string | undefined;
+          const b64 = handlers.screenshot?.(path) ?? "";
+          if (path) {
+            await Bun.write(path, Buffer.from(b64, "base64"));
+            return { path };
+          }
+          return b64;
+        }
         case "back":
           handlers.back?.();
           return;
@@ -516,6 +525,26 @@ describe("screenshot", () => {
       const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
       expect(out).toBe("wrote screenshot-shotinc-1.png");
       expect(await Bun.file(join(tmp, "screenshot-shotinc-1.png")).exists()).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  test("sends an ABSOLUTE path so the daemon (different cwd) writes to the right place", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      await cmdScreenshot(
+        { session: "shotabs", json: false, connect: async () => c },
+        { filename: "rel.png" },
+      );
+      const call = c.calls.find(([op]) => op === "screenshot")!;
+      expect(isAbsolute(call[1][0] as string)).toBe(true);
+      // Use process.cwd() after chdir — on macOS mkdtemp returns /var/... but
+      // cwd() resolves symlinks to /private/var/..., so we must compare against
+      // the resolved form rather than the raw tmp string.
+      expect(call[1][0]).toBe(join(process.cwd(), "rel.png"));
     } finally {
       process.chdir(origCwd);
     }
