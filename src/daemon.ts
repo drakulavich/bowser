@@ -214,8 +214,12 @@ export async function startDaemon(session: string): Promise<void> {
       drain(socket) {
         flushSocket(socket as unknown as WritableSocket);
       },
-      error(_socket, err) {
+      error(socket, err) {
         console.error("[bowser daemon] socket error:", err.message);
+        // Close the socket so its WriteQueue (`_wq` in socket-write.ts) can't
+        // strand buffered chunks on a peer that will never fire `drain` again.
+        // socket-write.ts delegates this cleanup to us by contract.
+        socket.end();
       },
     },
   });
