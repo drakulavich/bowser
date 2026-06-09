@@ -2,7 +2,7 @@
 
 `bowser` is a Bun-native CLI that drives a real headless browser through concise shell commands. The CLI surface is **drop-in command-compatible with Microsoft `playwright-cli`** for the core agent loop. Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
-Public API: the 18 commands listed in `README.md`. User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. This file is for whoever is *modifying* the code.
+Public API: the commands listed in `README.md`'s command-reference table (currently 25). User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. This file is for whoever is *modifying* the code.
 
 ## Where to look first
 
