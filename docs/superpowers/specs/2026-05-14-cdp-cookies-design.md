@@ -1,8 +1,8 @@
 # Cookies via CDP — Design
 
 **Date:** 2026-05-14
-**Status:** Design — pending implementation
-**Target version:** TBD (first command set after `sessionstorage-*`)
+**Status:** Design — revised at implementation time (2026-06-10)
+**Target version:** Unreleased (after `sessionstorage-*` / `eval` / `run-code`)
 
 ## Goal
 
@@ -22,15 +22,25 @@ Non-goals in v1: cookie observation across all frames (we target the top frame's
 
 It also can't enumerate — you only get a flat `name=value; name=value` string with no attributes, so even for non-HttpOnly cookies you cannot accurately reproduce them on another machine. Shipping a `document.cookie`-only `cookie-list` would return rows that look complete but are missing every cookie an agent actually cares about. That is worse than not shipping the command at all.
 
+## Revision (2026-06-10)
+
+The transport section of this spec was superseded during implementation. Investigation against Bun 1.3.13 found:
+
+- **`Bun.WebView` launches Chrome with `--remote-debugging-pipe`**, not `--remote-debugging-port`. Chrome communicates over pipe file-descriptors 3/4, not a TCP WebSocket port. It therefore does **not** emit the `DevTools listening on ws://…` line to stderr, so the stderr-scrape approach does not work.
+- **`Bun.WebView` exposes no `onStderr` hook**: only `stderr: "inherit" | "ignore"` is available, so there is no way to capture stderr programmatically from bowser.
+- **Bun.WebView ships a first-class CDP API** (`view.cdp(method, params)` / `view.addEventListener("Domain.event", cb)`), Chrome backend only, verified working in Bun 1.3.13. This eliminates the need for a separate WebSocket transport, the dual-client attach risk, and the stderr-scraping fragility.
+
+Therefore `src/cdp/client.ts` and `src/cdp/launch.ts` were **not implemented**. The daemon delegates cookie ops directly to `view.cdp()` via a `cdp()` method on the `Browser` interface. The `src/cdp/types.ts` types file is unchanged (still useful for the Cookie/CookieParam interface). Everything else in the spec (goals, CLI surface, daemon op table, HttpOnly-first-class) is implemented exactly as written below.
+
 ## Approach
 
-Introduce a CDP transport in the daemon that runs alongside the existing `Bun.WebView` driver. The daemon owns one CDP connection per session; cookie ops (and future CDP-only ops) are routed through it.
+`Bun.WebView` exposes `view.cdp(method, params)` (Chrome backend only) — a first-party CDP channel that is part of the same browser session the WebView already manages. The daemon delegates all cookie ops through this channel.
 
-**Cooperation with `Bun.WebView`:** CDP supports multiple clients per Chrome instance (`/json/version` returns a `webSocketDebuggerUrl` and additional clients can attach). The WebView's own protocol traffic and our CDP traffic do not interfere — they are separate sessions over separate WebSocket connections.
+**No second CDP connection, no `--remote-debugging-port` injection, no stderr-scrape.** The `Browser` interface gains two methods:
+- `cdpAvailable(): boolean` — true iff the chrome backend is active.
+- `cdp(method, params?): Promise<unknown>` — delegates to `view.cdp()`; on webkit rejects with the chrome-backend required error immediately.
 
-**Launch flags:** the daemon sets `--remote-debugging-port=0` in Chrome's argv (via the existing `BOWSER_CHROME_ARGS` mechanism extended to a daemon-injected default). Port 0 asks the kernel for a free port; the actual port is reported on Chrome's stderr (`DevTools listening on ws://127.0.0.1:<port>/devtools/browser/<uuid>`). The daemon captures stderr, parses that line, and stores the browser-level WS URL. (Future: prefer `--remote-debugging-pipe` to avoid stderr-scraping, once we confirm it round-trips on every supported Chrome channel.)
-
-Once the browser WS URL is known, the daemon fetches `http://127.0.0.1:<port>/json/version` to confirm reachability, then resolves the active page target by calling `Target.getTargets` on the browser-level connection and matching the URL the WebView reported. The daemon opens a second WS to that page target's `webSocketDebuggerUrl` and treats it as the per-page CDP channel.
+Cookie ops are routed through the existing serializer like all other ops (CLAUDE.md gotcha: never bare-dispatch).
 
 ## Daemon protocol additions
 
@@ -59,29 +69,30 @@ New ops on `DaemonRequest["op"]`:
 
 **Critically:** all five commands operate on **HttpOnly cookies as first-class data**. No flag suppresses or hides them. Help text and SKILL.md explicitly call this out: "HttpOnly cookies are visible to `cookie-list` / `cookie-get` and settable via `cookie-set --http-only`."
 
-## Implementation outline
+## Implementation outline (as built)
 
 | Path | Status | Responsibility |
 |---|---|---|
-| `src/cdp/client.ts` | new | minimal CDP client: ws connect, `send(method, params)` → promise, event subscription. ~120 LOC. No npm dep — Bun has built-in WebSocket. |
-| `src/cdp/launch.ts` | new | parses Chrome stderr for `DevTools listening on ws://…`, resolves page target via `/json/version` + `Target.getTargets`. ~80 LOC. |
-| `src/browser.ts` | extend | accept an `onStderr` hook so the daemon can scrape the debug URL; expose `cdpEndpoint()` getter. |
-| `src/daemon.ts` | extend | own the CDP client lifecycle; add cookie ops. |
-| `src/commands.ts` | extend | `cmdCookieList/Get/Set/Delete/Clear` using `loadState` for the default URL. |
+| `src/cdp/types.ts` | new | `Cookie`, `CookieParam`, `DeleteCookieOptions` types mirroring CDP Network domain. No runtime dep. |
+| ~~`src/cdp/client.ts`~~ | not built | superseded by `view.cdp()` — see Revision note above. |
+| ~~`src/cdp/launch.ts`~~ | not built | superseded by `view.cdp()` — see Revision note above. |
+| `src/browser.ts` | extend | `Browser` interface gains `cdpAvailable(): boolean` and `cdp(method, params?): Promise<unknown>`; `openBrowser` implements them via `view.cdp()` (chrome) or a rejection with the chrome-backend required message (webkit). |
+| `src/daemon.ts` | extend | adds four cookie ops routed through the serializer; each calls `browser.cdp("Network.*")`. |
+| `src/commands.ts` | extend | `cmdCookieList/Get/Set/Delete/Clear`; default URL from daemon `state` op. |
 | `src/cli/schemas.ts` | extend | five new command schemas with the flags above. |
-| `src/cli.ts` | extend | dispatch + help text. |
-| `tests/cookie.test.ts` | new | unit tests against an extended `fakeClient` handling the new ops. |
-| `tests/e2e-cookie.test.ts` | new | e2e: open a `data:` URL, set/get/delete a cookie via CDP, verify roundtrip including HttpOnly. |
+| `src/cli.ts` | extend | dispatch + help text (HttpOnly-first-class note in help). |
+| `tests/cookie.test.ts` | new | 31 unit tests against an extended `fakeClient` handling the four new ops. |
+| `tests/e2e-cookie.test.ts` | new | 8 e2e tests gated on `BOWSER_E2E=1 && BOWSER_BACKEND=chrome`; serves a local HTTP page for cookie origin; HttpOnly core risk confirmed. |
 | `README.md` | extend | command table + roadmap tick. |
-| `skills/bowser/SKILL.md` | extend | command reference. |
+| `skills/bowser/SKILL.md` | extend | command reference + HttpOnly note. |
 | `CHANGELOG.md` | append | `cookie-*` entry. |
 
-## Risks and mitigations
+## Risks and mitigations (updated)
 
-- **Chrome stderr parsing for the debug port.** Fragile across channels/versions. Mitigation: regex is loose (`/DevTools listening on (ws:\/\/\S+)/`), and we test on the Playwright-pinned `chrome-headless-shell` build that bowser already downloads via `bowser install`. Future: switch to `--remote-debugging-pipe` (file-descriptor transport) once confirmed working under `Bun.spawn`.
-- **Two CDP clients on one Chrome.** Confirmed supported by CDP, but Bun.WebView's internal protocol must not refuse a second attach. To de-risk, the new e2e test runs alongside an active WebView (open + snapshot) and exercises both paths in the same daemon process.
-- **HttpOnly correctness.** Asserted explicitly in the e2e test: set an HttpOnly cookie via `cookie-set --http-only`, observe it absent in `document.cookie` but present in `cookie-list`.
-- **Compile-target size.** Adding a CDP client should not pull in npm deps (Bun built-in WebSocket only). Verify `dist/bowser` binary size delta is < 1 MB in CI.
+- ~~**Chrome stderr parsing for the debug port.**~~ Eliminated — `view.cdp()` needs no port, no stderr scrape.
+- ~~**Two CDP clients on one Chrome.**~~ Eliminated — `view.cdp()` uses the same session Bun already owns.
+- **HttpOnly correctness.** Asserted in `tests/e2e-cookie.test.ts`: set HttpOnly cookie via `cookie-set --http-only`, serve a local HTTP page (same origin as the cookie scope), confirm it appears in `cookie-list` but NOT in `document.cookie`. Verified passing.
+- **Compile-target size.** No new npm deps. Binary delta vs stack base: **+16 KB** (well under the 1 MB threshold).
 
 ## Out of scope (next spec)
 

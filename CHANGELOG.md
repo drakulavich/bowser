@@ -12,6 +12,33 @@ All notable changes to this project are documented here. This project follows
   `--json` wraps output in `{ ok, result }`. Uses the existing `evaluate` daemon op; no new protocol op needed.
 - **`run-code <code>`** — run multi-statement JS in the current page by wrapping the user code in an
   IIFE (`(() => { <code> })()`), enabling `return` statements and variable declarations. Same output rules as `eval`.
+- **`cookie-list [--domain=<d>] [--url=<u>]`** — list all cookies for the current page (default) or a
+  specified scope. Text mode: `name=value` per line; `--json` returns the full CDP shape including all
+  attributes. **HttpOnly cookies are first-class** — they are visible and indistinguishable from ordinary
+  cookies (unlike `document.cookie`, which hides them). Requires the chrome backend.
+- **`cookie-get <name> [--domain=<d>] [--url=<u>]`** — print a cookie's value (empty string if not found).
+  `--json` returns `{ ok, cookie }` (full CDP shape) or `{ ok: false }`. HttpOnly cookies are visible.
+  Requires the chrome backend.
+- **`cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Lax|Strict|None] [--expires=<unix-s>]`** — set one cookie.
+  Defaults `--url` to the current page URL when neither `--domain` nor `--url` is given.
+  `--http-only` sets the HttpOnly flag (the cookie will be invisible to `document.cookie`).
+  Requires the chrome backend.
+- **`cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]`** — delete matching cookie(s).
+  Requires the chrome backend.
+- **`cookie-clear`** — wipe all browser cookies in the current session's Chrome profile.
+  Requires the chrome backend.
+- **`src/cdp/types.ts`** — `Cookie`, `CookieParam`, `DeleteCookieOptions` types mirroring the
+  CDP Network domain; no runtime dependency.
+- **`Browser.cdp()` / `Browser.cdpAvailable()`** — raw CDP access exposed on the `Browser`
+  interface in `src/browser.ts`. Delegates to `Bun.WebView.cdp()` on the chrome backend; rejects
+  with a clear error on webkit. Future CDP-based commands (tab management, network mocking, etc.)
+  build on these methods.
+
+  Implementation note: the design spec proposed a bespoke `src/cdp/client.ts` WebSocket transport
+  and `src/cdp/launch.ts` stderr-scraper. At implementation time Bun 1.3.13's `Bun.WebView` was
+  found to launch Chrome with `--remote-debugging-pipe` (no stderr `DevTools listening on ws://` line,
+  no stderr hook API) and to expose `view.cdp()` natively. The bespoke transport was therefore
+  unnecessary; `view.cdp()` is the supported path. The spec doc was updated accordingly.
 
 ## [0.3.0] — 2026-06-09
 

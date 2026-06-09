@@ -61,6 +61,11 @@ Do **not** use for static HTTP fetches.
 | `bowser sessionstorage-clear` | Clear all `sessionStorage` entries |
 | `bowser eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `bowser run-code <code>` | Run multi-statement JS; wrap in IIFE, use `return` to produce a value |
+| `bowser cookie-list [--domain=<d>] [--url=<u>]` | List cookies; HttpOnly cookies are **first-class** (chrome backend only) |
+| `bowser cookie-get <name> [--domain=<d>] [--url=<u>]` | Print cookie value; HttpOnly cookies are visible (chrome backend only) |
+| `bowser cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Lax\|Strict\|None] [--expires=<unix-s>]` | Set a cookie; `--http-only` sets the HttpOnly flag (chrome backend only) |
+| `bowser cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]` | Delete a cookie (chrome backend only) |
+| `bowser cookie-clear` | Wipe all browser cookies in this session (chrome backend only) |
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 
@@ -116,3 +121,5 @@ bowser install                            # one-time Chromium download
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.
 - **No Chromium found** — run `bowser install` or set `BOWSER_CHROMIUM_PATH`.
+- **cookie-* commands require the chrome backend** — `cookie-list`, `cookie-get`, `cookie-set`, `cookie-delete`, `cookie-clear` all call `Bun.WebView.cdp()` which is chrome-only. On WebKit they exit with a clear error. Use `bowser install` and set `BOWSER_BACKEND=chrome` (or `BOWSER_CHROMIUM_PATH`) to enable them.
+- **HttpOnly cookies** — `cookie-list` and `cookie-get` see HttpOnly cookies; `cookie-set --http-only` creates them. These are the session/auth cookies that `document.cookie` cannot access. Without the chrome backend you would miss them silently.
