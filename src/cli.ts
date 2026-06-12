@@ -9,6 +9,7 @@ import {
   cmdLocalStorageDelete, cmdLocalStorageClear,
   cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
   cmdSessionStorageDelete, cmdSessionStorageClear,
+  cmdEval, cmdRunCode,
   type CommandContext,
 } from "./commands.ts";
 
@@ -43,6 +44,8 @@ Commands:
   sessionstorage-set <key> <value>   write a sessionStorage entry
   sessionstorage-delete <key>        remove a sessionStorage entry
   sessionstorage-clear               clear all sessionStorage entries
+  eval <expression>                  evaluate JS expression in the page, print result
+  run-code <code>                    run multi-statement JS in the page, print result
 
 Global flags:
   -s, --session <name>     session name (default: "default")
@@ -91,6 +94,8 @@ export async function run(argv: string[]): Promise<string> {
     case "sessionstorage-set":    return cmdSessionStorageSet(ctx, p0 ?? "", p1 ?? "");
     case "sessionstorage-delete": return cmdSessionStorageDelete(ctx, p0 ?? "");
     case "sessionstorage-clear":  return cmdSessionStorageClear(ctx);
+    case "eval":      return cmdEval(ctx, p0 ?? "");
+    case "run-code":  return cmdRunCode(ctx, p0 ?? "");
     default:           throw new Error(`unknown command: ${args.command}`);
   }
 }
