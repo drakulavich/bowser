@@ -10,6 +10,7 @@ import {
   cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
   cmdSessionStorageDelete, cmdSessionStorageClear,
   cmdEval, cmdRunCode,
+  cmdCookieList, cmdCookieGet, cmdCookieSet, cmdCookieDelete, cmdCookieClear,
   type CommandContext,
 } from "./commands.ts";
 
@@ -46,6 +47,16 @@ Commands:
   sessionstorage-clear               clear all sessionStorage entries
   eval <expression>                  evaluate JS expression in the page, print result
   run-code <code>                    run multi-statement JS in the page, print result
+  cookie-list [--domain=<d>] [--url=<u>]
+                                     list cookies (HttpOnly cookies included; chrome backend only)
+  cookie-get <name> [--domain=<d>] [--url=<u>]
+                                     print cookie value (HttpOnly cookies are first-class)
+  cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>]
+             [--http-only] [--secure] [--same-site=Lax|Strict|None] [--expires=<unix-s>]
+                                     set a cookie; --http-only sets the HttpOnly flag (chrome backend only)
+  cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]
+                                     delete matching cookie(s) (chrome backend only)
+  cookie-clear                       wipe all browser cookies in this session (chrome backend only)
 
 Global flags:
   -s, --session <name>     session name (default: "default")
@@ -96,6 +107,31 @@ export async function run(argv: string[]): Promise<string> {
     case "sessionstorage-clear":  return cmdSessionStorageClear(ctx);
     case "eval":      return cmdEval(ctx, p0 ?? "");
     case "run-code":  return cmdRunCode(ctx, p0 ?? "");
+    case "cookie-list":   return cmdCookieList(ctx, {
+      domain: args.flags.domain as string | undefined,
+      url:    args.flags.url    as string | undefined,
+    });
+    case "cookie-get":    return cmdCookieGet(ctx, p0 ?? "", {
+      domain: args.flags.domain as string | undefined,
+      url:    args.flags.url    as string | undefined,
+    });
+    case "cookie-set":    return cmdCookieSet(ctx, p0 ?? "", p1 ?? "", {
+      domain:   args.flags.domain    as string | undefined,
+      url:      args.flags.url       as string | undefined,
+      path:     args.flags.path      as string | undefined,
+      httpOnly: args.flags["http-only"] ? true : undefined,
+      secure:   args.flags.secure       ? true : undefined,
+      sameSite: args.flags["same-site"] as "Strict" | "Lax" | "None" | undefined,
+      expires:  args.flags.expires !== undefined
+        ? Number(args.flags.expires)
+        : undefined,
+    });
+    case "cookie-delete": return cmdCookieDelete(ctx, p0 ?? "", {
+      domain: args.flags.domain as string | undefined,
+      url:    args.flags.url    as string | undefined,
+      path:   args.flags.path   as string | undefined,
+    });
+    case "cookie-clear":  return cmdCookieClear(ctx);
     default:           throw new Error(`unknown command: ${args.command}`);
   }
 }

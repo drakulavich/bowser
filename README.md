@@ -132,6 +132,11 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `sessionstorage-clear` | Clear all `sessionStorage` entries |
 | `eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `run-code <code>` | Run multi-statement JS in the current page; wrap in an IIFE, use `return` to produce a value |
+| `cookie-list [--domain=<d>] [--url=<u>]` | List cookies for the current page (or specified scope). HttpOnly cookies are first-class. Requires the chrome backend. |
+| `cookie-get <name> [--domain=<d>] [--url=<u>]` | Print a cookie's value (empty if not found). HttpOnly cookies are visible. Requires the chrome backend. |
+| `cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Lax\|Strict\|None] [--expires=<unix-s>]` | Set a cookie. Defaults URL to current page. `--http-only` sets the HttpOnly flag. Requires the chrome backend. |
+| `cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]` | Delete a cookie. Requires the chrome backend. |
+| `cookie-clear` | Wipe all browser cookies in this session. Requires the chrome backend. |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 
@@ -187,7 +192,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [ ] Storage commands (`cookie-*`, `localstorage-*`, `state-save`/`load`)
   - [x] `localstorage-{list,get,set,delete,clear}`
   - [x] `sessionstorage-{list,get,set,delete,clear}`
-  - [ ] `cookie-*` (needs CDP for HttpOnly cookies — see [design](./docs/superpowers/specs/2026-05-14-cdp-cookies-design.md))
+  - [x] `cookie-{list,get,set,delete,clear}` — HttpOnly cookies are first-class; uses `Bun.WebView.cdp()` (chrome backend only; see [design](./docs/superpowers/specs/2026-05-14-cdp-cookies-design.md))
   - [ ] `state-save` / `state-load` (storage state JSON dump/restore)
 - [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
 - [ ] Network mocking (`route`, `unroute`)

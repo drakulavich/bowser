@@ -125,6 +125,11 @@ export interface Browser {
   forward(): Promise<void>;
   reload(): Promise<void>;
   close(): Promise<void>;
+  /** True when the chrome backend is active and view.cdp() is available. */
+  cdpAvailable(): boolean;
+  /** Send a raw CDP command. Chrome backend only; rejects on webkit with a
+   *  clear message indicating the chrome backend is required. */
+  cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
 }
 
 /** Open a Bun.WebView. Backend precedence (highest first):
@@ -217,6 +222,23 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
       await view.close?.();
+    },
+    cdpAvailable(): boolean {
+      return spec.kind === "chrome";
+    },
+    cdp(method: string, params?: Record<string, unknown>): Promise<unknown> {
+      // view.cdp() is available on the chrome backend only. On webkit it throws
+      // "WebView.cdp() requires backend: \"chrome\"". We surface a friendlier
+      // error that matches the daemon op's wording.
+      if (spec.kind !== "chrome") {
+        return Promise.reject(
+          new Error(
+            "CDP is only available on the chrome backend (current: webkit) — " +
+            "run 'bowser install' to use Chromium-backed features",
+          ),
+        );
+      }
+      return (view as unknown as { cdp: (m: string, p?: Record<string, unknown>) => Promise<unknown> }).cdp(method, params);
     },
   };
 }
