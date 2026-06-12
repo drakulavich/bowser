@@ -6,7 +6,7 @@
 //     BOWSER_CHROMIUM_PATH=$(find ~/.bowser/chromium -type f -name chrome-headless-shell | head -1) \
 //     bun test tests/e2e-cookie.test.ts
 //
-// Key assertion (the spec's核心 risk):
+// Key assertion (the spec's core risk):
 //   An HttpOnly cookie set via cookie-set --http-only MUST appear in
 //   cookie-list but MUST NOT appear in document.cookie (JS-invisible).
 

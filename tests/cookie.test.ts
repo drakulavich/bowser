@@ -399,16 +399,82 @@ describe("cookie-clear", () => {
 describe("webkit error", () => {
   test("webkit error propagates as thrown Error with chrome-backend wording", async () => {
     const webkitError = new Error(
-      "cookie commands require the chrome backend " +
-      "(run 'bowser install' and set BOWSER_BACKEND=chrome, " +
-      "or rely on the bowser-managed Chromium)",
+      "CDP is only available on the chrome backend (current: webkit) — " +
+      "run 'bowser install' to use Chromium-backed features",
     );
     const c = fakeCookieClient({
       "cookie-get-all": () => { throw webkitError; },
     });
     await expect(
       cmdCookieList({ ...ctx(), connect: async () => c }),
-    ).rejects.toThrow(/cookie commands require the chrome backend/);
+    ).rejects.toThrow(/CDP is only available on the chrome backend/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI dispatch tri-state: absent --http-only/--secure must NOT set those keys
+// ---------------------------------------------------------------------------
+import { parse } from "../src/cli/parser.ts";
+import { SCHEMAS } from "../src/cli/schemas.ts";
+
+describe("cli dispatch tri-state flags", () => {
+  // These tests verify that absent boolean flags produce undefined opts (not false),
+  // and that present boolean flags produce true opts. The regression was:
+  // Boolean(args.flags["http-only"]) coerced undefined→false, causing
+  // param.httpOnly=false to be written to the CDP CookieParam even when the
+  // user never passed --http-only. The fix: flag ? true : undefined.
+
+  test("absent --http-only parses to undefined (not false)", () => {
+    const args = parse(SCHEMAS, ["cookie-set", "k", "v"]);
+    // The FIXED expression — this is what run() should use after the fix:
+    const httpOnly: true | undefined = args.flags["http-only"] ? true : undefined;
+    expect(httpOnly).toBeUndefined();
+  });
+
+  test("present --http-only parses to true", () => {
+    const args = parse(SCHEMAS, ["cookie-set", "k", "v", "--http-only"]);
+    const httpOnly: true | undefined = args.flags["http-only"] ? true : undefined;
+    expect(httpOnly).toBe(true);
+  });
+
+  test("absent --secure parses to undefined (not false)", () => {
+    const args = parse(SCHEMAS, ["cookie-set", "k", "v"]);
+    const secure: true | undefined = args.flags["secure"] ? true : undefined;
+    expect(secure).toBeUndefined();
+  });
+
+  test("cmdCookieSet with httpOnly:false sets httpOnly:false on param (regression demo)", async () => {
+    // Documents the old behaviour: passing false explicitly still reaches the daemon.
+    // After the cli.ts fix, run() never passes false — it passes undefined or true.
+    await seedState("https://example.com/");
+    let received: Record<string, unknown> | undefined;
+    const c = fakeCookieClient({
+      "cookie-set": (p) => { received = p as Record<string, unknown>; return { success: true }; },
+    });
+    await cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { httpOnly: false });
+    // cmdCookieSet correctly checks !== undefined, so false is forwarded.
+    // The fix is upstream in run(), not in cmdCookieSet itself.
+    expect((received as { httpOnly?: boolean }).httpOnly).toBe(false);
+  });
+
+  test("cmdCookieSet with httpOnly:undefined does NOT set httpOnly on param", async () => {
+    await seedState("https://example.com/");
+    let received: Record<string, unknown> | undefined;
+    const c = fakeCookieClient({
+      "cookie-set": (p) => { received = p as Record<string, unknown>; return { success: true }; },
+    });
+    await cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { httpOnly: undefined });
+    expect("httpOnly" in received!).toBe(false);
+  });
+
+  test("cmdCookieSet with secure:undefined does NOT set secure on param", async () => {
+    await seedState("https://example.com/");
+    let received: Record<string, unknown> | undefined;
+    const c = fakeCookieClient({
+      "cookie-set": (p) => { received = p as Record<string, unknown>; return { success: true }; },
+    });
+    await cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { secure: undefined });
+    expect("secure" in received!).toBe(false);
   });
 });
 

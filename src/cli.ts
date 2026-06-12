@@ -119,8 +119,8 @@ export async function run(argv: string[]): Promise<string> {
       domain:   args.flags.domain    as string | undefined,
       url:      args.flags.url       as string | undefined,
       path:     args.flags.path      as string | undefined,
-      httpOnly: Boolean(args.flags["http-only"]),
-      secure:   Boolean(args.flags.secure),
+      httpOnly: args.flags["http-only"] ? true : undefined,
+      secure:   args.flags.secure       ? true : undefined,
       sameSite: args.flags["same-site"] as "Strict" | "Lax" | "None" | undefined,
       expires:  args.flags.expires !== undefined
         ? Number(args.flags.expires)

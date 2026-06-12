@@ -233,9 +233,8 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
       if (spec.kind !== "chrome") {
         return Promise.reject(
           new Error(
-            "cookie commands require the chrome backend " +
-            "(run 'bowser install' and set BOWSER_BACKEND=chrome, " +
-            "or rely on the bowser-managed Chromium)",
+            "CDP is only available on the chrome backend (current: webkit) — " +
+            "run 'bowser install' to use Chromium-backed features",
           ),
         );
       }
