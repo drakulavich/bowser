@@ -64,6 +64,10 @@ extracted — see Status above.)*
 
 ## Validation
 
+These commands require the standalone **OpenSpec CLI** — a global developer tool
+installed separately, **not** a bowser dependency (bowser ships no runtime deps).
+The specs themselves are plain Markdown and reviewable without it.
+
 ```bash
 openspec spec list                    # enumerate capabilities
 openspec validate --specs --strict    # structural validation — must exit 0

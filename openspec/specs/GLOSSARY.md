@@ -9,7 +9,7 @@ need a new term, add it here first.
 | **CLI** | The `bowser` command — TypeScript executed by Bun, dispatched in `src/cli.ts` (per-command flags in `src/cli/schemas.ts`, implementations in `src/commands.ts`). |
 | **playwright-cli compatibility** | bowser's core command surface mirrors Microsoft `playwright-cli` byte-for-byte (commands, flag syntax, snapshot YAML), so existing playwright skills run unchanged. Enforced by `tests/compat.test.ts`. |
 | **Session** | A named, persistent browsing context backed by one long-lived browser process; selected with `-s`/`--session`. State persists under `~/.bowser/sessions/<name>/state.json` (`src/state.ts`). |
-| **Daemon** | The per-session background process that holds the `Bun.WebView` and answers requests over a Unix socket; serializes operations one at a time (`src/daemon.ts`, `src/serialize.ts`). |
+| **Daemon** | The per-session background process that holds the `Bun.WebView` and answers requests over a Unix socket, serializing operations one at a time. Spawned via `src/daemon-main.ts`; the request handler and op union live in `src/daemon.ts`, the serializer in `src/serialize.ts`. |
 | **Bun.WebView** | The Bun ≥ 1.3.12 API bowser drives the browser through (`src/browser.ts`). |
 | **Backend** | The browser engine behind the Daemon: **WebKit** (macOS native default) or **Chrome/Chromium** over the DevTools Protocol; chosen by `resolveBackend` (`src/browser.ts`). |
 | **CDP** | Chrome DevTools Protocol — the wire protocol used to drive the Chrome/Chromium Backend (and the only Backend that supports `cookie-*`). |
