@@ -13,7 +13,7 @@ need a new term, add it here first.
 | **Bun.WebView** | The Bun ≥ 1.3.12 API bowser drives the browser through (`src/browser.ts`). |
 | **Backend** | The browser engine behind the Daemon: **WebKit** (macOS native default) or **Chrome/Chromium** over the DevTools Protocol; chosen by `resolveBackend` (`src/browser.ts`). |
 | **CDP** | Chrome DevTools Protocol — the wire protocol used to drive the Chrome/Chromium Backend (and the only Backend that supports `cookie-*`). |
-| **Explicit Chromium opt-in** | bowser uses Chrome only when explicitly enabled — the bowser-managed cache exists or `BOWSER_CHROMIUM_PATH` is set (`hasExplicitChromium`) — never incidental system Chrome. `BOWSER_BACKEND=webkit\|chrome` overrides. |
+| **Explicit Chromium opt-in** | On **macOS** bowser defaults to native WebKit and uses Chrome only when explicitly enabled — the bowser-managed cache exists or `BOWSER_CHROMIUM_PATH` is set (`hasExplicitChromium`) — never incidental system Chrome. On **Linux/Windows** there is no native WebKit, so Chrome/Chromium over CDP is the default Backend. `BOWSER_BACKEND=webkit\|chrome` overrides everywhere. |
 | **Ref** | A bare `eN` handle (no `@` prefix) for an interactive element on the current page, resolved to a stable CSS path via `resolveRef`/`loadRef` and persisted in Session state. |
 | **Snapshot** | The aria-tree YAML listing of interactive Refs for the current page (`src/snapshot.ts`), byte-for-byte compatible with playwright-cli; `--json` emits the structured shape, `--depth=N` clips landmark nesting. |
 | **Interactive element** | A DOM element the Snapshot script selects and assigns a Ref (buttons, links, inputs, …). |
