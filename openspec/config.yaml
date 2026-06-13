@@ -1,0 +1,34 @@
+schema: spec-driven
+
+context: |
+  bowser: a Bun-native CLI (`@drakulavich/bowser-cli`, command `bowser`) that drives a
+  real browser through concise shell commands — a drop-in, command-compatible
+  alternative to Microsoft `playwright-cli` for AI agents. Built on `Bun.WebView`
+  (Bun >= 1.3.12). Each named Session keeps a long-lived browser process (a per-session
+  Daemon over a Unix socket) so multi-step flows survive between commands; session state
+  lives under `~/.bowser/sessions/<name>/`.
+  Backends: macOS defaults to native WebKit; Chrome/Chromium over the DevTools Protocol
+  on explicit opt-in (Linux/Windows, the bowser-managed cache, or `BOWSER_CHROMIUM_PATH`);
+  `BOWSER_BACKEND=webkit|chrome` overrides (`resolveBackend`, `src/browser.ts`).
+  Public surface: the ~25 commands in README.md's reference table (open / goto / snapshot /
+  click / fill / type / press / ... / localstorage-* / sessionstorage-* / cookie-* / eval /
+  run-code / install) plus `skills/bowser/SKILL.md`. Snapshot output is aria-tree YAML,
+  byte-for-byte compatible with playwright-cli; Refs are bare `eN` (no `@` prefix). Exit
+  codes: 0 success, 1 user error, 2 runtime error.
+  Conventions: Bun-native (`Bun.file` / `Bun.write` / `Bun.spawn` / `Bun.connect`; no npm
+  runtime dependencies — the package is devDep-only); TDD (write the failing test first);
+  the per-session Daemon serializes operations and must not be mocked in e2e tests;
+  `~`-relative paths resolve at call time, not module load.
+  See openspec/specs/README.md for personas and reading order, GLOSSARY.md for canonical
+  terms.
+
+rules:
+  proposal:
+    - Always include a "Non-goals" section
+  specs:
+    - Use glossary terms from openspec/specs/GLOSSARY.md verbatim
+    - Every requirement needs at least one happy-path and one error/edge scenario
+    - State outcomes, not implementation mechanisms, in requirement text
+    - Reference named personas (Sora/Ravi/Dana), never a generic "user"
+    - Record anything uncertain or where spec and code disagree under "Open Issues" — never invent a resolution
+    - Trace each requirement to code with file:line refs in a Technical Note
