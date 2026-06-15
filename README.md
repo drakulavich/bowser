@@ -116,6 +116,7 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `select <ref> <value>` | Choose a `<select>` option |
 | `check <ref>` / `uncheck <ref>` | Toggle a checkbox |
 | `screenshot [--filename=f]` | Full-page screenshot (PNG) |
+| `resize <width> <height>` | Set the viewport size in pixels. Works on both backends. |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions |
 | `close [name]` | End a session (defaults to `--session`; positional name overrides) |
@@ -200,7 +201,8 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [ ] Network mocking (`route`, `unroute`)
 - [ ] Tracing / video / PDF output
 - [x] `eval`, `run-code`
-- [ ] `dialog-accept`/`dismiss`, `resize`
+- [x] `resize`
+- [ ] `dialog-accept`/`dismiss`
 - [ ] MCP bridge subcommand for non-CLI clients
 - [ ] Agent skill published to [agentskills.io](https://agentskills.io)
 

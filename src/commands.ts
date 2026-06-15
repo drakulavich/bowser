@@ -242,6 +242,26 @@ export async function cmdScreenshot(
   });
 }
 
+export async function cmdResize(
+  ctx: CommandContext,
+  widthArg: string,
+  heightArg: string,
+): Promise<string> {
+  const width = Number(widthArg);
+  const height = Number(heightArg);
+  if (
+    !widthArg || !heightArg ||
+    !Number.isInteger(width) || !Number.isInteger(height) ||
+    width <= 0 || height <= 0
+  ) {
+    throw new Error("usage: bowser resize <width> <height>");
+  }
+  return withClient(ctx, async (c) => {
+    await c.request("resize", [width, height]);
+    return ctx.json ? JSON.stringify({ ok: true, width, height }) : `resized ${width}x${height}`;
+  });
+}
+
 export async function cmdHistory(
   ctx: CommandContext,
   which: "back" | "forward" | "reload",

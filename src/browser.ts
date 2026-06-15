@@ -121,6 +121,7 @@ export interface Browser {
   select(selector: string, value: string): Promise<void>;
   setChecked(selector: string, checked: boolean): Promise<void>;
   screenshot(): Promise<string>; // base64-encoded PNG (full page)
+  resize(width: number, height: number): Promise<void>;
   back(): Promise<void>;
   forward(): Promise<void>;
   reload(): Promise<void>;
@@ -204,6 +205,10 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
         throw new Error('screenshot: WebView returned an empty/invalid image');
       }
       return Buffer.from(bytes).toString('base64');
+    },
+    resize: async (width: number, height: number) => {
+      // Bun.WebView.resize() is native and works on both backends.
+      await (view as unknown as { resize: (w: number, h: number) => Promise<void> }).resize(width, height);
     },
     back: async () => {
       await view.evaluate("history.back()");

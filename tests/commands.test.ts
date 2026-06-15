@@ -8,7 +8,7 @@ import { isAbsolute, join } from "node:path";
 import type { DaemonClient } from "../src/daemon.ts";
 import {
   cmdClick, cmdFill, cmdType, cmdPress, cmdHover, cmdSelect,
-  cmdCheck, cmdUncheck, cmdScreenshot, cmdHistory,
+  cmdCheck, cmdUncheck, cmdScreenshot, cmdResize, cmdHistory,
   cmdClose, cmdOpen, cmdGoto, cmdSnapshot, cmdList, cmdInstall,
   cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
   cmdLocalStorageDelete, cmdLocalStorageClear,
@@ -549,6 +549,36 @@ describe("screenshot", () => {
     } finally {
       process.chdir(origCwd);
     }
+  });
+});
+
+describe("resize", () => {
+  test("sends the resize op with numeric width/height and reports them", async () => {
+    const c = fakeClient({});
+    const out = await cmdResize({ ...ctx(), connect: async () => c }, "800", "600");
+    expect(out).toBe("resized 800x600");
+    const call = c.calls.find(([op]) => op === "resize")!;
+    expect(call[1]).toEqual([800, 600]);
+  });
+
+  test("--json reports ok with numeric dimensions", async () => {
+    const c = fakeClient({});
+    const out = await cmdResize({ ...ctx({ json: true }), connect: async () => c }, "1024", "768");
+    expect(JSON.parse(out)).toEqual({ ok: true, width: 1024, height: 768 });
+  });
+
+  test.each([
+    ["", "600"],
+    ["800", ""],
+    ["800", "0"],
+    ["-1", "600"],
+    ["800", "12.5"],
+    ["wide", "600"],
+  ])("rejects invalid dimensions (%p, %p)", async (w, h) => {
+    const c = fakeClient({});
+    await expect(
+      cmdResize({ ...ctx(), connect: async () => c }, w, h),
+    ).rejects.toThrow(/usage: bowser resize/);
   });
 });
 

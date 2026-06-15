@@ -31,6 +31,7 @@ export interface DaemonRequest {
     | "check"
     | "uncheck"
     | "screenshot"
+    | "resize"
     | "back"
     | "forward"
     | "reload"
@@ -121,6 +122,12 @@ export async function startDaemon(session: string): Promise<void> {
             return { id: req.id, ok: true, result: { path } };
           }
           return { id: req.id, ok: true, result: b64 };
+        }
+        case "resize": {
+          const width = args[0] as number;
+          const height = args[1] as number;
+          await browser.resize(width, height);
+          return { id: req.id, ok: true };
         }
         case "back":    await browser.back();    return { id: req.id, ok: true };
         case "forward": await browser.forward(); return { id: req.id, ok: true };
