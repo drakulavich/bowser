@@ -1,6 +1,6 @@
 {
   "name": "@drakulavich/bowser-cli",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A Bun-native, drop-in command-compatible alternative to Microsoft playwright-cli for AI agents.",
   "type": "module",
   "bin": {
