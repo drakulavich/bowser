@@ -66,6 +66,8 @@ Do **not** use for static HTTP fetches.
 | `bowser cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Lax\|Strict\|None] [--expires=<unix-s>]` | Set a cookie; `--http-only` sets the HttpOnly flag (chrome backend only) |
 | `bowser cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]` | Delete a cookie (chrome backend only) |
 | `bowser cookie-clear` | Wipe all browser cookies in this session (chrome backend only) |
+| `bowser state-save <file>` | Dump cookies + localStorage to a Playwright `storageState` JSON file (chrome backend only) |
+| `bowser state-load <file>` | Restore cookies + localStorage from a `storageState` file (chrome backend only) |
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 
@@ -121,5 +123,6 @@ bowser install                            # one-time Chromium download
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.
 - **No Chromium found** — run `bowser install` or set `BOWSER_CHROMIUM_PATH`.
-- **cookie-* commands require the chrome backend** — `cookie-list`, `cookie-get`, `cookie-set`, `cookie-delete`, `cookie-clear` all call `Bun.WebView.cdp()` which is chrome-only. On WebKit they exit with a clear error. Use `bowser install` and set `BOWSER_BACKEND=chrome` (or `BOWSER_CHROMIUM_PATH`) to enable them.
+- **cookie-* and state-* commands require the chrome backend** — `cookie-list`, `cookie-get`, `cookie-set`, `cookie-delete`, `cookie-clear`, `state-save`, and `state-load` all call `Bun.WebView.cdp()` which is chrome-only. On WebKit they exit with a clear error. Use `bowser install` and set `BOWSER_BACKEND=chrome` (or `BOWSER_CHROMIUM_PATH`) to enable them.
+- **`state-save` / `state-load` round-trip a Playwright `storageState`** — `state-save <file>` dumps the cookie jar + current-origin localStorage; `state-load <file>` restores them. The JSON is interchangeable with Playwright's `storageState`. Because the daemon holds one page, load only restores localStorage for origins matching the current page (others are reported skipped) — navigate to an origin first, then `state-load`, to restore its localStorage. sessionStorage is not persisted (matching Playwright).
 - **HttpOnly cookies** — `cookie-list` and `cookie-get` see HttpOnly cookies; `cookie-set --http-only` creates them. These are the session/auth cookies that `document.cookie` cannot access. Without the chrome backend you would miss them silently.
