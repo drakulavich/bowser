@@ -2,7 +2,7 @@
 
 `bowser` is a Bun-native CLI that drives a real headless browser through concise shell commands. The CLI surface is **drop-in command-compatible with Microsoft `playwright-cli`** for the core agent loop. Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
-Public API: the commands listed in `README.md`'s command-reference table (currently 25). User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. This file is for whoever is *modifying* the code.
+Public API: the commands listed in `README.md`'s command-reference table (37 as of v0.5.0). User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. This file is for whoever is *modifying* the code.
 
 ## Where to look first
 
@@ -123,6 +123,7 @@ npm publish --access public
 3. Add an entry in `SCHEMAS.commands` in `src/cli/schemas.ts` and a case in `src/cli.ts`'s switch.
 4. Add a unit test in `tests/commands.test.ts` (extend `fakeClient` if needed).
 5. Add a row to the README table and the SKILL.md command reference.
+6. Add a one-line entry to `DESCRIPTIONS` in `src/mcp.ts` — every non-excluded command is **auto-exposed as an MCP tool** by reflecting over `SCHEMAS.commands`, and `tests/mcp.test.ts` has a drift-guard asserting every command has a description. (Exclude a command from MCP by adding it to `MCP_EXCLUDED`.) The MCP server must keep **stdout pure** (JSON-RPC only) — never `console.log` from `src/mcp.ts`; it routes through `run()` which returns a string rather than printing.
 
 **Change snapshot output**: edit `src/snapshot.ts`, update the golden in `tests/snapshot.test.ts`, then update `tests/e2e*.test.ts` substring matchers.
 

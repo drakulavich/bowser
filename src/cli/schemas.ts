@@ -79,5 +79,6 @@ export const SCHEMAS: Schemas = {
     { name: "cookie-clear", positional: [], flags: [] },
     { name: "state-save", positional: [{ name: "file", required: true }], flags: [] },
     { name: "state-load", positional: [{ name: "file", required: true }], flags: [] },
+    { name: "mcp", positional: [], flags: [] },
   ],
 };

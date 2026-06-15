@@ -61,6 +61,7 @@ Commands:
   cookie-clear                       wipe all browser cookies in this session (chrome backend only)
   state-save <file>                  dump cookies + localStorage to a Playwright storageState file (chrome backend only)
   state-load <file>                  restore cookies + localStorage from a storageState file (chrome backend only)
+  mcp                                run a Model Context Protocol stdio server exposing commands as tools
 
 Global flags:
   -s, --session <name>     session name (default: "default")
@@ -139,6 +140,10 @@ export async function run(argv: string[]): Promise<string> {
     case "cookie-clear":  return cmdCookieClear(ctx);
     case "state-save":    return cmdStateSave(ctx, p0 ?? "");
     case "state-load":    return cmdStateLoad(ctx, p0 ?? "");
+    // mcp is a long-lived server intercepted at the import.meta.main entry layer
+    // (it never returns a string), so it never reaches this dispatcher in normal
+    // use. This guard only fires if run(["mcp"]) is called directly.
+    case "mcp":        throw new Error("usage: run 'bowser mcp' as a top-level subcommand");
     default:           throw new Error(`unknown command: ${args.command}`);
   }
 }
@@ -162,6 +167,15 @@ if (import.meta.main) {
     // made the compiled binary's "did not start in time"). The keepalive holds
     // the process open; the `else` keeps us out of the command dispatcher.
     await startDaemon(session);
+  } else if (process.argv[2] === "mcp") {
+    // Long-lived stdio MCP server. Handled here at the entry layer (like
+    // --daemon) because it never returns a string — keeping run()'s contract
+    // string-returning. It is still listed in SCHEMAS/HELP for discoverability.
+    const { runMcpServer } = await import("./mcp.ts");
+    // Pass our own `run` so the MCP server never re-imports this module — cli.ts
+    // is still mid-evaluation here (top-level await below), and a dynamic
+    // import("./cli.ts") would deadlock in the compiled binary.
+    await runMcpServer({ run });
   } else {
     try {
       const out = await run(process.argv.slice(2));
