@@ -140,8 +140,28 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `cookie-clear` | Wipe all browser cookies in this session. Requires the chrome backend. |
 | `state-save <file>` | Dump the cookie jar + current-origin localStorage to a Playwright-compatible `storageState` JSON file. Requires the chrome backend. |
 | `state-load <file>` | Restore cookies + localStorage from a `storageState` file. localStorage restores for origins matching the current page; others are reported skipped. Requires the chrome backend. |
+| `mcp` | Run a Model Context Protocol stdio server exposing every command above as an MCP tool. |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
+
+## MCP bridge
+
+`bowser mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing every browser command as an MCP tool — so MCP clients (Claude Desktop, etc.) can drive the browser without shelling out. Each tool maps 1:1 to a CLI command and takes an optional `session` argument; outputs are the same JSON as `--json` mode.
+
+Register it in an MCP client config (e.g. `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "bowser": { "command": "bowser", "args": ["mcp"] }
+  }
+}
+```
+
+Notes:
+- Run `bowser install` once first (it is intentionally **not** exposed as a tool — it shells out and downloads Chromium).
+- The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
+- The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
 
 ## How it works
 
@@ -203,7 +223,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [x] `eval`, `run-code`
 - [x] `resize`
 - [ ] `dialog-accept`/`dismiss`
-- [ ] MCP bridge subcommand for non-CLI clients
+- [x] MCP bridge subcommand for non-CLI clients (`bowser mcp`)
 - [ ] Agent skill published to [agentskills.io](https://agentskills.io)
 
 ## Migrating from 0.1.0

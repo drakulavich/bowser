@@ -69,6 +69,7 @@ Do **not** use for static HTTP fetches.
 | `bowser cookie-clear` | Wipe all browser cookies in this session (chrome backend only) |
 | `bowser state-save <file>` | Dump cookies + localStorage to a Playwright `storageState` JSON file (chrome backend only) |
 | `bowser state-load <file>` | Restore cookies + localStorage from a `storageState` file (chrome backend only) |
+| `bowser mcp` | Run a Model Context Protocol stdio server exposing every command as an MCP tool |
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 
