@@ -11,6 +11,7 @@ import {
   cmdSessionStorageDelete, cmdSessionStorageClear,
   cmdEval, cmdRunCode,
   cmdCookieList, cmdCookieGet, cmdCookieSet, cmdCookieDelete, cmdCookieClear,
+  cmdStateSave, cmdStateLoad,
   type CommandContext,
 } from "./commands.ts";
 
@@ -57,6 +58,8 @@ Commands:
   cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]
                                      delete matching cookie(s) (chrome backend only)
   cookie-clear                       wipe all browser cookies in this session (chrome backend only)
+  state-save <file>                  dump cookies + localStorage to a Playwright storageState file (chrome backend only)
+  state-load <file>                  restore cookies + localStorage from a storageState file (chrome backend only)
 
 Global flags:
   -s, --session <name>     session name (default: "default")
@@ -132,6 +135,8 @@ export async function run(argv: string[]): Promise<string> {
       path:   args.flags.path   as string | undefined,
     });
     case "cookie-clear":  return cmdCookieClear(ctx);
+    case "state-save":    return cmdStateSave(ctx, p0 ?? "");
+    case "state-load":    return cmdStateLoad(ctx, p0 ?? "");
     default:           throw new Error(`unknown command: ${args.command}`);
   }
 }

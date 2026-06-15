@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`state-save <file>` / `state-load <file>`** — dump and restore a Playwright-compatible
+  `storageState` JSON: the full cookie jar plus per-origin localStorage. Files are interchangeable
+  with Playwright's `storageState` (sessionStorage is intentionally excluded, as in Playwright).
+  Save captures the current page's origin; load restores localStorage for origins matching the
+  current page and reports any others as skipped (navigate to each, then load again). Cookies use
+  the CDP `cookie-*` ops, so both commands require the chrome backend. Composed entirely in the
+  command layer — no new daemon op.
+
 ## [0.4.0] — 2026-06-15
 
 ### Added

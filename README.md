@@ -137,6 +137,8 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Lax\|Strict\|None] [--expires=<unix-s>]` | Set a cookie. Defaults URL to current page. `--http-only` sets the HttpOnly flag. Requires the chrome backend. |
 | `cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]` | Delete a cookie. Requires the chrome backend. |
 | `cookie-clear` | Wipe all browser cookies in this session. Requires the chrome backend. |
+| `state-save <file>` | Dump the cookie jar + current-origin localStorage to a Playwright-compatible `storageState` JSON file. Requires the chrome backend. |
+| `state-load <file>` | Restore cookies + localStorage from a `storageState` file. localStorage restores for origins matching the current page; others are reported skipped. Requires the chrome backend. |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 
@@ -193,7 +195,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
   - [x] `localstorage-{list,get,set,delete,clear}`
   - [x] `sessionstorage-{list,get,set,delete,clear}`
   - [x] `cookie-{list,get,set,delete,clear}` — HttpOnly cookies are first-class; uses `Bun.WebView.cdp()` (chrome backend only; see [design](./docs/superpowers/specs/2026-05-14-cdp-cookies-design.md))
-  - [ ] `state-save` / `state-load` (storage state JSON dump/restore)
+  - [x] `state-save` / `state-load` — Playwright-compatible `storageState` JSON (cookies + per-origin localStorage; chrome backend only)
 - [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
 - [ ] Network mocking (`route`, `unroute`)
 - [ ] Tracing / video / PDF output
