@@ -4,7 +4,7 @@ import { SCHEMAS } from "./cli/schemas.ts";
 import {
   cmdInstall, cmdOpen, cmdGoto, cmdClose, cmdSnapshot, cmdClick,
   cmdFill, cmdType, cmdPress, cmdHover, cmdSelect, cmdCheck,
-  cmdUncheck, cmdScreenshot, cmdHistory, cmdList,
+  cmdUncheck, cmdScreenshot, cmdResize, cmdHistory, cmdList,
   cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
   cmdLocalStorageDelete, cmdLocalStorageClear,
   cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
@@ -32,6 +32,7 @@ Commands:
   check <ref>
   uncheck <ref>
   screenshot [--filename=f]         full-page screenshot (PNG)
+  resize <width> <height>           set the viewport size (pixels)
   go-back
   go-forward
   reload
@@ -94,6 +95,7 @@ export async function run(argv: string[]): Promise<string> {
     case "screenshot": return cmdScreenshot(ctx, {
       filename: args.flags.filename as string | undefined,
     });
+    case "resize":     return cmdResize(ctx, p0 ?? "", p1 ?? "");
     case "go-back":    return cmdHistory(ctx, "back");
     case "go-forward": return cmdHistory(ctx, "forward");
     case "reload":     return cmdHistory(ctx, "reload");

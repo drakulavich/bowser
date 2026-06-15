@@ -44,6 +44,7 @@ Do **not** use for static HTTP fetches.
 | `bowser select <ref> <value>` | Choose a `<select>` option |
 | `bowser check <ref>` / `uncheck <ref>` | Toggle a checkbox/radio |
 | `bowser screenshot [--filename=f]` | Full-page screenshot (PNG) |
+| `bowser resize <width> <height>` | Set the viewport size in pixels (both backends) |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser list` | Enumerate sessions |
 | `bowser close [name]` | End a session (defaults to `--session`; positional name overrides) |

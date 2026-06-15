@@ -7,6 +7,9 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- **`resize <width> <height>`** — set the viewport size in pixels via the native
+  `Bun.WebView.resize()`. Works on both the webkit and chrome backends. Validates that both
+  dimensions are positive integers.
 - **`state-save <file>` / `state-load <file>`** — dump and restore a Playwright-compatible
   `storageState` JSON: the full cookie jar plus per-origin localStorage. Files are interchangeable
   with Playwright's `storageState` (sessionStorage is intentionally excluded, as in Playwright).

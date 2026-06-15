@@ -21,6 +21,7 @@ export const SCHEMAS: Schemas = {
     { name: "check",       positional: [{ name: "ref", required: true }],                    flags: [] },
     { name: "uncheck",     positional: [{ name: "ref", required: true }],                    flags: [] },
     { name: "screenshot",  positional: [],                                                   flags: [{ name: "filename", kind: "string" }] },
+    { name: "resize",      positional: [{ name: "width", required: true }, { name: "height", required: true }], flags: [] },
     { name: "go-back",     positional: [],                                                   flags: [] },
     { name: "go-forward",  positional: [],                                                   flags: [] },
     { name: "reload",      positional: [],                                                   flags: [] },
