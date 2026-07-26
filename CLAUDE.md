@@ -29,7 +29,7 @@ BOWSER_E2E=1 bun test                          # + offline e2e against real head
 BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub search; brittle)
 ```
 
-Requires Bun ≥ 1.3.12 — `Bun.WebView` does not exist in 1.3.11, and devs on it hit confusing failures inside the daemon. `engines.bun` and the CI `bun-version` constraints catch this; don't loosen them. Bumping the floor means updating `package.json`, the README, and both workflows.
+Requires Bun ≥ 1.3.12 — `Bun.WebView` does not exist in 1.3.11, and devs on it hit confusing failures inside the daemon. `engines.bun` and the CI `bun-version` constraints catch this; don't loosen them. Bumping the floor means updating `package.json`, the README, and `test.yml`'s three `bun-version` pins — `release.yml` uses `bun-version: latest` and enforces no floor.
 
 E2E tests redirect `$HOME` to a tmp dir, which hides the bowser-managed Chromium cache. Point at one explicitly:
 
@@ -39,7 +39,7 @@ BOWSER_E2E=1 \
   bun test tests/e2e.test.ts tests/e2e-todo.test.ts
 ```
 
-CI (`test.yml` on push/PR, `release.yml` on `v*` tags) does the same: it runs `bowser install --force`, locates `chrome-headless-shell`, and exports `BOWSER_CHROMIUM_PATH`.
+The e2e job in `test.yml` (push/PR) does the same for CI: `install --force`, locate `chrome-headless-shell`, export `BOWSER_CHROMIUM_PATH`. `release.yml` (on `v*` tags) only cross-compiles, smoke-tests `--help`, and publishes — it runs no browser tests.
 
 ## Release
 
@@ -52,8 +52,8 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 ## Conventions
 
 - **Refs are bare `eN`** (no `@` prefix). `resolveRef` rejects `@`-prefixed input.
-- **Snapshot output is aria-tree YAML** matching `playwright-cli` byte-for-byte (no `url:`/`title:` header). `--depth=N` is parsed but flat — fix the parser, not callers, when implementing nesting.
-- **Exit codes**: `0` success, `1` user error (`usage:`, `unknown command`, `expected a ref`, `ref '...' not found`, `no open page`), `2` runtime error. The regex lives in `src/cli.ts`'s `import.meta.main` block — keep error messages aligned with it.
+- **Snapshot output is aria-tree YAML** matching `playwright-cli` byte-for-byte (no `url:`/`title:` header). `--depth=N` is honored in `toYaml` (`src/snapshot.ts`): default unbounded, `depth=1` reproduces the flat v0.2 output, `depth=0` is a user error. Change nesting there, not in the parser or callers.
+- **Exit codes**: `0` success, `1` user error (`usage:`, `unknown command`, `expected a ref`, `ref '...' not found`, `no open page`, `invalid BOWSER_BACKEND`, `BOWSER_BACKEND=webkit`), `2` runtime error. The regex lives in `src/cli.ts`'s `import.meta.main` block — keep error messages aligned with it.
 - **Per-command implementations** in `src/commands.ts` use `loadRef(session, ref)` for ref-action commands and `emptyState(name)` for null-state fallbacks.
 - **Daemon round-trips are not free** — one Unix socket RTT per `c.request(...)`. `cmdFill` already costs 3 (click → evaluate(clear) → type); collapse if you add a similar command.
 - **Bun-native, not Node-native**: prefer `Bun.file`, `Bun.write`, `Bun.spawn`, `Bun.connect`. Avoid npm dependencies — the package is intentionally devDep-only.
