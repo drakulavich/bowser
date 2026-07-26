@@ -20,7 +20,9 @@ User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. Thi
 
 ```bash
 bun install
-bun build src/cli.ts --compile --outfile dist/bowser        # add --target=bun-{darwin,linux}-{arm64,x64} to cross-compile
+bun build src/cli.ts --compile --outfile dist/bowser
+# release.yml cross-compiles one binary per target, passing a single
+# --target=<t> each: bun-darwin-arm64, bun-darwin-x64, bun-linux-x64, bun-linux-arm64
 
 bun test                                       # unit + command tests, fake daemon, no Chromium
 BOWSER_E2E=1 bun test                          # + offline e2e against real headless Chromium
