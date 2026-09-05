@@ -150,6 +150,8 @@ runOrSkip("e2e: WebKit agent loop", () => {
     const out = JSON.parse(await cmdResize(ctx, "900", "700")) as { ok: boolean };
     expect(out.ok).toBe(true);
     await waitForEval("innerWidth + 'x' + innerHeight", "900x700");
+    // The fixture's resize listener writes #size; proves the event fired, not just the metrics.
+    await waitForEval("document.getElementById('size').textContent", "900x700");
   }, 60_000);
 
   test("click a link, then go-back, go-forward, goto", async () => {
@@ -167,7 +169,24 @@ runOrSkip("e2e: WebKit agent loop", () => {
     const gone = JSON.parse(await cmdGoto(ctx, base)) as { url: string };
     expect(gone.url).toBe(base);
     await waitForEval("document.title", "Kitchen Sink");
+    // The daemon persists the title it resolved (WebKit fallback path); check the stored one too.
+    expect((await loadState(session))?.title).toBe("Kitchen Sink");
   }, 90_000);
+
+  test("reload reloads the current page", async () => {
+    await cmdGoto(ctx, base + "two");
+    await waitForEval("document.title", "Page Two");
+    const out = JSON.parse(await cmdHistory(ctx, "reload")) as { ok: boolean };
+    expect(out.ok).toBe(true);
+    // A per-load marker, not the title: the title already holds before the
+    // reload, so waiting on it would prove nothing.
+    await waitForEval("performance.getEntriesByType('navigation')[0].type", "reload");
+    expect(await evalText("document.title")).toBe("Page Two");
+    // Restore the shared session to the Kitchen Sink page: later tests in
+    // this file (localStorage/sessionStorage/eval) assume it's loaded.
+    await cmdGoto(ctx, base);
+    await waitForEval("document.title", "Kitchen Sink");
+  }, 60_000);
 
   test.todo("reload then goto: WebKit rejects the goto with NSURLErrorDomain -999 (reload resolves before its navigation commits); fix belongs to the native-history change in a later PR", async () => {
     await cmdSnapshot(text);

@@ -6,12 +6,14 @@
 //
 // Skips unless BOWSER_E2E=1, on macOS, with playwright-cli in $PATH and its
 // WebKit installed (`playwright-cli install-browser webkit`). The describe
-// itself is gated at definition time on a cache-directory check so a missing
-// install shows as a real skip in the run summary; the `pwReady` flag inside
-// is a second backstop for a cache dir that exists but is broken (e.g. the
-// `webkit-*` folder is present but corrupt), in which case `playwright-cli
-// open` fails at runtime and each test returns early with a warning already
-// logged.
+// itself is gated at definition time on a cache-directory check, so a missing
+// install shows as a real skip in the run summary — that cache-dir gate is
+// the only skip. The `pwReady` flag inside is a second backstop for a
+// `webkit-*` cache dir that exists but is broken (e.g. corrupt), in which
+// case `playwright-cli open` fails at runtime with a warning logged in
+// `beforeAll`; from there on a `webkit-*` dir that playwright-cli still
+// reports as not installed is a hard failure, not a skip, so each test
+// throws instead of returning early.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
@@ -156,7 +158,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
   });
 
   test("bowser's refs are a subset of playwright-cli's tree on the fresh page", async () => {
-    if (!pwReady) return;
+    if (!pwReady) throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
     const pwOut = (await pw("snapshot")).out;
     const bowserOut = await cmdSnapshot(text);
     const missing = missingFrom(parseBowser(bowserOut), parsePlaywright(pwOut));
@@ -164,7 +166,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
   }, 90_000);
 
   test("after the same fill+click flow both tools see the new todos", async () => {
-    if (!pwReady) return;
+    if (!pwReady) throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
     for (const todo of ["buy milk", "write tests"]) {
       // playwright-cli: re-snapshot before each action, refs can shift.
       let snap = (await pw("snapshot")).out;
