@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Kitchen Sink</title>
+</head>
+<body>
+  <main>
+    <h1>Kitchen Sink</h1>
+    <form id="f">
+      <input id="name" type="text" aria-label="Name" placeholder="Your name" autocomplete="off" />
+      <select id="color" aria-label="Color">
+        <option value="red">red</option>
+        <option value="blue">blue</option>
+      </select>
+      <input id="agree" type="checkbox" aria-label="Agree" />
+      <button id="submit" type="submit">Submit</button>
+    </form>
+    <p id="submitted"></p>
+    <button id="hoverme" type="button">Hover me</button>
+    <p id="hovered"></p>
+    <p id="keys"></p>
+    <p id="size"></p>
+    <a id="two" href="/two">Page two</a>
+  </main>
+  <script>
+    document.getElementById("f").addEventListener("submit", (e) => {
+      e.preventDefault();
+      document.getElementById("submitted").textContent = "submitted:" + document.getElementById("name").value;
+    });
+    document.getElementById("color").addEventListener("change", (e) => {
+      document.getElementById("submitted").textContent = "color:" + e.target.value;
+    });
+    document.getElementById("hoverme").addEventListener("mouseover", () => {
+      document.getElementById("hovered").textContent = "hovered";
+    });
+    document.addEventListener("keydown", (e) => {
+      document.getElementById("keys").textContent += e.key + ";";
+    });
+    function size() { document.getElementById("size").textContent = innerWidth + "x" + innerHeight; }
+    addEventListener("resize", size);
+    size();
+  </script>
+</body>
+</html>
