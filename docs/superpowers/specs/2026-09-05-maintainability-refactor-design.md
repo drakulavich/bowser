@@ -381,6 +381,18 @@ Both tools were run against `tests/fixtures/todo-app.html`, bowser on WebKit.
 - **`open` reports an empty title on WebKit.** Fixed in PR 1 (Section 5).
 - **`tsc` fails today** with three errors nobody sees, because `bun test`
   does not typecheck. Fixed in PR 1.
+- **`goto` immediately after `reload` fails on WebKit** with `NSURLErrorDomain
+  error -999`: `reload` resolves before its navigation commits, so the next
+  `navigate` cancels it (a 50 ms gap passes every time). Deterministic. Kept
+  visible as a `test.todo` in `tests/e2e-webkit.test.ts`; fixed in PR 3 when
+  `Browser` adopts native history (Section 4 open question).
+- **`press` dispatches no bubbling `keydown` on WebKit**: `Bun.WebView.press("Enter")`
+  submits the form natively but no `keydown` listener on `document` fires. A
+  Bun/WebKit limitation bowser cannot fix; kept visible as a `test.todo`.
+- **`playwright-cli install-browser webkit` hung twice** on the owner's
+  machine (extraction stalls at 0 % CPU; disk 97 % full). The differential
+  test therefore ran only its skip path locally; the parsers were verified by
+  hand against captured output. Retry after freeing disk space.
 
 ## Backlog notes raised during design (not part of this refactor)
 

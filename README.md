@@ -182,8 +182,9 @@ Because selectors are stable paths (not injected `data-` attributes), they survi
 ## Tests
 
 ```bash
+bun run typecheck                              # tsc
 bun test                                       # unit + command tests with a fake daemon
-BOWSER_E2E=1 bun test                          # + end-to-end against real headless Chromium
+BOWSER_E2E=1 bun test                          # + end-to-end on the resolved backend (WebKit on macOS, Chromium elsewhere)
 BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub search)
 ```
 
