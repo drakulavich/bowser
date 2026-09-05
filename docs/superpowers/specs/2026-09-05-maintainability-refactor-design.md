@@ -41,7 +41,10 @@ simplifies the code. Every such change is listed in CHANGELOG.
 What is pinned because it *is* the `playwright-cli` contract:
 
 - command names and argv shapes (`tests/compat.test.ts`);
-- bare `eN` refs, snapshot YAML byte-for-byte (`tests/snapshot.test.ts`);
+- bare `eN` refs, and the snapshot YAML **frozen at its current shape**
+  (`tests/snapshot.test.ts`). That shape is *not* what `playwright-cli`
+  0.1.13 prints today; see "Findings" below. Parity is scheduled after this
+  refactor, not inside it;
 - exit codes 0 / 1 / 2 and the user-error message prefixes;
 - a named session surviving between commands.
 
@@ -289,20 +292,39 @@ cover `fill`, `type`, `press`, `hover`, `select`, `check`/`uncheck`, `resize`,
 Chromium under Ubuntu; the macOS job runs unit tests only. That gap is closed
 first, before any code moves.
 
-- **PR 1 — WebKit e2e coverage (tests and CI only).**
+- **PR 1 — WebKit e2e coverage and the type gate.** Plan:
+  `docs/superpowers/plans/2026-09-05-refactor-pr1-webkit-e2e.md`.
+  - **Typecheck gate.** `bun test` strips types and checks nothing, so a typed
+    protocol without `tsc` guarantees nothing. `typescript` becomes a
+    devDependency, `bun run typecheck` a script, and a CI step. Running `tsc`
+    today reports three real errors (a stale `@ts-expect-error` on
+    `Bun.WebView`, an untyped `backend` option, `end()` called on a
+    `Promise<Socket>`); they are fixed here.
+  - **WebKit title bug.** `open` on WebKit prints an empty title because
+    `view.title` is still empty when `navigate()` resolves, while
+    `document.title` inside the page is populated. Fixed the way `realUrl()`
+    fixes the URL: read it from the page when the native getter is empty.
+    The only code change in this PR besides the type fixes.
+  - `tests/e2e.test.ts` and `tests/e2e-todo.test.ts` stop demanding a
+    Chromium binary when the backend resolves to WebKit, so they run on both.
   - `tests/e2e-webkit.test.ts`: one agent-loop scenario against a local
     `Bun.serve` fixture that exercises every WebKit-capable command listed
     above, asserting on the snapshot refs and on page state read back with
     `eval`. Gated on `BOWSER_E2E=1`, forced to `BOWSER_BACKEND=webkit`,
     skipped off macOS.
   - `tests/e2e-compat.test.ts`: differential test. When `playwright-cli` is in
-    `$PATH`, run the same flow with both tools against the same fixture and
-    compare the snapshot YAML and the refs each one produces. Skips cleanly
-    otherwise. (`/opt/homebrew/bin/playwright-cli` is present on the owner's
-    machine; the 2026-04-26 design planned this test and it was never built.)
-  - `test.yml`: an `e2e (WebKit)` job on `macos-latest` running the WebKit
-    suites, alongside the existing Chromium job.
-  - The layer test skeleton (Section 1 rules) and the `OP_META` key test.
+    `$PATH` with its WebKit installed, run the same todo flow with both tools
+    against the same fixture and assert that every ref bowser reports
+    (role + name) exists in `playwright-cli`'s tree, before and after the
+    flow. Skips cleanly otherwise. (`/opt/homebrew/bin/playwright-cli` 0.1.13
+    is present on the owner's machine; the 2026-04-26 design planned this
+    test and it was never built.)
+  - `test.yml`: an `e2e (WebKit, macOS)` job on `macos-latest` running the
+    WebKit suites and the compiled-binary smoke, alongside the existing
+    Chromium job.
+  - The layer test skeleton with the rules that already hold today; later
+    PRs add rules as the layout changes. The `OP_META` key test belongs to
+    PR 2, where `OP_META` is born.
 - **Existing tests move, they are not rewritten.** Import paths change.
   Expected strings change only where a command's output changes on purpose
   (see "The contract"), and each such change is a separate commit in its PR.
@@ -328,7 +350,7 @@ Each PR is green on its own, including the WebKit e2e suites from PR 1.
 
 | # | PR | Touches | Visible change |
 | --- | --- | --- | --- |
-| 1 | WebKit e2e coverage, `playwright-cli` differential test, macOS e2e CI job, layer test skeleton | `tests/`, `test.yml` | none |
+| 1 | Typecheck gate and its three fixes; WebKit title fix; WebKit e2e coverage; `playwright-cli` differential test; macOS e2e CI job; layer test skeleton | `tests/`, `test.yml`, `package.json`, `browser.ts`, `daemon.ts` | `open` on WebKit prints the real title |
 | 2 | Typed protocol; split `daemon.ts` into `daemon/{protocol,server,client,main}.ts`; retype `fakeClient` | daemon, tests | none |
 | 3 | `Browser` absorbs cookies and native history; `backend.ts` split out; `requires: "cdp"` gate | browser, daemon/server | none (error text preserved) |
 | 4 | `commands/*` split, `context.ts` helpers, `page-scripts.ts` | commands, tests imports | output wording may move closer to `playwright-cli`; CHANGELOG |
@@ -341,6 +363,36 @@ PR 7 may be folded into 5 or 6. PRs 2 and 3 produce the types that 4 and 5
 lean on; 6 is last because it is the only one whose shape is set by a feature
 not yet built.
 
+## Findings from probing `playwright-cli` 0.1.13 (2026-09-05)
+
+Both tools were run against `tests/fixtures/todo-app.html`, bowser on WebKit.
+
+- **The snapshot formats differ in content, not just syntax.** `playwright-cli`
+  prints the full accessibility tree: headings, text nodes, generic
+  containers, list items, every node with a ref, plus attributes such as
+  `[active]`, `[level=1]`, `[cursor=pointer]` and `/placeholder:` children,
+  wrapped in a markdown block with `### Page`, URL, title and a ```` ```yaml ````
+  fence. Bowser prints only interactive elements under landmarks, as bare
+  YAML, with `- role "name": [ref=eN]` (colon before the ref). An agent on
+  bowser cannot read "0 items left" from a snapshot; it needs `eval`.
+  **Decision:** freeze bowser's format for this refactor. "Full aria tree in
+  `playwright-cli` 0.1.x format" is the first backlog item after the series,
+  ahead of `dialog-*`, because it affects every agent turn.
+- **`open` reports an empty title on WebKit.** Fixed in PR 1 (Section 5).
+- **`tsc` fails today** with three errors nobody sees, because `bun test`
+  does not typecheck. Fixed in PR 1.
+
+## Backlog notes raised during design (not part of this refactor)
+
+- **Persistent session profile on WebKit.** `Bun.WebView` accepts
+  `dataStore: { directory }` (WebKit needs macOS 15.2+). A `--persistent`
+  flag or env var pointing it at `~/.bowser/sessions/<name>/profile` would
+  keep logins across daemon restarts. One change in `openBrowser`; fits the
+  post-refactor layout as-is. Does not and cannot share Safari's or Chrome's
+  own profile.
+- **`fill --stdin`** so a secret from `op read` never appears in process
+  arguments. Trivial once the registry exists.
+
 ## Open questions
 
 - Whether `Bun.WebView` creates a new instance on `window.open` from the page,
@@ -352,6 +404,6 @@ not yet built.
 - How dialogs can be surfaced on WebKit at all (Section 4 caveat). Not
   blocking this refactor; blocking the dialog task.
 - Which bowser-specific output strings, if any, are worth changing toward
-  `playwright-cli` wording in PR 4. Decided per command by diffing against
-  `playwright-cli` in the PR 1 differential test; the default is to leave
-  wording alone.
+  `playwright-cli` wording in PR 4. The default is to leave wording alone;
+  `playwright-cli`'s own result wording is markdown (`### Ran Playwright
+  code`), which is not obviously better for a shell agent.
