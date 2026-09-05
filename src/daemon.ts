@@ -136,7 +136,7 @@ export async function startDaemon(session: string): Promise<void> {
           return {
             id: req.id,
             ok: true,
-            result: { url: await browser.realUrl(), title: browser.title },
+            result: { url: await browser.realUrl(), title: await browser.realTitle() },
           };
         // --- Cookie ops (chrome backend only; require Bun.WebView.cdp()) ---
         case "cookie-get-all": {
