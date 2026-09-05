@@ -119,7 +119,7 @@ jobs:
         # survives exec, so it bounds the child the same way.
         run: |
           bun build src/cli.ts --compile --outfile dist/bowser
-          t() { perl -e 'alarm shift; exec @ARGV' -- 60 "$@"; }
+          t() { perl -e 'alarm shift; exec @ARGV or die "exec failed: $!"' -- 60 "$@"; }
           t ./dist/bowser open "data:text/html,<h1>ci</h1>" --session ci-smoke
           t ./dist/bowser screenshot --session ci-smoke --filename /tmp/ci-smoke.png
           t ./dist/bowser close --session ci-smoke

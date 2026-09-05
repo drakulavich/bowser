@@ -191,6 +191,8 @@ BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub sea
 **End-to-end examples included:**
 - `tests/e2e.test.ts` — open/snapshot/click on a `data:` URL (no network)
 - `tests/e2e-todo.test.ts` — a local todo app served by `Bun.serve`: add three todos, toggle one, clear completed. Proves the daemon keeps state across commands.
+- `tests/e2e-webkit.test.ts` — every non-CDP command driven on WebKit, with page state read back via `eval` after each one.
+- `tests/e2e-compat.test.ts` — diffs bowser against `playwright-cli` on the todo flow, asserting bowser's refs are a subset of playwright-cli's tree; skips without playwright-cli's WebKit installed.
 - `tests/e2e-search.test.ts` — live web: search GitHub for OpenClaw, find the repo link, type into the search box and press Enter.
 
 ## Build a single binary

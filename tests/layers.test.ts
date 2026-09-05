@@ -21,10 +21,11 @@ function sources(dir: string): string[] {
   return out;
 }
 
-/** Module specifiers of value imports (type-only imports are ignored). */
+/** Module specifiers of value imports (type-only imports are ignored). Catches
+ *  `import "x"`, `import 'x'`, `import ... from "x"` and `import ... from 'x'`. */
 function valueImports(text: string): string[] {
   const out: string[] = [];
-  const re = /^import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm;
+  const re = /^import\s+(?!type\b)(?:[^;'"]*?\bfrom\s+)?["']([^"']+)["']/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) out.push(m[1]!);
   return out;

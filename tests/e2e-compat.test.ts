@@ -103,7 +103,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
   /** playwright-cli ref for the first node with this role and name. */
   function pwRef(stdout: string, role: string, name: string): string {
     const m = stdout.match(/```yaml\n([\s\S]*?)\n```/);
-    const re = new RegExp(`^\\s*- ${role} "${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^\\n]*\\[ref=(e\\d+)\\]`, "m");
+    const re = new RegExp(`^\\s*- ${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} "${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^\\n]*\\[ref=(e\\d+)\\]`, "m");
     const r = (m?.[1] ?? "").match(re);
     if (!r) throw new Error(`playwright-cli: no ${role} "${name}" in:\n${stdout}`);
     return r[1]!;
