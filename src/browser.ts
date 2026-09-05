@@ -78,9 +78,15 @@ export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
   return chromeBackend(env, detect);
 }
 
+/** The `backend` option Bun.WebView's constructor accepts. Derived from the
+ *  constructor so it tracks bun-types instead of a hand-copied union. */
+type BunBackend = NonNullable<
+  NonNullable<ConstructorParameters<typeof Bun.WebView>[0]>["backend"]
+>;
+
 /** Map our Backend union to the value Bun.WebView's `backend` field accepts:
  *  a bare string when there's nothing to tune, an object otherwise. */
-export function toBunBackend(b: Backend): unknown {
+export function toBunBackend(b: Backend): BunBackend {
   if (b.kind === "webkit") return "webkit";
   if (!b.path && !b.argv && !b.debug) return "chrome";
   return {
@@ -148,8 +154,6 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     ? chromeBackend(process.env, () => undefined, opts.executablePath)
     : resolveBackend();
 
-  // @ts-expect-error Bun.WebView is available in Bun >= 1.3.12 but not yet in
-  // the public types bundled with @types/bun at the time of writing.
   const view = new Bun.WebView({
     backend: toBunBackend(spec),
     width: opts.width ?? 1280,

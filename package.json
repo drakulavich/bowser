@@ -9,6 +9,7 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "bun build src/cli.ts --compile --outfile dist/bowser"
   },
   "engines": {
@@ -46,6 +47,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^7.0.2"
   }
 }
