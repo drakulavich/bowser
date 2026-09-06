@@ -440,6 +440,23 @@ Section 4 where it guessed.
   own profile.
 - **`fill --stdin`** so a secret from `op read` never appears in process
   arguments. Trivial once the registry exists.
+- **An invalid `--same-site` becomes `Lax` on a round-trip.** Measured during
+  PR 7's review: `cookie-set k v --same-site=garbage` reports success, and CDP
+  creates the cookie while silently dropping the attribute, so `cookie-list`
+  shows no `sameSite` key at all. `state-save` then invents one —
+  `normalizeSameSite` (`src/commands/storage-state.ts`) collapses anything
+  that is not `Strict` or `None`, including `undefined`, to `"Lax"`. So an
+  invalid value is discarded at set time and materialises as a real `Lax` in
+  the saved file. Two separate decisions to make: whether the CLI should
+  reject an unknown `--same-site` (it currently asserts the union without
+  checking, in `commands/cookies.ts`), and whether `normalizeSameSite` should
+  distinguish "absent" from "not one of ours" rather than folding both to
+  `Lax`. Both change user-visible output, which is why neither is in this
+  series.
+- **A request whose daemon exits never settles.** Raised by PR 6's final
+  review: `DaemonClient` registers no `close` handler, so if the daemon goes
+  away mid-request the promise neither resolves nor rejects and the client
+  waits for its timeout, or forever where none applies. Predates the series.
 
 ## Open questions
 
