@@ -12,3 +12,6 @@ tmp/
 /.cocoindex_code/
 .worktrees/
 .superpowers/
+
+# Scratch output from probing the real playwright-cli during development.
+.playwright-cli/

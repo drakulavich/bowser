@@ -114,7 +114,7 @@ function assignFlag(out: Parsed, spec: FlagSpec, value: string | boolean): void 
   // Both the --long and -short branches land here, so one check covers both.
   // No command prefix in the message: global flags belong to no command, and
   // a prefix that appears only sometimes reads worse than one that never does.
-  if (spec.values && typeof value === "string" && !spec.values.includes(value)) {
+  if (spec.values && spec.kind === "string" && !spec.values.includes(String(value))) {
     throw new Error(`invalid --${spec.name}: must be one of ${spec.values.join(", ")}`);
   }
   if (GLOBAL_NAMES.has(spec.name)) {

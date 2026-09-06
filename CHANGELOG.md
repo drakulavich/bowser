@@ -28,7 +28,9 @@ All notable changes to this project are documented here. This project follows
 
 - **An enum flag declares its accepted values.** `FlagSpec.values` drives both parser validation
   and the `--help` placeholder, so the two cannot drift. `bowser --help` now shows
-  `[--same-site=Strict|Lax|None]`, previously `[--same-site=Lax|Strict|None]`.
+  `[--same-site=Strict|Lax|None]`, previously `[--same-site=Lax|Strict|None]`, and an MCP client
+  sees the same list as a JSON-Schema `enum`. A bare `--same-site` or `--same-site=` is now an
+  error; both were previously ignored.
 
 - **A command reads its string flags through `str()`** instead of asserting them with
   `as string | undefined`. Flags arrive as `string | boolean` in one bag, so the cast also accepted a

@@ -33,6 +33,9 @@ export interface McpDeps {
 interface JsonSchemaProp {
   type: "string" | "boolean";
   description?: string;
+  /** From FlagSpec.values, so a client sees the accepted values up front
+   *  instead of discovering them from a rejected call. */
+  enum?: string[];
 }
 
 export interface McpTool {
@@ -60,7 +63,11 @@ export function buildTools(): McpTool[] {
       if (p.required) required.push(p.name);
     }
     for (const f of cmd.flags) {
-      properties[f.name] = { type: f.kind === "boolean" ? "boolean" : "string", description: `--${f.name}` };
+      properties[f.name] = {
+        type: f.kind === "boolean" ? "boolean" : "string",
+        description: `--${f.name}`,
+        ...(f.values ? { enum: f.values } : {}),
+      };
     }
     properties.session = { type: "string", description: 'bowser session name (default: "default")' };
     tools.push({
