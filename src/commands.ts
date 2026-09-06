@@ -2,7 +2,7 @@
 // daemon that holds a persistent Bun.WebView. This is what lets stateful flows
 // work — typed text, modals, and dynamic DOM all survive between commands.
 
-import { bowserCacheRoot, detectChromium } from "./browser.ts";
+import { bowserCacheRoot, detectChromium } from "./backend.ts";
 import { connectOrSpawn, socketPath } from "./daemon/client.ts";
 import type { DaemonConnection } from "./daemon/protocol.ts";
 import { toJson, toYaml, SNAPSHOT_SCRIPT, type SnapshotResult } from "./snapshot.ts";

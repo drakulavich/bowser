@@ -1,4 +1,9 @@
-// Thin wrapper around Bun.WebView so tests can mock it.
+// The daemon's handle on one Bun.WebView. This is the only file that
+// instantiates Bun.WebView; backend choice lives in backend.ts.
+
+import { chromeBackend, resolveBackend, toBunBackend } from "./backend.ts";
+import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
+import type { Backend } from "./backend.ts";
 
 export interface BrowserOptions {
   executablePath?: string;
@@ -6,95 +11,36 @@ export interface BrowserOptions {
   height?: number;
 }
 
-export type Backend =
-  | { kind: "webkit" }
-  | { kind: "chrome"; path?: string; argv?: string[]; debug?: boolean };
+/** The error every CDP-only path raises on webkit. The daemon answers
+ *  `requires: "cdp"` ops with it before their handler runs; `Browser.cdp()`
+ *  raises it as a backstop. Tests and docs quote it: change it here only. */
+export const CDP_UNAVAILABLE =
+  "CDP is only available on the chrome backend (current: webkit) — " +
+  "run 'bowser install' to use Chromium-backed features";
 
-export interface ResolveBackendDeps {
-  platform?: string;
-  env?: Record<string, string | undefined>;
-  hasExplicitChromium?: () => boolean;
-  detectChromium?: () => string | undefined;
-}
-
-function chromeBackend(
-  env: Record<string, string | undefined>,
-  detect: () => string | undefined,
-  pathOverride?: string,
-): Backend {
-  const path = pathOverride ?? detect();
-  const argv = (env.BOWSER_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean);
-  const debug = env.BOWSER_CHROME_DEBUG === "1";
-  return {
-    kind: "chrome",
-    ...(path ? { path } : {}),
-    ...(argv.length ? { argv } : {}),
-    ...(debug ? { debug: true } : {}),
-  };
-}
-
-/** Validate the BOWSER_BACKEND override without any detection or I/O. Throws the
- *  same errors resolveBackend() surfaces for a bad override. The parent CLI calls
- *  this before spawning the detached daemon, so a typo'd value fails fast with a
- *  clear message instead of being swallowed by the daemon and seen only as a
- *  "did not start in time" timeout. */
-export function assertValidBackendEnv(
-  env: Record<string, string | undefined> = process.env,
-  platform: string = process.platform,
-): void {
-  const override = env.BOWSER_BACKEND;
-  if (override === undefined || override === "") return;
-  if (override !== "webkit" && override !== "chrome") {
-    throw new Error(
-      `invalid BOWSER_BACKEND='${override}' (expected 'webkit' or 'chrome')`,
-    );
-  }
-  if (override === "webkit" && platform !== "darwin") {
-    throw new Error("BOWSER_BACKEND=webkit is only supported on macOS");
-  }
-}
-
-/** Decide which Bun.WebView backend to use. Pure: all inputs injectable.
- *  Order: explicit BOWSER_BACKEND > macOS-without-explicit-chromium=webkit >
- *  chrome. See docs/superpowers/specs/2026-06-04-macos-webkit-backend-design.md. */
-export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
-  const platform = deps.platform ?? process.platform;
-  const env = deps.env ?? process.env;
-  // Thread the resolved env into the default detectors so an injected
-  // `deps.env` governs the webkit/chrome switch and the chrome path
-  // consistently — not just chromeBackend's argv/debug parsing.
-  const hasExplicit = deps.hasExplicitChromium ?? (() => hasExplicitChromium(env));
-  const detect = deps.detectChromium ?? (() => detectChromium(env));
-
-  assertValidBackendEnv(env, platform);
-
-  const override = env.BOWSER_BACKEND;
-  if (override === "webkit") return { kind: "webkit" };
-  if (override === "chrome") return chromeBackend(env, detect);
-
-  if (platform === "darwin" && !hasExplicit()) {
-    return { kind: "webkit" };
-  }
-  return chromeBackend(env, detect);
-}
-
-/** The `backend` option Bun.WebView's constructor accepts. Derived from the
- *  constructor so it tracks bun-types instead of a hand-copied union. */
-type BunBackend = NonNullable<
-  NonNullable<ConstructorParameters<typeof Bun.WebView>[0]>["backend"]
->;
-
-/** Map our Backend union to the value Bun.WebView's `backend` field accepts:
- *  a bare string when there's nothing to tune, an object otherwise. */
-export function toBunBackend(b: Backend): BunBackend {
-  if (b.kind === "webkit") return "webkit";
-  if (!b.path && !b.argv && !b.debug) return "chrome";
-  return {
-    type: "chrome",
-    ...(b.path ? { path: b.path } : {}),
-    ...(b.argv ? { argv: b.argv } : {}),
-    ...(b.debug ? { stderr: "inherit", stdout: "inherit" } : {}),
-  };
+/** The slice of Bun.WebView that Browser uses. Optional members are the ones
+ *  a backend or Bun build may lack; wrapView probes them with typeof. */
+export interface ViewLike {
+  readonly url: string;
+  readonly title: string;
+  navigate(url: string): Promise<void>;
+  evaluate(expr: string): Promise<unknown>;
+  click(selector: string): Promise<void>;
+  type(text: string): Promise<void>;
+  press(key: string): Promise<void>;
+  resize(width: number, height: number): Promise<void>;
+  screenshot?(): Promise<Blob | string>;
+  reload?(): Promise<void>;
+  cdp?(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  close?(): void;
+  /** True while a navigation is in flight. */
+  readonly loading: boolean;
+  onNavigated: ((url: string, title: string) => void) | null;
+  onNavigationFailed: ((error: Error) => void) | null;
+  /** Runtime names. @types/bun (1.4.0) declares back()/forward() instead;
+   *  those do not exist on the object. Do not "fix" these to match the types. */
+  goBack?(): Promise<void>;
+  goForward?(): Promise<void>;
 }
 
 /** Resolve the committed page URL. Bun.WebView's `view.url` returns "about:blank"
@@ -154,6 +100,11 @@ export interface Browser {
   /** Send a raw CDP command. Chrome backend only; rejects on webkit with a
    *  clear message indicating the chrome backend is required. */
   cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  // --- Cookies: CDP-backed, so chrome only. Each rejects with CDP_UNAVAILABLE on webkit. ---
+  getCookies(urls?: string[]): Promise<Cookie[]>;
+  setCookie(param: CookieParam): Promise<{ success: boolean }>;
+  deleteCookies(name: string, opts?: DeleteCookieOptions): Promise<void>;
+  clearCookies(): Promise<void>;
 }
 
 /** Open a Bun.WebView. Backend precedence (highest first):
@@ -164,33 +115,93 @@ export interface Browser {
  *  Note: a programmatic opts.executablePath wins over BOWSER_BACKEND — a chromium
  *  binary path can't drive the webkit engine, so chrome is the only valid choice. */
 export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
-  // Choose webkit (native macOS) vs chrome. An explicit executablePath always
-  // forces chrome with that exact binary (the detect fn is unused here because
-  // pathOverride short-circuits it); otherwise resolveBackend() decides.
+  // An explicit executablePath always forces chrome with that exact binary
+  // (the detect fn is unused because pathOverride short-circuits it);
+  // otherwise resolveBackend() decides.
   const spec = opts.executablePath
     ? chromeBackend(process.env, () => undefined, opts.executablePath)
     : resolveBackend();
-
   const view = new Bun.WebView({
     backend: toBunBackend(spec),
     width: opts.width ?? 1280,
     height: opts.height ?? 800,
   });
+  // The real Bun.WebView satisfies ViewLike structurally; no cast needed here.
+  return wrapView(view, spec);
+}
+
+/** How long the navigation watch waits. Exported so tests can shorten it. */
+export interface NavTiming {
+  /** Window after an action in which a navigation may still begin. */
+  graceMs: number;
+  /** Cap on waiting for a navigation that did begin. */
+  settleMs: number;
+}
+export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
+
+/** Bun.WebView resolves click()/press()/goBack() when the input is delivered,
+ *  ~30 ms before the page it triggers commits (measured on WebKit, local
+ *  pages). `state` right after `click` therefore reported the old URL. The
+ *  watch counts navigation events and lets an action wait for the one it
+ *  started: a navigation that begins within graceMs is awaited up to
+ *  settleMs; an action that navigates nowhere costs the full grace window. */
+function navigationWatch(view: ViewLike, timing: NavTiming) {
+  // One watch per view: this takes over the view's navigation callbacks, so
+  // wrapView must be called once per view (openBrowser does).
+  // A failed navigation ends the wait but does not fail the action: WebKit
+  // reports NSURLErrorDomain -999 for routine cancellations (a page script
+  // navigating right after a click), and `state` reads the real URL anyway.
+  // Surfacing the last navigation error is DaemonState work (PR 6).
+  let landed = 0;
+  view.onNavigated = () => { landed++; };
+  view.onNavigationFailed = () => { landed++; };
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  return {
+    async act(action: () => Promise<void>): Promise<void> {
+      const before = landed;
+      // A navigation already in flight is not ours: only a false→true transition
+      // of `loading` counts, or one stuck navigation would cost every later
+      // action the full settleMs.
+      const wasLoading = view.loading;
+      await action();
+      let started = false;
+      const start = Date.now();
+      while (Date.now() - start < timing.graceMs) {
+        if (landed !== before) return;
+        if (view.loading && !wasLoading) { started = true; break; }
+        await sleep(10);
+      }
+      if (!started) return;
+      const began = Date.now();
+      while (view.loading && landed === before && Date.now() - began < timing.settleMs) await sleep(10);
+    },
+  };
+}
+
+/** Turn a view into a Browser. Separate from openBrowser so tests can pass a
+ *  fake view; openBrowser is the only caller with a real one. */
+export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING): Browser {
+  const nav = navigationWatch(view, timing);
+  const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
+    // view.cdp() exists on the chrome backend only. On webkit Bun throws
+    // 'WebView.cdp() requires backend: "chrome"'; we raise the friendlier
+    // shared message instead.
+    if (spec.kind !== "chrome" || typeof view.cdp !== "function") {
+      return Promise.reject(new Error(CDP_UNAVAILABLE));
+    }
+    return view.cdp(method, params);
+  };
 
   return {
-    get url() {
-      return view.url as string;
-    },
-    get title() {
-      return view.title as string;
-    },
-    realUrl: () => resolveUrl(view.url as string, () => view.evaluate("location.href")),
-    realTitle: () => resolveTitle(view.title as string, () => view.evaluate("document.title")),
+    get url() { return view.url; },
+    get title() { return view.title; },
+    realUrl: () => resolveUrl(view.url, () => view.evaluate("location.href")),
+    realTitle: () => resolveTitle(view.title, () => view.evaluate("document.title")),
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
-    click: (selector) => view.click(selector),
+    click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
-    press: (key) => view.press(key),
+    press: (key) => nav.act(() => view.press(key)),
     hover: async (selector) => {
       await view.evaluate(`(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
@@ -220,52 +231,64 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
       // Element-bounded screenshots are not supported in v1.
-      const data = await (view as { screenshot?: () => Promise<Blob | string> }).screenshot?.();
-      if (!data) throw new Error('screenshot: not supported by this Bun.WebView');
+      const data = await view.screenshot?.();
+      if (!data) throw new Error("screenshot: not supported by this Bun.WebView");
       const bytes = await pngBytesFrom(data);
       if (!isLikelyPng(bytes)) {
-        throw new Error('screenshot: WebView returned an empty/invalid image');
+        throw new Error("screenshot: WebView returned an empty/invalid image");
       }
-      return Buffer.from(bytes).toString('base64');
+      return Buffer.from(bytes).toString("base64");
     },
-    resize: async (width: number, height: number) => {
-      // Bun.WebView.resize() is native and works on both backends.
-      await (view as unknown as { resize: (w: number, h: number) => Promise<void> }).resize(width, height);
-    },
-    back: async () => {
-      await view.evaluate("history.back()");
-    },
-    forward: async () => {
-      await view.evaluate("history.forward()");
-    },
-    reload: async () => {
-      if (typeof (view as { reload?: unknown }).reload === 'function') {
-        await (view as { reload: () => Promise<void> }).reload();
-      } else {
-        await view.evaluate("location.reload()");
-      }
-    },
+    resize: (width, height) => view.resize(width, height),
+    back: () => nav.act(async () => {
+      if (typeof view.goBack === "function") await view.goBack();
+      else await view.evaluate("history.back()");
+    }),
+    forward: () => nav.act(async () => {
+      if (typeof view.goForward === "function") await view.goForward();
+      else await view.evaluate("history.forward()");
+    }),
+    reload: () => nav.act(async () => {
+      // Native reload() resolves before the reload commits, like goBack();
+      // measured in the daemon: a navigate() 1 ms later was rejected with
+      // NSURLErrorDomain -999. The watch makes reload return once it lands.
+      if (typeof view.reload === "function") await view.reload();
+      else await view.evaluate("location.reload()");
+    }),
     close: async () => {
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
-      await view.close?.();
+      view.close?.();
     },
     cdpAvailable(): boolean {
       return spec.kind === "chrome";
     },
-    cdp(method: string, params?: Record<string, unknown>): Promise<unknown> {
-      // view.cdp() is available on the chrome backend only. On webkit it throws
-      // "WebView.cdp() requires backend: \"chrome\"". We surface a friendlier
-      // error that matches the daemon op's wording.
-      if (spec.kind !== "chrome") {
-        return Promise.reject(
-          new Error(
-            "CDP is only available on the chrome backend (current: webkit) — " +
-            "run 'bowser install' to use Chromium-backed features",
-          ),
-        );
-      }
-      return (view as unknown as { cdp: (m: string, p?: Record<string, unknown>) => Promise<unknown> }).cdp(method, params);
+    cdp,
+    getCookies: async (urls) => {
+      // `!= null`: the wire delivers JSON null for an omitted url list.
+      const scoped = urls != null && urls.length > 0;
+      const res = (await cdp(
+        scoped ? "Network.getCookies" : "Network.getAllCookies",
+        scoped ? { urls } : undefined,
+      )) as { cookies: Cookie[] };
+      return res.cookies;
+    },
+    setCookie: async (param) => {
+      const res = (await cdp("Network.setCookie", param as unknown as Record<string, unknown>)) as { success: boolean };
+      return { success: res.success };
+    },
+    deleteCookies: async (name, opts) => {
+      // `opts ?? {}`, not a default parameter: a request carrying null must
+      // behave like one carrying nothing (wire compatibility, PR 2 review).
+      const o = opts ?? {};
+      const params: Record<string, unknown> = { name };
+      if (o.url) params.url = o.url;
+      if (o.domain) params.domain = o.domain;
+      if (o.path) params.path = o.path;
+      await cdp("Network.deleteCookies", params);
+    },
+    clearCookies: async () => {
+      await cdp("Network.clearBrowserCookies");
     },
   };
 }
@@ -289,97 +312,4 @@ export function isLikelyPng(bytes: Uint8Array): boolean {
 export async function pngBytesFrom(data: Blob | string): Promise<Uint8Array> {
   if (typeof data === "string") return new Uint8Array(Buffer.from(data, "base64"));
   return new Uint8Array(await data.arrayBuffer());
-}
-
-/** Look in a handful of standard locations. Bun does its own detection too,
- *  but being explicit gives better error messages. */
-export function detectChromium(
-  env: Record<string, string | undefined> = process.env,
-): string | undefined {
-  const candidates = [
-    env.BOWSER_CHROMIUM_PATH,
-    ...bowserCacheCandidates(env),
-    "/usr/bin/chromium-headless-shell",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  ].filter(Boolean) as string[];
-
-  const fs = require("node:fs") as typeof import("node:fs");
-  for (const p of candidates) {
-    try {
-      // Must exist and be a regular file (not a symlink to /dev/null etc).
-      const st = fs.statSync(p);
-      if (st.isFile() || st.isSymbolicLink()) return p;
-    } catch {
-      // keep scanning
-    }
-  }
-  return undefined;
-}
-
-/** True iff the user explicitly opted into Chromium: BOWSER_CHROMIUM_PATH points
- *  at a real file, or the bowser-managed cache (`bowser install`) holds a binary.
- *  Deliberately excludes system Chrome paths — those are a valid chrome *path*
- *  but must NOT trigger the macOS webkit→chrome switch. */
-export function hasExplicitChromium(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
-  const fs = require("node:fs") as typeof import("node:fs");
-  const exists = (p: string | undefined): boolean => {
-    if (!p) return false;
-    try {
-      const st = fs.statSync(p);
-      return st.isFile() || st.isSymbolicLink();
-    } catch {
-      return false;
-    }
-  };
-  if (exists(env.BOWSER_CHROMIUM_PATH)) return true;
-  return bowserCacheCandidates(env).some(exists);
-}
-
-/** Root of bowser's dedicated chromium cache. `bowser install` downloads into
- *  here via Playwright's installer (with PLAYWRIGHT_BROWSERS_PATH pointed at
- *  this directory). Nothing else on the machine writes to this path. */
-export function bowserCacheRoot(
-  env: Record<string, string | undefined> = process.env,
-): string {
-  const home = env.HOME ?? "";
-  return `${home}/.bowser/chromium`;
-}
-
-/** Expand the bowser-owned cache into concrete executable candidate paths.
- *  Layout mirrors Playwright's because we use Playwright's installer. */
-function bowserCacheCandidates(
-  env: Record<string, string | undefined> = process.env,
-): string[] {
-  const root = bowserCacheRoot(env);
-  if (!root) return [];
-
-  const out: string[] = [];
-  try {
-    const fs = require("node:fs") as typeof import("node:fs");
-    if (!fs.existsSync(root)) return [];
-    for (const entry of fs.readdirSync(root)) {
-      if (!entry.startsWith("chromium")) continue;
-      const base = `${root}/${entry}`;
-      out.push(
-        // chromium-headless-shell (what `bowser install` fetches)
-        `${base}/chrome-headless-shell-linux64/chrome-headless-shell`,
-        `${base}/chrome-headless-shell-mac-arm64/chrome-headless-shell`,
-        `${base}/chrome-headless-shell-mac/chrome-headless-shell`,
-        // Full chromium, in case someone installs the heavier build
-        `${base}/chrome-linux64/chrome`,
-        `${base}/chrome-linux/chrome`,
-        `${base}/chrome-mac/Chromium.app/Contents/MacOS/Chromium`,
-        `${base}/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium`,
-      );
-    }
-  } catch {
-    // ignore
-  }
-  return out;
 }

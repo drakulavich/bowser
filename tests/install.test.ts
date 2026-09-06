@@ -11,7 +11,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { bowserCacheRoot } from "../src/browser.ts";
+import { bowserCacheRoot } from "../src/backend.ts";
 import { cmdInstall } from "../src/commands.ts";
 
 describe("cmdInstall", () => {

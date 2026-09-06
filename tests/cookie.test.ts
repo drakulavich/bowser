@@ -15,6 +15,7 @@ import {
   type CommandContext,
 } from "../src/commands.ts";
 import { saveState } from "../src/state.ts";
+import { CDP_UNAVAILABLE } from "../src/browser.ts";
 import type { Cookie } from "../src/cdp/types.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 
@@ -358,10 +359,7 @@ describe("cookie-clear", () => {
 // ---------------------------------------------------------------------------
 describe("webkit error", () => {
   test("webkit error propagates as thrown Error with chrome-backend wording", async () => {
-    const webkitError = new Error(
-      "CDP is only available on the chrome backend (current: webkit) — " +
-      "run 'bowser install' to use Chromium-backed features",
-    );
+    const webkitError = new Error(CDP_UNAVAILABLE);
     const c = fakeClient({
       "cookie-get-all": () => { throw webkitError; },
     });

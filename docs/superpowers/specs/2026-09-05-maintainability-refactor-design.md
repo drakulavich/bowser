@@ -394,6 +394,14 @@ Both tools were run against `tests/fixtures/todo-app.html`, bowser on WebKit.
   machine (extraction stalls at 0 % CPU; disk 97 % full). The differential
   test therefore ran only its skip path locally; the parsers were verified by
   hand against captured output. Retry after freeing disk space.
+- **Native history does not fix stale URLs by itself (2026-09-06 probe, Bun 1.4.0).**
+  `goBack()`/`goForward()` resolve immediately, like the `history.back()` emulation;
+  `onNavigated` fires ~2 ms later and `url` updates within ~25 ms. `click()` resolves ~30 ms
+  before its navigation commits. PR 3 adds a navigation watch in `Browser` (wait for a
+  navigation that begins within 100 ms, up to 10 s). Native `reload()` also resolves
+  immediately; the `-999` failure went away once `reload` waited for its navigation
+  through the same watch. The runtime methods are `goBack`/`goForward`; `@types/bun`
+  declares `back`/`forward`.
 
 ## Backlog notes raised during design (not part of this refactor)
 
@@ -411,9 +419,8 @@ Both tools were run against `tests/fixtures/todo-app.html`, bowser on WebKit.
 - Whether `Bun.WebView` creates a new instance on `window.open` from the page,
   or the popup is lost. Not needed for this refactor; decides how tabs are
   designed later. Answer by experiment when tabs are scheduled.
-- Whether native `view.goBack()` resolves on the same event as the current
-  `history.back()` emulation on the webkit backend. PR 3 finds out; the
-  fallback is stated in Section 4.
+- (Answered in PR 3, see Findings.) Native `goBack()` resolves on the same event as the
+  emulation; the fix was a navigation watch, not the native call.
 - How dialogs can be surfaced on WebKit at all (Section 4 caveat). Not
   blocking this refactor; blocking the dialog task.
 - Which bowser-specific output strings, if any, are worth changing toward

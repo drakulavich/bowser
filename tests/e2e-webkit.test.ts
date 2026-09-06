@@ -158,8 +158,8 @@ runOrSkip("e2e: WebKit agent loop", () => {
     await cmdSnapshot(text);
     const out = JSON.parse(await cmdClick(ctx, await refNamed("Page two"))) as { ok: boolean };
     expect(out.ok).toBe(true);
-    // The page itself is the witness that the click navigated. What `click`
-    // *reports* as the URL is a separate question, pinned in the todo below.
+    // The page itself is the witness that the click navigated; what `click`
+    // reports is checked by the next test.
     await waitForEval("document.title", "Page Two");
     expect(await evalText("location.pathname")).toBe("/two");
 
@@ -176,7 +176,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
     expect((await loadState(session))?.title).toBe("Kitchen Sink");
   }, 90_000);
 
-  test.todo("click reports the post-navigation url: the daemon snapshots state before the click's navigation settles, so the reported url can still be the previous page's; fix belongs to the native-history change in a later PR", async () => {
+  test("click reports the post-navigation url", async () => {
     await cmdGoto(ctx, base);
     await waitForEval("document.title", "Kitchen Sink");
     await cmdSnapshot(text);
@@ -201,7 +201,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
     await waitForEval("document.title", "Kitchen Sink");
   }, 60_000);
 
-  test.todo("reload then goto: WebKit rejects the goto with NSURLErrorDomain -999 (reload resolves before its navigation commits); fix belongs to the native-history change in a later PR", async () => {
+  test("reload then goto: reload waits for its navigation to land", async () => {
     await cmdSnapshot(text);
     const out = JSON.parse(await cmdClick(ctx, await refNamed("Page two"))) as { url: string };
     await waitForEval("document.title", "Page Two");
@@ -215,7 +215,8 @@ runOrSkip("e2e: WebKit agent loop", () => {
 
     const reloaded = JSON.parse(await cmdHistory(ctx, "reload")) as { ok: boolean };
     expect(reloaded.ok).toBe(true);
-    await waitForEval("document.title", "Page Two");
+    // No wait here on purpose: the -999 failure needed goto to arrive while
+    // the reload's navigation was still in flight.
 
     const gone = JSON.parse(await cmdGoto(ctx, base)) as { url: string };
     expect(gone.url).toBe(base);

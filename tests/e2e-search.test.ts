@@ -13,7 +13,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium } from "../src/browser.ts";
+import { detectChromium } from "../src/backend.ts";
 import { cmdClick, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
 import { connectOrSpawn } from "../src/daemon/client.ts";
 import { loadState } from "../src/state.ts";

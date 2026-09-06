@@ -10,7 +10,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, isLikelyPng, resolveBackend } from "../src/browser.ts";
+import { detectChromium, resolveBackend } from "../src/backend.ts";
+import { isLikelyPng } from "../src/browser.ts";
 import { cmdClick, cmdClose, cmdOpen, cmdScreenshot, cmdSnapshot } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 

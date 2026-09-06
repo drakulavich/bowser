@@ -5,7 +5,8 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { hasExplicitChromium, bowserCacheRoot, resolveBackend, toBunBackend, assertValidBackendEnv, isLikelyPng } from "../src/browser.ts";
+import { hasExplicitChromium, bowserCacheRoot, resolveBackend, toBunBackend, assertValidBackendEnv } from "../src/backend.ts";
+import { isLikelyPng } from "../src/browser.ts";
 
 describe("hasExplicitChromium", () => {
   let tmp: string;
