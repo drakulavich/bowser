@@ -8,7 +8,7 @@ User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. Thi
 
 | Question | File |
 | --- | --- |
-| What command does X? | `src/cli/registry.ts` (the `COMMANDS` list), `src/commands/<domain>.ts` (the `Command` objects and their implementations) |
+| What command does X? | `src/cli/registry.ts` (the `COMMANDS` list), `src/commands/<domain>.ts` (the `Command` objects and their implementations; `context.ts` has what they share) |
 | A script injected into the page? | `src/page-scripts.ts` — the only file that builds one |
 | How is a flag parsed? | `src/cli/parser.ts` |
 | What does the snapshot YAML look like? | `src/snapshot.ts` (`toYaml`, `toJson`); the page-side walker is `SNAPSHOT_SCRIPT` in `src/page-scripts.ts` |
@@ -71,7 +71,7 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 - **Backend selection lives in `resolveBackend()`** (`src/backend.ts`). macOS defaults to native `webkit` and switches to `chrome` only on *explicit* opt-in (`hasExplicitChromium()` — bowser cache or `BOWSER_CHROMIUM_PATH`), never on incidental system Chrome. `BOWSER_BACKEND=webkit|chrome` overrides. Keep that trigger distinct from the path resolver `detectChromium()`, which may use system Chrome.
 - **TDD for new functionality**: write the test, see it fail, implement minimally, see it pass, commit. Plans live in `docs/superpowers/plans/`.
 - **Daemon requests are typed.** `c.request("state")` returns `PageState`; do not cast results. A new op needs an entry in `DaemonOps` and a handler in `server.ts`; `tests/helpers/fake-client.ts` picks it up automatically.
-- **The registry is the source of truth for what commands exist.** `src/cli/registry.ts` concatenates each `commands/<domain>.ts`'s `COMMANDS`; `SCHEMAS`, `--help` and the MCP tool list are all derived from it, and `tests/docs-drift.test.ts` checks README and SKILL.md against it. A command's `summary` is one line, imperative, no trailing period: it is both its help text and its MCP description.
+- **The registry is the source of truth for what commands exist.** `src/cli/registry.ts` concatenates each `commands/<domain>.ts`'s `COMMANDS`; `SCHEMAS`, `--help` and the MCP tool list are all derived from it, and `tests/docs-drift.test.ts` checks README and SKILL.md against it in both directions: a command with no doc row fails, and so does a `bowser <name>` the docs still show after the command was renamed or removed. A command's `summary` is one line, imperative, no trailing period: it is both its help text and its MCP description.
 
 ## Adding a command (e.g. `dblclick`)
 

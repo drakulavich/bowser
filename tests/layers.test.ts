@@ -80,7 +80,9 @@ const RULES: Rule[] = [
     name: "only src/page-scripts.ts passes a string literal to .evaluate(",
     // Catches what the IIFE check above misses: a double- or single-quoted
     // string, or a template literal that isn't an IIFE, handed straight to
-    // .evaluate(). Like the rule above, this is a code-ownership lint, not a
+    // .evaluate(). A literal assigned to a local first and then passed slips
+    // past this rule and the one above alike: the pair is not exhaustive.
+    // Like the rule above, this is a code-ownership lint, not a
     // security control — see its note for what actually guards injection.
     violates: (file, text) => file !== "src/page-scripts.ts" && /\.evaluate\(\s*[`'"]/.test(text),
   },
