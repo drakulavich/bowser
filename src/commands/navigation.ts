@@ -233,8 +233,14 @@ async function isLive(ctx: CommandContext, session: string): Promise<boolean> {
   try {
     const c = await connector(ctx)(session, { spawn: false });
     try {
-      await c.request("ping");
-      return true;
+      // Cap the probe. A daemon can hold a connectable socket and never answer
+      // — stopped, or blocked in a syscall — and `list` must report it rather
+      // than hang on it. A live daemon answers in microseconds; the urgent lane
+      // means a busy one does too.
+      return await Promise.race([
+        c.request("ping").then(() => true),
+        Bun.sleep(LIVE_PROBE_MS).then(() => false),
+      ]);
     } finally {
       c.close();
     }
@@ -242,6 +248,8 @@ async function isLive(ctx: CommandContext, session: string): Promise<boolean> {
     return false;
   }
 }
+
+const LIVE_PROBE_MS = 1000;
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
   let names: string[] = [];

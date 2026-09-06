@@ -320,6 +320,13 @@ describe("list", () => {
     expect(out.split("\n").filter(Boolean).sort()).toEqual(["dead-c", "live-a"]);
   });
 
+  test("omits a session whose daemon connects but never answers", async () => {
+    await ensureSessionDir("wedged");
+    const hung = fakeClient({ ping: () => new Promise<"pong">(() => {}) });
+    const out = await cmdList({ ...ctx(), connect: async () => hung });
+    expect(out.split("\n")).not.toContain("wedged");
+  }, 10_000);
+
   test("--json carries the same filtered set", async () => {
     await seedSessions();
     const out = await cmdList({ ...ctx(), json: true, connect: only(["live-a"]) });
