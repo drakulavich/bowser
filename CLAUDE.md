@@ -8,7 +8,8 @@ User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. Thi
 
 | Question | File |
 | --- | --- |
-| What command does X? | `src/cli.ts` (dispatcher), `src/cli/schemas.ts` (per-command flags), `src/commands.ts` (implementations) |
+| What command does X? | `src/cli.ts` (dispatcher), `src/cli/schemas.ts` (per-command flags), `src/commands/<domain>.ts` (implementations; `context.ts` has what they share) |
+| A script injected into the page? | `src/page-scripts.ts` — the only file that builds one |
 | How is a flag parsed? | `src/cli/parser.ts` |
 | What does the snapshot YAML look like? | `src/snapshot.ts` (`SNAPSHOT_SCRIPT`, `toYaml`, `toJson`) |
 | Where is session state? | `src/state.ts` — also `~/.bowser/sessions/<name>/state.json` at runtime |
@@ -63,7 +64,7 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 - **Refs are bare `eN`** (no `@` prefix). `resolveRef` rejects `@`-prefixed input.
 - **Snapshot output is aria-tree YAML** matching `playwright-cli` byte-for-byte (no `url:`/`title:` header). `--depth=N` is honored in `toYaml` (`src/snapshot.ts`): default unbounded, `depth=1` reproduces the flat v0.2 output, `depth=0` is a user error. Change nesting there, not in the parser or callers.
 - **Exit codes**: `0` success, `1` user error (`usage:`, `unknown command`, `expected a ref`, `ref '...' not found`, `no open page`, `invalid BOWSER_BACKEND`, `BOWSER_BACKEND=webkit`), `2` runtime error. The regex lives in `src/cli.ts`'s `import.meta.main` block — keep error messages aligned with it.
-- **Per-command implementations** in `src/commands.ts` use `loadRef(session, ref)` for ref-action commands and `emptyState(name)` for null-state fallbacks.
+- **Per-command implementations** live in `src/commands/<domain>.ts` and use the `context.ts` helpers: `withClient`, `loadRef(session, ref)` for ref-action commands, `emptyState(name)` for null-state fallbacks, `reply(ctx, json, text)` for the answer, `syncState(prev, state)` after an action that may navigate.
 - **Daemon round-trips are not free** — one Unix socket RTT per `c.request(...)`. `cmdFill` already costs 3 (click → evaluate(clear) → type); collapse if you add a similar command.
 - **Bun-native, not Node-native**: prefer `Bun.file`, `Bun.write`, `Bun.spawn`, `Bun.connect`. Avoid npm dependencies — the package is intentionally devDep-only.
 - **Don't mock the daemon for e2e** — those tests must hit a real WebView. Unit tests use the `fakeClient(handlers)` factory in `tests/helpers/fake-client.ts`; its handlers are typed from `DaemonOps`, so a new op needs no fake change — pass a handler per test only when the default doesn't fit — and seed refs with `saveState({ ... })`.
@@ -74,7 +75,7 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 ## Adding a command (e.g. `dblclick`)
 
 1. Add the op to `DaemonOps` in `src/daemon/protocol.ts` and a handler to the `handlers` table in `src/daemon/server.ts` (tsc fails until both exist); back it with a `Browser` method in `src/browser.ts`. If the op needs CDP, add `requires: "cdp"` to its `DaemonOps` entry and a row to `CDP_OPS` in the same file; the daemon then answers webkit callers with `CDP_UNAVAILABLE` before the handler runs.
-2. Add `cmdDblclick` in `src/commands.ts` (use `loadRef` if it takes a ref).
+2. Add `cmdDblclick` in the `src/commands/<domain>.ts` it belongs to (`interaction.ts` here; use `loadRef` if it takes a ref, `reply` for the answer). A new page script goes in `src/page-scripts.ts`.
 3. Add an entry to `SCHEMAS.commands` in `src/cli/schemas.ts` and a case in `src/cli.ts`'s switch.
 4. Add a unit test in `tests/commands.test.ts`.
 5. Add a row to the README table and the SKILL.md command reference.
@@ -84,7 +85,7 @@ Changing snapshot output means updating `src/snapshot.ts`, the golden in `tests/
 
 ## Gotchas (lessons learned)
 
-- **`JSON.stringify(selector)` is mandatory in evaluate-shims.** `src/browser.ts` and `src/commands.ts` build IIFE strings injected into the page (`document.querySelector(${JSON.stringify(selector)})`). Skipping it is a quoting/injection bug — selectors with quotes could break or execute attacker-controlled code via `bowser fill`.
+- **`JSON.stringify(selector)` is mandatory in evaluate-shims.** `src/page-scripts.ts` builds every IIFE string injected into the page (a layer rule keeps them out of other files) (`document.querySelector(${JSON.stringify(selector)})`). Skipping it is a quoting/injection bug — selectors with quotes could break or execute attacker-controlled code via `bowser fill`.
 - **`socket.write()` does partial writes — never ignore its return value.** Bun's low-level socket write returns the bytes actually accepted and silently drops the rest under backpressure (~8 KB on macOS Unix sockets). Route every daemon/client write through `socketWriteAll()` (`src/socket-write.ts`) and keep the `drain` handlers wired in both `Bun.listen` and `Bun.connect`. A raw `socket.write(bigString)` truncates anything over the buffer — that is what made `screenshot` (~140 KB base64) hang for 30 s (#9).
 - **`spawnDaemon()` MUST `proc.unref()` the daemon.** Bun holds the parent's event loop open until a spawned child exits, but the daemon runs forever — without `unref()`, `bowser open` on a fresh session prints its result and then hangs. `bun test` masks this entirely (the runner force-exits), so only the compiled-binary CI step catches it; its commands are wrapped in `timeout` because a regression otherwise burns the full 6 h job budget.
 - **Compiled-binary daemon spawn re-invokes the binary with `--daemon`.** In a `--compile` binary `import.meta.url` is `file:///$bunfs/root/...`, a virtual path `Bun.spawn` can't execute. `spawnDaemon()` detects it with `import.meta.url.includes("/$bunfs/")` (NOT `startsWith` — the `file://` scheme defeats that) and spawns `[execPath, "--daemon", session]`. `cli.ts` intercepts `--daemon` first thing in `import.meta.main` and calls `startDaemon()` **without** `process.exit()` — the keepalive interval holds the process open, and exiting tears the daemon down the moment its socket is ready. `bun test` never exercises this; the e2e CI job does.

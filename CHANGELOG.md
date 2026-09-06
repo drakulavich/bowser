@@ -36,6 +36,10 @@ All notable changes to this project are documented here. This project follows
   `cookie-*` ops carry `requires: "cdp"` in `DaemonOps`; the daemon answers with the same error text
   as before without calling the handler.
 
+- **`src/commands.ts` is now `src/commands/{context,navigation,interaction,snapshot,web-storage,cookies,storage-state,scripting,install}.ts`**,
+  and every script injected into the page lives in `src/page-scripts.ts`. `reply()` and `syncState()` in
+  `context.ts` replace the two lines every command repeated. No output, `--json` or wire change.
+
 ## [0.5.0] — 2026-06-15
 
 ### Added
