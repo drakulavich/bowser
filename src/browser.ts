@@ -2,6 +2,7 @@
 // instantiates Bun.WebView; backend choice lives in backend.ts.
 
 import { chromeBackend, resolveBackend, toBunBackend } from "./backend.ts";
+import { hoverScript, selectScript, setCheckedScript } from "./page-scripts.ts";
 import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
 import type { Backend } from "./backend.ts";
 
@@ -202,32 +203,9 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
     press: (key) => nav.act(() => view.press(key)),
-    hover: async (selector) => {
-      await view.evaluate(`(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) throw new Error('hover: element not found');
-        const r = el.getBoundingClientRect();
-        const x = r.x + r.width / 2, y = r.y + r.height / 2;
-        el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: x, clientY: y }));
-        el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: x, clientY: y }));
-      })()`);
-    },
-    select: async (selector, value) => {
-      await view.evaluate(`(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) throw new Error('select: element not found');
-        el.value = ${JSON.stringify(value)};
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`);
-    },
-    setChecked: async (selector, checked) => {
-      await view.evaluate(`(() => {
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) throw new Error('check: element not found');
-        if (Boolean(el.checked) !== ${checked}) el.click();
-      })()`);
-    },
+    hover: async (selector) => { await view.evaluate(hoverScript(selector)); },
+    select: async (selector, value) => { await view.evaluate(selectScript(selector, value)); },
+    setChecked: async (selector, checked) => { await view.evaluate(setCheckedScript(selector, checked)); },
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
       // Element-bounded screenshots are not supported in v1.

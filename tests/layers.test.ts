@@ -50,9 +50,9 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
-    name: "backend.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
+    name: "backend.ts, page-scripts.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
     violates: (file, text) =>
-      ["src/backend.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
+      ["src/backend.ts", "src/page-scripts.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
       valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
@@ -65,6 +65,12 @@ const RULES: Rule[] = [
     name: "daemon/client.ts does not import browser.ts (backend checks come from backend.ts)",
     violates: (file, text) =>
       file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
+  },
+  {
+    name: "only src/page-scripts.ts builds a script string for the page",
+    // A template literal that opens an IIFE is exactly what an injected script
+    // is; ordinary arrow code like `.catch(() => {})` is not.
+    violates: (file, text) => file !== "src/page-scripts.ts" && /`\(\(\)\s*=>/.test(text),
   },
 ];
 

@@ -5,7 +5,11 @@
 import { bowserCacheRoot, detectChromium } from "./backend.ts";
 import { connectOrSpawn, socketPath } from "./daemon/client.ts";
 import type { DaemonConnection } from "./daemon/protocol.ts";
-import { toJson, toYaml, SNAPSHOT_SCRIPT, type SnapshotResult } from "./snapshot.ts";
+import { toJson, toYaml, type SnapshotResult } from "./snapshot.ts";
+import {
+  SNAPSHOT_SCRIPT, clearForFillScript, runCodeScript, storageClearScript, storageDeleteScript,
+  storageGetScript, storageListScript, storageRestoreScript, storageSetScript,
+} from "./page-scripts.ts";
 import {
   ensureSessionDir,
   loadState,
@@ -145,8 +149,7 @@ export async function cmdFill(
   return withClient(ctx, async (c) => {
     await c.request("click", [target.selector]);
     // JSON.stringify so selectors with quotes are safely embedded.
-    const clearExpr = `(() => { const el = document.querySelector(${JSON.stringify(target.selector)}); if (el && 'value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); } })()`;
-    await c.request("evaluate", [clearExpr]);
+    await c.request("evaluate", [clearForFillScript(target.selector)]);
     await c.request("type", [text]);
     return ctx.json
       ? JSON.stringify({ ok: true, ref, text })
@@ -347,17 +350,10 @@ async function closeAll(ctx: CommandContext): Promise<string> {
 // session. Values are always strings — that's the Storage API surface, no
 // JSON encoding is implied.
 
-// Wraps a body in a try/catch so a SecurityError (e.g. on `about:blank` or
-// pages where storage is disabled) surfaces as a readable daemon error rather
-// than a bare DOMException.
-function storageScript(area: "localStorage" | "sessionStorage", body: string): string {
-  return `(() => { try { ${body} } catch (e) { throw new Error('${area}: ' + (e && e.message || e)); } })()`;
-}
-
 async function storageList(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
     const entries = (await c.request("evaluate", [
-      storageScript(area, `const o = {}; for (let i = 0; i < ${area}.length; i++) { const k = ${area}.key(i); o[k] = ${area}.getItem(k); } return o;`),
+      storageListScript(area),
     ])) as Record<string, string> | null;
     const obj = entries ?? {};
     if (ctx.json) return JSON.stringify(obj);
@@ -376,7 +372,7 @@ async function storageGet(
   if (!key) throw new Error(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     const val = (await c.request("evaluate", [
-      storageScript(area, `return ${area}.getItem(${JSON.stringify(key)});`),
+      storageGetScript(area, key),
     ])) as string | null;
     if (ctx.json) return JSON.stringify({ ok: true, key, value: val });
     return val ?? "";
@@ -394,7 +390,7 @@ async function storageSet(
   if (value === undefined) throw new Error(`usage: bowser ${command} <key> <value>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [
-      storageScript(area, `${area}.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)});`),
+      storageSetScript(area, key, value),
     ]);
     return ctx.json ? JSON.stringify({ ok: true, key, value }) : `set ${key}`;
   });
@@ -409,7 +405,7 @@ async function storageDelete(
   if (!key) throw new Error(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [
-      storageScript(area, `${area}.removeItem(${JSON.stringify(key)});`),
+      storageDeleteScript(area, key),
     ]);
     return ctx.json ? JSON.stringify({ ok: true, key }) : `deleted ${key}`;
   });
@@ -417,7 +413,7 @@ async function storageDelete(
 
 async function storageClear(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
-    await c.request("evaluate", [storageScript(area, `${area}.clear();`)]);
+    await c.request("evaluate", [storageClearScript(area)]);
     return ctx.json ? JSON.stringify({ ok: true }) : "cleared";
   });
 }
@@ -442,9 +438,8 @@ export async function cmdEval(ctx: CommandContext, expression: string): Promise<
 
 export async function cmdRunCode(ctx: CommandContext, code: string): Promise<string> {
   if (!code) throw new Error("usage: bowser run-code <code>");
-  const wrapped = `(() => { ${code} })()`;
   return withClient(ctx, async (c) => {
-    const result = await c.request("evaluate", [wrapped]);
+    const result = await c.request("evaluate", [runCodeScript(code)]);
     if (ctx.json) return JSON.stringify({ ok: true, result });
     return formatEvalResult(result);
   });
@@ -723,9 +718,6 @@ function pageOrigin(url: string): string | null {
   }
 }
 
-const LOCALSTORAGE_DUMP =
-  "const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o;";
-
 export async function cmdStateSave(ctx: CommandContext, file: string): Promise<string> {
   if (!file) throw new Error("usage: bowser state-save <file>");
   const target = resolve(file);
@@ -746,7 +738,7 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
     const state = await c.request("state");
     const origin = pageOrigin(state.url);
     const entries = (await c.request("evaluate", [
-      storageScript("localStorage", LOCALSTORAGE_DUMP),
+      storageListScript("localStorage"),
     ])) as Record<string, string> | null;
     const local = entries ?? {};
     const origins: StorageStateOrigin[] = [];
@@ -801,10 +793,9 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
     let originsSkipped = 0;
     for (const o of origins) {
       if (current && o.origin === current) {
-        const sets = o.localStorage
-          .map((e) => `localStorage.setItem(${JSON.stringify(e.name)}, ${JSON.stringify(e.value)});`)
-          .join(" ");
-        if (sets) await c.request("evaluate", [storageScript("localStorage", sets)]);
+        if (o.localStorage.length > 0) {
+          await c.request("evaluate", [storageRestoreScript("localStorage", o.localStorage)]);
+        }
         originsRestored++;
       } else {
         originsSkipped++;
