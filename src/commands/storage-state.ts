@@ -17,7 +17,7 @@
 import { resolve } from "node:path";
 import type { Cookie, CookieParam } from "../cdp/types.ts";
 import { storageListScript, storageRestoreScript } from "../page-scripts.ts";
-import { withClient, type CommandContext } from "./context.ts";
+import { reply, withClient, type CommandContext } from "./context.ts";
 
 interface StorageStateCookie {
   name: string;
@@ -89,9 +89,7 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
 
     const storageState: StorageState = { cookies: stateCookies, origins };
     await Bun.write(target, JSON.stringify(storageState, null, 2) + "\n");
-    return ctx.json
-      ? JSON.stringify({ ok: true, file: target, cookies: stateCookies.length, origins: origins.length })
-      : `saved ${target}`;
+    return reply(ctx, { ok: true, file: target, cookies: stateCookies.length, origins: origins.length }, `saved ${target}`);
   });
 }
 
@@ -140,12 +138,10 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
       }
     }
 
-    return ctx.json
-      ? JSON.stringify({ ok: true, file: target, cookies: cookies.length, originsRestored, originsSkipped })
-      : `loaded ${target} (${cookies.length} cookie(s), ${originsRestored} origin(s)` +
+    return reply(ctx, { ok: true, file: target, cookies: cookies.length, originsRestored, originsSkipped }, `loaded ${target} (${cookies.length} cookie(s), ${originsRestored} origin(s)` +
         (originsSkipped
           ? `, ${originsSkipped} skipped — navigate to each origin then load again to restore its localStorage`
           : "") +
-        ")";
+        ")");
   });
 }

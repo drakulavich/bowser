@@ -6,7 +6,7 @@
 import {
   storageClearScript, storageDeleteScript, storageGetScript, storageListScript, storageSetScript,
 } from "../page-scripts.ts";
-import { withClient, type CommandContext } from "./context.ts";
+import { reply, withClient, type CommandContext } from "./context.ts";
 
 async function storageList(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
@@ -50,7 +50,7 @@ async function storageSet(
     await c.request("evaluate", [
       storageSetScript(area, key, value),
     ]);
-    return ctx.json ? JSON.stringify({ ok: true, key, value }) : `set ${key}`;
+    return reply(ctx, { ok: true, key, value }, `set ${key}`);
   });
 }
 
@@ -65,14 +65,14 @@ async function storageDelete(
     await c.request("evaluate", [
       storageDeleteScript(area, key),
     ]);
-    return ctx.json ? JSON.stringify({ ok: true, key }) : `deleted ${key}`;
+    return reply(ctx, { ok: true, key }, `deleted ${key}`);
   });
 }
 
 async function storageClear(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [storageClearScript(area)]);
-    return ctx.json ? JSON.stringify({ ok: true }) : "cleared";
+    return reply(ctx, { ok: true }, "cleared");
   });
 }
 

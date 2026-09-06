@@ -2,7 +2,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { bowserCacheRoot, detectChromium } from "../backend.ts";
-import type { CommandContext } from "./context.ts";
+import { reply, type CommandContext } from "./context.ts";
 
 /** Download a headless Chromium build into ~/.bowser/chromium. We delegate
  *  the actual download to Playwright's installer (proven, cross-platform,
@@ -25,7 +25,7 @@ export async function cmdInstall(
   const existing = detect();
   if (existing && !opts.force) {
     const msg = `chromium already available at ${existing} (use --force to reinstall)`;
-    return ctx.json ? JSON.stringify({ ok: true, path: existing, skipped: true }) : msg;
+    return reply(ctx, { ok: true, path: existing, skipped: true }, msg);
   }
 
   const cacheRoot = bowserCacheRoot();
@@ -64,7 +64,5 @@ export async function cmdInstall(
     );
   }
 
-  return ctx.json
-    ? JSON.stringify({ ok: true, path })
-    : `installed chromium to ${path}`;
+  return reply(ctx, { ok: true, path }, `installed chromium to ${path}`);
 }

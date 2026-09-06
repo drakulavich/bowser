@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { CookieParam, DeleteCookieOptions } from "../cdp/types.ts";
-import { withClient, type CommandContext } from "./context.ts";
+import { reply, withClient, type CommandContext } from "./context.ts";
 import type { DaemonConnection } from "../daemon/protocol.ts";
 
 export interface CookieListOptions {
@@ -68,12 +68,11 @@ export async function cmdCookieGet(
     const urls = await cookieUrls(c, opts);
     const cookies = await c.request("cookie-get-all", [urls.length ? urls : undefined]);
     const found = cookies.find((ck) => ck.name === name);
-    if (ctx.json) {
-      return found
-        ? JSON.stringify({ ok: true, cookie: found })
-        : JSON.stringify({ ok: false });
-    }
-    return found ? found.value : "";
+    return reply(
+      ctx,
+      found ? { ok: true, cookie: found } : { ok: false },
+      found ? found.value : "",
+    );
   });
 }
 
@@ -102,7 +101,7 @@ export async function cmdCookieSet(
     if (opts.sameSite) param.sameSite = opts.sameSite;
     if (opts.expires !== undefined) param.expires = opts.expires;
     await c.request("cookie-set", [param]);
-    return ctx.json ? JSON.stringify({ ok: true }) : `set ${name}`;
+    return reply(ctx, { ok: true }, `set ${name}`);
   });
 }
 
@@ -118,13 +117,13 @@ export async function cmdCookieDelete(
     if (opts.domain) deleteOpts.domain = opts.domain;
     if (opts.path) deleteOpts.path = opts.path;
     await c.request("cookie-delete", [name, deleteOpts]);
-    return ctx.json ? JSON.stringify({ ok: true }) : `deleted ${name}`;
+    return reply(ctx, { ok: true }, `deleted ${name}`);
   });
 }
 
 export async function cmdCookieClear(ctx: CommandContext): Promise<string> {
   return withClient(ctx, async (c) => {
     await c.request("cookie-clear", []);
-    return ctx.json ? JSON.stringify({ ok: true }) : "cleared";
+    return reply(ctx, { ok: true }, "cleared");
   });
 }

@@ -2,8 +2,7 @@
 // uncheck, resize. Ref-taking commands resolve their target with loadRef.
 
 import { clearForFillScript } from "../page-scripts.ts";
-import { loadRef, withClient, type CommandContext } from "./context.ts";
-import { saveState } from "../state.ts";
+import { loadRef, reply, syncState, withClient, type CommandContext } from "./context.ts";
 
 export async function cmdClick(
   ctx: CommandContext,
@@ -13,10 +12,8 @@ export async function cmdClick(
   return withClient(ctx, async (c) => {
     await c.request("click", [target.selector]);
     const state = await c.request("state");
-    await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
-    return ctx.json
-      ? JSON.stringify({ ok: true, ref, url: state.url })
-      : `clicked ${ref} (${target.role} "${target.name}")`;
+    await syncState(prev, state);
+    return reply(ctx, { ok: true, ref, url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
   });
 }
 
@@ -32,16 +29,14 @@ export async function cmdFill(
     // JSON.stringify so selectors with quotes are safely embedded.
     await c.request("evaluate", [clearForFillScript(target.selector)]);
     await c.request("type", [text]);
-    return ctx.json
-      ? JSON.stringify({ ok: true, ref, text })
-      : `filled ${ref} (${target.role} "${target.name}")`;
+    return reply(ctx, { ok: true, ref, text }, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
 
 export async function cmdType(ctx: CommandContext, text: string): Promise<string> {
   return withClient(ctx, async (c) => {
     await c.request("type", [text]);
-    return ctx.json ? JSON.stringify({ ok: true, text }) : `typed "${text}"`;
+    return reply(ctx, { ok: true, text }, `typed "${text}"`);
   });
 }
 
@@ -49,7 +44,7 @@ export async function cmdPress(ctx: CommandContext, key: string): Promise<string
   if (!key) throw new Error("usage: bowser press <key>");
   return withClient(ctx, async (c) => {
     await c.request("press", [key]);
-    return ctx.json ? JSON.stringify({ ok: true, key }) : `pressed ${key}`;
+    return reply(ctx, { ok: true, key }, `pressed ${key}`);
   });
 }
 
@@ -57,7 +52,7 @@ export async function cmdHover(ctx: CommandContext, ref: string): Promise<string
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("hover", [target.selector]);
-    return ctx.json ? JSON.stringify({ ok: true, ref }) : `hovered ${ref}`;
+    return reply(ctx, { ok: true, ref }, `hovered ${ref}`);
   });
 }
 
@@ -66,7 +61,7 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("select", [target.selector, value]);
-    return ctx.json ? JSON.stringify({ ok: true, ref, value }) : `selected ${ref} -> "${value}"`;
+    return reply(ctx, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
   });
 }
 
@@ -74,7 +69,7 @@ export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("check", [target.selector]);
-    return ctx.json ? JSON.stringify({ ok: true, ref }) : `checked ${ref}`;
+    return reply(ctx, { ok: true, ref }, `checked ${ref}`);
   });
 }
 
@@ -82,7 +77,7 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   const { target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("uncheck", [target.selector]);
-    return ctx.json ? JSON.stringify({ ok: true, ref }) : `unchecked ${ref}`;
+    return reply(ctx, { ok: true, ref }, `unchecked ${ref}`);
   });
 }
 
@@ -102,6 +97,6 @@ export async function cmdResize(
   }
   return withClient(ctx, async (c) => {
     await c.request("resize", [width, height]);
-    return ctx.json ? JSON.stringify({ ok: true, width, height }) : `resized ${width}x${height}`;
+    return reply(ctx, { ok: true, width, height }, `resized ${width}x${height}`);
   });
 }

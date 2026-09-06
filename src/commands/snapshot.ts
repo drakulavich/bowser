@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import { toJson, toYaml, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
-import { withClient, type CommandContext } from "./context.ts";
+import { reply, withClient, type CommandContext } from "./context.ts";
 
 export async function cmdSnapshot(
   ctx: CommandContext,
@@ -70,6 +70,6 @@ export async function cmdScreenshot(
   const abs = resolve(process.cwd(), filename);
   return withClient(ctx, async (c) => {
     await c.request("screenshot", [abs]);
-    return ctx.json ? JSON.stringify({ ok: true, filename }) : `wrote ${filename}`;
+    return reply(ctx, { ok: true, filename }, `wrote ${filename}`);
   });
 }

@@ -3,7 +3,7 @@
 import { readdir, unlink } from "node:fs/promises";
 import { socketPath } from "../daemon/client.ts";
 import { ensureSessionDir, loadState, saveState, sessionsRoot, type SessionState } from "../state.ts";
-import { connector, emptyState, withClient, type CommandContext } from "./context.ts";
+import { connector, emptyState, reply, syncState, withClient, type CommandContext } from "./context.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
  *  state op resolves the URL via realUrl() (which falls back to location.href),
@@ -26,9 +26,7 @@ export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string
       name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
     };
     await saveState(next);
-    return ctx.json
-      ? JSON.stringify({ ok: true, url: state.url, title: state.title })
-      : (url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`);
+    return reply(ctx, { ok: true, url: state.url, title: state.title }, (url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`));
   });
 }
 
@@ -39,10 +37,8 @@ export async function cmdGoto(ctx: CommandContext, url: string): Promise<string>
     await c.request("navigate", [url]);
     const state = await c.request("state");
     assertNavigated(url, state.url);
-    await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
-    return ctx.json
-      ? JSON.stringify({ ok: true, url: state.url })
-      : `navigated to ${state.url}`;
+    await syncState(prev, state);
+    return reply(ctx, { ok: true, url: state.url }, `navigated to ${state.url}`);
   });
 }
 
@@ -54,10 +50,8 @@ export async function cmdHistory(
   return withClient(ctx, async (c) => {
     await c.request(which, []);
     const state = await c.request("state");
-    await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
-    return ctx.json
-      ? JSON.stringify({ ok: true, url: state.url })
-      : (which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`);
+    await syncState(prev, state);
+    return reply(ctx, { ok: true, url: state.url }, (which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`));
   });
 }
 
@@ -91,9 +85,7 @@ async function closeOne(ctx: CommandContext, session: string): Promise<string> {
 
   await saveState({ ...emptyState(prev?.name ?? session), updatedAt: Date.now() });
 
-  return ctx.json
-    ? JSON.stringify({ ok: true, session })
-    : `closed session '${session}'`;
+  return reply(ctx, { ok: true, session }, `closed session '${session}'`);
 }
 
 async function closeAll(ctx: CommandContext): Promise<string> {
