@@ -4,7 +4,11 @@
 // everything the page accumulated (typed text, modals, dynamic DOM).
 //
 // The op set lives in ./protocol.ts. `handlers` below is typed from it, so
-// an op without a handler here does not compile.
+// an op without a handler here does not compile. `state` is the exception
+// and is answered by a closure in createHandler(), because it alone reads
+// DaemonState, which a handlers entry is not given. Removing that closure
+// does not compile either, for a different reason: req.op spans every op,
+// and Handlers excludes `state`, so the lookup stops being index-safe.
 
 import { unlink } from "node:fs/promises";
 import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
