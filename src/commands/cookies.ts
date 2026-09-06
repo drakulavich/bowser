@@ -176,8 +176,12 @@ export const COMMANDS: Command[] = [
       path:     str(a.flags, "path"),
       httpOnly: a.flags["http-only"] ? true : undefined,
       secure:   a.flags.secure       ? true : undefined,
+      // Asserted, not validated: CDP accepts an unknown value silently, so
+      // `--same-site=garbage` sets a cookie today and reports success.
+      // Rejecting it in the CLI would be an improvement and a new error
+      // message, which this refactor series has kept off the table.
       sameSite: str(a.flags, "same-site") as "Strict" | "Lax" | "None" | undefined,
-      expires:  a.flags.expires !== undefined ? Number(a.flags.expires) : undefined,
+      expires:  str(a.flags, "expires") !== undefined ? Number(str(a.flags, "expires")) : undefined,
     }),
   },
   {
