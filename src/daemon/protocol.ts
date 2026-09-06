@@ -44,10 +44,10 @@ export type Op = keyof DaemonOps;
 export type ArgsOf<O extends Op> = DaemonOps[O]["args"];
 export type ResultOf<O extends Op> = DaemonOps[O]["result"];
 
-/** `request("state")` and `request("state", [])` are both fine; an op with
- *  arguments must pass them. */
+/** `args` may be omitted whenever the empty tuple satisfies the op: `request("state")`,
+ *  `request("screenshot")`; an op with a required argument must pass it. */
 export type RequestParams<O extends Op> =
-  ArgsOf<O> extends [] ? [op: O, args?: []] : [op: O, args: ArgsOf<O>];
+  [] extends ArgsOf<O> ? [op: O, args?: ArgsOf<O>] : [op: O, args: ArgsOf<O>];
 
 /** One request on the wire. `args` is untyped here on purpose: it is what
  *  JSON.parse produced, and server.ts casts it exactly once at dispatch. */
