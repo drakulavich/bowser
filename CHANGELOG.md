@@ -10,6 +10,12 @@ All notable changes to this project are documented here. This project follows
 - **WebKit: `open` printed an empty title.** `Bun.WebView`'s `title` getter is still empty when
   `navigate()` resolves on the webkit backend; the daemon now reads `document.title` from the page
   when the getter is empty, the same fallback `realUrl()` uses for the URL.
+- **WebKit: `goto` right after `reload` failed with `NSURLErrorDomain -999`.** `reload` now waits for
+  its navigation to land before answering (native `Bun.WebView.reload()` is used where the runtime
+  has it, but like `goBack()` it resolves before the reload commits).
+- **`click`, `press`, `go-back`, `go-forward` and `reload` reported the URL of the page they were
+  leaving.** The browser now waits for a navigation the action started (begins within 100 ms, lands
+  within 10 s) before answering, on both backends.
 
 ### Changed
 
@@ -18,13 +24,17 @@ All notable changes to this project are documented here. This project follows
 - **WebKit is tested end-to-end.** A macOS CI job runs the e2e suites on WebKit, including a
   new agent-loop scenario covering every non-CDP command, and a differential test against
   `playwright-cli` (skipped when it is not installed).
-- **Known WebKit limitations, now pinned as `test.todo`:** `goto` right after `reload` is rejected
-  with `NSURLErrorDomain -999`; `press` fires no bubbling `keydown`. See the 2026-09-05 refactor
-  spec, "Findings".
+- **Known WebKit limitations, now pinned as `test.todo`:** `press` fires no bubbling `keydown`. See
+  the 2026-09-05 refactor spec, "Findings".
 - **Daemon protocol is one typed map.** `src/daemon.ts` is now `src/daemon/{protocol,server,client,main}.ts`.
   `DaemonOps` declares every op's arguments and result; the client's `request`, the server's handler
   table and the tests' fake client derive from it, so a new op without a handler fails `bun run
   typecheck`. No wire, CLI or `--json` change.
+- **`src/backend.ts`.** Backend selection and Chromium detection moved out of `src/browser.ts`;
+  `browser.ts` is now only the `Browser` over one `Bun.WebView`, built by `wrapView()`.
+- **Cookie ops are `Browser` methods; CDP-only ops are refused on webkit before dispatch.** The four
+  `cookie-*` ops carry `requires: "cdp"` in `DaemonOps`; the daemon answers with the same error text
+  as before without calling the handler.
 
 ## [0.5.0] — 2026-06-15
 

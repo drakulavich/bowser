@@ -13,7 +13,8 @@ User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. Thi
 | What does the snapshot YAML look like? | `src/snapshot.ts` (`SNAPSHOT_SCRIPT`, `toYaml`, `toJson`) |
 | Where is session state? | `src/state.ts` — also `~/.bowser/sessions/<name>/state.json` at runtime |
 | Daemon protocol? | `src/daemon/protocol.ts` (the `DaemonOps` map), `src/daemon/server.ts` (`createHandler`, `startDaemon`), `src/daemon/client.ts` (`DaemonClient`, `connectOrSpawn`), `src/daemon/main.ts` (spawn entry) |
-| WebView / Chromium glue? | `src/browser.ts` |
+| WebView glue (Browser, cookies, navigation watch)? | `src/browser.ts` (`wrapView`, `openBrowser`) |
+| Backend choice / Chromium detection? | `src/backend.ts` (`resolveBackend`, `detectChromium`, `hasExplicitChromium`) |
 | Design / plan history? | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
 
 ## Build & test
@@ -66,13 +67,13 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 - **Daemon round-trips are not free** — one Unix socket RTT per `c.request(...)`. `cmdFill` already costs 3 (click → evaluate(clear) → type); collapse if you add a similar command.
 - **Bun-native, not Node-native**: prefer `Bun.file`, `Bun.write`, `Bun.spawn`, `Bun.connect`. Avoid npm dependencies — the package is intentionally devDep-only.
 - **Don't mock the daemon for e2e** — those tests must hit a real WebView. Unit tests use the `fakeClient(handlers)` factory in `tests/helpers/fake-client.ts`; its handlers are typed from `DaemonOps`, so a new op needs no fake change — pass a handler per test only when the default doesn't fit — and seed refs with `saveState({ ... })`.
-- **Backend selection lives in `resolveBackend()`** (`src/browser.ts`). macOS defaults to native `webkit` and switches to `chrome` only on *explicit* opt-in (`hasExplicitChromium()` — bowser cache or `BOWSER_CHROMIUM_PATH`), never on incidental system Chrome. `BOWSER_BACKEND=webkit|chrome` overrides. Keep that trigger distinct from the path resolver `detectChromium()`, which may use system Chrome.
+- **Backend selection lives in `resolveBackend()`** (`src/backend.ts`). macOS defaults to native `webkit` and switches to `chrome` only on *explicit* opt-in (`hasExplicitChromium()` — bowser cache or `BOWSER_CHROMIUM_PATH`), never on incidental system Chrome. `BOWSER_BACKEND=webkit|chrome` overrides. Keep that trigger distinct from the path resolver `detectChromium()`, which may use system Chrome.
 - **TDD for new functionality**: write the test, see it fail, implement minimally, see it pass, commit. Plans live in `docs/superpowers/plans/`.
 - **Daemon requests are typed.** `c.request("state")` returns `PageState`; do not cast results. A new op needs an entry in `DaemonOps` and a handler in `server.ts`; `tests/helpers/fake-client.ts` picks it up automatically.
 
 ## Adding a command (e.g. `dblclick`)
 
-1. Add the op to `DaemonOps` in `src/daemon/protocol.ts` and a handler to the `handlers` table in `src/daemon/server.ts` (tsc fails until both exist); back it with a `Browser` method in `src/browser.ts`.
+1. Add the op to `DaemonOps` in `src/daemon/protocol.ts` and a handler to the `handlers` table in `src/daemon/server.ts` (tsc fails until both exist); back it with a `Browser` method in `src/browser.ts`. If the op needs CDP, add `requires: "cdp"` to its `DaemonOps` entry and a row to `CDP_OPS` in the same file; the daemon then answers webkit callers with `CDP_UNAVAILABLE` before the handler runs.
 2. Add `cmdDblclick` in `src/commands.ts` (use `loadRef` if it takes a ref).
 3. Add an entry to `SCHEMAS.commands` in `src/cli/schemas.ts` and a case in `src/cli.ts`'s switch.
 4. Add a unit test in `tests/commands.test.ts`.
@@ -95,3 +96,6 @@ Changing snapshot output means updating `src/snapshot.ts`, the golden in `tests/
 - **Live-internet e2e is brittle.** `tests/e2e-search.test.ts` drives `github.com` and breaks whenever GitHub renames a CSS class. Never gate a release on it — that is why it sits behind `BOWSER_E2E_NET=1`.
 - **`gh auth setup-git` if a push to `.github/workflows/` is rejected.** A default OAuth token without the `workflow` scope refuses workflow file changes; that command switches git's credential helper to gh's scoped token.
 - **Squash-merge after local commits on `main` causes divergence.** Resolve with `git reset --hard origin/main`, never a merge.
+- **`Bun.WebView` history methods are `goBack()`/`goForward()` at runtime.** `@types/bun` declares `back()`/`forward()`, which are `undefined` on the object (Bun 1.4.0). `ViewLike` in `src/browser.ts` names the runtime methods and probes them with `typeof`; do not rename them to match the types.
+- **Actions that can navigate go through `nav.act()`.** `click`, `press`, `back`, `forward` and `reload` wait for a navigation that begins within 100 ms and let it land (10 s cap) before returning; that is why `state` right after `click` reports the new URL. A new action that may trigger a navigation must be wrapped the same way, or its reported URL will be stale.
+- **The daemon's `shutdown` exit is a macrotask (`setTimeout(..., 0)`), never a microtask.** The reply is written from a promise continuation; a `queueMicrotask` exit ran before it once `Browser.close()` stopped awaiting anything, and every `close` hung for the client's timeout. `tests/daemon-handler.test.ts` pins reply-before-exit.
