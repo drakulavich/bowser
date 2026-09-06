@@ -10,7 +10,7 @@ import { unlink } from "node:fs/promises";
 import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
-import { REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type Op, type ResultOf } from "./protocol.ts";
+import { IS_URGENT, REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type Op, type ResultOf } from "./protocol.ts";
 import { socketPath } from "./client.ts";
 
 /** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
@@ -133,9 +133,11 @@ export async function startDaemon(session: string): Promise<void> {
           // held until handle(req) actually settles, so a timed-out-but-still-
           // running op can never overlap the next one. withTimeout only governs
           // how soon we answer the client.
-          if (req.op === "shutdown") {
-            // Shutdown must NOT queue behind a wedged op — its job is to kill a
-            // possibly-stuck daemon. Dispatch it directly, bypassing the serializer.
+          // The urgent lane skips the serializer: these ops exist to be
+          // answerable while a queued op is wedged, which is the whole point
+          // of shutdown killing a stuck daemon. Declared in OP_META, not
+          // spelled here, so the next urgent op (dialog-handle) is one marker.
+          if (IS_URGENT.has(req.op)) {
             handle(req).then((res) => {
               socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
             }).catch(() => {

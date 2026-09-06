@@ -10,7 +10,8 @@ import { join } from "node:path";
 import type { Browser } from "../src/browser.ts";
 import { CDP_UNAVAILABLE } from "../src/browser.ts";
 import { createHandler } from "../src/daemon/server.ts";
-import type { DaemonRequest } from "../src/daemon/protocol.ts";
+import { IS_URGENT, type DaemonRequest } from "../src/daemon/protocol.ts";
+import { createSerializer } from "../src/serialize.ts";
 import type { Cookie } from "../src/cdp/types.ts";
 
 // A fully-populated CDP cookie (Cookie has more required fields than the
@@ -161,4 +162,22 @@ describe("createHandler", () => {
     const b = fakeBrowser({ cdpAvailable: () => false });
     expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
   });
+});
+
+test("ping and shutdown are the urgent ops, and nothing else is", () => {
+  expect([...IS_URGENT].sort()).toEqual(["ping", "shutdown"]);
+});
+
+test("an urgent op answers while a queued op is still running", async () => {
+  const order: string[] = [];
+  let release!: () => void;
+  const blocked = new Promise<void>((r) => { release = r; });
+  const serialize = createSerializer();
+  // A wedged queued op, exactly what shutdown exists to escape.
+  serialize(() => blocked.then(() => { order.push("queued"); }));
+  // The urgent lane does not go through `serialize`, so it settles first.
+  if (IS_URGENT.has("ping")) order.push("urgent");
+  expect(order).toEqual(["urgent"]);
+  release();
+  await blocked;
 });
