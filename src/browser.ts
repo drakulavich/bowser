@@ -2,7 +2,10 @@
 // instantiates Bun.WebView; backend choice lives in backend.ts.
 
 import { chromeBackend, resolveBackend, toBunBackend } from "./backend.ts";
-import { hoverScript, selectScript, setCheckedScript } from "./page-scripts.ts";
+import {
+  HISTORY_BACK, HISTORY_FORWARD, READ_TITLE, READ_URL, RELOAD,
+  hoverScript, selectScript, setCheckedScript,
+} from "./page-scripts.ts";
 import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
 import type { Backend } from "./backend.ts";
 
@@ -196,8 +199,8 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
   return {
     get url() { return view.url; },
     get title() { return view.title; },
-    realUrl: () => resolveUrl(view.url, () => view.evaluate("location.href")),
-    realTitle: () => resolveTitle(view.title, () => view.evaluate("document.title")),
+    realUrl: () => resolveUrl(view.url, () => view.evaluate(READ_URL)),
+    realTitle: () => resolveTitle(view.title, () => view.evaluate(READ_TITLE)),
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
@@ -220,18 +223,18 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     resize: (width, height) => view.resize(width, height),
     back: () => nav.act(async () => {
       if (typeof view.goBack === "function") await view.goBack();
-      else await view.evaluate("history.back()");
+      else await view.evaluate(HISTORY_BACK);
     }),
     forward: () => nav.act(async () => {
       if (typeof view.goForward === "function") await view.goForward();
-      else await view.evaluate("history.forward()");
+      else await view.evaluate(HISTORY_FORWARD);
     }),
     reload: () => nav.act(async () => {
       // Native reload() resolves before the reload commits, like goBack();
       // measured in the daemon: a navigate() 1 ms later was rejected with
       // NSURLErrorDomain -999. The watch makes reload return once it lands.
       if (typeof view.reload === "function") await view.reload();
-      else await view.evaluate("location.reload()");
+      else await view.evaluate(RELOAD);
     }),
     close: async () => {
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the

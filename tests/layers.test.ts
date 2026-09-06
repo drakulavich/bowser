@@ -41,7 +41,7 @@ const RULES: Rule[] = [
   {
     name: "only src/browser.ts instantiates Bun.WebView",
     // Future: tighten this to "only src/browser.ts mentions Bun.WebView" once
-    // other modules stop referencing it in comments (daemon.ts, commands.ts, etc).
+    // other modules stop referencing it in comments.
     violates: (file, text) => file !== "src/browser.ts" && /new\s+Bun\.WebView\s*\(/.test(text),
   },
   {

@@ -104,6 +104,15 @@ export const SNAPSHOT_SCRIPT = `(() => {
   return { url: location.href, title: document.title, refs };
 })()`;
 
+// Bare expressions, not IIFEs: they take no input, so there is nothing to
+// quote. Named here so this file really is every string bowser evaluates in
+// the page, which is what the layer rule and CLAUDE.md claim.
+export const READ_URL = "location.href";
+export const READ_TITLE = "document.title";
+export const HISTORY_BACK = "history.back()";
+export const HISTORY_FORWARD = "history.forward()";
+export const RELOAD = "location.reload()";
+
 export function hoverScript(selector: string): string {
   return `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});

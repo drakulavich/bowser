@@ -4,7 +4,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   clearForFillScript, hoverScript, runCodeScript, selectScript, setCheckedScript,
-  storageDeleteScript, storageGetScript, storageRestoreScript, storageSetScript, storageScript,
+  storageDeleteScript, storageGetScript, storageListScript, storageRestoreScript, storageSetScript,
+  storageScript,
 } from "../src/page-scripts.ts";
 
 const nasty = `a"b'c\\d`;
@@ -24,6 +25,11 @@ describe("page scripts quote their inputs", () => {
     expect(storageDeleteScript("localStorage", nasty)).toContain(`localStorage.removeItem(${quoted})`);
     expect(storageRestoreScript("localStorage", [{ name: nasty, value: "1" }])).toContain(`localStorage.setItem(${quoted}, "1");`);
     expect(storageScript("localStorage", "x")).toBe("(() => { try { x } catch (e) { throw new Error('localStorage: ' + (e && e.message || e)); } })()");
+  });
+
+  test("the list builder is the storage dump every list command shares", () => {
+    expect(storageListScript("localStorage")).toBe(storageScript("localStorage",
+      "const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o;"));
   });
 
   test("run-code wraps the body in an IIFE", () => {

@@ -775,6 +775,7 @@ describe("context helpers", () => {
     const prev = (await loadState("sync"))!;
     await syncState(prev, { url: "https://new/", title: "New" });
     const next = (await loadState("sync"))!;
+    expect(next.name).toBe("sync");
     expect(next.url).toBe("https://new/");
     expect(next.title).toBe("New");
     expect(next.refs).toEqual(prev.refs);
