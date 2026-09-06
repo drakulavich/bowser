@@ -8,10 +8,22 @@
 
 import type { Cookie, CookieParam, DeleteCookieOptions } from "../cdp/types.ts";
 
+/** A dialog the page opened. Chrome only: webkit delivers no dialog events
+ *  (see the 2026-09-05 refactor spec, Section 4). `defaultValue` carries
+ *  CDP's `defaultPrompt`, renamed here to match the other fields' style. */
+export interface DialogState {
+  type: "alert" | "confirm" | "prompt" | "beforeunload";
+  message: string;
+  defaultValue?: string;
+}
+
 /** What the `state` op returns. */
 export interface PageState {
   url: string;
   title: string;
+  /** Present only while a dialog is open. Populated by the dialog task; no
+   *  code in this PR sets it. */
+  dialog?: DialogState;
 }
 
 export interface DaemonOps {

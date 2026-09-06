@@ -10,8 +10,16 @@ import { unlink } from "node:fs/promises";
 import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
-import { IS_URGENT, REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type Op, type ResultOf } from "./protocol.ts";
+import { IS_URGENT, REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogState, type Op, type PageState, type ResultOf } from "./protocol.ts";
 import { socketPath } from "./client.ts";
+
+/** What the daemon knows that the page cannot be asked for. `url` and `title`
+ *  are deliberately NOT here: they are read live from the page on every
+ *  `state` call, because an action can navigate and a cached copy would go
+ *  stale (that regression is why `nav.act()` exists). */
+export interface DaemonState {
+  dialog?: DialogState;
+}
 
 /** What `dispatch` needs from the daemon. Separated from the socket so the
  *  lane choice can be tested without one. */
@@ -63,8 +71,10 @@ function opTimeoutMs(): number {
   return Number.isFinite(n) && n >= 0 ? n : 30000;
 }
 
+// `state` is excluded: it alone needs the DaemonState the daemon owns, so
+// createHandler() answers it with a closure instead of an entry here.
 type Handlers = {
-  [O in Op]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
+  [O in Exclude<Op, "state">]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
 };
 
 const handlers: Handlers = {
@@ -81,7 +91,6 @@ const handlers: Handlers = {
       process.exit(0);
     }, 0);
   },
-  state: async (browser) => ({ url: await browser.realUrl(), title: await browser.realTitle() }),
   navigate: (browser, url) => browser.navigate(url),
   evaluate: (browser, expr) => browser.evaluate(expr),
   click: (browser, selector) => browser.click(selector),
@@ -114,10 +123,22 @@ const handlers: Handlers = {
 };
 
 /** Dispatch one parsed request to its handler. Never rejects: every failure,
- *  including an op name that is not in the map, is a `{ ok: false }` reply. */
-export function createHandler(browser: Browser): (req: DaemonRequest) => Promise<DaemonResponse> {
+ *  including an op name that is not in the map, is a `{ ok: false }` reply.
+ *
+ *  `state` defaults to `{}` so the 13 existing call sites that pass only a
+ *  browser keep compiling unchanged; only the `state` op reads it. */
+export function createHandler(browser: Browser, state: DaemonState = {}): (req: DaemonRequest) => Promise<DaemonResponse> {
   return async (req) => {
-    const fn = Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
+    // `state` is answered by a closure, not an entry in `handlers`: it is the
+    // one op that reads DaemonState, and threading a third parameter through
+    // the other ~30 handlers for that would be a change with one consumer.
+    const fn = req.op === "state"
+      ? async (b: Browser): Promise<PageState> => ({
+          url: await b.realUrl(),
+          title: await b.realTitle(),
+          ...(state.dialog ? { dialog: state.dialog } : {}),
+        })
+      : Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
     // Capability gate: a CDP-only op on webkit fails here with the shared
     // message, so the handler never touches a view that cannot answer.
@@ -144,7 +165,8 @@ export async function startDaemon(session: string): Promise<void> {
   } catch {}
 
   const browser: Browser = await openBrowser();
-  const handle = createHandler(browser);
+  const state: DaemonState = {};
+  const handle = createHandler(browser, state);
   const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();
 
