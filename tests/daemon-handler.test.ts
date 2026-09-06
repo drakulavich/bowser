@@ -53,6 +53,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     close: rec("close", undefined),
     cdpAvailable: () => true,
     cdp: rec("cdp", { cookies: [{ name: "a", value: "1" }], success: true }),
+    subscribe: (event) => { calls.push(["subscribe", [event]]); return true; },
     getCookies: rec("getCookies", [cookie]),
     setCookie: rec("setCookie", { success: true }),
     deleteCookies: rec("deleteCookies", undefined),

@@ -40,6 +40,7 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     press: async (k) => { calls.push(["press", [k]]); },
     resize: async (w, h) => { calls.push(["resize", [w, h]]); },
     cdp: async (m, p) => { calls.push(["cdp", [m, p]]); return { cookies: [cookie], success: true }; },
+    addEventListener: (event) => { calls.push(["addEventListener", [event]]); },
     /** A navigation lands: url changes, loading ends, onNavigated fires. */
     land(url) { v.url = url; v.loading = false; v.onNavigated?.(url, ""); },
     ...over,
@@ -209,5 +210,25 @@ describe("wrapView navigation watch", () => {
     await b.reload();
     expect(v.calls).toEqual([["reload", []]]);
     expect(b.url).toBe("https://x/re");
+  });
+});
+
+describe("wrapView subscribe", () => {
+  test("subscribe registers on chrome and reports it", () => {
+    const seen: unknown[] = [];
+    let registered: ((e: { type: string; data?: unknown }) => void) | null = null;
+    const view = fakeView({ addEventListener: (_n, h) => { registered = h; } });
+    const b = wrapView(view, chrome);
+    expect(b.subscribe("Page.javascriptDialogOpening", (d) => seen.push(d))).toBe(true);
+    registered!({ type: "Page.javascriptDialogOpening", data: { message: "sure?" } });
+    expect(seen).toEqual([{ message: "sure?" }]);
+  });
+
+  test("subscribe refuses on webkit instead of registering a listener that never fires", () => {
+    let calls = 0;
+    const view = fakeView({ addEventListener: () => { calls++; } });
+    const b = wrapView(view, webkit);
+    expect(b.subscribe("Page.javascriptDialogOpening", () => {})).toBe(false);
+    expect(calls).toBe(0);
   });
 });
