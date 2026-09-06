@@ -16,6 +16,7 @@
 
 import { resolve } from "node:path";
 import type { Cookie, CookieParam } from "../cdp/types.ts";
+import type { Command } from "../cli/registry.ts";
 import { storageListScript, storageRestoreScript } from "../page-scripts.ts";
 import { reply, withClient, type CommandContext } from "./context.ts";
 
@@ -151,3 +152,20 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
     );
   });
 }
+
+export const COMMANDS: Command[] = [
+  {
+    name: "state-save",
+    summary: "Save cookies + localStorage to a Playwright storageState file (chrome backend only)",
+    positional: [{ name: "file", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdStateSave(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "state-load",
+    summary: "Restore cookies + localStorage from a storageState file (chrome backend only)",
+    positional: [{ name: "file", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdStateLoad(ctx, a.positional[0] ?? ""),
+  },
+];

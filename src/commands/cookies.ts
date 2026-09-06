@@ -3,8 +3,9 @@
 // ---------------------------------------------------------------------------
 
 import type { CookieParam, DeleteCookieOptions } from "../cdp/types.ts";
-import { reply, withClient, type CommandContext } from "./context.ts";
+import type { Command } from "../cli/registry.ts";
 import type { DaemonConnection } from "../daemon/protocol.ts";
+import { reply, withClient, type CommandContext } from "./context.ts";
 
 export interface CookieListOptions {
   domain?: string;
@@ -127,3 +128,76 @@ export async function cmdCookieClear(ctx: CommandContext): Promise<string> {
     return reply(ctx, { ok: true }, "cleared");
   });
 }
+
+export const COMMANDS: Command[] = [
+  {
+    name: "cookie-list",
+    summary: "List cookies, HttpOnly included (chrome backend only)",
+    positional: [],
+    flags: [
+      { name: "domain", kind: "string" },
+      { name: "url",    kind: "string" },
+    ],
+    run: (ctx, a) => cmdCookieList(ctx, {
+      domain: a.flags.domain as string | undefined,
+      url:    a.flags.url    as string | undefined,
+    }),
+  },
+  {
+    name: "cookie-get",
+    summary: "Print a cookie's value (chrome backend only)",
+    positional: [{ name: "name", required: true }],
+    flags: [
+      { name: "domain", kind: "string" },
+      { name: "url",    kind: "string" },
+    ],
+    run: (ctx, a) => cmdCookieGet(ctx, a.positional[0] ?? "", {
+      domain: a.flags.domain as string | undefined,
+      url:    a.flags.url    as string | undefined,
+    }),
+  },
+  {
+    name: "cookie-set",
+    summary: "Set a cookie (chrome backend only)",
+    positional: [{ name: "name", required: true }, { name: "value", required: true }],
+    flags: [
+      { name: "domain",    kind: "string" },
+      { name: "url",       kind: "string" },
+      { name: "path",      kind: "string" },
+      { name: "http-only", kind: "boolean" },
+      { name: "secure",    kind: "boolean" },
+      { name: "same-site", kind: "string", placeholder: "Lax|Strict|None" },
+      { name: "expires",   kind: "string", placeholder: "<unix-seconds>" },
+    ],
+    run: (ctx, a) => cmdCookieSet(ctx, a.positional[0] ?? "", a.positional[1] ?? "", {
+      domain:   a.flags.domain    as string | undefined,
+      url:      a.flags.url       as string | undefined,
+      path:     a.flags.path      as string | undefined,
+      httpOnly: a.flags["http-only"] ? true : undefined,
+      secure:   a.flags.secure       ? true : undefined,
+      sameSite: a.flags["same-site"] as "Strict" | "Lax" | "None" | undefined,
+      expires:  a.flags.expires !== undefined ? Number(a.flags.expires) : undefined,
+    }),
+  },
+  {
+    name: "cookie-delete",
+    summary: "Delete matching cookie(s) (chrome backend only)",
+    positional: [{ name: "name", required: true }],
+    flags: [
+      { name: "domain", kind: "string" },
+      { name: "url",    kind: "string" },
+      { name: "path",   kind: "string" },
+    ],
+    run: (ctx, a) => cmdCookieDelete(ctx, a.positional[0] ?? "", {
+      domain: a.flags.domain as string | undefined,
+      url:    a.flags.url    as string | undefined,
+      path:   a.flags.path   as string | undefined,
+    }),
+  },
+  {
+    name: "cookie-clear",
+    summary: "Wipe all cookies in this session (chrome backend only)",
+    positional: [], flags: [],
+    run: (ctx) => cmdCookieClear(ctx),
+  },
+];

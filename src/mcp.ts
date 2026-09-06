@@ -2,9 +2,10 @@
 //
 // `bowser mcp` runs a long-lived newline-delimited JSON-RPC server that exposes
 // every bowser command as an MCP tool. The bridge is a thin adapter: it reflects
-// over SCHEMAS.commands to generate tool definitions, and for each `tools/call`
-// it reconstructs a CLI argv and calls the existing `run()` — the single source
-// of truth for dispatch, validation, and the --json output contract.
+// over the command registry to generate tool definitions, and for each
+// `tools/call` it reconstructs a CLI argv and calls the existing `run()` — the
+// single source of truth for dispatch, validation, and the --json output
+// contract.
 //
 // Hand-rolled protocol, zero runtime dependencies (the repo is devDep-only).
 //
@@ -13,7 +14,7 @@
 // string) rather than letting a command print — that is also why `install`
 // (which inherits child stdio) is excluded from the tool set.
 
-import { SCHEMAS } from "./cli/schemas.ts";
+import { COMMANDS, findCommand } from "./cli/registry.ts";
 import type { CommandSchema } from "./cli/parser.ts";
 import pkg from "../package.json";
 
@@ -21,54 +22,6 @@ const VERSION = (pkg as { version: string }).version;
 
 /** Protocol version advertised when the client doesn't request a known one. */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
-
-/** Commands NOT exposed as tools.
- *  - mcp: must not expose itself (would spawn another server).
- *  - install: shells out with inherited stdio + long download — pollutes stdout
- *    and is a one-time operator action, not a browser-driving command. */
-export const MCP_EXCLUDED = new Set<string>(["mcp", "install"]);
-
-/** One-line tool descriptions, mirroring the CLI HELP text. A drift-guard test
- *  asserts every non-excluded command has an entry here. */
-export const DESCRIPTIONS: Record<string, string> = {
-  open: "Start or attach to a session; navigate if a URL is given",
-  goto: "Navigate the current session to a URL",
-  close: "Close a session (or all sessions with --all)",
-  snapshot: "Capture an aria-tree YAML snapshot of the page (refs for interaction)",
-  click: "Click the element with the given ref",
-  fill: "Fill the element with the given ref with text",
-  type: "Type text into the focused element",
-  press: "Press a key (e.g. Enter, Tab)",
-  hover: "Hover over the element with the given ref",
-  select: "Select an option value in the element with the given ref",
-  check: "Check the checkbox/radio with the given ref",
-  uncheck: "Uncheck the checkbox with the given ref",
-  screenshot: "Save a full-page PNG screenshot",
-  resize: "Set the viewport size in pixels",
-  "go-back": "Navigate back in history",
-  "go-forward": "Navigate forward in history",
-  reload: "Reload the current page",
-  list: "List active sessions",
-  "localstorage-list": "List all localStorage entries",
-  "localstorage-get": "Read a localStorage value",
-  "localstorage-set": "Write a localStorage entry",
-  "localstorage-delete": "Remove a localStorage entry",
-  "localstorage-clear": "Clear all localStorage entries",
-  "sessionstorage-list": "List all sessionStorage entries",
-  "sessionstorage-get": "Read a sessionStorage value",
-  "sessionstorage-set": "Write a sessionStorage entry",
-  "sessionstorage-delete": "Remove a sessionStorage entry",
-  "sessionstorage-clear": "Clear all sessionStorage entries",
-  eval: "Evaluate a JS expression in the page and return the result",
-  "run-code": "Run multi-statement JS in the page and return the result",
-  "cookie-list": "List cookies, HttpOnly included (chrome backend only)",
-  "cookie-get": "Print a cookie's value (chrome backend only)",
-  "cookie-set": "Set a cookie (chrome backend only)",
-  "cookie-delete": "Delete matching cookie(s) (chrome backend only)",
-  "cookie-clear": "Wipe all cookies in this session (chrome backend only)",
-  "state-save": "Save cookies + localStorage to a Playwright storageState file (chrome backend only)",
-  "state-load": "Restore cookies + localStorage from a storageState file (chrome backend only)",
-};
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */
@@ -92,13 +45,14 @@ export interface McpTool {
   };
 }
 
-/** Reflect over SCHEMAS.commands to generate one MCP tool per non-excluded
- *  command. Positionals → string props (required ones into `required`); flags →
- *  boolean|string props (never required); plus an optional `session` string. */
+/** Reflect over COMMANDS to generate one MCP tool per command not opted out
+ *  via `mcp: false`. Positionals → string props (required ones into
+ *  `required`); flags → boolean|string props (never required); plus an
+ *  optional `session` string. A command's `summary` is its tool description. */
 export function buildTools(): McpTool[] {
   const tools: McpTool[] = [];
-  for (const cmd of SCHEMAS.commands) {
-    if (MCP_EXCLUDED.has(cmd.name)) continue;
+  for (const cmd of COMMANDS) {
+    if (cmd.mcp === false) continue;
     const properties: Record<string, JsonSchemaProp> = {};
     const required: string[] = [];
     for (const p of cmd.positional) {
@@ -111,7 +65,7 @@ export function buildTools(): McpTool[] {
     properties.session = { type: "string", description: 'bowser session name (default: "default")' };
     tools.push({
       name: cmd.name,
-      description: DESCRIPTIONS[cmd.name] ?? `bowser ${cmd.name}`,
+      description: cmd.summary,
       inputSchema: { type: "object", properties, required },
     });
   }
@@ -162,9 +116,8 @@ async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
   const p = (params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
   const name = p.name;
   const args = p.arguments ?? {};
-  const schema = name && !MCP_EXCLUDED.has(name)
-    ? SCHEMAS.commands.find((c) => c.name === name)
-    : undefined;
+  const cmd = name ? findCommand(name) : undefined;
+  const schema = cmd && cmd.mcp !== false ? cmd : undefined;
   if (!schema) return toolResult(id, `unknown tool: ${name}`, true);
   try {
     const out = await deps.run(toArgv(schema, args));

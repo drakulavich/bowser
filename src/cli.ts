@@ -1,153 +1,17 @@
 #!/usr/bin/env bun
+import { renderHelp } from "./cli/help.ts";
 import { parse } from "./cli/parser.ts";
-import { SCHEMAS } from "./cli/schemas.ts";
+import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import type { CommandContext } from "./commands/context.ts";
-import { cmdCookieClear, cmdCookieDelete, cmdCookieGet, cmdCookieList, cmdCookieSet } from "./commands/cookies.ts";
-import { cmdInstall } from "./commands/install.ts";
-import {
-  cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
-} from "./commands/interaction.ts";
-import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "./commands/navigation.ts";
-import { cmdEval, cmdRunCode } from "./commands/scripting.ts";
-import { cmdScreenshot, cmdSnapshot } from "./commands/snapshot.ts";
-import { cmdStateLoad, cmdStateSave } from "./commands/storage-state.ts";
-import {
-  cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet, cmdLocalStorageList,
-  cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
-  cmdSessionStorageList, cmdSessionStorageSet,
-} from "./commands/web-storage.ts";
-
-const HELP = `bowser — drop-in playwright-cli alternative for AI agents
-
-Commands:
-  install [--force]                  download a headless Chromium
-  open [url]                         start session; navigate if URL given
-  goto <url>                         navigate within current session
-  close                              end session
-  snapshot [--filename=f] [--depth=N] aria-tree YAML of the page
-  click <ref>
-  fill <ref> <text>
-  type <text>
-  press <key>
-  hover <ref>
-  select <ref> <value>
-  check <ref>
-  uncheck <ref>
-  screenshot [--filename=f]         full-page screenshot (PNG)
-  resize <width> <height>           set the viewport size (pixels)
-  go-back
-  go-forward
-  reload
-  list                               list sessions
-  localstorage-list                  list all localStorage entries
-  localstorage-get <key>             read a localStorage value
-  localstorage-set <key> <value>     write a localStorage entry
-  localstorage-delete <key>          remove a localStorage entry
-  localstorage-clear                 clear all localStorage entries
-  sessionstorage-list                list all sessionStorage entries
-  sessionstorage-get <key>           read a sessionStorage value
-  sessionstorage-set <key> <value>   write a sessionStorage entry
-  sessionstorage-delete <key>        remove a sessionStorage entry
-  sessionstorage-clear               clear all sessionStorage entries
-  eval <expression>                  evaluate JS expression in the page, print result
-  run-code <code>                    run multi-statement JS in the page, print result
-  cookie-list [--domain=<d>] [--url=<u>]
-                                     list cookies (HttpOnly cookies included; chrome backend only)
-  cookie-get <name> [--domain=<d>] [--url=<u>]
-                                     print cookie value (HttpOnly cookies are first-class)
-  cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>]
-             [--http-only] [--secure] [--same-site=Lax|Strict|None] [--expires=<unix-s>]
-                                     set a cookie; --http-only sets the HttpOnly flag (chrome backend only)
-  cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]
-                                     delete matching cookie(s) (chrome backend only)
-  cookie-clear                       wipe all browser cookies in this session (chrome backend only)
-  state-save <file>                  dump cookies + localStorage to a Playwright storageState file (chrome backend only)
-  state-load <file>                  restore cookies + localStorage from a storageState file (chrome backend only)
-  mcp                                run a Model Context Protocol stdio server exposing commands as tools
-
-Global flags:
-  -s, --session <name>     session name (default: "default")
-      --json               machine-readable output
-  -h, --help               show this help`;
 
 export async function run(argv: string[]): Promise<string> {
   const args = parse(SCHEMAS, argv);
-  if (args.help && !args.command) return HELP;
-  if (!args.command) return HELP;
-
+  if (!args.command) return renderHelp(COMMANDS);
+  const command = findCommand(args.command);
+  // parse() already rejects an unknown command; this is the type narrowing.
+  if (!command) throw new Error(`unknown command: ${args.command}`);
   const ctx: CommandContext = { session: args.session, json: args.json };
-  const [p0, p1] = args.positional;
-
-  switch (args.command) {
-    case "install":    return cmdInstall(ctx, { force: Boolean(args.flags.force) });
-    case "open":       return cmdOpen(ctx, p0);
-    case "goto":       return cmdGoto(ctx, p0 ?? "");
-    case "close":      return cmdClose(ctx, { name: p0, all: Boolean(args.flags.all) });
-    case "snapshot":   return cmdSnapshot(ctx, {
-      filename: args.flags.filename as string | undefined,
-      depth: args.flags.depth as string | undefined,
-    });
-    case "click":      return cmdClick(ctx, p0 ?? "");
-    case "fill":       return cmdFill(ctx, p0 ?? "", p1 ?? "");
-    case "type":       return cmdType(ctx, p0 ?? "");
-    case "press":      return cmdPress(ctx, p0 ?? "");
-    case "hover":      return cmdHover(ctx, p0 ?? "");
-    case "select":     return cmdSelect(ctx, p0 ?? "", p1 ?? "");
-    case "check":      return cmdCheck(ctx, p0 ?? "");
-    case "uncheck":    return cmdUncheck(ctx, p0 ?? "");
-    case "screenshot": return cmdScreenshot(ctx, {
-      filename: args.flags.filename as string | undefined,
-    });
-    case "resize":     return cmdResize(ctx, p0 ?? "", p1 ?? "");
-    case "go-back":    return cmdHistory(ctx, "back");
-    case "go-forward": return cmdHistory(ctx, "forward");
-    case "reload":     return cmdHistory(ctx, "reload");
-    case "list":       return cmdList(ctx);
-    case "localstorage-list":   return cmdLocalStorageList(ctx);
-    case "localstorage-get":    return cmdLocalStorageGet(ctx, p0 ?? "");
-    case "localstorage-set":    return cmdLocalStorageSet(ctx, p0 ?? "", p1 ?? "");
-    case "localstorage-delete": return cmdLocalStorageDelete(ctx, p0 ?? "");
-    case "localstorage-clear":  return cmdLocalStorageClear(ctx);
-    case "sessionstorage-list":   return cmdSessionStorageList(ctx);
-    case "sessionstorage-get":    return cmdSessionStorageGet(ctx, p0 ?? "");
-    case "sessionstorage-set":    return cmdSessionStorageSet(ctx, p0 ?? "", p1 ?? "");
-    case "sessionstorage-delete": return cmdSessionStorageDelete(ctx, p0 ?? "");
-    case "sessionstorage-clear":  return cmdSessionStorageClear(ctx);
-    case "eval":      return cmdEval(ctx, p0 ?? "");
-    case "run-code":  return cmdRunCode(ctx, p0 ?? "");
-    case "cookie-list":   return cmdCookieList(ctx, {
-      domain: args.flags.domain as string | undefined,
-      url:    args.flags.url    as string | undefined,
-    });
-    case "cookie-get":    return cmdCookieGet(ctx, p0 ?? "", {
-      domain: args.flags.domain as string | undefined,
-      url:    args.flags.url    as string | undefined,
-    });
-    case "cookie-set":    return cmdCookieSet(ctx, p0 ?? "", p1 ?? "", {
-      domain:   args.flags.domain    as string | undefined,
-      url:      args.flags.url       as string | undefined,
-      path:     args.flags.path      as string | undefined,
-      httpOnly: args.flags["http-only"] ? true : undefined,
-      secure:   args.flags.secure       ? true : undefined,
-      sameSite: args.flags["same-site"] as "Strict" | "Lax" | "None" | undefined,
-      expires:  args.flags.expires !== undefined
-        ? Number(args.flags.expires)
-        : undefined,
-    });
-    case "cookie-delete": return cmdCookieDelete(ctx, p0 ?? "", {
-      domain: args.flags.domain as string | undefined,
-      url:    args.flags.url    as string | undefined,
-      path:   args.flags.path   as string | undefined,
-    });
-    case "cookie-clear":  return cmdCookieClear(ctx);
-    case "state-save":    return cmdStateSave(ctx, p0 ?? "");
-    case "state-load":    return cmdStateLoad(ctx, p0 ?? "");
-    // mcp is a long-lived server intercepted at the import.meta.main entry layer
-    // (it never returns a string), so it never reaches this dispatcher in normal
-    // use. This guard only fires if run(["mcp"]) is called directly.
-    case "mcp":        throw new Error("usage: run 'bowser mcp' as a top-level subcommand");
-    default:           throw new Error(`unknown command: ${args.command}`);
-  }
+  return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 
 if (import.meta.main) {

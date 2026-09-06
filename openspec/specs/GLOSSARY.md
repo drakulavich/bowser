@@ -6,7 +6,7 @@ need a new term, add it here first.
 | Term | Definition |
 |---|---|
 | **bowser** | This project: a Bun-native browser-automation CLI, published as `@drakulavich/bowser-cli`, command `bowser`. |
-| **CLI** | The `bowser` command — TypeScript executed by Bun, dispatched in `src/cli.ts` (per-command flags in `src/cli/schemas.ts`, implementations in `src/commands/<domain>.ts`). |
+| **CLI** | The `bowser` command — TypeScript executed by Bun, dispatched in `src/cli.ts` from the registry in `src/cli/registry.ts`; each command's `Command` object and implementation live in `src/commands/<domain>.ts`. |
 | **playwright-cli compatibility** | bowser's core command surface mirrors Microsoft `playwright-cli` byte-for-byte (commands, flag syntax, snapshot YAML), so existing playwright skills run unchanged. Enforced by `tests/compat.test.ts`. |
 | **Session** | A named, persistent browsing context backed by one long-lived browser process; selected with `-s`/`--session`. State persists under `~/.bowser/sessions/<name>/state.json` (`src/state.ts`). |
 | **Daemon** | The per-session background process that holds the `Bun.WebView` and answers requests over a Unix socket, serializing operations one at a time. Spawned via `src/daemon/main.ts`; the op map lives in `src/daemon/protocol.ts`, the request handler in `src/daemon/server.ts`, the serializer in `src/serialize.ts`. |

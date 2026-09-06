@@ -39,6 +39,23 @@ All notable changes to this project are documented here. This project follows
 - **`src/commands.ts` is now `src/commands/{context,navigation,interaction,snapshot,web-storage,cookies,storage-state,scripting,install}.ts`**,
   and every script injected into the page lives in `src/page-scripts.ts`. `reply()` and `syncState()` in
   `context.ts` replace the two lines every command repeated. No output, `--json` or wire change.
+- **Each command carries its own one-line summary, now the single source for `--help` and the MCP
+  tool description.** `list`'s summary is now `"List sessions"`, matching the CLI `--help` text it
+  had always used — the MCP tool description carried the stale `"List active sessions"` even though
+  `cmdList` enumerates every session directory, closed sessions included.
+- **Commands are a registry.** Each `src/commands/<domain>.ts` exports `Command` objects; dispatch,
+  `bowser --help` and the MCP tool list are generated from them. `src/cli.ts`'s 39-case switch, the
+  hand-written help text, and `DESCRIPTIONS`/`MCP_EXCLUDED` in `src/mcp.ts` are gone. Command names,
+  argv shapes, exit codes and every command's output are unchanged.
+- **`bowser --help` lists commands grouped by domain.** The registry concatenates each
+  `commands/<domain>.ts`'s array, so navigation and session commands now come before `snapshot`
+  and `screenshot` before the interaction commands, where the old hand-written order interleaved
+  them. The MCP `tools/list` order follows the same grouping. No command was added or removed.
+- **`bowser --help`'s column alignment changed.** The summary column now starts two spaces past the
+  widest usage that still ends by column 40 (column 38), instead of a fixed width. The `snapshot`
+  usage and the four `cookie-*` usages exceed that and now wrap onto their own line with the summary
+  beneath. Every command's summary text is otherwise the same string used for its MCP tool
+  description (see above).
 
 ## [0.5.0] — 2026-06-15
 
