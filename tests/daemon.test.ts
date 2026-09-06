@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { connectOrSpawn, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
 
 describe("socketPath", () => {
   test("resolves under process.env.HOME at call time", () => {
@@ -13,6 +13,18 @@ describe("socketPath", () => {
     process.env.HOME = "/tmp/bowser-sockpath-test";
     try {
       expect(socketPath("sess")).toBe("/tmp/bowser-sockpath-test/.bowser/sessions/sess/sock");
+    } finally {
+      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+    }
+  });
+});
+
+describe("pidPath", () => {
+  test("sits beside the socket, resolved at call time", () => {
+    const orig = process.env.HOME;
+    process.env.HOME = "/tmp/bowser-pidpath-test";
+    try {
+      expect(pidPath("sess")).toBe("/tmp/bowser-pidpath-test/.bowser/sessions/sess/pid");
     } finally {
       if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
     }

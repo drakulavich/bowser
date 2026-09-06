@@ -12,6 +12,14 @@ export function socketPath(session: string): string {
   return join(sessionsRoot(), session, "sock");
 }
 
+/** Where the daemon records its own pid, beside its socket. `close` needs it
+ *  to confirm the process actually died: an unreachable daemon has no socket
+ *  to ask, so without this the only honest answer is "something may still be
+ *  running". */
+export function pidPath(session: string): string {
+  return join(sessionsRoot(), session, "pid");
+}
+
 export class DaemonClient implements DaemonConnection {
   private sock: Awaited<ReturnType<typeof Bun.connect>> | undefined;
   private nextId = 1;
