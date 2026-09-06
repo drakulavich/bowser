@@ -1,7 +1,7 @@
 // Which engine Bun.WebView runs, and where a Chromium binary lives. Pure
 // decisions plus filesystem probes; nothing here touches a WebView. Imported
 // by browser.ts (to open the view), daemon/client.ts (to fail fast on a bad
-// BOWSER_BACKEND before spawning) and commands.ts (`install`).
+// BOWSER_BACKEND before spawning) and commands/install.ts.
 
 export type Backend =
   | { kind: "webkit" }

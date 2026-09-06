@@ -7,11 +7,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { CommandContext } from "../src/commands/context.ts";
 import {
   cmdStateSave,
   cmdStateLoad,
-  type CommandContext,
-} from "../src/commands.ts";
+} from "../src/commands/storage-state.ts";
 import { saveState } from "../src/state.ts";
 import type { Cookie } from "../src/cdp/types.ts";
 import { fakeClient } from "./helpers/fake-client.ts";

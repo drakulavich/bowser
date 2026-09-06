@@ -6,14 +6,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { CommandContext } from "../src/commands/context.ts";
 import {
   cmdCookieList,
   cmdCookieGet,
   cmdCookieSet,
   cmdCookieDelete,
   cmdCookieClear,
-  type CommandContext,
-} from "../src/commands.ts";
+} from "../src/commands/cookies.ts";
 import { saveState } from "../src/state.ts";
 import { CDP_UNAVAILABLE } from "../src/browser.ts";
 import type { Cookie } from "../src/cdp/types.ts";

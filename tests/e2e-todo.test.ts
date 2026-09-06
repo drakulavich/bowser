@@ -11,7 +11,9 @@ import { join } from "node:path";
 
 import { detectChromium, resolveBackend } from "../src/backend.ts";
 import { openBrowser } from "../src/browser.ts";
-import { cmdClick, cmdClose, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
+import { cmdClick, cmdFill } from "../src/commands/interaction.ts";
+import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";

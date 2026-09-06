@@ -21,7 +21,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { cmdClick, cmdClose, cmdFill, cmdOpen, cmdSnapshot, type CommandContext } from "../src/commands.ts";
+import type { CommandContext } from "../src/commands/context.ts";
+import { cmdClick, cmdFill } from "../src/commands/interaction.ts";
+import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";

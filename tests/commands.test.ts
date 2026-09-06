@@ -5,17 +5,19 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
+import { reply, syncState, type CommandContext } from "../src/commands/context.ts";
+import { cmdInstall } from "../src/commands/install.ts";
 import {
-  cmdClick, cmdFill, cmdType, cmdPress, cmdHover, cmdSelect,
-  cmdCheck, cmdUncheck, cmdScreenshot, cmdResize, cmdHistory,
-  cmdClose, cmdOpen, cmdGoto, cmdSnapshot, cmdList, cmdInstall,
-  cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
-  cmdLocalStorageDelete, cmdLocalStorageClear,
-  cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
-  cmdSessionStorageDelete, cmdSessionStorageClear,
-  cmdEval, cmdRunCode,
-  type CommandContext,
-} from "../src/commands.ts";
+  cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
+} from "../src/commands/interaction.ts";
+import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
+import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
+import {
+  cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet, cmdLocalStorageList,
+  cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
+  cmdSessionStorageList, cmdSessionStorageSet,
+} from "../src/commands/web-storage.ts";
 import { saveState, loadState } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 
@@ -758,5 +760,25 @@ describe("run-code", () => {
 
   test("missing code throws usage error", async () => {
     await expect(cmdRunCode(ctx(), undefined as unknown as string)).rejects.toThrow(/^usage: bowser run-code/);
+  });
+});
+
+describe("context helpers", () => {
+  test("reply picks JSON or text by ctx.json, with identical JSON.stringify output", () => {
+    expect(reply({ session: "s", json: true }, { ok: true, ref: "e1" }, "clicked e1")).toBe(JSON.stringify({ ok: true, ref: "e1" }));
+    expect(reply({ session: "s", json: false }, { ok: true, ref: "e1" }, "clicked e1")).toBe("clicked e1");
+  });
+
+  test("syncState keeps refs and name, replaces url and title, bumps updatedAt", async () => {
+    const refs = [{ id: "e1", selector: "a", role: "link", name: "x", tag: "a" }];
+    await saveState({ name: "sync", url: "https://old/", title: "Old", refs, updatedAt: 1 });
+    const prev = (await loadState("sync"))!;
+    await syncState(prev, { url: "https://new/", title: "New" });
+    const next = (await loadState("sync"))!;
+    expect(next.name).toBe("sync");
+    expect(next.url).toBe("https://new/");
+    expect(next.title).toBe("New");
+    expect(next.refs).toEqual(prev.refs);
+    expect(next.updatedAt).toBeGreaterThan(1);
   });
 });

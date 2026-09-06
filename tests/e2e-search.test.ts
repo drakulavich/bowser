@@ -14,7 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { detectChromium } from "../src/backend.ts";
-import { cmdClick, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
+import { cmdClick, cmdFill } from "../src/commands/interaction.ts";
+import { cmdOpen } from "../src/commands/navigation.ts";
+import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { connectOrSpawn } from "../src/daemon/client.ts";
 import { loadState } from "../src/state.ts";
 

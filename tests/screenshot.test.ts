@@ -1,7 +1,7 @@
 // Unit tests for decoding what Bun.WebView.screenshot() returns (a Blob).
 import { describe, expect, test } from "bun:test";
 import { pngBytesFrom } from "../src/browser.ts";
-import { nextAvailablePath } from "../src/commands.ts";
+import { nextAvailablePath } from "../src/commands/snapshot.ts";
 
 const PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";

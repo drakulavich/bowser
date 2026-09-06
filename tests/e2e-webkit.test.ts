@@ -11,14 +11,18 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { CommandContext } from "../src/commands/context.ts";
 import {
-  cmdCheck, cmdClick, cmdClose, cmdEval, cmdFill, cmdGoto, cmdHistory, cmdHover,
-  cmdList, cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet,
-  cmdLocalStorageList, cmdLocalStorageSet, cmdOpen, cmdPress, cmdResize,
-  cmdRunCode, cmdSelect, cmdSessionStorageClear, cmdSessionStorageGet,
-  cmdSessionStorageList, cmdSessionStorageSet, cmdSnapshot, cmdType, cmdUncheck,
-  type CommandContext,
-} from "../src/commands.ts";
+  cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
+} from "../src/commands/interaction.ts";
+import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
+import { cmdSnapshot } from "../src/commands/snapshot.ts";
+import {
+  cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet,
+  cmdLocalStorageList, cmdLocalStorageSet, cmdSessionStorageClear,
+  cmdSessionStorageGet, cmdSessionStorageList, cmdSessionStorageSet,
+} from "../src/commands/web-storage.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { bowserCacheRoot } from "../src/backend.ts";
-import { cmdInstall } from "../src/commands.ts";
+import { cmdInstall } from "../src/commands/install.ts";
 
 describe("cmdInstall", () => {
   let tmp: string;

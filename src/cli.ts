@@ -1,19 +1,21 @@
 #!/usr/bin/env bun
 import { parse } from "./cli/parser.ts";
 import { SCHEMAS } from "./cli/schemas.ts";
+import type { CommandContext } from "./commands/context.ts";
+import { cmdCookieClear, cmdCookieDelete, cmdCookieGet, cmdCookieList, cmdCookieSet } from "./commands/cookies.ts";
+import { cmdInstall } from "./commands/install.ts";
 import {
-  cmdInstall, cmdOpen, cmdGoto, cmdClose, cmdSnapshot, cmdClick,
-  cmdFill, cmdType, cmdPress, cmdHover, cmdSelect, cmdCheck,
-  cmdUncheck, cmdScreenshot, cmdResize, cmdHistory, cmdList,
-  cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
-  cmdLocalStorageDelete, cmdLocalStorageClear,
-  cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
-  cmdSessionStorageDelete, cmdSessionStorageClear,
-  cmdEval, cmdRunCode,
-  cmdCookieList, cmdCookieGet, cmdCookieSet, cmdCookieDelete, cmdCookieClear,
-  cmdStateSave, cmdStateLoad,
-  type CommandContext,
-} from "./commands.ts";
+  cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
+} from "./commands/interaction.ts";
+import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "./commands/navigation.ts";
+import { cmdEval, cmdRunCode } from "./commands/scripting.ts";
+import { cmdScreenshot, cmdSnapshot } from "./commands/snapshot.ts";
+import { cmdStateLoad, cmdStateSave } from "./commands/storage-state.ts";
+import {
+  cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet, cmdLocalStorageList,
+  cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
+  cmdSessionStorageList, cmdSessionStorageSet,
+} from "./commands/web-storage.ts";
 
 const HELP = `bowser — drop-in playwright-cli alternative for AI agents
 

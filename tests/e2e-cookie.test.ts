@@ -17,15 +17,14 @@ import { join } from "node:path";
 
 import { detectChromium } from "../src/backend.ts";
 import {
-  cmdClose,
   cmdCookieClear,
   cmdCookieDelete,
   cmdCookieGet,
   cmdCookieList,
   cmdCookieSet,
-  cmdEval,
-  cmdOpen,
-} from "../src/commands.ts";
+} from "../src/commands/cookies.ts";
+import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdEval } from "../src/commands/scripting.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
 const IS_CHROME = process.env.BOWSER_BACKEND === "chrome";

@@ -41,7 +41,7 @@ const RULES: Rule[] = [
   {
     name: "only src/browser.ts instantiates Bun.WebView",
     // Future: tighten this to "only src/browser.ts mentions Bun.WebView" once
-    // other modules stop referencing it in comments (daemon.ts, commands.ts, etc).
+    // other modules stop referencing it in comments.
     violates: (file, text) => file !== "src/browser.ts" && /new\s+Bun\.WebView\s*\(/.test(text),
   },
   {
@@ -50,21 +50,31 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
-    name: "backend.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
+    name: "backend.ts, page-scripts.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
     violates: (file, text) =>
-      ["src/backend.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
+      ["src/backend.ts", "src/page-scripts.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
       valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
-    name: "commands.ts talks to the daemon only through client.ts and protocol.ts",
+    name: "commands/* talk to the daemon only through client.ts and protocol.ts (never browser.ts or daemon/server.ts)",
     violates: (file, text) =>
-      file === "src/commands.ts" &&
+      file.startsWith("src/commands/") &&
       valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
   },
   {
     name: "daemon/client.ts does not import browser.ts (backend checks come from backend.ts)",
     violates: (file, text) =>
       file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
+  },
+  {
+    name: "only src/page-scripts.ts builds a script string for the page",
+    // A template literal that opens an IIFE is exactly what an injected script
+    // is; ordinary arrow code like `.catch(() => {})` is not. This is a
+    // code-ownership lint, not a security control: a script built by
+    // concatenation or as a `function(){}` IIFE would slip past. The
+    // injection-safety property is the JSON.stringify quoting, pinned
+    // directly by tests/page-scripts.test.ts.
+    violates: (file, text) => file !== "src/page-scripts.ts" && /`\(\(\)\s*=>/.test(text),
   },
 ];
 
