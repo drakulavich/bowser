@@ -1,6 +1,6 @@
 # Spec: `cookie-set` reports failure instead of claiming success
 
-**Status:** awaiting review — do not implement until approved.
+**Status:** approved 2026-09-06. Plan: `docs/superpowers/plans/2026-09-06-cookie-set-reports-failure.md`.
 **Origin:** ticket 3 of the post-refactor triage. The ticket described the
 symptom; the measurements below found a broader cause and cancelled half of
 the proposed fix.
@@ -182,22 +182,20 @@ Required coverage:
    `"sameSite": "Lax"`, byte-identical to `playwright-cli`'s output.
 6. `bun run typecheck` clean; `bun test` green; chrome e2e green.
 
-## Open Questions
+## Open Questions — settled 2026-09-06
 
-These change the work and are yours to settle:
+All three are decided; kept here with their reasoning.
 
 1. **Error text.** Match `playwright-cli` closely —
    `'--same-site' option: Invalid option: expected one of "Strict"|"Lax"|"None"`
    — or use bowser's own phrasing? bowser uses kebab-case flags (`--same-site`
-   vs `--sameSite`), so the strings cannot be identical anyway. My
-   recommendation: bowser phrasing, same information.
+   vs `--sameSite`), so the strings cannot be identical anyway. **Decided: bowser phrasing, same information.**
 2. **Where validation lives.** A one-off check inside `cmdCookieSet`, or a new
    `values?: string[]` on `FlagSpec` so any enum flag is validated by the parser
    and `--help` derives its placeholder from the same list? The second is more
    work and removes the hand-written `placeholder: "Lax|Strict|None"` that can
-   drift from what is accepted. Only `--same-site` needs it today. My
-   recommendation: the `FlagSpec` route, because the drift it removes is the
-   same class of bug as this ticket.
+   drift from what is accepted. Only `--same-site` needs it today. **Decided: the `FlagSpec` route,
+   because the drift it removes is the same class of bug as this ticket.**
 3. **Scope.** `cookie-delete` and `cookie-clear` return `void`, so they cannot
    report failure at all — is auditing them part of this ticket or a separate
-   one? My recommendation: separate; this spec stays on `cookie-set`.
+   one? **Decided: separate; this spec stays on `cookie-set`.**
