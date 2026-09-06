@@ -12,7 +12,7 @@ User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. Thi
 | How is a flag parsed? | `src/cli/parser.ts` |
 | What does the snapshot YAML look like? | `src/snapshot.ts` (`SNAPSHOT_SCRIPT`, `toYaml`, `toJson`) |
 | Where is session state? | `src/state.ts` — also `~/.bowser/sessions/<name>/state.json` at runtime |
-| Daemon protocol? | `src/daemon.ts` (op union + `handle()`), `src/daemon-main.ts` (entry) |
+| Daemon protocol? | `src/daemon/protocol.ts` (the `DaemonOps` map), `src/daemon/server.ts` (`createHandler`, `startDaemon`), `src/daemon/client.ts` (`DaemonClient`, `connectOrSpawn`), `src/daemon/main.ts` (spawn entry) |
 | WebView / Chromium glue? | `src/browser.ts` |
 | Design / plan history? | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
 
@@ -65,13 +65,14 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 - **Per-command implementations** in `src/commands.ts` use `loadRef(session, ref)` for ref-action commands and `emptyState(name)` for null-state fallbacks.
 - **Daemon round-trips are not free** — one Unix socket RTT per `c.request(...)`. `cmdFill` already costs 3 (click → evaluate(clear) → type); collapse if you add a similar command.
 - **Bun-native, not Node-native**: prefer `Bun.file`, `Bun.write`, `Bun.spawn`, `Bun.connect`. Avoid npm dependencies — the package is intentionally devDep-only.
-- **Don't mock the daemon for e2e** — those tests must hit a real WebView. Unit tests use the inline `fakeClient(handlers)` factory in `tests/commands.test.ts`; add new ops to its switch when you introduce daemon ops, and seed refs with `saveState({ ... })`.
+- **Don't mock the daemon for e2e** — those tests must hit a real WebView. Unit tests use the `fakeClient(handlers)` factory in `tests/helpers/fake-client.ts`; its handlers are typed from `DaemonOps`, so a new op needs no fake change — pass a handler per test only when the default doesn't fit — and seed refs with `saveState({ ... })`.
 - **Backend selection lives in `resolveBackend()`** (`src/browser.ts`). macOS defaults to native `webkit` and switches to `chrome` only on *explicit* opt-in (`hasExplicitChromium()` — bowser cache or `BOWSER_CHROMIUM_PATH`), never on incidental system Chrome. `BOWSER_BACKEND=webkit|chrome` overrides. Keep that trigger distinct from the path resolver `detectChromium()`, which may use system Chrome.
 - **TDD for new functionality**: write the test, see it fail, implement minimally, see it pass, commit. Plans live in `docs/superpowers/plans/`.
+- **Daemon requests are typed.** `c.request("state")` returns `PageState`; do not cast results. A new op needs an entry in `DaemonOps` and a handler in `server.ts`; `tests/helpers/fake-client.ts` picks it up automatically.
 
 ## Adding a command (e.g. `dblclick`)
 
-1. Add the op to `DaemonRequest["op"]` and `handle()` in `src/daemon.ts`; back it with a `Browser` method in `src/browser.ts`.
+1. Add the op to `DaemonOps` in `src/daemon/protocol.ts` and a handler to the `handlers` table in `src/daemon/server.ts` (tsc fails until both exist); back it with a `Browser` method in `src/browser.ts`.
 2. Add `cmdDblclick` in `src/commands.ts` (use `loadRef` if it takes a ref).
 3. Add an entry to `SCHEMAS.commands` in `src/cli/schemas.ts` and a case in `src/cli.ts`'s switch.
 4. Add a unit test in `tests/commands.test.ts`.
