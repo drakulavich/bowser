@@ -49,7 +49,7 @@ if (import.meta.main) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`bowser: ${msg}`);
-      const userError = /^(usage:|unknown command|expected a ref|ref '.*' not found|no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
+      const userError = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
       process.exit(userError ? 1 : 2);
     }
   }

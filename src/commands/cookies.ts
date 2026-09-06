@@ -102,7 +102,13 @@ export async function cmdCookieSet(
     if (opts.secure !== undefined) param.secure = opts.secure;
     if (opts.sameSite) param.sameSite = opts.sameSite;
     if (opts.expires !== undefined) param.expires = opts.expires;
-    await c.request("cookie-set", [param]);
+    const { success } = await c.request("cookie-set", [param]);
+    // `success` is the op's declared result and discarding it is indefensible.
+    // It is defensive, not the ticket's fix: no probe reached success: false —
+    // an invalid sameSite, a mismatched domain and Secure on localhost all
+    // returned true, and a malformed cookie throws instead. See the 2026-09-06
+    // cookie-set spec.
+    if (!success) throw new Error(`cookie-set: browser refused to set ${name}`);
     return reply(ctx, { ok: true }, `set ${name}`);
   });
 }
@@ -167,7 +173,7 @@ export const COMMANDS: Command[] = [
       { name: "path",      kind: "string" },
       { name: "http-only", kind: "boolean" },
       { name: "secure",    kind: "boolean" },
-      { name: "same-site", kind: "string", placeholder: "Lax|Strict|None" },
+      { name: "same-site", kind: "string", values: ["Strict", "Lax", "None"] },
       { name: "expires",   kind: "string", placeholder: "<unix-seconds>" },
     ],
     run: (ctx, a) => cmdCookieSet(ctx, a.positional[0] ?? "", a.positional[1] ?? "", {
@@ -176,10 +182,8 @@ export const COMMANDS: Command[] = [
       path:     str(a.flags, "path"),
       httpOnly: a.flags["http-only"] ? true : undefined,
       secure:   a.flags.secure       ? true : undefined,
-      // Asserted, not validated: CDP accepts an unknown value silently, so
-      // `--same-site=garbage` sets a cookie today and reports success.
-      // Rejecting it in the CLI would be an improvement and a new error
-      // message, which this refactor series has kept off the table.
+      // Safe to assert: the flag declares `values`, so the parser rejected
+      // anything but these three before this ran.
       sameSite: str(a.flags, "same-site") as "Strict" | "Lax" | "None" | undefined,
       expires:  str(a.flags, "expires") !== undefined ? Number(str(a.flags, "expires")) : undefined,
     }),

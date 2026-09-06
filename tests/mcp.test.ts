@@ -205,6 +205,21 @@ describe("descriptions drift-guard", () => {
     }
   });
 
+  test("an enum flag reaches the client as a JSON-Schema enum", () => {
+    // Without this a client sees --same-site as a bare string and learns the
+    // accepted values only from a rejected call.
+    const setCookie = buildTools().find((t) => t.name === "cookie-set")!;
+    expect(setCookie.inputSchema.properties["same-site"]).toMatchObject({
+      type: "string",
+      enum: ["Strict", "Lax", "None"],
+    });
+  });
+
+  test("a flag with no values list carries no enum", () => {
+    const setCookie = buildTools().find((t) => t.name === "cookie-set")!;
+    expect(setCookie.inputSchema.properties.domain).not.toHaveProperty("enum");
+  });
+
   test("mcp and install are not exposed as tools", () => {
     const names = buildTools().map((t) => t.name);
     expect(names).not.toContain("mcp");

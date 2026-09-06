@@ -35,7 +35,7 @@ export function usageOf(c: Command): string {
   for (const p of c.positional) parts.push(p.required ? `<${p.name}>` : `[${p.name}]`);
   for (const f of c.flags) {
     if (f.kind === "boolean") parts.push(`[--${f.name}]`);
-    else parts.push(`[--${f.name}=${f.placeholder ?? `<${f.name}>`}]`);
+    else parts.push(`[--${f.name}=${f.placeholder ?? f.values?.join("|") ?? `<${f.name}>`}]`);
   }
   return parts.join(" ");
 }

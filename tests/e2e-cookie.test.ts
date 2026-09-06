@@ -24,6 +24,7 @@ import {
   cmdCookieSet,
 } from "../src/commands/cookies.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdStateSave } from "../src/commands/storage-state.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -167,6 +168,35 @@ runOrSkip("e2e: cookie-* commands (chrome backend)", () => {
       { url: cookieUrl() },
     );
     expect(JSON.parse(out)).toEqual({ ok: true });
+  }, 30_000);
+
+  test("the sameSite asked for is the sameSite stored", async () => {
+    // CDP answers { success: true } and stores the cookie even when it drops an
+    // attribute it does not understand, so "it was set" proves nothing about
+    // what was set. This is why the CLI rejects an unknown --same-site rather
+    // than relying on the browser to complain (see the 2026-09-06 spec).
+    await cmdCookieClear({ session, json: false });
+    await cmdCookieSet({ session, json: false }, "ss", "v", {
+      url: cookieUrl(), sameSite: "Strict",
+    });
+
+    const out = await cmdCookieList({ session, json: true }, { url: cookieUrl() });
+    const cookies = JSON.parse(out) as Array<{ name: string; sameSite?: string }>;
+    expect(cookies.find((c) => c.name === "ss")?.sameSite).toBe("Strict");
+  }, 30_000);
+
+  test("a cookie set without --same-site still saves as Lax", async () => {
+    // Guards the half of the original ticket that measurement cancelled:
+    // playwright-cli 0.1.13 writes "Lax" here too, so this must not change.
+    await cmdCookieClear({ session, json: false });
+    await cmdCookieSet({ session, json: false }, "nosamesite", "v", { url: cookieUrl() });
+
+    const file = join(tmp, "state-samesite.json");
+    await cmdStateSave({ session, json: false }, file);
+    const state = JSON.parse(await Bun.file(file).text()) as {
+      cookies: Array<{ name: string; sameSite: string }>;
+    };
+    expect(state.cookies.find((c) => c.name === "nosamesite")?.sameSite).toBe("Lax");
   }, 30_000);
 
   test("cookie-list --json includes httpOnly field (true for HttpOnly, false for plain)", async () => {

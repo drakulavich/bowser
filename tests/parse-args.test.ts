@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parse, str } from "../src/cli/parser.ts";
+import { run } from "../src/cli.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 
 describe("parse", () => {
@@ -62,6 +63,38 @@ describe("parse", () => {
   });
   test("--depth=N on snapshot is parsed", () => {
     expect(parse(SCHEMAS, ["snapshot", "--depth=3"]).flags.depth).toBe("3");
+  });
+});
+
+describe("run() rejects an invalid enum value before reaching a browser", () => {
+  // The only assertion covering the reported case through the real argv path:
+  // the e2e cookie tests call the command functions directly and never parse
+  // a command line, so nothing else exercises this. parse() throws before any
+  // daemon work, which is what keeps this a unit test — the sibling assertion
+  // for a *valid* value would reach a real browser, and belongs (and already
+  // lives) in the parse() tests below.
+  test("cookie-set --same-site=garbage never reaches the daemon", async () => {
+    await expect(run(["cookie-set", "k", "v", "--same-site=garbage"]))
+      .rejects.toThrow("invalid --same-site: must be one of Strict, Lax, None");
+  });
+});
+
+describe("an enum flag", () => {
+  test("rejects a value outside its list", () => {
+    expect(() => parse(SCHEMAS, ["cookie-set", "k", "v", "--same-site=garbage"]))
+      .toThrow("invalid --same-site: must be one of Strict, Lax, None");
+  });
+
+  test("accepts each of its values", () => {
+    for (const v of ["Strict", "Lax", "None"]) {
+      const p = parse(SCHEMAS, ["cookie-set", "k", "v", `--same-site=${v}`]);
+      expect(p.flags["same-site"]).toBe(v);
+    }
+  });
+
+  test("does not constrain a flag with no values list", () => {
+    const p = parse(SCHEMAS, ["cookie-set", "k", "v", "--domain=anything.example"]);
+    expect(p.flags.domain).toBe("anything.example");
   });
 });
 

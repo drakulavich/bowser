@@ -135,7 +135,7 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `run-code <code>` | Run multi-statement JS in the current page; wrap in an IIFE, use `return` to produce a value |
 | `cookie-list [--domain=<d>] [--url=<u>]` | List cookies for the current page (or specified scope). HttpOnly cookies are first-class. Requires the chrome backend. |
 | `cookie-get <name> [--domain=<d>] [--url=<u>]` | Print a cookie's value (empty if not found). HttpOnly cookies are visible. Requires the chrome backend. |
-| `cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Lax\|Strict\|None] [--expires=<unix-s>]` | Set a cookie. Defaults URL to current page. `--http-only` sets the HttpOnly flag. Requires the chrome backend. |
+| `cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Strict\|Lax\|None] [--expires=<unix-s>]` | Set a cookie. Defaults URL to current page. `--http-only` sets the HttpOnly flag. Requires the chrome backend. |
 | `cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]` | Delete a cookie. Requires the chrome backend. |
 | `cookie-clear` | Wipe all browser cookies in this session. Requires the chrome backend. |
 | `state-save <file>` | Dump the cookie jar + current-origin localStorage to a Playwright-compatible `storageState` JSON file. Requires the chrome backend. |
