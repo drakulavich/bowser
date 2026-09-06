@@ -18,7 +18,7 @@ import {
   cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
   cmdSessionStorageList, cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
-import { saveState, loadState } from "../src/state.ts";
+import { ensureSessionDir, saveState, loadState } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 
 async function seedRefs() {
@@ -199,9 +199,38 @@ describe("close", () => {
 });
 
 describe("list", () => {
+  /** Session directories on disk, one live and two not. */
+  async function seedSessions(): Promise<void> {
+    for (const n of ["live-a", "dead-b", "dead-c"]) await ensureSessionDir(n);
+  }
+
+  /** A connector that answers only for the sessions named. */
+  const only = (live: string[]) => async (session: string) => {
+    if (!live.includes(session)) throw new Error("connect: no daemon");
+    return fakeClient({});
+  };
+
   test("returns string output (sessions or empty)", async () => {
     const out = await cmdList(ctx());
     expect(typeof out).toBe("string");
+  });
+
+  test("omits a session whose daemon does not answer", async () => {
+    await seedSessions();
+    const out = await cmdList({ ...ctx(), connect: only(["live-a"]) });
+    expect(out.split("\n").filter(Boolean).sort()).toEqual(["live-a"]);
+  });
+
+  test("includes every session whose daemon answers", async () => {
+    await seedSessions();
+    const out = await cmdList({ ...ctx(), connect: only(["live-a", "dead-c"]) });
+    expect(out.split("\n").filter(Boolean).sort()).toEqual(["dead-c", "live-a"]);
+  });
+
+  test("--json carries the same filtered set", async () => {
+    await seedSessions();
+    const out = await cmdList({ ...ctx(), json: true, connect: only(["live-a"]) });
+    expect(JSON.parse(out)).toEqual(["live-a"]);
   });
 });
 

@@ -120,14 +120,38 @@ async function closeAll(ctx: CommandContext): Promise<string> {
   return parts.join("; ");
 }
 
+/** A session is live when its daemon answers. The socket file alone is not
+ *  enough — a stale socket outlives a crashed daemon — and a pid alone is not
+ *  either, since an orphan holds no socket. `ping` is on the urgent lane, so a
+ *  busy daemon still answers and reads as live, which is correct. */
+async function isLive(ctx: CommandContext, session: string): Promise<boolean> {
+  try {
+    const c = await connector(ctx)(session, { spawn: false });
+    try {
+      await c.request("ping");
+      return true;
+    } finally {
+      c.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 export async function cmdList(ctx: CommandContext): Promise<string> {
+  let names: string[] = [];
   try {
     const entries = await readdir(sessionsRoot(), { withFileTypes: true });
-    const names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-    return ctx.json ? JSON.stringify(names) : names.join("\n");
+    names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
   } catch {
-    return ctx.json ? "[]" : "";
+    // no sessions root; nothing is live
   }
+  // A directory is not a session an agent can use, so every name is probed.
+  // Concurrently: one dead session waits out a connect, and serially that cost
+  // would multiply by however many directories have accumulated.
+  const live = await Promise.all(names.map((n) => isLive(ctx, n)));
+  const usable = names.filter((_, i) => live[i]);
+  return ctx.json ? JSON.stringify(usable) : usable.join("\n");
 }
 
 export const COMMANDS: Command[] = [
