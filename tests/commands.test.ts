@@ -2,15 +2,20 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import { reply, syncState, type CommandContext } from "../src/commands/context.ts";
+import { pidPath } from "../src/daemon/client.ts";
 import { cmdInstall } from "../src/commands/install.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "../src/commands/interaction.ts";
-import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "../src/commands/navigation.ts";
+import {
+  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, looksLikeOurDaemon,
+  type ProcessOps,
+} from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import {
@@ -18,7 +23,7 @@ import {
   cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
   cmdSessionStorageList, cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
-import { ensureSessionDir, saveState, loadState } from "../src/state.ts";
+import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 
 async function seedRefs() {
@@ -166,21 +171,85 @@ describe("snapshot", () => {
 });
 
 describe("close", () => {
+  /** Process facts a test controls. The default refuses to signal anything —
+   *  a test that expects a kill must say so. `graceMs` is small so the
+   *  give-up path does not spend the real grace period twice. */
+  const procOps = (o: Partial<ProcessOps> = {}): ProcessOps => ({
+    alive: () => false,
+    ours: async () => false,
+    term: () => { throw new Error("term must not be called"); },
+    graceMs: 20,
+    ...o,
+  });
+
+  /** A daemon that cannot be reached — the case the whole ticket is about. */
+  const unreachable = async () => { throw new Error("no daemon"); };
+
   test("clears state", async () => {
     const c = fakeClient({});
     const out = await cmdClose({ ...ctx(), connect: async () => c });
     expect(out).toContain(`closed session '${session}'`);
   });
+
   test("closes the session named by the positional, not --session default", async () => {
     const c = fakeClient({});
     // Seed 'dog1' with non-empty state and leave ctx()'s random session absent.
     await saveState({ name: "dog1", url: "u", title: "t", refs: [], updatedAt: 1 });
     const out = await cmdClose({ ...ctx(), connect: async () => c }, { name: "dog1" });
     expect(out).toContain("closed session 'dog1'");
-    // 'dog1' state was cleared (emptyState has url ""), ctx session was never touched.
-    const closed = await loadState("dog1");
-    expect(closed?.url).toBe("");
+    // 'dog1' is gone from disk; ctx's session was never touched.
+    expect(existsSync(sessionDir("dog1"))).toBe(false);
     expect(await loadState(session)).toBeNull();
+  });
+
+  test("removes the session directory", async () => {
+    await saveState({ name: session, url: "u", title: "t", refs: [], updatedAt: 1 });
+    expect(existsSync(sessionDir(session))).toBe(true);
+    await cmdClose({ ...ctx(), connect: async () => fakeClient({}) });
+    expect(existsSync(sessionDir(session))).toBe(false);
+  });
+
+  test("succeeds on a session that never existed", async () => {
+    const out = await closeOne({ ...ctx(), connect: unreachable }, "never-existed", procOps());
+    expect(out).toContain("closed session 'never-existed'");
+  });
+
+  test("ends an unreachable daemon that is ours", async () => {
+    await ensureSessionDir(session);
+    await Bun.write(pidPath(session), "4242");
+    let termed = false;
+    const out = await closeOne({ ...ctx(), connect: unreachable }, session, procOps({
+      alive: () => !termed,
+      ours: async () => true,
+      term: () => { termed = true; },
+    }));
+    expect(termed).toBe(true);
+    expect(out).toContain("ended unreachable daemon 4242");
+    expect(existsSync(sessionDir(session))).toBe(false);
+  });
+
+  test("never signals a live pid that is not ours", async () => {
+    await ensureSessionDir(session);
+    await Bun.write(pidPath(session), "4242");
+    // procOps()'s term throws, so reaching it fails the test rather than
+    // quietly killing a stranger.
+    const out = await closeOne({ ...ctx(), connect: unreachable }, session, procOps({
+      alive: () => true,
+    }));
+    expect(out).toBe(`closed session '${session}'`);
+    expect(existsSync(sessionDir(session))).toBe(false);
+  });
+
+  test("fails, and keeps the directory, when the daemon will not die", async () => {
+    await ensureSessionDir(session);
+    await Bun.write(pidPath(session), "4242");
+    const call = closeOne({ ...ctx(), connect: unreachable }, session, procOps({
+      alive: () => true,
+      ours: async () => true,
+      term: () => {},
+    }));
+    await expect(call).rejects.toThrow(/pid 4242.*still running/);
+    expect(existsSync(sessionDir(session))).toBe(true);
   });
 
   test("--all closes every session under the sessions root", async () => {
@@ -192,9 +261,33 @@ describe("close", () => {
     expect(out).toMatch(/^closed \d+ sessions?: /);
     expect(out).toContain("a");
     expect(out).toContain("b");
-    // both were cleared (emptyState url is "")
-    expect((await loadState("a"))?.url).toBe("");
-    expect((await loadState("b"))?.url).toBe("");
+    // and left nothing behind
+    expect(existsSync(sessionDir("a"))).toBe(false);
+    expect(existsSync(sessionDir("b"))).toBe(false);
+  });
+});
+
+// The one check standing between a stale pidfile and a signal sent to an
+// unrelated process. Refusals first: an over-eager match is the damaging
+// direction, and a missed one only leaks a daemon of ours.
+describe("looksLikeOurDaemon", () => {
+  test("refuses a pid that no longer exists (ps prints nothing)", () => {
+    expect(looksLikeOurDaemon("", "sess")).toBe(false);
+  });
+  test("refuses a process that is not a daemon", () => {
+    expect(looksLikeOurDaemon("bun test tests/commands.test.ts sess", "sess")).toBe(false);
+  });
+  test("refuses a daemon serving a different session", () => {
+    expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts other", "sess")).toBe(false);
+  });
+  test("refuses a session name that is only a substring of an argument", () => {
+    expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts abc", "ab")).toBe(false);
+  });
+  test("accepts the source form", () => {
+    expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts sess", "sess")).toBe(true);
+  });
+  test("accepts the compiled form", () => {
+    expect(looksLikeOurDaemon("/usr/local/bin/bowser --daemon sess", "sess")).toBe(true);
   });
 });
 

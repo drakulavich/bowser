@@ -1,9 +1,11 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
-import { readdir, unlink } from "node:fs/promises";
+import { readFile, readdir, rm, unlink } from "node:fs/promises";
 import type { Command } from "../cli/registry.ts";
-import { socketPath } from "../daemon/client.ts";
-import { ensureSessionDir, loadState, saveState, sessionsRoot, type SessionState } from "../state.ts";
+import { pidPath, socketPath } from "../daemon/client.ts";
+import {
+  ensureSessionDir, loadState, saveState, sessionDir, sessionsRoot, type SessionState,
+} from "../state.ts";
 import { connector, emptyState, reply, syncState, withClient, type CommandContext } from "./context.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
@@ -66,10 +68,95 @@ export async function cmdClose(
   return closeOne(ctx, opts.name ?? ctx.session);
 }
 
-async function closeOne(ctx: CommandContext, session: string): Promise<string> {
-  const prev = await loadState(session);
+/** The three process facts `close` needs, injectable so the paths that decide
+ *  whether to signal can be tested without a real daemon to kill. */
+export interface ProcessOps {
+  alive: (pid: number) => boolean;
+  ours: (pid: number, session: string) => Promise<boolean>;
+  term: (pid: number) => void;
+  /** How long a daemon gets to disappear, per attempt. */
+  graceMs: number;
+}
 
-  // Try to gracefully shut down the daemon. If it's not running, that's fine.
+/** True when `pid` is one of our daemons for `session`. Nothing here signals a
+ *  pid without asking this first: pids are reused, and killing a stranger's
+ *  process because a stale file named it would be far worse than leaking one of
+ *  ours. The session must be a whole argument, not a substring, so the daemon
+ *  for 'abc' cannot answer for 'ab'; the daemon runs either as
+ *  `bun .../daemon/main.ts <session>` or, compiled, as `bowser --daemon
+ *  <session>`, so one of those two markers must be present too. */
+export function looksLikeOurDaemon(command: string, session: string): boolean {
+  const argv = command.trim().split(/\s+/);
+  const isDaemon = argv.some((a) => a === "--daemon" || a.endsWith("daemon/main.ts"));
+  return isDaemon && argv.includes(session);
+}
+
+async function isOurDaemon(pid: number, session: string): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["ps", "-o", "command=", "-p", String(pid)], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    // A pid that no longer exists prints nothing, which no session name matches.
+    return looksLikeOurDaemon(await new Response(proc.stdout).text(), session);
+  } catch {
+    return false;
+  }
+}
+
+const realProcess: ProcessOps = {
+  alive(pid) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (e) {
+      // EPERM means the process exists and is someone else's — alive, and the
+      // ownership check is what decides whether we may touch it.
+      return (e as { code?: string }).code === "EPERM";
+    }
+  },
+  ours: isOurDaemon,
+  term(pid) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {}
+  },
+  graceMs: 2000,
+};
+
+/** The pid the daemon recorded for this session, or null if it recorded none
+ *  (a session from before pidfiles, or one whose daemon never started). */
+async function readPid(session: string): Promise<number | null> {
+  try {
+    const pid = Number((await readFile(pidPath(session), "utf8")).trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Poll until `pid` is gone, up to the grace period, and report whether it went. */
+async function waitGone(proc: ProcessOps, pid: number): Promise<boolean> {
+  const deadline = Date.now() + proc.graceMs;
+  while (Date.now() < deadline) {
+    if (!proc.alive(pid)) return true;
+    await Bun.sleep(25);
+  }
+  return !proc.alive(pid);
+}
+
+/** Exported for tests, which supply their own `proc` to exercise the paths that
+ *  decide whether to signal a pid. `cmdClose` is the command entry point. */
+export async function closeOne(
+  ctx: CommandContext,
+  session: string,
+  proc: ProcessOps = realProcess,
+): Promise<string> {
+  const pid = await readPid(session);
+
+  // Ask the daemon to stop. Failing to connect is not yet an error: the daemon
+  // may be gone already, or unreachable while still running — which is the case
+  // the pid below exists to settle, and which used to be reported as success.
   try {
     const client = await connector(ctx)(session, { spawn: false });
     try {
@@ -77,18 +164,36 @@ async function closeOne(ctx: CommandContext, session: string): Promise<string> {
     } finally {
       client.close();
     }
-  } catch {
-    // no daemon; that's ok
-  }
+  } catch {}
 
   // Remove the socket file.
   try {
     await unlink(socketPath(session));
   } catch {}
 
-  await saveState({ ...emptyState(prev?.name ?? session), updatedAt: Date.now() });
+  let ended = false;
+  if (pid !== null && !(await waitGone(proc, pid))) {
+    // Still running after being asked to stop, or never reachable to ask. A pid
+    // that is not ours is a reused number and the daemon is already gone.
+    if (await proc.ours(pid, session)) {
+      proc.term(pid);
+      ended = true;
+      if (!(await waitGone(proc, pid))) {
+        throw new Error(
+          `close: daemon for session '${session}' (pid ${pid}) is still running`,
+        );
+      }
+    }
+  }
 
-  return reply(ctx, { ok: true, session }, `closed session '${session}'`);
+  // The directory outlives nothing now: keeping it is what let closed sessions
+  // accumulate, and after close there is no state left in it worth reading.
+  await rm(sessionDir(session), { recursive: true, force: true });
+
+  const text = ended
+    ? `closed session '${session}' (ended unreachable daemon ${pid})`
+    : `closed session '${session}'`;
+  return reply(ctx, { ok: true, session, ended }, text);
 }
 
 async function closeAll(ctx: CommandContext): Promise<string> {
