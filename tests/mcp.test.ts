@@ -10,11 +10,13 @@ import {
   toArgv,
   handleMcpRequest,
   handleMcpLine,
-  MCP_EXCLUDED,
-  DESCRIPTIONS,
   type McpDeps,
 } from "../src/mcp.ts";
 import { SCHEMAS } from "../src/cli/schemas.ts";
+import { findCommand } from "../src/cli/registry.ts";
+
+/** Number of commands opted out of the MCP tool set via `mcp: false`. */
+const MCP_EXCLUDED_COUNT = SCHEMAS.commands.filter((c) => findCommand(c.name)!.mcp === false).length;
 
 const okRun = (out = '{"ok":true}'): McpDeps => ({
   run: async () => out,
@@ -30,7 +32,7 @@ function schema(name: string) {
 describe("buildTools", () => {
   test("generates one tool per non-excluded command", () => {
     const tools = buildTools();
-    expect(tools.length).toBe(SCHEMAS.commands.length - MCP_EXCLUDED.size);
+    expect(tools.length).toBe(SCHEMAS.commands.length - MCP_EXCLUDED_COUNT);
   });
 
   test("excludes mcp and install", () => {
@@ -133,7 +135,7 @@ describe("handleMcpRequest — tools/list", () => {
       { jsonrpc: "2.0", id: 2, method: "tools/list" },
       okRun(),
     );
-    expect(res.result.tools.length).toBe(SCHEMAS.commands.length - MCP_EXCLUDED.size);
+    expect(res.result.tools.length).toBe(SCHEMAS.commands.length - MCP_EXCLUDED_COUNT);
   });
 });
 
@@ -196,10 +198,16 @@ describe("handleMcpRequest — errors", () => {
 });
 
 describe("descriptions drift-guard", () => {
-  test("every non-excluded command has a DESCRIPTIONS entry", () => {
-    for (const c of SCHEMAS.commands) {
-      if (MCP_EXCLUDED.has(c.name)) continue;
-      expect(DESCRIPTIONS[c.name], `missing description for ${c.name}`).toBeDefined();
+  test("every exposed tool has a non-empty summary as its description", () => {
+    for (const t of buildTools()) {
+      expect(t.description.length).toBeGreaterThan(0);
+      expect(t.description).toBe(findCommand(t.name)!.summary);
     }
+  });
+
+  test("mcp and install are not exposed as tools", () => {
+    const names = buildTools().map((t) => t.name);
+    expect(names).not.toContain("mcp");
+    expect(names).not.toContain("install");
   });
 });
