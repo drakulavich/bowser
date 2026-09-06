@@ -56,9 +56,9 @@ const RULES: Rule[] = [
       valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
-    name: "commands.ts talks to the daemon only through client.ts and protocol.ts",
+    name: "commands/* talk to the daemon only through client.ts and protocol.ts (never browser.ts or daemon/server.ts)",
     violates: (file, text) =>
-      file === "src/commands.ts" &&
+      file.startsWith("src/commands/") &&
       valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
   },
   {

@@ -5,17 +5,19 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
+import type { CommandContext } from "../src/commands/context.ts";
+import { cmdInstall } from "../src/commands/install.ts";
 import {
-  cmdClick, cmdFill, cmdType, cmdPress, cmdHover, cmdSelect,
-  cmdCheck, cmdUncheck, cmdScreenshot, cmdResize, cmdHistory,
-  cmdClose, cmdOpen, cmdGoto, cmdSnapshot, cmdList, cmdInstall,
-  cmdLocalStorageList, cmdLocalStorageGet, cmdLocalStorageSet,
-  cmdLocalStorageDelete, cmdLocalStorageClear,
-  cmdSessionStorageList, cmdSessionStorageGet, cmdSessionStorageSet,
-  cmdSessionStorageDelete, cmdSessionStorageClear,
-  cmdEval, cmdRunCode,
-  type CommandContext,
-} from "../src/commands.ts";
+  cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
+} from "../src/commands/interaction.ts";
+import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
+import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
+import {
+  cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet, cmdLocalStorageList,
+  cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
+  cmdSessionStorageList, cmdSessionStorageSet,
+} from "../src/commands/web-storage.ts";
 import { saveState, loadState } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 

@@ -12,7 +12,9 @@ import { join } from "node:path";
 
 import { detectChromium, resolveBackend } from "../src/backend.ts";
 import { isLikelyPng } from "../src/browser.ts";
-import { cmdClick, cmdClose, cmdOpen, cmdScreenshot, cmdSnapshot } from "../src/commands.ts";
+import { cmdClick } from "../src/commands/interaction.ts";
+import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
