@@ -2,7 +2,7 @@
 // Both use the existing `evaluate` daemon op; no new daemon op is needed.
 
 import { runCodeScript } from "../page-scripts.ts";
-import { withClient, type CommandContext } from "./context.ts";
+import { reply, withClient, type CommandContext } from "./context.ts";
 
 function formatEvalResult(result: unknown): string {
   if (result === undefined || result === null) return "";
@@ -14,8 +14,7 @@ export async function cmdEval(ctx: CommandContext, expression: string): Promise<
   if (!expression) throw new Error("usage: bowser eval <expression>");
   return withClient(ctx, async (c) => {
     const result = await c.request("evaluate", [expression]);
-    if (ctx.json) return JSON.stringify({ ok: true, result });
-    return formatEvalResult(result);
+    return reply(ctx, { ok: true, result }, formatEvalResult(result));
   });
 }
 
@@ -23,7 +22,6 @@ export async function cmdRunCode(ctx: CommandContext, code: string): Promise<str
   if (!code) throw new Error("usage: bowser run-code <code>");
   return withClient(ctx, async (c) => {
     const result = await c.request("evaluate", [runCodeScript(code)]);
-    if (ctx.json) return JSON.stringify({ ok: true, result });
-    return formatEvalResult(result);
+    return reply(ctx, { ok: true, result }, formatEvalResult(result));
   });
 }

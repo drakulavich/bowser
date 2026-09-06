@@ -32,8 +32,7 @@ async function storageGet(
     const val = (await c.request("evaluate", [
       storageGetScript(area, key),
     ])) as string | null;
-    if (ctx.json) return JSON.stringify({ ok: true, key, value: val });
-    return val ?? "";
+    return reply(ctx, { ok: true, key, value: val }, val ?? "");
   });
 }
 
