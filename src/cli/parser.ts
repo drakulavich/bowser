@@ -8,8 +8,14 @@ export interface FlagSpec {
    *  flag, or the unit of a number. Written the way it should read after the
    *  `=`, so a literal set of values goes bare (`Lax|Strict|None`) and a
    *  stand-in the caller fills in goes in angle brackets (`<unix-seconds>`).
-   *  Defaults to the flag's own name. Parsing ignores it. */
+   *  Defaults to the flag's own name. Parsing ignores it. An enum flag should
+   *  use `values` instead, which drives the placeholder and the parser from
+   *  one list. */
   placeholder?: string;
+  /** Accepted values for an enum flag. The parser rejects anything else, and
+   *  `--help` derives the placeholder from this same list, so what is shown
+   *  and what is accepted cannot drift. */
+  values?: string[];
 }
 
 export interface CommandSchema {
@@ -105,6 +111,12 @@ function findShort(s: Schemas, cmd: CommandSchema | undefined, short: string): F
   return s.global.find((f) => f.short === short) ?? cmd?.flags.find((f) => f.short === short);
 }
 function assignFlag(out: Parsed, spec: FlagSpec, value: string | boolean): void {
+  // Both the --long and -short branches land here, so one check covers both.
+  // No command prefix in the message: global flags belong to no command, and
+  // a prefix that appears only sometimes reads worse than one that never does.
+  if (spec.values && typeof value === "string" && !spec.values.includes(value)) {
+    throw new Error(`invalid --${spec.name}: must be one of ${spec.values.join(", ")}`);
+  }
   if (GLOBAL_NAMES.has(spec.name)) {
     if (spec.name === "session") out.session = String(value);
     else if (spec.name === "json") out.json = Boolean(value);

@@ -25,8 +25,13 @@ describe("generated help", () => {
     expect(HELP).toContain("[--filename=<filename>]");
   });
 
-  test("a flag's placeholder carries its accepted values into the usage", () => {
-    expect(HELP).toContain("[--same-site=Lax|Strict|None]");
+  test("an enum flag's usage lists the values the parser accepts", () => {
+    // Derived from FlagSpec.values, the same list the parser enforces, so the
+    // help text cannot promise a value that would be rejected.
+    expect(HELP).toContain("[--same-site=Strict|Lax|None]");
+  });
+
+  test("a flag's placeholder carries its unit into the usage", () => {
     expect(HELP).toContain("[--expires=<unix-seconds>]");
   });
 

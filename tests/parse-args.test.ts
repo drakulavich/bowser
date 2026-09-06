@@ -65,6 +65,25 @@ describe("parse", () => {
   });
 });
 
+describe("an enum flag", () => {
+  test("rejects a value outside its list", () => {
+    expect(() => parse(SCHEMAS, ["cookie-set", "k", "v", "--same-site=garbage"]))
+      .toThrow("invalid --same-site: must be one of Strict, Lax, None");
+  });
+
+  test("accepts each of its values", () => {
+    for (const v of ["Strict", "Lax", "None"]) {
+      const p = parse(SCHEMAS, ["cookie-set", "k", "v", `--same-site=${v}`]);
+      expect(p.flags["same-site"]).toBe(v);
+    }
+  });
+
+  test("does not constrain a flag with no values list", () => {
+    const p = parse(SCHEMAS, ["cookie-set", "k", "v", "--domain=anything.example"]);
+    expect(p.flags.domain).toBe("anything.example");
+  });
+});
+
 describe("str()", () => {
   test("returns a string flag's value", () => {
     expect(str({ domain: "example.com" }, "domain")).toBe("example.com");

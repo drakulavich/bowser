@@ -167,7 +167,7 @@ export const COMMANDS: Command[] = [
       { name: "path",      kind: "string" },
       { name: "http-only", kind: "boolean" },
       { name: "secure",    kind: "boolean" },
-      { name: "same-site", kind: "string", placeholder: "Lax|Strict|None" },
+      { name: "same-site", kind: "string", values: ["Strict", "Lax", "None"] },
       { name: "expires",   kind: "string", placeholder: "<unix-seconds>" },
     ],
     run: (ctx, a) => cmdCookieSet(ctx, a.positional[0] ?? "", a.positional[1] ?? "", {
