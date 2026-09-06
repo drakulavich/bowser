@@ -6,7 +6,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { DaemonConnection } from "../src/daemon/protocol.ts";
 import {
   cmdCookieList,
   cmdCookieGet,
@@ -17,47 +16,7 @@ import {
 } from "../src/commands.ts";
 import { saveState } from "../src/state.ts";
 import type { Cookie } from "../src/cdp/types.ts";
-
-// ---------------------------------------------------------------------------
-// Extended fakeClient — adds the four cookie ops on top of the base handlers
-// ---------------------------------------------------------------------------
-function fakeCookieClient(handlers: {
-  "cookie-get-all"?: (urls?: string[]) => Cookie[];
-  "cookie-set"?: (param: unknown) => { success: boolean };
-  "cookie-delete"?: (name: string, opts: unknown) => void;
-  "cookie-clear"?: () => void;
-  state?: () => { url: string; title: string };
-}) {
-  const calls: Array<[string, unknown[]]> = [];
-
-  const c: DaemonConnection & { calls: typeof calls } = {
-    calls,
-    async connect() {},
-    async request(op: string, args: unknown[] = []) {
-      calls.push([op, args]);
-      switch (op) {
-        case "ping":
-          return "pong";
-        case "state":
-          return handlers.state?.() ?? { url: "https://example.com/", title: "Example" };
-        case "cookie-get-all":
-          return handlers["cookie-get-all"]?.(args[0] as string[] | undefined) ?? [];
-        case "cookie-set":
-          return handlers["cookie-set"]?.(args[0]) ?? { success: true };
-        case "cookie-delete":
-          handlers["cookie-delete"]?.(args[0] as string, args[1] ?? {});
-          return undefined;
-        case "cookie-clear":
-          handlers["cookie-clear"]?.();
-          return undefined;
-        default:
-          return undefined;
-      }
-    },
-    close() {},
-  } as unknown as DaemonConnection & { calls: typeof calls };
-  return c;
-}
+import { fakeClient } from "./helpers/fake-client.ts";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure (mirrors commands.test.ts HOME-redirect pattern)
@@ -108,13 +67,13 @@ describe("cookie-list", () => {
   ];
 
   test("text mode: prints name=value per line", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => cookies });
+    const c = fakeClient({ "cookie-get-all": () => cookies });
     const out = await cmdCookieList({ ...ctx(), connect: async () => c });
     expect(out).toBe("sid=abc123\ntheme=dark");
   });
 
   test("--json returns full CDP cookie shape", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => cookies });
+    const c = fakeClient({ "cookie-get-all": () => cookies });
     const out = await cmdCookieList({ ...ctx({ json: true }), connect: async () => c });
     const parsed = JSON.parse(out) as Cookie[];
     expect(Array.isArray(parsed)).toBe(true);
@@ -123,13 +82,13 @@ describe("cookie-list", () => {
   });
 
   test("text mode: empty list returns empty string", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => [] });
+    const c = fakeClient({ "cookie-get-all": () => [] });
     const out = await cmdCookieList({ ...ctx(), connect: async () => c });
     expect(out).toBe("");
   });
 
   test("--domain flag passes urls based on domain to daemon", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": (urls) => {
+    const c = fakeClient({ "cookie-get-all": (urls) => {
       // should receive a url built from the domain
       expect(urls).toBeDefined();
       return cookies;
@@ -142,7 +101,7 @@ describe("cookie-list", () => {
   });
 
   test("--url flag passes that url directly", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => [] });
+    const c = fakeClient({ "cookie-get-all": () => [] });
     await cmdCookieList({ ...ctx(), connect: async () => c }, { url: "https://other.com/" });
     const call = c.calls.find(([op]) => op === "cookie-get-all");
     expect((call![1][0] as string[]).includes("https://other.com/")).toBe(true);
@@ -150,7 +109,7 @@ describe("cookie-list", () => {
 
   test("default (no flags): uses current page URL from daemon state op", async () => {
     // The fake client's state handler returns "https://example.com/" by default.
-    const c = fakeCookieClient({
+    const c = fakeClient({
       "cookie-get-all": () => [],
       state: () => ({ url: "https://example.com/page", title: "Page" }),
     });
@@ -175,19 +134,19 @@ describe("cookie-get", () => {
   ];
 
   test("found: prints value in text mode", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => cookies });
+    const c = fakeClient({ "cookie-get-all": () => cookies });
     const out = await cmdCookieGet({ ...ctx(), connect: async () => c }, "sid");
     expect(out).toBe("abc123");
   });
 
   test("not found: prints empty string in text mode", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => [] });
+    const c = fakeClient({ "cookie-get-all": () => [] });
     const out = await cmdCookieGet({ ...ctx(), connect: async () => c }, "missing");
     expect(out).toBe("");
   });
 
   test("found: --json returns {ok:true, cookie}", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => cookies });
+    const c = fakeClient({ "cookie-get-all": () => cookies });
     const out = await cmdCookieGet({ ...ctx({ json: true }), connect: async () => c }, "sid");
     const parsed = JSON.parse(out);
     expect(parsed.ok).toBe(true);
@@ -195,7 +154,7 @@ describe("cookie-get", () => {
   });
 
   test("not found: --json returns {ok:false}", async () => {
-    const c = fakeCookieClient({ "cookie-get-all": () => [] });
+    const c = fakeClient({ "cookie-get-all": () => [] });
     const out = await cmdCookieGet({ ...ctx({ json: true }), connect: async () => c }, "gone");
     const parsed = JSON.parse(out);
     expect(parsed.ok).toBe(false);
@@ -214,8 +173,9 @@ describe("cookie-set", () => {
   test("basic set passes name/value/url to daemon", async () => {
     await seedState("https://example.com/");
     let received: unknown;
-    const c = fakeCookieClient({
+    const c = fakeClient({
       "cookie-set": (p) => { received = p; return { success: true }; },
+      state: () => ({ url: "https://example.com/", title: "Example" }),
     });
     const out = await cmdCookieSet(
       { ...ctx(), connect: async () => c },
@@ -231,7 +191,7 @@ describe("cookie-set", () => {
   test("--http-only passes httpOnly:true", async () => {
     await seedState("https://example.com/");
     let received: unknown;
-    const c = fakeCookieClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
+    const c = fakeClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
     await cmdCookieSet(
       { ...ctx(), connect: async () => c },
       "sid", "s3cr3t",
@@ -243,7 +203,7 @@ describe("cookie-set", () => {
   test("--secure passes secure:true", async () => {
     await seedState("https://example.com/");
     let received: unknown;
-    const c = fakeCookieClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
+    const c = fakeClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
     await cmdCookieSet(
       { ...ctx(), connect: async () => c },
       "s", "v",
@@ -255,7 +215,7 @@ describe("cookie-set", () => {
   test("--same-site passes sameSite", async () => {
     await seedState("https://example.com/");
     let received: unknown;
-    const c = fakeCookieClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
+    const c = fakeClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
     await cmdCookieSet(
       { ...ctx(), connect: async () => c },
       "s", "v",
@@ -267,7 +227,7 @@ describe("cookie-set", () => {
   test("--expires passes expires as number", async () => {
     await seedState("https://example.com/");
     let received: unknown;
-    const c = fakeCookieClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
+    const c = fakeClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
     await cmdCookieSet(
       { ...ctx(), connect: async () => c },
       "s", "v",
@@ -278,7 +238,7 @@ describe("cookie-set", () => {
 
   test("--domain uses domain instead of url", async () => {
     let received: unknown;
-    const c = fakeCookieClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
+    const c = fakeClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
     await cmdCookieSet(
       { ...ctx(), connect: async () => c },
       "s", "v",
@@ -291,7 +251,7 @@ describe("cookie-set", () => {
   test("--url overrides default page url", async () => {
     await seedState("https://page.com/");
     let received: unknown;
-    const c = fakeCookieClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
+    const c = fakeClient({ "cookie-set": (p) => { received = p; return { success: true }; } });
     await cmdCookieSet(
       { ...ctx(), connect: async () => c },
       "s", "v",
@@ -302,7 +262,7 @@ describe("cookie-set", () => {
 
   test("--json returns {ok:true}", async () => {
     await seedState("https://example.com/");
-    const c = fakeCookieClient({ "cookie-set": () => ({ success: true }) });
+    const c = fakeClient({ "cookie-set": () => ({ success: true }) });
     const out = await cmdCookieSet(
       { ...ctx({ json: true }), connect: async () => c },
       "k", "v",
@@ -325,7 +285,7 @@ describe("cookie-set", () => {
 describe("cookie-delete", () => {
   test("passes name to daemon", async () => {
     let deleteName: string | undefined;
-    const c = fakeCookieClient({
+    const c = fakeClient({
       "cookie-delete": (name) => { deleteName = name; },
     });
     const out = await cmdCookieDelete({ ...ctx(), connect: async () => c }, "sid");
@@ -335,7 +295,7 @@ describe("cookie-delete", () => {
 
   test("--domain and --path forwarded in opts", async () => {
     let receivedOpts: unknown;
-    const c = fakeCookieClient({
+    const c = fakeClient({
       "cookie-delete": (_, opts) => { receivedOpts = opts; },
     });
     await cmdCookieDelete(
@@ -349,7 +309,7 @@ describe("cookie-delete", () => {
 
   test("--url forwarded in opts", async () => {
     let receivedOpts: unknown;
-    const c = fakeCookieClient({
+    const c = fakeClient({
       "cookie-delete": (_, opts) => { receivedOpts = opts; },
     });
     await cmdCookieDelete(
@@ -361,7 +321,7 @@ describe("cookie-delete", () => {
   });
 
   test("--json returns {ok:true}", async () => {
-    const c = fakeCookieClient({ "cookie-delete": () => {} });
+    const c = fakeClient({ "cookie-delete": () => {} });
     const out = await cmdCookieDelete(
       { ...ctx({ json: true }), connect: async () => c },
       "sid",
@@ -380,14 +340,14 @@ describe("cookie-delete", () => {
 describe("cookie-clear", () => {
   test("calls cookie-clear op and returns 'cleared'", async () => {
     let cleared = false;
-    const c = fakeCookieClient({ "cookie-clear": () => { cleared = true; } });
+    const c = fakeClient({ "cookie-clear": () => { cleared = true; } });
     const out = await cmdCookieClear({ ...ctx(), connect: async () => c });
     expect(out).toBe("cleared");
     expect(cleared).toBe(true);
   });
 
   test("--json returns {ok:true}", async () => {
-    const c = fakeCookieClient({ "cookie-clear": () => {} });
+    const c = fakeClient({ "cookie-clear": () => {} });
     const out = await cmdCookieClear({ ...ctx({ json: true }), connect: async () => c });
     expect(JSON.parse(out)).toEqual({ ok: true });
   });
@@ -402,7 +362,7 @@ describe("webkit error", () => {
       "CDP is only available on the chrome backend (current: webkit) — " +
       "run 'bowser install' to use Chromium-backed features",
     );
-    const c = fakeCookieClient({
+    const c = fakeClient({
       "cookie-get-all": () => { throw webkitError; },
     });
     await expect(
@@ -448,8 +408,8 @@ describe("cli dispatch tri-state flags", () => {
     // After the cli.ts fix, run() never passes false — it passes undefined or true.
     await seedState("https://example.com/");
     let received: Record<string, unknown> | undefined;
-    const c = fakeCookieClient({
-      "cookie-set": (p) => { received = p as Record<string, unknown>; return { success: true }; },
+    const c = fakeClient({
+      "cookie-set": (p) => { received = p as unknown as Record<string, unknown>; return { success: true }; },
     });
     await cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { httpOnly: false });
     // cmdCookieSet correctly checks !== undefined, so false is forwarded.
@@ -460,8 +420,8 @@ describe("cli dispatch tri-state flags", () => {
   test("cmdCookieSet with httpOnly:undefined does NOT set httpOnly on param", async () => {
     await seedState("https://example.com/");
     let received: Record<string, unknown> | undefined;
-    const c = fakeCookieClient({
-      "cookie-set": (p) => { received = p as Record<string, unknown>; return { success: true }; },
+    const c = fakeClient({
+      "cookie-set": (p) => { received = p as unknown as Record<string, unknown>; return { success: true }; },
     });
     await cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { httpOnly: undefined });
     expect("httpOnly" in received!).toBe(false);
@@ -470,8 +430,8 @@ describe("cli dispatch tri-state flags", () => {
   test("cmdCookieSet with secure:undefined does NOT set secure on param", async () => {
     await seedState("https://example.com/");
     let received: Record<string, unknown> | undefined;
-    const c = fakeCookieClient({
-      "cookie-set": (p) => { received = p as Record<string, unknown>; return { success: true }; },
+    const c = fakeClient({
+      "cookie-set": (p) => { received = p as unknown as Record<string, unknown>; return { success: true }; },
     });
     await cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { secure: undefined });
     expect("secure" in received!).toBe(false);
@@ -488,7 +448,7 @@ describe("flag parsing (schema-level)", () => {
     // explicit option objects — flag parsing is already tested in parse-args.test.ts.
     // Here we just confirm the command layer accepts the option object shape.
     await seedState("https://example.com/");
-    const c = fakeCookieClient({ "cookie-set": () => ({ success: true }) });
+    const c = fakeClient({ "cookie-set": () => ({ success: true }) });
     // Should not throw.
     await expect(
       cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { httpOnly: true }),
@@ -498,7 +458,7 @@ describe("flag parsing (schema-level)", () => {
   test("--same-site accepts Strict/Lax/None values", async () => {
     await seedState("https://example.com/");
     for (const val of ["Strict", "Lax", "None"] as const) {
-      const c = fakeCookieClient({ "cookie-set": () => ({ success: true }) });
+      const c = fakeClient({ "cookie-set": () => ({ success: true }) });
       await expect(
         cmdCookieSet({ ...ctx(), connect: async () => c }, "k", "v", { sameSite: val }),
       ).resolves.toBeDefined();

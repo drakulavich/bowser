@@ -7,7 +7,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { DaemonConnection } from "../src/daemon/protocol.ts";
 import {
   cmdStateSave,
   cmdStateLoad,
@@ -15,42 +14,7 @@ import {
 } from "../src/commands.ts";
 import { saveState } from "../src/state.ts";
 import type { Cookie } from "../src/cdp/types.ts";
-
-// ---------------------------------------------------------------------------
-// Extended fakeClient — cookie ops + evaluate + state, with a call log.
-// ---------------------------------------------------------------------------
-function fakeStateClient(handlers: {
-  "cookie-get-all"?: (urls?: string[]) => Cookie[];
-  "cookie-set"?: (param: unknown) => { success: boolean };
-  evaluate?: (expr: string) => unknown;
-  state?: () => { url: string; title: string };
-}) {
-  const calls: Array<[string, unknown[]]> = [];
-
-  const c: DaemonConnection & { calls: typeof calls } = {
-    calls,
-    async connect() {},
-    async request(op: string, args: unknown[] = []) {
-      calls.push([op, args]);
-      switch (op) {
-        case "ping":
-          return "pong";
-        case "state":
-          return handlers.state?.() ?? { url: "https://example.com/", title: "Example" };
-        case "cookie-get-all":
-          return handlers["cookie-get-all"]?.(args[0] as string[] | undefined) ?? [];
-        case "cookie-set":
-          return handlers["cookie-set"]?.(args[0]) ?? { success: true };
-        case "evaluate":
-          return handlers.evaluate?.(args[0] as string);
-        default:
-          return undefined;
-      }
-    },
-    close() {},
-  } as unknown as DaemonConnection & { calls: typeof calls };
-  return c;
-}
+import { fakeClient } from "./helpers/fake-client.ts";
 
 // A fully-populated CDP cookie for mapping assertions.
 function cdpCookie(over: Partial<Cookie> = {}): Cookie {
@@ -112,7 +76,7 @@ async function seedUrl(url: string) {
 describe("state-save", () => {
   test("writes a Playwright-shaped storageState file (cookies + origins)", async () => {
     await seedUrl("https://example.com/app");
-    const c = fakeStateClient({
+    const c = fakeClient({
       state: () => ({ url: "https://example.com/app", title: "App" }),
       "cookie-get-all": () => [cdpCookie()],
       evaluate: () => ({ token: "t1", theme: "dark" }),
@@ -146,7 +110,7 @@ describe("state-save", () => {
 
   test("captures the whole cookie jar (cookie-get-all called with no url scope)", async () => {
     await seedUrl("https://example.com/");
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-get-all": () => [cdpCookie()],
       evaluate: () => ({}),
     });
@@ -158,7 +122,7 @@ describe("state-save", () => {
 
   test("omits the origins entry when localStorage is empty", async () => {
     await seedUrl("https://example.com/");
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-get-all": () => [cdpCookie()],
       evaluate: () => ({}),
     });
@@ -170,7 +134,7 @@ describe("state-save", () => {
 
   test("maps non-standard CDP sameSite to Lax", async () => {
     await seedUrl("https://example.com/");
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-get-all": () => [cdpCookie({ sameSite: "Unspecified" })],
       evaluate: () => ({}),
     });
@@ -182,9 +146,10 @@ describe("state-save", () => {
 
   test("--json reports counts", async () => {
     await seedUrl("https://example.com/");
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-get-all": () => [cdpCookie(), cdpCookie({ name: "other" })],
       evaluate: () => ({ a: "1" }),
+      state: () => ({ url: "https://example.com/", title: "Example" }),
     });
     const file = tmpFile();
     const out = await cmdStateSave({ ...ctx({ json: true }), connect: async () => c }, file);
@@ -193,7 +158,7 @@ describe("state-save", () => {
   });
 
   test("requires a file argument", async () => {
-    const c = fakeStateClient({});
+    const c = fakeClient({});
     await expect(
       cmdStateSave({ ...ctx(), connect: async () => c }, ""),
     ).rejects.toThrow(/usage: bowser state-save/);
@@ -213,7 +178,7 @@ describe("state-load", () => {
   test("restores every cookie via cookie-set with domain + path", async () => {
     await seedUrl("https://example.com/");
     const setParams: unknown[] = [];
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-set": (p) => {
         setParams.push(p);
         return { success: true };
@@ -245,7 +210,7 @@ describe("state-load", () => {
   test("drops a session cookie's -1 expires when restoring", async () => {
     await seedUrl("https://example.com/");
     const setParams: unknown[] = [];
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-set": (p) => {
         setParams.push(p);
         return { success: true };
@@ -263,7 +228,7 @@ describe("state-load", () => {
   test("restores localStorage for the current origin", async () => {
     await seedUrl("https://example.com/");
     const evalExprs: string[] = [];
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-set": () => ({ success: true }),
       evaluate: (e) => {
         evalExprs.push(e);
@@ -287,7 +252,7 @@ describe("state-load", () => {
   test("skips origins that do not match the current page and reports them", async () => {
     await seedUrl("https://example.com/");
     let evalCount = 0;
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-set": () => ({ success: true }),
       evaluate: () => {
         evalCount++;
@@ -309,7 +274,7 @@ describe("state-load", () => {
 
   test("--json reports counts", async () => {
     await seedUrl("https://example.com/");
-    const c = fakeStateClient({
+    const c = fakeClient({
       "cookie-set": () => ({ success: true }),
       evaluate: () => undefined,
       state: () => ({ url: "https://example.com/", title: "t" }),
@@ -323,14 +288,14 @@ describe("state-load", () => {
   });
 
   test("requires a file argument", async () => {
-    const c = fakeStateClient({});
+    const c = fakeClient({});
     await expect(
       cmdStateLoad({ ...ctx(), connect: async () => c }, ""),
     ).rejects.toThrow(/usage: bowser state-load/);
   });
 
   test("errors clearly when the file is missing", async () => {
-    const c = fakeStateClient({});
+    const c = fakeClient({});
     await expect(
       cmdStateLoad({ ...ctx(), connect: async () => c }, join(tmp, "does-not-exist.json")),
     ).rejects.toThrow();
