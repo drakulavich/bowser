@@ -370,10 +370,14 @@ Each PR is green on its own, including the WebKit e2e suites from PR 1.
 | 4 | `commands/*` split, `context.ts` helpers, `page-scripts.ts` | commands, tests imports | output wording may move closer to `playwright-cli`; CHANGELOG |
 | 5 | Registry: dispatch, HELP, MCP from `COMMANDS`; delete `schemas.ts` body, `DESCRIPTIONS`, `MCP_EXCLUDED`; docs drift test | cli, mcp, tests | `--help`, MCP descriptions; CHANGELOG |
 | 6 | Event lane: `urgent` markers, urgent routing, `DaemonState`, `subscribe()` | daemon/server, browser | none |
-| 7 | CLAUDE.md: new "Where to look first", "Adding a command" is four steps, drop gotchas the compiler now enforces | docs | none |
+| 7 | `str()` for flag reads; delete `src/cli/schemas.ts`; CLAUDE.md follow-through | cli, commands, tests, docs | none |
 | — | Series gate: dogfooding pass on the compiled binary on WebKit (Section 5) | report only | none |
 
-PR 7 may be folded into 5 or 6. PRs 2 and 3 produce the types that 4 and 5
+PR 7 shrank: PR 5 had already rewritten "Where to look first" and cut
+"Adding a command" to four steps, and no gotcha turned out to be enforced by
+the compiler. The most likely candidate was checked rather than assumed — see
+the history-method gotcha, which survives because the compiler catches only a
+half-rename. PR 7 carries the two cleanups PR 5's review deferred instead. PRs 2 and 3 produce the types that 4 and 5
 lean on; 6 is last because it is the only one whose shape is set by a feature
 not yet built.
 
@@ -436,6 +440,23 @@ Section 4 where it guessed.
   own profile.
 - **`fill --stdin`** so a secret from `op read` never appears in process
   arguments. Trivial once the registry exists.
+- **An invalid `--same-site` becomes `Lax` on a round-trip.** Measured during
+  PR 7's review: `cookie-set k v --same-site=garbage` reports success, and CDP
+  creates the cookie while silently dropping the attribute, so `cookie-list`
+  shows no `sameSite` key at all. `state-save` then invents one —
+  `normalizeSameSite` (`src/commands/storage-state.ts`) collapses anything
+  that is not `Strict` or `None`, including `undefined`, to `"Lax"`. So an
+  invalid value is discarded at set time and materialises as a real `Lax` in
+  the saved file. Two separate decisions to make: whether the CLI should
+  reject an unknown `--same-site` (it currently asserts the union without
+  checking, in `commands/cookies.ts`), and whether `normalizeSameSite` should
+  distinguish "absent" from "not one of ours" rather than folding both to
+  `Lax`. Both change user-visible output, which is why neither is in this
+  series.
+- **A request whose daemon exits never settles.** Raised by PR 6's final
+  review: `DaemonClient` registers no `close` handler, so if the daemon goes
+  away mid-request the promise neither resolves nor rejects and the client
+  waits for its timeout, or forever where none applies. Predates the series.
 
 ## Open questions
 

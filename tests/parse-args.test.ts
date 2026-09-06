@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parse } from "../src/cli/parser.ts";
-import { SCHEMAS } from "../src/cli/schemas.ts";
+import { parse, str } from "../src/cli/parser.ts";
+import { SCHEMAS } from "../src/cli/registry.ts";
 
 describe("parse", () => {
   test("global session via -s=name", () => {
@@ -62,5 +62,23 @@ describe("parse", () => {
   });
   test("--depth=N on snapshot is parsed", () => {
     expect(parse(SCHEMAS, ["snapshot", "--depth=3"]).flags.depth).toBe("3");
+  });
+});
+
+describe("str()", () => {
+  test("returns a string flag's value", () => {
+    expect(str({ domain: "example.com" }, "domain")).toBe("example.com");
+  });
+
+  test("returns undefined for a flag that was never passed", () => {
+    expect(str({}, "domain")).toBeUndefined();
+  });
+
+  test("returns undefined for a boolean flag rather than handing over `true`", () => {
+    // This is the whole reason str() exists. `flags.secure as string |
+    // undefined` compiles and yields the boolean, so a command reading a
+    // boolean flag as a string would receive true and pass it on.
+    expect(str({ secure: true }, "secure")).toBeUndefined();
+    expect(str({ secure: false }, "secure")).toBeUndefined();
   });
 });

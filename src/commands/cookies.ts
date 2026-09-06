@@ -4,6 +4,7 @@
 
 import type { CookieParam, DeleteCookieOptions } from "../cdp/types.ts";
 import type { Command } from "../cli/registry.ts";
+import { str } from "../cli/parser.ts";
 import type { DaemonConnection } from "../daemon/protocol.ts";
 import { reply, withClient, type CommandContext } from "./context.ts";
 
@@ -139,8 +140,8 @@ export const COMMANDS: Command[] = [
       { name: "url",    kind: "string" },
     ],
     run: (ctx, a) => cmdCookieList(ctx, {
-      domain: a.flags.domain as string | undefined,
-      url:    a.flags.url    as string | undefined,
+      domain: str(a.flags, "domain"),
+      url:    str(a.flags, "url"),
     }),
   },
   {
@@ -152,8 +153,8 @@ export const COMMANDS: Command[] = [
       { name: "url",    kind: "string" },
     ],
     run: (ctx, a) => cmdCookieGet(ctx, a.positional[0] ?? "", {
-      domain: a.flags.domain as string | undefined,
-      url:    a.flags.url    as string | undefined,
+      domain: str(a.flags, "domain"),
+      url:    str(a.flags, "url"),
     }),
   },
   {
@@ -170,13 +171,17 @@ export const COMMANDS: Command[] = [
       { name: "expires",   kind: "string", placeholder: "<unix-seconds>" },
     ],
     run: (ctx, a) => cmdCookieSet(ctx, a.positional[0] ?? "", a.positional[1] ?? "", {
-      domain:   a.flags.domain    as string | undefined,
-      url:      a.flags.url       as string | undefined,
-      path:     a.flags.path      as string | undefined,
+      domain:   str(a.flags, "domain"),
+      url:      str(a.flags, "url"),
+      path:     str(a.flags, "path"),
       httpOnly: a.flags["http-only"] ? true : undefined,
       secure:   a.flags.secure       ? true : undefined,
-      sameSite: a.flags["same-site"] as "Strict" | "Lax" | "None" | undefined,
-      expires:  a.flags.expires !== undefined ? Number(a.flags.expires) : undefined,
+      // Asserted, not validated: CDP accepts an unknown value silently, so
+      // `--same-site=garbage` sets a cookie today and reports success.
+      // Rejecting it in the CLI would be an improvement and a new error
+      // message, which this refactor series has kept off the table.
+      sameSite: str(a.flags, "same-site") as "Strict" | "Lax" | "None" | undefined,
+      expires:  str(a.flags, "expires") !== undefined ? Number(str(a.flags, "expires")) : undefined,
     }),
   },
   {
@@ -189,9 +194,9 @@ export const COMMANDS: Command[] = [
       { name: "path",   kind: "string" },
     ],
     run: (ctx, a) => cmdCookieDelete(ctx, a.positional[0] ?? "", {
-      domain: a.flags.domain as string | undefined,
-      url:    a.flags.url    as string | undefined,
-      path:   a.flags.path   as string | undefined,
+      domain: str(a.flags, "domain"),
+      url:    str(a.flags, "url"),
+      path:   str(a.flags, "path"),
     }),
   },
   {

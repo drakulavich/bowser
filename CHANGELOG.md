@@ -19,6 +19,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Changed
 
+- **A command reads its string flags through `str()`** instead of asserting them with
+  `as string | undefined`. Flags arrive as `string | boolean` in one bag, so the cast also accepted a
+  boolean: a flag declared `kind: "boolean"` could be read as a string and the command handed `true`.
+  `src/cli/schemas.ts`, a one-line re-export left over from the registry move, is deleted.
 - **Type checking is a gate.** `bun run typecheck` (tsc) runs in CI; `bun test` strips types and
   never checked them. Three latent type errors fixed.
 - **WebKit is tested end-to-end.** A macOS CI job runs the e2e suites on WebKit, including a

@@ -12,7 +12,7 @@ import {
   handleMcpLine,
   type McpDeps,
 } from "../src/mcp.ts";
-import { SCHEMAS } from "../src/cli/schemas.ts";
+import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
 
 /** Number of commands opted out of the MCP tool set via `mcp: false`. */

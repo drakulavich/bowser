@@ -373,7 +373,7 @@ describe("webkit error", () => {
 // CLI dispatch tri-state: absent --http-only/--secure must NOT set those keys
 // ---------------------------------------------------------------------------
 import { parse } from "../src/cli/parser.ts";
-import { SCHEMAS } from "../src/cli/schemas.ts";
+import { SCHEMAS } from "../src/cli/registry.ts";
 
 describe("cli dispatch tri-state flags", () => {
   // These tests verify that absent boolean flags produce undefined opts (not false),
