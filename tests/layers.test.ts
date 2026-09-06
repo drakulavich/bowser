@@ -69,7 +69,11 @@ const RULES: Rule[] = [
   {
     name: "only src/page-scripts.ts builds a script string for the page",
     // A template literal that opens an IIFE is exactly what an injected script
-    // is; ordinary arrow code like `.catch(() => {})` is not.
+    // is; ordinary arrow code like `.catch(() => {})` is not. This is a
+    // code-ownership lint, not a security control: a script built by
+    // concatenation or as a `function(){}` IIFE would slip past. The
+    // injection-safety property is the JSON.stringify quoting, pinned
+    // directly by tests/page-scripts.test.ts.
     violates: (file, text) => file !== "src/page-scripts.ts" && /`\(\(\)\s*=>/.test(text),
   },
 ];

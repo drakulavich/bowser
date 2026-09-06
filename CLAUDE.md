@@ -11,7 +11,7 @@ User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. Thi
 | What command does X? | `src/cli.ts` (dispatcher), `src/cli/schemas.ts` (per-command flags), `src/commands/<domain>.ts` (implementations; `context.ts` has what they share) |
 | A script injected into the page? | `src/page-scripts.ts` — the only file that builds one |
 | How is a flag parsed? | `src/cli/parser.ts` |
-| What does the snapshot YAML look like? | `src/snapshot.ts` (`SNAPSHOT_SCRIPT`, `toYaml`, `toJson`) |
+| What does the snapshot YAML look like? | `src/snapshot.ts` (`toYaml`, `toJson`); the page-side walker is `SNAPSHOT_SCRIPT` in `src/page-scripts.ts` |
 | Where is session state? | `src/state.ts` — also `~/.bowser/sessions/<name>/state.json` at runtime |
 | Daemon protocol? | `src/daemon/protocol.ts` (the `DaemonOps` map), `src/daemon/server.ts` (`createHandler`, `startDaemon`), `src/daemon/client.ts` (`DaemonClient`, `connectOrSpawn`), `src/daemon/main.ts` (spawn entry) |
 | WebView glue (Browser, cookies, navigation watch)? | `src/browser.ts` (`wrapView`, `openBrowser`) |
@@ -85,7 +85,7 @@ Changing snapshot output means updating `src/snapshot.ts`, the golden in `tests/
 
 ## Gotchas (lessons learned)
 
-- **`JSON.stringify(selector)` is mandatory in evaluate-shims.** `src/page-scripts.ts` builds every IIFE string injected into the page (a layer rule keeps them out of other files) (`document.querySelector(${JSON.stringify(selector)})`). Skipping it is a quoting/injection bug — selectors with quotes could break or execute attacker-controlled code via `bowser fill`.
+- **`JSON.stringify(selector)` is mandatory in evaluate-shims.** `src/page-scripts.ts` builds every string injected into the page (`document.querySelector(${JSON.stringify(selector)})`), and a layer rule keeps them out of every other file. Skipping the quoting is a quoting/injection bug — selectors with quotes could break or execute attacker-controlled code via `bowser fill`.
 - **`socket.write()` does partial writes — never ignore its return value.** Bun's low-level socket write returns the bytes actually accepted and silently drops the rest under backpressure (~8 KB on macOS Unix sockets). Route every daemon/client write through `socketWriteAll()` (`src/socket-write.ts`) and keep the `drain` handlers wired in both `Bun.listen` and `Bun.connect`. A raw `socket.write(bigString)` truncates anything over the buffer — that is what made `screenshot` (~140 KB base64) hang for 30 s (#9).
 - **`spawnDaemon()` MUST `proc.unref()` the daemon.** Bun holds the parent's event loop open until a spawned child exits, but the daemon runs forever — without `unref()`, `bowser open` on a fresh session prints its result and then hangs. `bun test` masks this entirely (the runner force-exits), so only the compiled-binary CI step catches it; its commands are wrapped in `timeout` because a regression otherwise burns the full 6 h job budget.
 - **Compiled-binary daemon spawn re-invokes the binary with `--daemon`.** In a `--compile` binary `import.meta.url` is `file:///$bunfs/root/...`, a virtual path `Bun.spawn` can't execute. `spawnDaemon()` detects it with `import.meta.url.includes("/$bunfs/")` (NOT `startsWith` — the `file://` scheme defeats that) and spawns `[execPath, "--daemon", session]`. `cli.ts` intercepts `--daemon` first thing in `import.meta.main` and calls `startDaemon()` **without** `process.exit()` — the keepalive interval holds the process open, and exiting tears the daemon down the moment its socket is ready. `bun test` never exercises this; the e2e CI job does.
