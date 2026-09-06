@@ -157,7 +157,7 @@ if (import.meta.main) {
   if (process.argv[2] === "--daemon") {
     const session = process.argv[3];
     if (!session) {
-      console.error("daemon-main: missing session name");
+      console.error("daemon: missing session name");
       process.exit(1);
     }
     const { startDaemon } = await import("./daemon/server.ts");

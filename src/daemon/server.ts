@@ -77,11 +77,12 @@ const handlers: Handlers = {
     const res = (await browser.cdp("Network.setCookie", param as unknown as Record<string, unknown>)) as { success: boolean };
     return { success: res.success };
   },
-  "cookie-delete": async (browser, name, opts = {}) => {
+  "cookie-delete": async (browser, name, opts) => {
+    const o = opts ?? {};
     const params: Record<string, unknown> = { name };
-    if (opts.url) params.url = opts.url;
-    if (opts.domain) params.domain = opts.domain;
-    if (opts.path) params.path = opts.path;
+    if (o.url) params.url = o.url;
+    if (o.domain) params.domain = o.domain;
+    if (o.path) params.path = o.path;
     await browser.cdp("Network.deleteCookies", params);
   },
   "cookie-clear": async (browser) => {

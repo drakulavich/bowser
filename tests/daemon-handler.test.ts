@@ -98,6 +98,12 @@ describe("createHandler", () => {
     expect(b.calls).toEqual([["cdp", ["Network.deleteCookies", { name: "sid", domain: "x" }]]]);
   });
 
+  test("cookie-delete treats a null options argument like an empty object", async () => {
+    const b = fakeBrowser();
+    await createHandler(b)(req("cookie-delete", ["sid", null]));
+    expect(b.calls).toEqual([["cdp", ["Network.deleteCookies", { name: "sid" }]]]);
+  });
+
   test("a throwing browser method becomes { ok: false, error }", async () => {
     const b = fakeBrowser({ click: async () => { throw new Error("click: element not found"); } });
     expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({ id: 7, ok: false, error: "click: element not found" });
@@ -106,5 +112,10 @@ describe("createHandler", () => {
   test("an unknown op on the wire is rejected, not thrown", async () => {
     const res = await createHandler(fakeBrowser())({ id: 7, op: "dblclick" as DaemonRequest["op"], args: [] });
     expect(res).toEqual({ id: 7, ok: false, error: "unknown op: dblclick" });
+  });
+
+  test("a prototype key is an unknown op, not a lookup hit", async () => {
+    const res = await createHandler(fakeBrowser())({ id: 7, op: "toString" as DaemonRequest["op"], args: [] });
+    expect(res).toEqual({ id: 7, ok: false, error: "unknown op: toString" });
   });
 });

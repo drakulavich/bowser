@@ -6,7 +6,7 @@ import { startDaemon } from "./server.ts";
 
 const session = process.argv[2];
 if (!session) {
-  console.error("daemon-main: missing session name");
+  console.error("daemon: missing session name");
   process.exit(1);
 }
 
