@@ -8,8 +8,8 @@ import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "./commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "./commands/navigation.ts";
-import { cmdScreenshot, cmdSnapshot } from "./commands/snapshot.ts";
 import { cmdEval, cmdRunCode } from "./commands/scripting.ts";
+import { cmdScreenshot, cmdSnapshot } from "./commands/snapshot.ts";
 import { cmdStateLoad, cmdStateSave } from "./commands/storage-state.ts";
 import {
   cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet, cmdLocalStorageList,

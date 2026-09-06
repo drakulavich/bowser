@@ -138,10 +138,16 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
       }
     }
 
-    return reply(ctx, { ok: true, file: target, cookies: cookies.length, originsRestored, originsSkipped }, `loaded ${target} (${cookies.length} cookie(s), ${originsRestored} origin(s)` +
-        (originsSkipped
-          ? `, ${originsSkipped} skipped — navigate to each origin then load again to restore its localStorage`
-          : "") +
-        ")");
+    const text =
+      `loaded ${target} (${cookies.length} cookie(s), ${originsRestored} origin(s)` +
+      (originsSkipped
+        ? `, ${originsSkipped} skipped — navigate to each origin then load again to restore its localStorage`
+        : "") +
+      ")";
+    return reply(
+      ctx,
+      { ok: true, file: target, cookies: cookies.length, originsRestored, originsSkipped },
+      text,
+    );
   });
 }

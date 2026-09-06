@@ -26,7 +26,8 @@ export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string
       name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
     };
     await saveState(next);
-    return reply(ctx, { ok: true, url: state.url, title: state.title }, (url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`));
+    const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
+    return reply(ctx, { ok: true, url: state.url, title: state.title }, text);
   });
 }
 
@@ -51,7 +52,8 @@ export async function cmdHistory(
     await c.request(which, []);
     const state = await c.request("state");
     await syncState(prev, state);
-    return reply(ctx, { ok: true, url: state.url }, (which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`));
+    const text = which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`;
+    return reply(ctx, { ok: true, url: state.url }, text);
   });
 }
 
