@@ -156,9 +156,12 @@ runOrSkip("e2e: WebKit agent loop", () => {
 
   test("click a link, then go-back, go-forward, goto", async () => {
     await cmdSnapshot(text);
-    const out = JSON.parse(await cmdClick(ctx, await refNamed("Page two"))) as { url: string };
+    const out = JSON.parse(await cmdClick(ctx, await refNamed("Page two"))) as { ok: boolean };
+    expect(out.ok).toBe(true);
+    // The page itself is the witness that the click navigated. What `click`
+    // *reports* as the URL is a separate question, pinned in the todo below.
     await waitForEval("document.title", "Page Two");
-    expect(out.url.endsWith("/two") || (await evalText("location.pathname")) === "/two").toBe(true);
+    expect(await evalText("location.pathname")).toBe("/two");
 
     await cmdHistory(ctx, "back");
     await waitForEval("document.title", "Kitchen Sink");
@@ -172,6 +175,16 @@ runOrSkip("e2e: WebKit agent loop", () => {
     // The daemon persists the title it resolved (WebKit fallback path); check the stored one too.
     expect((await loadState(session))?.title).toBe("Kitchen Sink");
   }, 90_000);
+
+  test.todo("click reports the post-navigation url: the daemon snapshots state before the click's navigation settles, so the reported url can still be the previous page's; fix belongs to the native-history change in a later PR", async () => {
+    await cmdGoto(ctx, base);
+    await waitForEval("document.title", "Kitchen Sink");
+    await cmdSnapshot(text);
+    const out = JSON.parse(await cmdClick(ctx, await refNamed("Page two"))) as { url: string };
+    expect(out.url).toBe(base + "two");
+    await cmdGoto(ctx, base);
+    await waitForEval("document.title", "Kitchen Sink");
+  }, 60_000);
 
   test("reload reloads the current page", async () => {
     await cmdGoto(ctx, base + "two");
