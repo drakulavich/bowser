@@ -370,10 +370,14 @@ Each PR is green on its own, including the WebKit e2e suites from PR 1.
 | 4 | `commands/*` split, `context.ts` helpers, `page-scripts.ts` | commands, tests imports | output wording may move closer to `playwright-cli`; CHANGELOG |
 | 5 | Registry: dispatch, HELP, MCP from `COMMANDS`; delete `schemas.ts` body, `DESCRIPTIONS`, `MCP_EXCLUDED`; docs drift test | cli, mcp, tests | `--help`, MCP descriptions; CHANGELOG |
 | 6 | Event lane: `urgent` markers, urgent routing, `DaemonState`, `subscribe()` | daemon/server, browser | none |
-| 7 | CLAUDE.md: new "Where to look first", "Adding a command" is four steps, drop gotchas the compiler now enforces | docs | none |
+| 7 | `str()` for flag reads; delete `src/cli/schemas.ts`; CLAUDE.md follow-through | cli, commands, tests, docs | none |
 | — | Series gate: dogfooding pass on the compiled binary on WebKit (Section 5) | report only | none |
 
-PR 7 may be folded into 5 or 6. PRs 2 and 3 produce the types that 4 and 5
+PR 7 shrank: PR 5 had already rewritten "Where to look first" and cut
+"Adding a command" to four steps, and no gotcha turned out to be enforced by
+the compiler. The most likely candidate was checked rather than assumed — see
+the history-method gotcha, which survives because the compiler catches only a
+half-rename. PR 7 carries the two cleanups PR 5's review deferred instead. PRs 2 and 3 produce the types that 4 and 5
 lean on; 6 is last because it is the only one whose shape is set by a feature
 not yet built.
 
