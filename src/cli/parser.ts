@@ -5,8 +5,10 @@ export interface FlagSpec {
   kind: FlagKind;
   short?: string;
   /** What the value looks like, for `--help`: the accepted values of an enum
-   *  flag, or the unit of a number. Defaults to the flag's own name. Parsing
-   *  ignores it. */
+   *  flag, or the unit of a number. Written the way it should read after the
+   *  `=`, so a literal set of values goes bare (`Lax|Strict|None`) and a
+   *  stand-in the caller fills in goes in angle brackets (`<unix-seconds>`).
+   *  Defaults to the flag's own name. Parsing ignores it. */
   placeholder?: string;
 }
 

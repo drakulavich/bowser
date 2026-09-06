@@ -30,6 +30,24 @@ describe("generated help", () => {
     expect(HELP).toContain("[--expires=<unix-seconds>]");
   });
 
+  test("summaries line up in one column, narrow enough to leave half the width", () => {
+    const cols = new Set<number>();
+    for (const c of COMMANDS) {
+      const line = HELP.split("\n").find((l) => l.includes(c.summary));
+      cols.add(line!.indexOf(c.summary));
+    }
+    expect(cols.size).toBe(1);
+    expect([...cols][0]).toBeLessThanOrEqual(40);
+  });
+
+  test("a usage too wide for the column wraps instead of widening it", () => {
+    const lines = HELP.split("\n");
+    const col = lines.find((l) => l.includes("Reload the current page"))!.indexOf("Reload");
+    const i = lines.findIndex((l) => l.startsWith("  cookie-set "));
+    expect(lines[i]!.length).toBeGreaterThan(col);
+    expect(lines[i + 1]).toBe(" ".repeat(col) + "Set a cookie (chrome backend only)");
+  });
+
   test("every summary appears", () => {
     for (const c of COMMANDS) expect(HELP).toContain(c.summary);
   });

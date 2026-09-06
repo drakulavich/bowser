@@ -11,8 +11,24 @@ const GLOBAL = `Global flags:
       --json               machine-readable output
   -h, --help               show this help`;
 
-/** Column the summaries start at. Usages at or past it wrap. */
-const SUMMARY_COL = 54;
+const INDENT = 2;
+const GUTTER = 2;
+/** No summary starts past here, so every one keeps half an 80-column
+ *  terminal. The cookie and snapshot usages run 45 to 157 characters; a
+ *  column wide enough for them would leave the other 34 commands a gutter
+ *  wider than their own usage. */
+const MAX_COL = 40;
+
+/** Two spaces past the widest usage that fits, so the column is as narrow as
+ *  the commands allow. Usages at or past it wrap. */
+function summaryCol(commands: readonly Command[]): number {
+  let col = 0;
+  for (const c of commands) {
+    const end = INDENT + usageOf(c).length + GUTTER;
+    if (end <= MAX_COL && end > col) col = end;
+  }
+  return col || MAX_COL;
+}
 
 export function usageOf(c: Command): string {
   const parts = [c.name];
@@ -25,11 +41,12 @@ export function usageOf(c: Command): string {
 }
 
 export function renderHelp(commands: readonly Command[]): string {
+  const col = summaryCol(commands);
   const lines = [HEADER, "", "Commands:"];
   for (const c of commands) {
-    const usage = "  " + usageOf(c);
-    if (usage.length < SUMMARY_COL) lines.push(usage.padEnd(SUMMARY_COL) + c.summary);
-    else lines.push(usage, " ".repeat(SUMMARY_COL) + c.summary);
+    const usage = " ".repeat(INDENT) + usageOf(c);
+    if (usage.length < col) lines.push(usage.padEnd(col) + c.summary);
+    else lines.push(usage, " ".repeat(col) + c.summary);
   }
   lines.push("", GLOBAL);
   return lines.join("\n");
