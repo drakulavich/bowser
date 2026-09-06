@@ -28,7 +28,33 @@ Both tools, same local HTTP fixture, same flags.
 | `playwright-cli` 0.1.13 | `Error: '--sameSite' option: Invalid option: expected one of "Strict"\|"Lax"\|"None"` — the cookie is never created |
 | `bowser` (main, 8621fbd) | prints `set bad`, exit 0 — and `cookie-list --json` returns `[]`, so nothing was created |
 
-**Root cause** (`src/commands/cookies.ts:105`):
+### Correction, measured during implementation
+
+The root cause below was **wrong about the reported symptom**, and the
+measurement that corrected it is worth keeping.
+
+Calling CDP directly with an invalid `sameSite` returns **`{"success": true}`**
+and stores the cookie — with the attribute silently dropped:
+
+```
+invalid sameSite -> {"success":true}
+valid sameSite   -> {"success":true}
+stored: bad/-  good/Strict
+```
+
+So checking `success` would **not** have caught the ticket's case: the browser
+reported success. What actually fixes the report is rejecting the value in the
+CLI, because the browser will not complain. A malformed cookie (`__Host-` with a
+domain) makes CDP *throw*, which already surfaced as an error before this work.
+
+`success: false` was not reachable in any case probed — invalid `sameSite`,
+mismatched domain, and `Secure` on a plain-http localhost origin all returned
+`true`. Reading the field is still correct: it is the op's declared result and
+discarding a failure signal is indefensible. But it is defensive, not the fix,
+and it has unit coverage only. Do not claim it fixes the ticket.
+
+**Original root-cause claim** (`src/commands/cookies.ts:105`), accurate as a
+description of the code and wrong as a diagnosis of the report:
 
 ```ts
 await c.request("cookie-set", [param]);
@@ -70,13 +96,12 @@ on the cookie existing.
 Two changes, in dependency order:
 
 1. **Reject an invalid `--same-site` before the request is sent**, the way the
-   reference does, with a message naming the accepted values.
-2. **Stop discarding CDP's `success`.** When the browser declines to store the
-   cookie for any other reason, say so and exit non-zero.
-
-Change 1 alone would fix the reported symptom and leave the defect. Change 2 is
-the actual fix; change 1 exists because the reference validates client-side and
-because a clear message beats a generic failure.
+   reference does, with a message naming the accepted values. **This is the fix
+   for the report** — the browser accepts the request and drops the attribute,
+   so nothing downstream can notice.
+2. **Stop discarding CDP's `success`.** Defensive, and correct on principle: it
+   is the op's declared result. Not the fix, and no case was found that
+   triggers it — see the correction above.
 
 ## Tech Stack
 
@@ -172,10 +197,12 @@ Required coverage:
 
 1. `bowser cookie-set k v --same-site=garbage` exits non-zero and prints a
    message naming the accepted values. Today it prints `set k` and exits 0.
-2. `bowser cookie-set` exits non-zero when CDP returns `success: false` for any
-   reason, with a message naming the cookie.
-3. `cookie-list` after a failed `cookie-set` does not contain the cookie —
-   verified end-to-end on chrome, not only against a fake.
+2. `bowser cookie-set` exits non-zero when CDP returns `success: false`, with a
+   message naming the cookie. Unit coverage only: no reachable case was found,
+   so there is nothing to assert end-to-end.
+3. A cookie stored with `--same-site=Strict` reads back as `Strict` — the
+   end-to-end evidence that what is asked for is what is stored, since
+   "it was set" alone proves nothing when an attribute can be dropped.
 4. Every existing test in `tests/cookie.test.ts` and `tests/e2e-cookie.test.ts`
    passes unchanged.
 5. A cookie set without `--same-site` still round-trips through `state-save` as

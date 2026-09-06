@@ -7,6 +7,13 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`cookie-set` accepted an invalid `--same-site` and silently dropped it.** CDP answers
+  `Network.setCookie` with `success: true` for a `sameSite` it does not understand and stores the
+  cookie without the attribute, so nothing downstream could notice: `cookie-set` printed
+  `set <name>` and the cookie came back with no `sameSite`. The value is now rejected before the
+  request is sent, as `playwright-cli` does. `cookie-set` also reports a failure when CDP returns
+  `success: false`, which it previously discarded.
+
 - **WebKit: `open` printed an empty title.** `Bun.WebView`'s `title` getter is still empty when
   `navigate()` resolves on the webkit backend; the daemon now reads `document.title` from the page
   when the getter is empty, the same fallback `realUrl()` uses for the URL.
@@ -18,6 +25,10 @@ All notable changes to this project are documented here. This project follows
   within 10 s) before answering, on both backends.
 
 ### Changed
+
+- **An enum flag declares its accepted values.** `FlagSpec.values` drives both parser validation
+  and the `--help` placeholder, so the two cannot drift. `bowser --help` now shows
+  `[--same-site=Strict|Lax|None]`, previously `[--same-site=Lax|Strict|None]`.
 
 - **A command reads its string flags through `str()`** instead of asserting them with
   `as string | undefined`. Flags arrive as `string | boolean` in one bag, so the cast also accepted a
