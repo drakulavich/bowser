@@ -64,6 +64,12 @@ describe("wrapView cookies", () => {
     ]);
   });
 
+  test("getCookies treats a null url list from the wire like none", async () => {
+    const v = fakeView();
+    await wrapView(v, chrome).getCookies(null as never);
+    expect(v.calls).toEqual([["cdp", ["Network.getAllCookies", undefined]]]);
+  });
+
   test("setCookie returns the success flag", async () => {
     const v = fakeView();
     expect(await wrapView(v, chrome).setCookie({ name: "a", value: "1" })).toEqual({ success: true });
@@ -102,6 +108,35 @@ describe("wrapView cookies", () => {
 const fast = { graceMs: 40, settleMs: 300 };
 
 describe("wrapView navigation watch", () => {
+  test("press goes through the watch like click", async () => {
+    const v = fakeView();
+    v.press = async (k) => { v.calls.push(["press", [k]]); setTimeout(() => v.land("https://x/submitted"), 10); };
+    const b = wrapView(v, chrome, fast);
+    await b.press("Enter");
+    expect(b.url).toBe("https://x/submitted");
+  });
+
+  test("a failed navigation ends the wait without failing the action", async () => {
+    const v = fakeView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; setTimeout(() => { v.onNavigationFailed?.(new Error("-999")); }, 20); };
+    const b = wrapView(v, chrome, fast);
+    const t0 = Date.now();
+    await b.click("#l");
+    expect(Date.now() - t0).toBeLessThan(fast.settleMs);
+    expect(b.url).toBe("https://x/");
+  });
+
+  test("an action after a given-up navigation pays the grace window, not settleMs", async () => {
+    const v = fakeView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; };
+    const b = wrapView(v, chrome, { graceMs: 20, settleMs: 60 });
+    await b.click("#stuck");
+    expect(v.loading).toBe(true);
+    const t0 = Date.now();
+    await b.click("#next");
+    expect(Date.now() - t0).toBeLessThan(60);
+  });
+
   test("click returns after a navigation that lands inside the grace window", async () => {
     const v = fakeView();
     v.click = async (s) => { v.calls.push(["click", [s]]); setTimeout(() => v.land("https://x/two"), 10); };

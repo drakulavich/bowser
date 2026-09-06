@@ -148,6 +148,10 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 function navigationWatch(view: ViewLike, timing: NavTiming) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
+  // A failed navigation ends the wait but does not fail the action: WebKit
+  // reports NSURLErrorDomain -999 for routine cancellations (a page script
+  // navigating right after a click), and `state` reads the real URL anyway.
+  // Surfacing the last navigation error is DaemonState work (PR 6).
   let landed = 0;
   view.onNavigated = () => { landed++; };
   view.onNavigationFailed = () => { landed++; };
@@ -155,13 +159,19 @@ function navigationWatch(view: ViewLike, timing: NavTiming) {
   return {
     async act(action: () => Promise<void>): Promise<void> {
       const before = landed;
+      // A navigation already in flight is not ours: only a false→true transition
+      // of `loading` counts, or one stuck navigation would cost every later
+      // action the full settleMs.
+      const wasLoading = view.loading;
       await action();
+      let started = false;
       const start = Date.now();
       while (Date.now() - start < timing.graceMs) {
         if (landed !== before) return;
-        if (view.loading) break;
+        if (view.loading && !wasLoading) { started = true; break; }
         await sleep(10);
       }
+      if (!started) return;
       const began = Date.now();
       while (view.loading && landed === before && Date.now() - began < timing.settleMs) await sleep(10);
     },
@@ -255,7 +265,8 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     },
     cdp,
     getCookies: async (urls) => {
-      const scoped = urls !== undefined && urls.length > 0;
+      // `!= null`: the wire delivers JSON null for an omitted url list.
+      const scoped = urls != null && urls.length > 0;
       const res = (await cdp(
         scoped ? "Network.getCookies" : "Network.getAllCookies",
         scoped ? { urls } : undefined,

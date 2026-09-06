@@ -215,7 +215,8 @@ runOrSkip("e2e: WebKit agent loop", () => {
 
     const reloaded = JSON.parse(await cmdHistory(ctx, "reload")) as { ok: boolean };
     expect(reloaded.ok).toBe(true);
-    await waitForEval("document.title", "Page Two");
+    // No wait here on purpose: the -999 failure needed goto to arrive while
+    // the reload's navigation was still in flight.
 
     const gone = JSON.parse(await cmdGoto(ctx, base)) as { url: string };
     expect(gone.url).toBe(base);
