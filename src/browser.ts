@@ -45,6 +45,10 @@ export interface ViewLike {
    *  those do not exist on the object. Do not "fix" these to match the types. */
   goBack?(): Promise<void>;
   goForward?(): Promise<void>;
+  /** Chrome only in practice: webkit accepts the registration and never
+   *  fires. Not the same mechanism as onNavigated/onNavigationFailed above,
+   *  which are assignable properties this file already owns. */
+  addEventListener(event: string, handler: (e: { type: string; data?: unknown }) => void): void;
 }
 
 /** Resolve the committed page URL. Bun.WebView's `view.url` returns "about:blank"
@@ -104,6 +108,11 @@ export interface Browser {
   /** Send a raw CDP command. Chrome backend only; rejects on webkit with a
    *  clear message indicating the chrome backend is required. */
   cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  /** Listen for a backend event by name (CDP event names on chrome, e.g.
+   *  "Page.javascriptDialogOpening"; the domain must be enabled first with
+   *  cdp("Page.enable", {})). Returns false on webkit, where no such event is
+   *  ever delivered — check the result rather than assuming it fired. */
+  subscribe(event: string, handler: (data: unknown) => void): boolean;
   // --- Cookies: CDP-backed, so chrome only. Each rejects with CDP_UNAVAILABLE on webkit. ---
   getCookies(urls?: string[]): Promise<Cookie[]>;
   setCookie(param: CookieParam): Promise<{ success: boolean }>;
@@ -155,7 +164,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming) {
   // A failed navigation ends the wait but does not fail the action: WebKit
   // reports NSURLErrorDomain -999 for routine cancellations (a page script
   // navigating right after a click), and `state` reads the real URL anyway.
-  // Surfacing the last navigation error is DaemonState work (PR 6).
+  // Surfacing the last navigation error is future DaemonState work.
   let landed = 0;
   view.onNavigated = () => { landed++; };
   view.onNavigationFailed = () => { landed++; };
@@ -245,6 +254,13 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
       return spec.kind === "chrome";
     },
     cdp,
+    subscribe: (event, handler) => {
+      // webkit accepts addEventListener and silently never fires it, so
+      // registering there would report success and deliver nothing.
+      if (spec.kind !== "chrome") return false;
+      view.addEventListener(event, (e) => handler(e.data));
+      return true;
+    },
     getCookies: async (urls) => {
       // `!= null`: the wire delivers JSON null for an omitted url list.
       const scoped = urls != null && urls.length > 0;

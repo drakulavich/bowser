@@ -148,10 +148,12 @@ export interface DaemonRequest<O extends Op = Op> {
 }
 ```
 
-`urgent` and `requires` are type-level markers mirrored by a small runtime
-table (`OP_META: Record<Op, { urgent?: true; requires?: "cdp" }>`) so the
-server can route on them. A test asserts the table has exactly the keys of
-`DaemonOps`.
+`urgent` and `requires` are type-level markers, each mirrored by its own
+small runtime object (`URGENT_OPS`, `CDP_OPS`) that
+`satisfies Record<UrgentOp, true>` / `Record<CdpOp, true>`, so the server can
+route on them. There is no `Record<Op, …>` table and no key test: `satisfies`
+fails compilation in both directions instead — a marker with no row, and a
+row with no marker.
 
 Derived from the map:
 
@@ -226,9 +228,12 @@ for `shutdown`. This section generalizes it without touching
 `src/serialize.ts`.
 
 **Two lanes in `daemon/server.ts`.** On each parsed request:
-`OP_META[op].urgent ? handle(req) : serialize(() => handle(req))`. `ping` and
-`shutdown` are urgent now. `dialog-handle` (next task) and `page-list` (tabs,
-later) will be. The `withTimeout` wrapping stays on the queued lane only.
+`IS_URGENT.has(req.op) ? handle(req) : serialize(() => handle(req))`, where
+`IS_URGENT` is a runtime `Set` derived from `urgent: true` markers on the
+op's own entry in `DaemonOps` (mirroring the existing `requires: "cdp"`
+pattern), not a separate `OP_META` table. `ping` and `shutdown` are urgent
+now. `dialog-handle` (next task) and `page-list` (tabs, later) will be. The
+`withTimeout` wrapping stays on the queued lane only.
 
 **Capability gate.** Before calling a handler with `requires: "cdp"`, the
 server checks `browser.cdpAvailable()` and answers with today's exact error
@@ -239,21 +244,30 @@ inside `Browser.cdp()` is kept as a backstop but no handler relies on it.
 
 ```ts
 interface DaemonState {
-  url: string;
-  title: string;
-  /** Set by Page.javascriptDialogOpening; cleared by dialog-handle. Chrome only. */
+  /** Set by Page.javascriptDialogOpening; cleared by dialog-handle. Chrome
+   *  only. `defaultValue` renames CDP's own `defaultPrompt` field to match
+   *  the other fields' style. */
   dialog?: { type: "alert" | "confirm" | "prompt" | "beforeunload"; message: string; defaultValue?: string };
 }
 ```
 
-The `state` op returns this object. Today's `{ url, title }` consumers keep
-working because those fields keep their names; `dialog` is absent until the
-next task populates it.
+`url` and `title` are deliberately not fields here, though an earlier draft
+of this section had them. Nothing would refresh such a cache, and a `state`
+call that reported the page an action had just navigated away from is the
+exact bug `nav.act()` was added to fix. They stay computed live from the page
+on every `state` call; `DaemonState` holds only what cannot be recomputed on
+demand. The `state` op returns the live pair merged with this object, so
+today's `{ url, title }` consumers keep working unchanged and `dialog` is
+absent — not present-and-undefined, which would differ on the wire — until
+the dialog task populates it.
 
-**`Browser.subscribe(event, handler)`.** Thin wrapper over
-`view.addEventListener` on chrome; a no-op returning `false` on webkit so
-callers can tell the difference. No subscriptions are made in this refactor;
-the method exists so the dialog task adds one line, not a `Browser` change.
+**`Browser.subscribe(event, handler)`.** Wraps `view.addEventListener`,
+branching on backend kind rather than feature-probing `addEventListener`
+itself — webkit accepts the registration and never fires it, so a feature
+probe would report `true` there and lie. `subscribe()` returns `false` on
+webkit so callers can tell the difference. No subscriptions are made in this
+refactor; the method exists so the dialog task adds one line, not a
+`Browser` change.
 
 **WebKit caveat for the dialog task.** `Bun.WebView` documents no dialog
 events on the webkit backend, so `subscribe` alone will not deliver
@@ -323,9 +337,8 @@ first, before any code moves.
     WebKit suites and the compiled-binary smoke, alongside the existing
     Chromium job.
   - The layer test skeleton with the rules that already hold today; later
-    PRs add rules as the layout changes. The `OP_META` table and its key test
-    belong to PR 6, which introduces urgent routing; PR 2 declares the op map
-    only.
+    PRs add rules as the layout changes. Urgent routing and its markers
+    belong to PR 6; PR 2 declares the op map only.
 - **Existing tests move, they are not rewritten.** Import paths change.
   Expected strings change only where a command's output changes on purpose
   (see "The contract"), and each such change is a separate commit in its PR.
@@ -356,7 +369,7 @@ Each PR is green on its own, including the WebKit e2e suites from PR 1.
 | 3 | `Browser` absorbs cookies and native history; `backend.ts` split out; `requires: "cdp"` gate | browser, daemon/server | none (error text preserved) |
 | 4 | `commands/*` split, `context.ts` helpers, `page-scripts.ts` | commands, tests imports | output wording may move closer to `playwright-cli`; CHANGELOG |
 | 5 | Registry: dispatch, HELP, MCP from `COMMANDS`; delete `schemas.ts` body, `DESCRIPTIONS`, `MCP_EXCLUDED`; docs drift test | cli, mcp, tests | `--help`, MCP descriptions; CHANGELOG |
-| 6 | Event lane: `OP_META`, urgent routing, `DaemonState`, `subscribe()` | daemon/server, browser | none |
+| 6 | Event lane: `urgent` markers, urgent routing, `DaemonState`, `subscribe()` | daemon/server, browser | none |
 | 7 | CLAUDE.md: new "Where to look first", "Adding a command" is four steps, drop gotchas the compiler now enforces | docs | none |
 | — | Series gate: dogfooding pass on the compiled binary on WebKit (Section 5) | report only | none |
 
@@ -402,6 +415,16 @@ Both tools were run against `tests/fixtures/todo-app.html`, bowser on WebKit.
   immediately; the `-999` failure went away once `reload` waited for its navigation
   through the same watch. The runtime methods are `goBack`/`goForward`; `@types/bun`
   declares `back`/`forward`.
+
+### Bun.WebView event mechanisms (2026-09-06)
+
+Probed directly (Bun 1.4.0, macOS arm64) while building PR 6; these correct
+Section 4 where it guessed.
+
+1. **`view.addEventListener(<CDP event name>, handler)` works on the chrome backend.** After `await v.cdp("Page.enable", {})`, clicking a button that calls `confirm()` fires the listener registered for `"Page.javascriptDialogOpening"`. The event object's own enumerable key is only `isTrusted`; the CDP parameters arrive on **`e.data`**, and `e.type` is the event name. Observed `e.data` for a `confirm`: `{ url, frameId, message: "sure?", type: "confirm", hasBrowserHandler: false, defaultPrompt: "" }`.
+2. **On the webkit backend `addEventListener` accepts the registration and never throws — and never fires.** So a `subscribe()` that feature-probed `typeof view.addEventListener === "function"` would return `true` on webkit and be a lie. It must branch on the backend kind.
+3. **`onNavigated` / `onNavigationFailed` are assignable properties, not `addEventListener` events, and `wrapView` already owns both** (`src/browser.ts`, the navigation watch). `subscribe()` must not touch them: assigning over either would silently break the false→true `loading` transition detection that PR 3 added.
+4. CDP parameter naming differs from the spec's sketch: CDP sends `defaultPrompt`, the spec's `DaemonState` sketch wrote `defaultValue`.
 
 ## Backlog notes raised during design (not part of this refactor)
 

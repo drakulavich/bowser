@@ -4,14 +4,67 @@
 // everything the page accumulated (typed text, modals, dynamic DOM).
 //
 // The op set lives in ./protocol.ts. `handlers` below is typed from it, so
-// an op without a handler here does not compile.
+// an op without a handler here does not compile. `state` is the exception
+// and is answered by a closure in createHandler(), because it alone reads
+// DaemonState, which a handlers entry is not given. Removing that closure
+// does not compile either, for a different reason: req.op spans every op,
+// and Handlers excludes `state`, so the lookup stops being index-safe.
 
 import { unlink } from "node:fs/promises";
 import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
-import { REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type Op, type ResultOf } from "./protocol.ts";
+import { IS_URGENT, REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogState, type Op, type PageState, type ResultOf } from "./protocol.ts";
 import { socketPath } from "./client.ts";
+
+/** What the daemon knows that the page cannot be asked for. `url` and `title`
+ *  are deliberately NOT here: they are read live from the page on every
+ *  `state` call, because an action can navigate and a cached copy would go
+ *  stale (that regression is why `nav.act()` exists). */
+export interface DaemonState {
+  dialog?: DialogState;
+}
+
+/** What `dispatch` needs from the daemon. Separated from the socket so the
+ *  lane choice can be tested without one. */
+export interface Lane {
+  handle: (req: DaemonRequest) => Promise<DaemonResponse>;
+  serialize: <T>(fn: () => Promise<T>) => Promise<T>;
+  timeoutMs: number;
+  reply: (res: DaemonResponse) => void;
+}
+
+/** Route one request onto the urgent or the queued lane.
+ *
+ *  Urgent ops skip the serializer: they exist to be answerable while another
+ *  op is wedged, which is the whole point of `shutdown` being able to kill a
+ *  stuck daemon. Which ops those are is declared by `urgent: true` on the op
+ *  in `DaemonOps`, not spelled here, so adding one is a marker rather than a
+ *  branch.
+ *
+ *  The queued lane serializes on the UNDERLYING op, not the timeout: the
+ *  WebView lock is held until `handle(req)` actually settles, so a
+ *  timed-out-but-still-running op can never overlap the next one.
+ *  `withTimeout` only governs how soon the client is answered. */
+export function dispatch(req: DaemonRequest, lane: Lane): void {
+  if (IS_URGENT.has(req.op)) {
+    lane.handle(req).then(lane.reply).catch(() => {
+      // handle() never rejects; mirrors the guard on the serialized path.
+    });
+    return;
+  }
+  lane.serialize(() => {
+    const underlying = lane.handle(req);
+    withTimeout(underlying, lane.timeoutMs, req.op).then(lane.reply, (err) => {
+      // handle() catches its own errors; this path is for timeouts.
+      const msg = err instanceof Error ? err.message : String(err);
+      lane.reply({ id: req.id, ok: false, error: msg });
+    });
+    return underlying;
+  }).catch(() => {
+    // handle() never rejects; guards against an unhandled rejection.
+  });
+}
 
 /** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
  *  (set to 0 to disable). Guards a wedged WebKit call from hanging forever. */
@@ -22,8 +75,10 @@ function opTimeoutMs(): number {
   return Number.isFinite(n) && n >= 0 ? n : 30000;
 }
 
+// `state` is excluded: it alone needs the DaemonState the daemon owns, so
+// createHandler() answers it with a closure instead of an entry here.
 type Handlers = {
-  [O in Op]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
+  [O in Exclude<Op, "state">]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
 };
 
 const handlers: Handlers = {
@@ -40,7 +95,6 @@ const handlers: Handlers = {
       process.exit(0);
     }, 0);
   },
-  state: async (browser) => ({ url: await browser.realUrl(), title: await browser.realTitle() }),
   navigate: (browser, url) => browser.navigate(url),
   evaluate: (browser, expr) => browser.evaluate(expr),
   click: (browser, selector) => browser.click(selector),
@@ -73,10 +127,22 @@ const handlers: Handlers = {
 };
 
 /** Dispatch one parsed request to its handler. Never rejects: every failure,
- *  including an op name that is not in the map, is a `{ ok: false }` reply. */
-export function createHandler(browser: Browser): (req: DaemonRequest) => Promise<DaemonResponse> {
+ *  including an op name that is not in the map, is a `{ ok: false }` reply.
+ *
+ *  `state` defaults to `{}` so the 13 existing call sites that pass only a
+ *  browser keep compiling unchanged; only the `state` op reads it. */
+export function createHandler(browser: Browser, state: DaemonState = {}): (req: DaemonRequest) => Promise<DaemonResponse> {
   return async (req) => {
-    const fn = Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
+    // `state` is answered by a closure, not an entry in `handlers`: it is the
+    // one op that reads DaemonState, and threading a third parameter through
+    // the other ~30 handlers for that would be a change with one consumer.
+    const fn = req.op === "state"
+      ? async (b: Browser): Promise<PageState> => ({
+          url: await b.realUrl(),
+          title: await b.realTitle(),
+          ...(state.dialog ? { dialog: state.dialog } : {}),
+        })
+      : Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
     // Capability gate: a CDP-only op on webkit fails here with the shared
     // message, so the handler never touches a view that cannot answer.
@@ -103,7 +169,8 @@ export async function startDaemon(session: string): Promise<void> {
   } catch {}
 
   const browser: Browser = await openBrowser();
-  const handle = createHandler(browser);
+  const state: DaemonState = {};
+  const handle = createHandler(browser, state);
   const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();
 
@@ -129,36 +196,9 @@ export async function startDaemon(session: string): Promise<void> {
             );
             continue;
           }
-          // Serialize on the UNDERLYING op (not the timeout): the WebView lock is
-          // held until handle(req) actually settles, so a timed-out-but-still-
-          // running op can never overlap the next one. withTimeout only governs
-          // how soon we answer the client.
-          if (req.op === "shutdown") {
-            // Shutdown must NOT queue behind a wedged op — its job is to kill a
-            // possibly-stuck daemon. Dispatch it directly, bypassing the serializer.
-            handle(req).then((res) => {
-              socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
-            }).catch(() => {
-              // handle() never rejects; mirrors the guard on the serialized path.
-            });
-          } else {
-            serialize(() => {
-              const underlying = handle(req);
-              withTimeout(underlying, timeoutMs, req.op).then(
-                (res) => {
-                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
-                },
-                (err) => {
-                  // handle() catches its own errors; this path is for timeouts.
-                  const msg = err instanceof Error ? err.message : String(err);
-                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
-                },
-              );
-              return underlying;
-            }).catch(() => {
-              // handle() never rejects; guards against an unhandled rejection.
-            });
-          }
+          dispatch(req, { handle, serialize, timeoutMs, reply: (res) => {
+            socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
+          } });
         }
       },
       open(socket) {

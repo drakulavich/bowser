@@ -8,15 +8,27 @@
 
 import type { Cookie, CookieParam, DeleteCookieOptions } from "../cdp/types.ts";
 
+/** A dialog the page opened. Chrome only: webkit delivers no dialog events
+ *  (see the 2026-09-05 refactor spec, Section 4). `defaultValue` carries
+ *  CDP's `defaultPrompt`, renamed here to match the other fields' style. */
+export interface DialogState {
+  type: "alert" | "confirm" | "prompt" | "beforeunload";
+  message: string;
+  defaultValue?: string;
+}
+
 /** What the `state` op returns. */
 export interface PageState {
   url: string;
   title: string;
+  /** Present only while a dialog is open. Populated by the dialog task; no
+   *  code in this PR sets it. */
+  dialog?: DialogState;
 }
 
 export interface DaemonOps {
-  ping:             { args: [];                                          result: "pong" };
-  shutdown:         { args: [];                                          result: void };
+  ping:             { args: [];                                          result: "pong";               urgent: true };
+  shutdown:         { args: [];                                          result: void;                 urgent: true };
   state:            { args: [];                                          result: PageState };
   navigate:         { args: [url: string];                               result: void };
   evaluate:         { args: [expr: string];                              result: unknown };
@@ -49,7 +61,6 @@ export type CdpOp = { [O in Op]: DaemonOps[O] extends { requires: "cdp" } ? O : 
 
 // The runtime mirror of the `requires: "cdp"` markers. `satisfies` makes a
 // marker without a row here, or a row without a marker, fail typecheck.
-// PR 6 folds this into OP_META when urgent routing arrives.
 const CDP_OPS = {
   "cookie-get-all": true,
   "cookie-set": true,
@@ -58,6 +69,16 @@ const CDP_OPS = {
 } satisfies Record<CdpOp, true>;
 
 export const REQUIRES_CDP: ReadonlySet<Op> = new Set<Op>(Object.keys(CDP_OPS) as CdpOp[]);
+
+/** Ops that must not queue behind a wedged operation. */
+export type UrgentOp = { [O in Op]: DaemonOps[O] extends { urgent: true } ? O : never }[Op];
+
+// The runtime mirror of the `urgent: true` markers, same trick as CDP_OPS:
+// `satisfies` makes a missing entry a compile error, so an op cannot be
+// declared urgent in the type and stay queued at runtime.
+const URGENT_OPS = { ping: true, shutdown: true } satisfies Record<UrgentOp, true>;
+
+export const IS_URGENT: ReadonlySet<Op> = new Set<Op>(Object.keys(URGENT_OPS) as UrgentOp[]);
 
 /** `args` may be omitted whenever the empty tuple satisfies the op: `request("state")`,
  *  `request("screenshot")`; an op with a required argument must pass it. */

@@ -9,8 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser } from "../src/browser.ts";
 import { CDP_UNAVAILABLE } from "../src/browser.ts";
-import { createHandler } from "../src/daemon/server.ts";
-import type { DaemonRequest } from "../src/daemon/protocol.ts";
+import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
+import { IS_URGENT, type DaemonRequest, type DaemonResponse } from "../src/daemon/protocol.ts";
+import { createSerializer } from "../src/serialize.ts";
 import type { Cookie } from "../src/cdp/types.ts";
 
 // A fully-populated CDP cookie (Cookie has more required fields than the
@@ -52,6 +53,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     close: rec("close", undefined),
     cdpAvailable: () => true,
     cdp: rec("cdp", { cookies: [{ name: "a", value: "1" }], success: true }),
+    subscribe: (event) => { calls.push(["subscribe", [event]]); return true; },
     getCookies: rec("getCookies", [cookie]),
     setCookie: rec("setCookie", { success: true }),
     deleteCookies: rec("deleteCookies", undefined),
@@ -59,6 +61,23 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     ...over,
   };
   return b;
+}
+
+// The smallest fake that can prove `state` reads url/title live rather than
+// from a cache: fakeBrowser()'s realUrl/realTitle are fixed at construction,
+// so `state`'s two DaemonState tests need one whose page can move.
+function fakeBrowserWithPage(url: string, title: string): Browser & { setPage(url: string, title: string): void } {
+  const page = { url, title };
+  return {
+    ...fakeBrowser({
+      realUrl: async () => page.url,
+      realTitle: async () => page.title,
+    }),
+    setPage(url: string, title: string) {
+      page.url = url;
+      page.title = title;
+    },
+  };
 }
 
 const req = (op: DaemonRequest["op"], args?: unknown[]): DaemonRequest => ({ id: 7, op, args });
@@ -73,6 +92,32 @@ describe("createHandler", () => {
   test("state returns the resolved url and title", async () => {
     const b = fakeBrowser();
     expect(await createHandler(b)(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X" } });
+  });
+
+  test("state reports the page's live url and title, not a cached copy", async () => {
+    // Two reads with a navigation between them must differ: this fails if
+    // DaemonState ever starts caching url/title.
+    const browser = fakeBrowserWithPage("https://a.example/", "A");
+    const state: DaemonState = {};
+    const handle = createHandler(browser, state);
+    const first = await handle({ id: 1, op: "state", args: [] });
+    browser.setPage("https://b.example/", "B");
+    const second = await handle({ id: 2, op: "state", args: [] });
+    expect(first).toMatchObject({ ok: true, result: { url: "https://a.example/" } });
+    expect(second).toMatchObject({ ok: true, result: { url: "https://b.example/" } });
+  });
+
+  test("state omits dialog entirely when none is open", async () => {
+    const handle = createHandler(fakeBrowser(), {});
+    const res = await handle({ id: 1, op: "state", args: [] });
+    expect(res.ok && "dialog" in (res.result as object)).toBe(false);
+  });
+
+  test("state carries the dialog when the daemon has one", async () => {
+    const state: DaemonState = { dialog: { type: "confirm", message: "sure?" } };
+    const handle = createHandler(fakeBrowser(), state);
+    const res = await handle({ id: 1, op: "state", args: [] });
+    expect(res).toMatchObject({ ok: true, result: { dialog: { type: "confirm", message: "sure?" } } });
   });
 
   test("navigate, select and resize forward their arguments", async () => {
@@ -161,4 +206,81 @@ describe("createHandler", () => {
     const b = fakeBrowser({ cdpAvailable: () => false });
     expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
   });
+});
+
+test("ping and shutdown are the urgent ops, and nothing else is", () => {
+  expect([...IS_URGENT].sort()).toEqual(["ping", "shutdown"]);
+});
+
+test("an urgent op answers while a queued op is wedged", async () => {
+  // The regression this guards: route urgent ops through the serializer and
+  // `ping` waits for the wedged op, so a stuck daemon can never be shut down.
+  const replies: string[] = [];
+  let release!: () => void;
+  const wedged = new Promise<void>((r) => { release = r; });
+  const serialize = createSerializer();
+  const lane = {
+    handle: async (req: DaemonRequest) => {
+      if (req.op !== "ping") await wedged;
+      return { id: req.id, ok: true as const, result: req.op };
+    },
+    serialize,
+    timeoutMs: 0,
+    reply: (res: DaemonResponse) => { replies.push(String(res.ok && res.result)); },
+  };
+
+  dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
+  dispatch({ id: 2, op: "ping", args: [] } as DaemonRequest, lane);
+  await Bun.sleep(20);
+
+  // ping answered; click is still stuck behind its own wedge.
+  expect(replies).toEqual(["ping"]);
+  release();
+  await Bun.sleep(20);
+  expect(replies).toEqual(["ping", "click"]);
+});
+
+test("a queued op that overruns its budget answers with a timeout error", async () => {
+  // Both tests above pass timeoutMs: 0, which makes withTimeout a no-op, so
+  // neither reaches the timeout branch. Without this the whole per-op budget
+  // could be deleted and the suite would stay green — the final review of
+  // PR 6 proved exactly that by deleting it.
+  const replies: DaemonResponse[] = [];
+  const lane = {
+    handle: () => new Promise<DaemonResponse>(() => {}), // never settles
+    serialize: createSerializer(),
+    timeoutMs: 5,
+    reply: (res: DaemonResponse) => { replies.push(res); },
+  };
+  dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
+  await Bun.sleep(40);
+  expect(replies).toEqual([
+    { id: 1, ok: false, error: "operation 'click' timed out after 5ms" },
+  ]);
+});
+
+test("a non-urgent op waits its turn behind the one before it", async () => {
+  // The other half: without the serializer two ops could touch the WebView
+  // at once. Proves the urgent lane above is a real exception, not the norm.
+  const replies: string[] = [];
+  let release!: () => void;
+  const first = new Promise<void>((r) => { release = r; });
+  const serialize = createSerializer();
+  const lane = {
+    handle: async (req: DaemonRequest) => {
+      if (req.id === 1) await first;
+      return { id: req.id, ok: true as const, result: req.op };
+    },
+    serialize,
+    timeoutMs: 0,
+    reply: (res: DaemonResponse) => { replies.push(String(res.ok && res.result)); },
+  };
+
+  dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
+  dispatch({ id: 2, op: "type", args: ["hi"] } as DaemonRequest, lane);
+  await Bun.sleep(20);
+  expect(replies).toEqual([]);
+  release();
+  await Bun.sleep(20);
+  expect(replies).toEqual(["click", "type"]);
 });

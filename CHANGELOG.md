@@ -56,6 +56,14 @@ All notable changes to this project are documented here. This project follows
   usage and the four `cookie-*` usages exceed that and now wrap onto their own line with the summary
   beneath. Every command's summary text is otherwise the same string used for its MCP tool
   description (see above).
+- **The daemon's urgent lane is declared.** `ping` and `shutdown` carry `urgent: true` in
+  `DaemonOps` and the server routes on that marker instead of testing for the string
+  `"shutdown"`, so an op that must answer while another is wedged is one marker rather than a
+  new branch. The routing itself moved out of `Bun.listen`'s `data` callback into an exported
+  `dispatch(req, lane)` function in `src/daemon/server.ts`, so the lane choice can be
+  unit-tested without a socket. `DaemonState` gives the daemon a slot for a dialog the page
+  opened, and `Browser.subscribe()` exposes the backend event stream it will be filled from. No
+  visible change: no command's output differs.
 
 ## [0.5.0] — 2026-06-15
 
