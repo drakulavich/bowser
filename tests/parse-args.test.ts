@@ -69,17 +69,13 @@ describe("parse", () => {
 describe("run() rejects an invalid enum value before reaching a browser", () => {
   // The only assertion covering the reported case through the real argv path:
   // the e2e cookie tests call the command functions directly and never parse
-  // a command line, so nothing else exercises this.
+  // a command line, so nothing else exercises this. parse() throws before any
+  // daemon work, which is what keeps this a unit test — the sibling assertion
+  // for a *valid* value would reach a real browser, and belongs (and already
+  // lives) in the parse() tests below.
   test("cookie-set --same-site=garbage never reaches the daemon", async () => {
     await expect(run(["cookie-set", "k", "v", "--same-site=garbage"]))
       .rejects.toThrow("invalid --same-site: must be one of Strict, Lax, None");
-  });
-
-  test("a valid value gets past the parser", async () => {
-    // Fails later for wanting a browser, which is the point: the parser let it
-    // through, so the rejection above is about the value and not the command.
-    await expect(run(["cookie-set", "k", "v", "--same-site=Strict"]))
-      .rejects.not.toThrow("invalid --same-site");
   });
 });
 
