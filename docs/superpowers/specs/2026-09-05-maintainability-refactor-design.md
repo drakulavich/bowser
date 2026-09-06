@@ -242,8 +242,6 @@ inside `Browser.cdp()` is kept as a backstop but no handler relies on it.
 
 ```ts
 interface DaemonState {
-  url: string;
-  title: string;
   /** Set by Page.javascriptDialogOpening; cleared by dialog-handle. Chrome
    *  only. `defaultValue` renames CDP's own `defaultPrompt` field to match
    *  the other fields' style. */
@@ -251,9 +249,15 @@ interface DaemonState {
 }
 ```
 
-The `state` op returns this object. Today's `{ url, title }` consumers keep
-working because those fields keep their names; `dialog` is absent until the
-next task populates it.
+`url` and `title` are deliberately not fields here, though an earlier draft
+of this section had them. Nothing would refresh such a cache, and a `state`
+call that reported the page an action had just navigated away from is the
+exact bug `nav.act()` was added to fix. They stay computed live from the page
+on every `state` call; `DaemonState` holds only what cannot be recomputed on
+demand. The `state` op returns the live pair merged with this object, so
+today's `{ url, title }` consumers keep working unchanged and `dialog` is
+absent — not present-and-undefined, which would differ on the wire — until
+the dialog task populates it.
 
 **`Browser.subscribe(event, handler)`.** Wraps `view.addEventListener`,
 branching on backend kind rather than feature-probing `addEventListener`
