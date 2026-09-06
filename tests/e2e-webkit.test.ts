@@ -256,7 +256,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
     const out = JSON.parse(await cmdClose(ctx, { all: true })) as { ok: boolean; closed: string[] };
     expect(out.ok).toBe(true);
     expect(out.closed).toContain(session);
-    const after = await loadState(session);
-    expect(after?.url).toBe("");
+    // close removes the session directory, so nothing is left to load.
+    expect(await loadState(session)).toBeNull();
   }, 60_000);
 });

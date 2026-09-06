@@ -37,7 +37,20 @@ export function sessionsRoot(): string {
   return join(process.env.HOME || homedir(), ".bowser", "sessions");
 }
 
+/** Every filesystem path for a session goes through here, so this is where a
+ *  name is checked. A session name arrives from `-s` unfiltered, and `close`
+ *  now removes the directory it names recursively: without this, `bowser -s
+ *  ../../Documents close` would resolve outside the sessions root and delete
+ *  it. One path segment, no traversal, no separators. */
 export function sessionDir(name: string): string {
+  const bad =
+    !name || name === "." || name === ".." ||
+    name.includes("/") || name.includes("\\") || name.includes("\0");
+  if (bad) {
+    throw new Error(
+      `usage: session name must be a single path segment, got ${JSON.stringify(name)}`,
+    );
+  }
   return join(sessionsRoot(), name);
 }
 

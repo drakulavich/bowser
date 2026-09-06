@@ -11,11 +11,12 @@
 // and Handlers excludes `state`, so the lookup stops being index-safe.
 
 import { unlink } from "node:fs/promises";
+import { unlinkSync } from "node:fs";
 import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import { IS_URGENT, REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogState, type Op, type PageState, type ResultOf } from "./protocol.ts";
-import { socketPath } from "./client.ts";
+import { pidPath, socketPath } from "./client.ts";
 
 /** What the daemon knows that the page cannot be asked for. `url` and `title`
  *  are deliberately NOT here: they are read live from the page on every
@@ -167,6 +168,18 @@ export async function startDaemon(session: string): Promise<void> {
   try {
     await unlink(sock);
   } catch {}
+
+  // Record the pid so `close` can confirm this process died rather than
+  // assuming it. Removed on the way out — a pidfile outliving its process is
+  // the same stale state this exists to detect. An exit handler catches every
+  // path out, not just `shutdown`, so it must be synchronous.
+  const pidFile = pidPath(session);
+  await Bun.write(pidFile, String(process.pid));
+  process.on("exit", () => {
+    try {
+      unlinkSync(pidFile);
+    } catch {}
+  });
 
   const browser: Browser = await openBrowser();
   const state: DaemonState = {};
