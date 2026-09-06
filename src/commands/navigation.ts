@@ -276,7 +276,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "close",
-    summary: "Close a session (or all sessions with --all)",
+    summary: "Close a session and remove its data (or all with --all)",
     positional: [{ name: "session", required: false }],
     flags: [{ name: "all", kind: "boolean" }],
     run: (ctx, a) => cmdClose(ctx, { name: a.positional[0], all: Boolean(a.flags.all) }),
@@ -301,7 +301,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "list",
-    summary: "List sessions",
+    summary: "List sessions whose daemon is running",
     positional: [], flags: [],
     run: (ctx) => cmdList(ctx),
   },

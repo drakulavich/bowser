@@ -7,6 +7,15 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`close` could report success while leaving a browser process running.** It connected to the
+  daemon with `spawn: false`, swallowed a failure to connect as "no daemon; that's ok", unlinked
+  the socket and printed `closed session '<name>'`. A daemon that was running but unreachable was
+  left orphaned — holding a browser view, addressable by no command, found only with `pgrep`. The
+  daemon now records its pid beside its socket; `close` waits for that process to go, ends it if it
+  does not, and throws rather than claim success when it cannot confirm it stopped. Nothing is
+  signalled until the pid's command line is confirmed to name this session and a bowser daemon,
+  so a stale pidfile whose number has been reused cannot cost an unrelated process.
+
 - **`cookie-set` accepted an invalid `--same-site` and silently dropped it.** CDP answers
   `Network.setCookie` with `success: true` for a `sameSite` it does not understand and stores the
   cookie without the attribute, so nothing downstream could notice: `cookie-set` printed
@@ -25,6 +34,14 @@ All notable changes to this project are documented here. This project follows
   within 10 s) before answering, on both backends.
 
 ### Changed
+
+- **`list` shows only sessions whose daemon answers.** It listed every session directory, and
+  nothing removed one, so the output grew without bound — 640 lines on the machine where this was
+  found, 2 of which named a session an agent could use. Liveness is asked of the daemon, not read
+  off the filesystem: a stale socket outlives a crashed daemon and an orphan holds no socket.
+
+- **`close` removes the session directory** instead of rewriting its state file empty. Nothing
+  reads a closed session's state, and keeping the directory is what let closed sessions accumulate.
 
 - **An enum flag declares its accepted values.** `FlagSpec.values` drives both parser validation
   and the `--help` placeholder, so the two cannot drift. `bowser --help` now shows
@@ -57,9 +74,9 @@ All notable changes to this project are documented here. This project follows
   and every script injected into the page lives in `src/page-scripts.ts`. `reply()` and `syncState()` in
   `context.ts` replace the two lines every command repeated. No output, `--json` or wire change.
 - **Each command carries its own one-line summary, now the single source for `--help` and the MCP
-  tool description.** `list`'s summary is now `"List sessions"`, matching the CLI `--help` text it
-  had always used — the MCP tool description carried the stale `"List active sessions"` even though
-  `cmdList` enumerates every session directory, closed sessions included.
+  tool description.** `list`'s summary is now one string serving both, where the MCP tool
+  description had carried a stale `"List active sessions"` of its own. (What `list` enumerates
+  changed later in this release — see "`list` shows only sessions whose daemon answers" above.)
 - **Commands are a registry.** Each `src/commands/<domain>.ts` exports `Command` objects; dispatch,
   `bowser --help` and the MCP tool list are generated from them. `src/cli.ts`'s 39-case switch, the
   hand-written help text, and `DESCRIPTIONS`/`MCP_EXCLUDED` in `src/mcp.ts` are gone. Command names,
