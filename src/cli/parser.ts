@@ -4,6 +4,10 @@ export interface FlagSpec {
   name: string;
   kind: FlagKind;
   short?: string;
+  /** What the value looks like, for `--help`: the accepted values of an enum
+   *  flag, or the unit of a number. Defaults to the flag's own name. Parsing
+   *  ignores it. */
+  placeholder?: string;
 }
 
 export interface CommandSchema {

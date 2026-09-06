@@ -17,7 +17,10 @@ const SUMMARY_COL = 54;
 export function usageOf(c: Command): string {
   const parts = [c.name];
   for (const p of c.positional) parts.push(p.required ? `<${p.name}>` : `[${p.name}]`);
-  for (const f of c.flags) parts.push(f.kind === "boolean" ? `[--${f.name}]` : `[--${f.name}=<${f.name}>]`);
+  for (const f of c.flags) {
+    if (f.kind === "boolean") parts.push(`[--${f.name}]`);
+    else parts.push(`[--${f.name}=${f.placeholder ?? `<${f.name}>`}]`);
+  }
   return parts.join(" ");
 }
 

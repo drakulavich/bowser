@@ -25,6 +25,11 @@ describe("generated help", () => {
     expect(HELP).toContain("[--filename=<filename>]");
   });
 
+  test("a flag's placeholder carries its accepted values into the usage", () => {
+    expect(HELP).toContain("[--same-site=Lax|Strict|None]");
+    expect(HELP).toContain("[--expires=<unix-seconds>]");
+  });
+
   test("every summary appears", () => {
     for (const c of COMMANDS) expect(HELP).toContain(c.summary);
   });
