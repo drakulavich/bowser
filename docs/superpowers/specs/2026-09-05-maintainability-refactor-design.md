@@ -323,8 +323,9 @@ first, before any code moves.
     WebKit suites and the compiled-binary smoke, alongside the existing
     Chromium job.
   - The layer test skeleton with the rules that already hold today; later
-    PRs add rules as the layout changes. The `OP_META` key test belongs to
-    PR 2, where `OP_META` is born.
+    PRs add rules as the layout changes. The `OP_META` table and its key test
+    belong to PR 6, which introduces urgent routing; PR 2 declares the op map
+    only.
 - **Existing tests move, they are not rewritten.** Import paths change.
   Expected strings change only where a command's output changes on purpose
   (see "The contract"), and each such change is a separate commit in its PR.

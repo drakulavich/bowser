@@ -5,7 +5,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import type { DaemonClient } from "../src/daemon.ts";
 import {
   cmdClick, cmdFill, cmdType, cmdPress, cmdHover, cmdSelect,
   cmdCheck, cmdUncheck, cmdScreenshot, cmdResize, cmdHistory,
@@ -18,96 +17,7 @@ import {
   type CommandContext,
 } from "../src/commands.ts";
 import { saveState, loadState } from "../src/state.ts";
-
-// Minimal DaemonClient stand-in with a scripted response map.
-function fakeClient(handlers: {
-  navigate?: (url: string) => void;
-  evaluate?: (expr: string) => unknown;
-  click?: (selector: string) => void;
-  type?: (text: string) => void;
-  press?: (key: string) => void;
-  hover?: (selector: string) => void;
-  select?: (selector: string, value: string) => void;
-  check?: (selector: string) => void;
-  uncheck?: (selector: string) => void;
-  screenshot?: (selector?: string) => string;
-  back?: () => void;
-  forward?: () => void;
-  reload?: () => void;
-  state?: () => { url: string; title: string };
-}) {
-  const calls: Array<[string, unknown[]]> = [];
-  let currentUrl = "";
-  let currentTitle = "";
-
-  const c: DaemonClient & { calls: typeof calls } = {
-    calls,
-    async connect() {},
-    async request(op: string, args: unknown[] = []) {
-      calls.push([op, args]);
-      switch (op) {
-        case "ping":
-          return "pong";
-        case "navigate": {
-          const url = args[0] as string;
-          currentUrl = url;
-          currentTitle = "Fake " + url;
-          handlers.navigate?.(url);
-          return;
-        }
-        case "evaluate":
-          return handlers.evaluate?.(args[0] as string);
-        case "click":
-          handlers.click?.(args[0] as string);
-          return;
-        case "type":
-          handlers.type?.(args[0] as string);
-          return;
-        case "press":
-          handlers.press?.(args[0] as string);
-          return;
-        case "hover":
-          handlers.hover?.(args[0] as string);
-          return;
-        case "select":
-          handlers.select?.(args[0] as string, args[1] as string);
-          return;
-        case "check":
-          handlers.check?.(args[0] as string);
-          return;
-        case "uncheck":
-          handlers.uncheck?.(args[0] as string);
-          return;
-        case "screenshot": {
-          // Mirror the real daemon: when given a path, write the PNG and return
-          // just { path }; otherwise return base64.
-          const path = args[0] as string | undefined;
-          const b64 = handlers.screenshot?.(path) ?? "";
-          if (path) {
-            await Bun.write(path, Buffer.from(b64, "base64"));
-            return { path };
-          }
-          return b64;
-        }
-        case "back":
-          handlers.back?.();
-          return;
-        case "forward":
-          handlers.forward?.();
-          return;
-        case "reload":
-          handlers.reload?.();
-          return;
-        case "state":
-          return handlers.state?.() ?? { url: currentUrl, title: currentTitle };
-        default:
-          return undefined;
-      }
-    },
-    close() {},
-  } as unknown as DaemonClient & { calls: typeof calls };
-  return c;
-}
+import { fakeClient } from "./helpers/fake-client.ts";
 
 async function seedRefs() {
   await saveState({

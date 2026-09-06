@@ -15,7 +15,7 @@ import { join } from "node:path";
 
 import { detectChromium } from "../src/browser.ts";
 import { cmdClick, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
-import { connectOrSpawn } from "../src/daemon.ts";
+import { connectOrSpawn } from "../src/daemon/client.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E =

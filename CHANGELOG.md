@@ -21,6 +21,10 @@ All notable changes to this project are documented here. This project follows
 - **Known WebKit limitations, now pinned as `test.todo`:** `goto` right after `reload` is rejected
   with `NSURLErrorDomain -999`; `press` fires no bubbling `keydown`. See the 2026-09-05 refactor
   spec, "Findings".
+- **Daemon protocol is one typed map.** `src/daemon.ts` is now `src/daemon/{protocol,server,client,main}.ts`.
+  `DaemonOps` declares every op's arguments and result; the client's `request`, the server's handler
+  table and the tests' fake client derive from it, so a new op without a handler fails `bun run
+  typecheck`. No wire, CLI or `--json` change.
 
 ## [0.5.0] — 2026-06-15
 
