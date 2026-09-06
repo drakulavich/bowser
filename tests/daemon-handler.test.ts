@@ -240,6 +240,25 @@ test("an urgent op answers while a queued op is wedged", async () => {
   expect(replies).toEqual(["ping", "click"]);
 });
 
+test("a queued op that overruns its budget answers with a timeout error", async () => {
+  // Both tests above pass timeoutMs: 0, which makes withTimeout a no-op, so
+  // neither reaches the timeout branch. Without this the whole per-op budget
+  // could be deleted and the suite would stay green — the final review of
+  // PR 6 proved exactly that by deleting it.
+  const replies: DaemonResponse[] = [];
+  const lane = {
+    handle: () => new Promise<DaemonResponse>(() => {}), // never settles
+    serialize: createSerializer(),
+    timeoutMs: 5,
+    reply: (res: DaemonResponse) => { replies.push(res); },
+  };
+  dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
+  await Bun.sleep(40);
+  expect(replies).toEqual([
+    { id: 1, ok: false, error: "operation 'click' timed out after 5ms" },
+  ]);
+});
+
 test("a non-urgent op waits its turn behind the one before it", async () => {
   // The other half: without the serializer two ops could touch the WebView
   // at once. Proves the urgent lane above is a real exception, not the norm.

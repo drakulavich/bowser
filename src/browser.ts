@@ -164,7 +164,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming) {
   // A failed navigation ends the wait but does not fail the action: WebKit
   // reports NSURLErrorDomain -999 for routine cancellations (a page script
   // navigating right after a click), and `state` reads the real URL anyway.
-  // Surfacing the last navigation error is DaemonState work (PR 6).
+  // Surfacing the last navigation error is future DaemonState work.
   let landed = 0;
   view.onNavigated = () => { landed++; };
   view.onNavigationFailed = () => { landed++; };

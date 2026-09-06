@@ -148,10 +148,12 @@ export interface DaemonRequest<O extends Op = Op> {
 }
 ```
 
-`urgent` and `requires` are type-level markers mirrored by a small runtime
-table (`OP_META: Record<Op, { urgent?: true; requires?: "cdp" }>`) so the
-server can route on them. A test asserts the table has exactly the keys of
-`DaemonOps`.
+`urgent` and `requires` are type-level markers, each mirrored by its own
+small runtime object (`URGENT_OPS`, `CDP_OPS`) that
+`satisfies Record<UrgentOp, true>` / `Record<CdpOp, true>`, so the server can
+route on them. There is no `Record<Op, …>` table and no key test: `satisfies`
+fails compilation in both directions instead — a marker with no row, and a
+row with no marker.
 
 Derived from the map:
 
@@ -335,9 +337,8 @@ first, before any code moves.
     WebKit suites and the compiled-binary smoke, alongside the existing
     Chromium job.
   - The layer test skeleton with the rules that already hold today; later
-    PRs add rules as the layout changes. The `OP_META` table and its key test
-    belong to PR 6, which introduces urgent routing; PR 2 declares the op map
-    only.
+    PRs add rules as the layout changes. Urgent routing and its markers
+    belong to PR 6; PR 2 declares the op map only.
 - **Existing tests move, they are not rewritten.** Import paths change.
   Expected strings change only where a command's output changes on purpose
   (see "The contract"), and each such change is a separate commit in its PR.
@@ -368,7 +369,7 @@ Each PR is green on its own, including the WebKit e2e suites from PR 1.
 | 3 | `Browser` absorbs cookies and native history; `backend.ts` split out; `requires: "cdp"` gate | browser, daemon/server | none (error text preserved) |
 | 4 | `commands/*` split, `context.ts` helpers, `page-scripts.ts` | commands, tests imports | output wording may move closer to `playwright-cli`; CHANGELOG |
 | 5 | Registry: dispatch, HELP, MCP from `COMMANDS`; delete `schemas.ts` body, `DESCRIPTIONS`, `MCP_EXCLUDED`; docs drift test | cli, mcp, tests | `--help`, MCP descriptions; CHANGELOG |
-| 6 | Event lane: `OP_META`, urgent routing, `DaemonState`, `subscribe()` | daemon/server, browser | none |
+| 6 | Event lane: `urgent` markers, urgent routing, `DaemonState`, `subscribe()` | daemon/server, browser | none |
 | 7 | CLAUDE.md: new "Where to look first", "Adding a command" is four steps, drop gotchas the compiler now enforces | docs | none |
 | — | Series gate: dogfooding pass on the compiled binary on WebKit (Section 5) | report only | none |
 
