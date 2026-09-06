@@ -1,6 +1,6 @@
 # Spec: a session is live or it is gone
 
-**Status:** awaiting review — do not implement until approved.
+**Status:** approved. Plan: `docs/superpowers/plans/2026-09-06-session-liveness.md`.
 **Origin:** ticket 2 of the post-refactor triage (`list` prints every session
 ever created). Investigating it found a process leak underneath, and the ticket
 grew to cover both. Also closes ET-01 from the exploratory campaign.
@@ -189,15 +189,15 @@ Required coverage:
 5. A full WebKit e2e run leaves no daemon behind, checked with `pgrep`.
 6. `bun run typecheck` clean, `bun test` green, WebKit e2e green.
 
-## Open Questions
+## Open Questions — settled
 
 1. **The pidfile** — approve it, or take the report-only alternative? See the
-   section above. My recommendation: the pidfile. Objective 2 is the half of
+   section above. **Decided: the pidfile.** Objective 2 is the half of
    this ticket that actually stops the leak, and ten orphaned browsers went
    unnoticed for hours precisely because nothing reported or ended them.
 2. **What `close` should do about a session that does not exist at all.** Today
    it reports success for any name. With directories now deleted, `close
    typo-name` will be the common way to hit this. Options: stay silent and
    succeed (idempotent, current behaviour), or report "no such session" and exit
-   non-zero. My recommendation: keep it succeeding — `close` is what an agent
+   non-zero. **Decided: keep it succeeding** — `close` is what an agent
    calls in a cleanup path, and failing there is noise.
