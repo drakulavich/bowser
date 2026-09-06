@@ -24,12 +24,20 @@ bun build src/cli.ts --compile --outfile dist/bowser
 # release.yml cross-compiles one binary per target, passing a single
 # --target=<t> each: bun-darwin-arm64, bun-darwin-x64, bun-linux-x64, bun-linux-arm64
 
-bun test                                       # unit + command tests, fake daemon, no Chromium
-BOWSER_E2E=1 bun test                          # + offline e2e against real headless Chromium
+bun run typecheck                              # tsc; bun test strips types and checks nothing
+bun test                                       # unit + command tests, fake daemon, no browser
+BOWSER_E2E=1 bun test                          # + offline e2e on whichever backend resolves (webkit on macOS)
+BOWSER_E2E=1 BOWSER_BACKEND=webkit bun test    # + the WebKit agent-loop scenario (macOS)
 BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub search; brittle)
 ```
 
-Requires Bun ≥ 1.3.12 — `Bun.WebView` does not exist in 1.3.11, and devs on it hit confusing failures inside the daemon. `engines.bun` and the CI `bun-version` constraints catch this; don't loosen them. Bumping the floor means updating `package.json`, the README, and `test.yml`'s three `bun-version` pins — `release.yml` uses `bun-version: latest` and enforces no floor.
+`tests/e2e-compat.test.ts` diffs bowser against `playwright-cli` on WebKit and
+skips unless `playwright-cli` is in `$PATH` with its WebKit installed
+(`playwright-cli install-browser webkit`). It asserts bowser's refs are a
+subset of `playwright-cli`'s tree; the formats themselves differ on purpose
+until the snapshot-parity task (see the 2026-09-05 refactor spec, "Findings").
+
+Requires Bun ≥ 1.3.12 — `Bun.WebView` does not exist in 1.3.11, and devs on it hit confusing failures inside the daemon. `engines.bun` and the CI `bun-version` constraints catch this; don't loosen them. Bumping the floor means updating `package.json`, the README, and `test.yml`'s four `bun-version` pins — `release.yml` uses `bun-version: latest` and enforces no floor.
 
 E2E tests redirect `$HOME` to a tmp dir, which hides the bowser-managed Chromium cache. Point at one explicitly:
 

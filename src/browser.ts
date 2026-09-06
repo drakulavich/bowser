@@ -78,9 +78,15 @@ export function resolveBackend(deps: ResolveBackendDeps = {}): Backend {
   return chromeBackend(env, detect);
 }
 
+/** The `backend` option Bun.WebView's constructor accepts. Derived from the
+ *  constructor so it tracks bun-types instead of a hand-copied union. */
+type BunBackend = NonNullable<
+  NonNullable<ConstructorParameters<typeof Bun.WebView>[0]>["backend"]
+>;
+
 /** Map our Backend union to the value Bun.WebView's `backend` field accepts:
  *  a bare string when there's nothing to tune, an object otherwise. */
-export function toBunBackend(b: Backend): unknown {
+export function toBunBackend(b: Backend): BunBackend {
   if (b.kind === "webkit") return "webkit";
   if (!b.path && !b.argv && !b.debug) return "chrome";
   return {
@@ -108,10 +114,27 @@ export async function resolveUrl(
   }
 }
 
+/** Resolve the page title. On the webkit backend `view.title` is still ""
+ *  when navigate() resolves even though document.title is set (chrome has
+ *  it ready). When the native getter is empty, read it from the page. */
+export async function resolveTitle(
+  viewTitle: string,
+  evalTitle: () => Promise<unknown>,
+): Promise<string> {
+  if (viewTitle) return viewTitle;
+  try {
+    const t = await evalTitle();
+    return typeof t === "string" ? t : "";
+  } catch {
+    return "";
+  }
+}
+
 export interface Browser {
   url: string;
   title: string;
   realUrl(): Promise<string>;
+  realTitle(): Promise<string>;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
@@ -148,8 +171,6 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     ? chromeBackend(process.env, () => undefined, opts.executablePath)
     : resolveBackend();
 
-  // @ts-expect-error Bun.WebView is available in Bun >= 1.3.12 but not yet in
-  // the public types bundled with @types/bun at the time of writing.
   const view = new Bun.WebView({
     backend: toBunBackend(spec),
     width: opts.width ?? 1280,
@@ -164,6 +185,7 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
       return view.title as string;
     },
     realUrl: () => resolveUrl(view.url as string, () => view.evaluate("location.href")),
+    realTitle: () => resolveTitle(view.title as string, () => view.evaluate("document.title")),
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
     click: (selector) => view.click(selector),

@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **WebKit: `open` printed an empty title.** `Bun.WebView`'s `title` getter is still empty when
+  `navigate()` resolves on the webkit backend; the daemon now reads `document.title` from the page
+  when the getter is empty, the same fallback `realUrl()` uses for the URL.
+
+### Changed
+
+- **Type checking is a gate.** `bun run typecheck` (tsc) runs in CI; `bun test` strips types and
+  never checked them. Three latent type errors fixed.
+- **WebKit is tested end-to-end.** A macOS CI job runs the e2e suites on WebKit, including a
+  new agent-loop scenario covering every non-CDP command, and a differential test against
+  `playwright-cli` (skipped when it is not installed).
+- **Known WebKit limitations, now pinned as `test.todo`:** `goto` right after `reload` is rejected
+  with `NSURLErrorDomain -999`; `press` fires no bubbling `keydown`. See the 2026-09-05 refactor
+  spec, "Findings".
+
 ## [0.5.0] — 2026-06-15
 
 ### Added

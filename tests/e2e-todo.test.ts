@@ -9,27 +9,29 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, openBrowser } from "../src/browser.ts";
+import { detectChromium, openBrowser, resolveBackend } from "../src/browser.ts";
 import { cmdClick, cmdClose, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
 
-runOrSkip("e2e: local todo app", () => {
+runOrSkip("e2e: local todo app (backend from resolveBackend)", () => {
   let tmp: string;
   let origHome: string | undefined;
   let server: { stop: () => void; url: URL } | undefined;
   let baseUrl: string;
 
   beforeAll(async () => {
-    if (!detectChromium()) {
-      throw new Error("no Chromium binary found; install chromium-headless-shell");
-    }
-
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-todo-"));
     process.env.HOME = tmp;
+    if (resolveBackend().kind === "chrome" && !detectChromium()) {
+      throw new Error(
+        "BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found. " +
+          "Install chromium-headless-shell, set BOWSER_CHROMIUM_PATH, or set BOWSER_BACKEND=webkit on macOS.",
+      );
+    }
 
     const html = await readFile(
       join(import.meta.dir, "fixtures/todo-app.html"),

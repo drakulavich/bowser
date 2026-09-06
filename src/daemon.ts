@@ -136,7 +136,7 @@ export async function startDaemon(session: string): Promise<void> {
           return {
             id: req.id,
             ok: true,
-            result: { url: await browser.realUrl(), title: browser.title },
+            result: { url: await browser.realUrl(), title: await browser.realTitle() },
           };
         // --- Cookie ops (chrome backend only; require Bun.WebView.cdp()) ---
         case "cookie-get-all": {
@@ -273,7 +273,7 @@ export async function startDaemon(session: string): Promise<void> {
 }
 
 export class DaemonClient {
-  private sock: ReturnType<typeof Bun.connect> | undefined;
+  private sock: Awaited<ReturnType<typeof Bun.connect>> | undefined;
   private nextId = 1;
   private pending = new Map<number, (res: DaemonResponse) => void>();
   private buf = "";
@@ -282,7 +282,6 @@ export class DaemonClient {
 
   async connect(): Promise<void> {
     const self = this;
-    // @ts-expect-error Bun.connect unix option
     this.sock = await Bun.connect({
       unix: this.path,
       socket: {
