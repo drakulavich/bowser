@@ -2,6 +2,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { bowserCacheRoot, detectChromium } from "../backend.ts";
+import type { Command } from "../cli/registry.ts";
 import { reply, type CommandContext } from "./context.ts";
 
 /** Download a headless Chromium build into ~/.bowser/chromium. We delegate
@@ -66,3 +67,14 @@ export async function cmdInstall(
 
   return reply(ctx, { ok: true, path }, `installed chromium to ${path}`);
 }
+
+export const COMMANDS: Command[] = [
+  {
+    name: "install",
+    summary: "Download a headless Chromium",
+    positional: [],
+    flags: [{ name: "force", short: "f", kind: "boolean" }],
+    mcp: false,
+    run: (ctx, a) => cmdInstall(ctx, { force: Boolean(a.flags.force) }),
+  },
+];

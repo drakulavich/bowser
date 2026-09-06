@@ -39,6 +39,10 @@ All notable changes to this project are documented here. This project follows
 - **`src/commands.ts` is now `src/commands/{context,navigation,interaction,snapshot,web-storage,cookies,storage-state,scripting,install}.ts`**,
   and every script injected into the page lives in `src/page-scripts.ts`. `reply()` and `syncState()` in
   `context.ts` replace the two lines every command repeated. No output, `--json` or wire change.
+- **Each command carries its own one-line summary, now the single source for `--help` and the MCP
+  tool description.** `list`'s summary is now `"List sessions"`, matching the CLI `--help` text it
+  had always used — the MCP tool description carried the stale `"List active sessions"` even though
+  `cmdList` enumerates every session directory, closed sessions included.
 
 ## [0.5.0] — 2026-06-15
 

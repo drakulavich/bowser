@@ -1,6 +1,7 @@
 // Evaluate commands — run a JS expression or code block in the current page.
 // Both use the existing `evaluate` daemon op; no new daemon op is needed.
 
+import type { Command } from "../cli/registry.ts";
 import { runCodeScript } from "../page-scripts.ts";
 import { reply, withClient, type CommandContext } from "./context.ts";
 
@@ -25,3 +26,20 @@ export async function cmdRunCode(ctx: CommandContext, code: string): Promise<str
     return reply(ctx, { ok: true, result }, formatEvalResult(result));
   });
 }
+
+export const COMMANDS: Command[] = [
+  {
+    name: "eval",
+    summary: "Evaluate a JS expression in the page and return the result",
+    positional: [{ name: "expression", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdEval(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "run-code",
+    summary: "Run multi-statement JS in the page and return the result",
+    positional: [{ name: "code", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdRunCode(ctx, a.positional[0] ?? ""),
+  },
+];

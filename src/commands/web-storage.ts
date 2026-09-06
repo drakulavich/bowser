@@ -3,6 +3,7 @@
 // session. Values are always strings — that's the Storage API surface, no
 // JSON encoding is implied.
 
+import type { Command } from "../cli/registry.ts";
 import {
   storageClearScript, storageDeleteScript, storageGetScript, storageListScript, storageSetScript,
 } from "../page-scripts.ts";
@@ -92,3 +93,72 @@ export const cmdSessionStorageSet = (ctx: CommandContext, key: string, value: st
 export const cmdSessionStorageDelete = (ctx: CommandContext, key: string) =>
   storageDelete(ctx, "sessionStorage", "sessionstorage-delete", key);
 export const cmdSessionStorageClear = (ctx: CommandContext) => storageClear(ctx, "sessionStorage");
+
+export const COMMANDS: Command[] = [
+  {
+    name: "localstorage-list",
+    summary: "List all localStorage entries",
+    positional: [], flags: [],
+    run: (ctx) => cmdLocalStorageList(ctx),
+  },
+  {
+    name: "localstorage-get",
+    summary: "Read a localStorage value",
+    positional: [{ name: "key", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdLocalStorageGet(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "localstorage-set",
+    summary: "Write a localStorage entry",
+    positional: [{ name: "key", required: true }, { name: "value", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdLocalStorageSet(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
+  },
+  {
+    name: "localstorage-delete",
+    summary: "Remove a localStorage entry",
+    positional: [{ name: "key", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdLocalStorageDelete(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "localstorage-clear",
+    summary: "Clear all localStorage entries",
+    positional: [], flags: [],
+    run: (ctx) => cmdLocalStorageClear(ctx),
+  },
+  {
+    name: "sessionstorage-list",
+    summary: "List all sessionStorage entries",
+    positional: [], flags: [],
+    run: (ctx) => cmdSessionStorageList(ctx),
+  },
+  {
+    name: "sessionstorage-get",
+    summary: "Read a sessionStorage value",
+    positional: [{ name: "key", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdSessionStorageGet(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "sessionstorage-set",
+    summary: "Write a sessionStorage entry",
+    positional: [{ name: "key", required: true }, { name: "value", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdSessionStorageSet(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
+  },
+  {
+    name: "sessionstorage-delete",
+    summary: "Remove a sessionStorage entry",
+    positional: [{ name: "key", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdSessionStorageDelete(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "sessionstorage-clear",
+    summary: "Clear all sessionStorage entries",
+    positional: [], flags: [],
+    run: (ctx) => cmdSessionStorageClear(ctx),
+  },
+];

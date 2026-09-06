@@ -1,6 +1,7 @@
 // Reading the page: the aria snapshot and the screenshot.
 
 import { resolve } from "node:path";
+import type { Command } from "../cli/registry.ts";
 import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import { toJson, toYaml, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
@@ -73,3 +74,23 @@ export async function cmdScreenshot(
     return reply(ctx, { ok: true, filename }, `wrote ${filename}`);
   });
 }
+
+export const COMMANDS: Command[] = [
+  {
+    name: "snapshot",
+    summary: "Capture an aria-tree YAML snapshot of the page (refs for interaction)",
+    positional: [],
+    flags: [{ name: "filename", kind: "string" }, { name: "depth", kind: "string" }],
+    run: (ctx, a) => cmdSnapshot(ctx, {
+      filename: a.flags.filename as string | undefined,
+      depth: a.flags.depth as string | undefined,
+    }),
+  },
+  {
+    name: "screenshot",
+    summary: "Save a full-page PNG screenshot",
+    positional: [],
+    flags: [{ name: "filename", kind: "string" }],
+    run: (ctx, a) => cmdScreenshot(ctx, { filename: a.flags.filename as string | undefined }),
+  },
+];

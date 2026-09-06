@@ -1,6 +1,7 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
 import { readdir, unlink } from "node:fs/promises";
+import type { Command } from "../cli/registry.ts";
 import { socketPath } from "../daemon/client.ts";
 import { ensureSessionDir, loadState, saveState, sessionsRoot, type SessionState } from "../state.ts";
 import { connector, emptyState, reply, syncState, withClient, type CommandContext } from "./context.ts";
@@ -128,3 +129,51 @@ export async function cmdList(ctx: CommandContext): Promise<string> {
     return ctx.json ? "[]" : "";
   }
 }
+
+export const COMMANDS: Command[] = [
+  {
+    name: "open",
+    summary: "Start or attach to a session; navigate if a URL is given",
+    positional: [{ name: "url", required: false }],
+    flags: [],
+    run: (ctx, a) => cmdOpen(ctx, a.positional[0]),
+  },
+  {
+    name: "goto",
+    summary: "Navigate the current session to a URL",
+    positional: [{ name: "url", required: true }],
+    flags: [],
+    run: (ctx, a) => cmdGoto(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "close",
+    summary: "Close a session (or all sessions with --all)",
+    positional: [{ name: "session", required: false }],
+    flags: [{ name: "all", kind: "boolean" }],
+    run: (ctx, a) => cmdClose(ctx, { name: a.positional[0], all: Boolean(a.flags.all) }),
+  },
+  {
+    name: "go-back",
+    summary: "Navigate back in history",
+    positional: [], flags: [],
+    run: (ctx) => cmdHistory(ctx, "back"),
+  },
+  {
+    name: "go-forward",
+    summary: "Navigate forward in history",
+    positional: [], flags: [],
+    run: (ctx) => cmdHistory(ctx, "forward"),
+  },
+  {
+    name: "reload",
+    summary: "Reload the current page",
+    positional: [], flags: [],
+    run: (ctx) => cmdHistory(ctx, "reload"),
+  },
+  {
+    name: "list",
+    summary: "List sessions",
+    positional: [], flags: [],
+    run: (ctx) => cmdList(ctx),
+  },
+];
