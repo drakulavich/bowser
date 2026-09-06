@@ -76,6 +76,14 @@ const RULES: Rule[] = [
     // directly by tests/page-scripts.test.ts.
     violates: (file, text) => file !== "src/page-scripts.ts" && /`\(\(\)\s*=>/.test(text),
   },
+  {
+    name: "only src/page-scripts.ts passes a string literal to .evaluate(",
+    // Catches what the IIFE check above misses: a double- or single-quoted
+    // string, or a template literal that isn't an IIFE, handed straight to
+    // .evaluate(). Like the rule above, this is a code-ownership lint, not a
+    // security control — see its note for what actually guards injection.
+    violates: (file, text) => file !== "src/page-scripts.ts" && /\.evaluate\(\s*[`'"]/.test(text),
+  },
 ];
 
 describe("src layering rules", () => {
