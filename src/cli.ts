@@ -151,7 +151,7 @@ export async function run(argv: string[]): Promise<string> {
 if (import.meta.main) {
   // Hidden entry point used when the compiled binary re-spawns itself as a
   // daemon (import.meta.url is virtual /$bunfs/... in a compiled binary, so
-  // the normal `bun daemon-main.ts` path is unavailable). This MUST stay the
+  // the normal `bun daemon/main.ts` path is unavailable). This MUST stay the
   // first branch in import.meta.main; any code above it would also run inside
   // the daemon process.
   if (process.argv[2] === "--daemon") {
@@ -160,8 +160,8 @@ if (import.meta.main) {
       console.error("daemon-main: missing session name");
       process.exit(1);
     }
-    const { startDaemon } = await import("./daemon.ts");
-    // Mirror daemon-main.ts: startDaemon sets up the socket listener and a
+    const { startDaemon } = await import("./daemon/server.ts");
+    // Mirror daemon/main.ts: startDaemon sets up the socket listener and a
     // keepalive interval, then resolves. Do NOT process.exit() here — that
     // would tear the daemon down the instant its socket is ready (the bug that
     // made the compiled binary's "did not start in time"). The keepalive holds

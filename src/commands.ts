@@ -3,7 +3,8 @@
 // work — typed text, modals, and dynamic DOM all survive between commands.
 
 import { bowserCacheRoot, detectChromium } from "./browser.ts";
-import { connectOrSpawn, socketPath, type DaemonClient } from "./daemon.ts";
+import { connectOrSpawn, socketPath } from "./daemon/client.ts";
+import type { DaemonConnection } from "./daemon/protocol.ts";
 import { toJson, toYaml, SNAPSHOT_SCRIPT, type SnapshotResult } from "./snapshot.ts";
 import {
   ensureSessionDir,
@@ -21,16 +22,16 @@ export interface CommandContext {
   session: string;
   json: boolean;
   // Injected in tests.
-  connect?: typeof connectOrSpawn;
+  connect?: (session: string, opts?: { spawn?: boolean }) => Promise<DaemonConnection>;
 }
 
-function connector(ctx: CommandContext): typeof connectOrSpawn {
+function connector(ctx: CommandContext): (session: string, opts?: { spawn?: boolean }) => Promise<DaemonConnection> {
   return ctx.connect ?? connectOrSpawn;
 }
 
 async function withClient<T>(
   ctx: CommandContext,
-  fn: (c: DaemonClient) => Promise<T>,
+  fn: (c: DaemonConnection) => Promise<T>,
   opts: { spawn?: boolean } = {},
 ): Promise<T> {
   const client = await connector(ctx)(ctx.session, opts);
@@ -66,7 +67,7 @@ export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string
   await ensureSessionDir(ctx.session);
   return withClient(ctx, async (c) => {
     if (url) await c.request("navigate", [url]);
-    const state = (await c.request("state")) as { url: string; title: string };
+    const state = await c.request("state");
     if (url) assertNavigated(url, state.url);
     const next: SessionState = {
       name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
@@ -83,7 +84,7 @@ export async function cmdGoto(ctx: CommandContext, url: string): Promise<string>
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withClient(ctx, async (c) => {
     await c.request("navigate", [url]);
-    const state = (await c.request("state")) as { url: string; title: string };
+    const state = await c.request("state");
     assertNavigated(url, state.url);
     await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
     return ctx.json
@@ -126,7 +127,7 @@ export async function cmdClick(
   const { prev, target } = await loadRef(ctx.session, ref);
   return withClient(ctx, async (c) => {
     await c.request("click", [target.selector]);
-    const state = (await c.request("state")) as { url: string; title: string };
+    const state = await c.request("state");
     await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
     return ctx.json
       ? JSON.stringify({ ok: true, ref, url: state.url })
@@ -269,7 +270,7 @@ export async function cmdHistory(
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withClient(ctx, async (c) => {
     await c.request(which, []);
-    const state = (await c.request("state")) as { url: string; title: string };
+    const state = await c.request("state");
     await saveState({ ...prev, url: state.url, title: state.title, updatedAt: Date.now() });
     return ctx.json
       ? JSON.stringify({ ok: true, url: state.url })
@@ -570,7 +571,7 @@ export interface CookieDeleteOptions {
 /** Resolve the URL scope for cookie-list / cookie-get:
  *  explicit --url > --domain translated to http(s) URL > current page URL from daemon. */
 async function cookieUrls(
-  c: DaemonClient,
+  c: DaemonConnection,
   opts: { domain?: string; url?: string },
 ): Promise<string[]> {
   if (opts.url) return [opts.url];
@@ -580,7 +581,7 @@ async function cookieUrls(
     return [`${scheme}://${opts.domain}/`];
   }
   // Default to the current page URL from the daemon's state op.
-  const state = (await c.request("state")) as { url: string; title: string };
+  const state = await c.request("state");
   const url = state.url;
   return url ? [url] : [];
 }
@@ -591,7 +592,7 @@ export async function cmdCookieList(
 ): Promise<string> {
   return withClient(ctx, async (c) => {
     const urls = await cookieUrls(c, opts);
-    const cookies = (await c.request("cookie-get-all", [urls.length ? urls : undefined])) as Cookie[];
+    const cookies = await c.request("cookie-get-all", [urls.length ? urls : undefined]);
     if (ctx.json) return JSON.stringify(cookies);
     if (cookies.length === 0) return "";
     return cookies.map((ck) => `${ck.name}=${ck.value}`).join("\n");
@@ -606,7 +607,7 @@ export async function cmdCookieGet(
   if (!name) throw new Error("usage: bowser cookie-get <name> [--domain=<d>] [--url=<u>]");
   return withClient(ctx, async (c) => {
     const urls = await cookieUrls(c, opts);
-    const cookies = (await c.request("cookie-get-all", [urls.length ? urls : undefined])) as Cookie[];
+    const cookies = await c.request("cookie-get-all", [urls.length ? urls : undefined]);
     const found = cookies.find((ck) => ck.name === name);
     if (ctx.json) {
       return found
@@ -632,7 +633,7 @@ export async function cmdCookieSet(
     } else {
       // Default url to the current page if no explicit url/domain given.
       const targetUrl = opts.url ?? (
-        (await c.request("state")) as { url: string; title: string }
+        await c.request("state")
       ).url;
       if (targetUrl) param.url = targetUrl;
     }
@@ -730,7 +731,7 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
   const target = resolve(file);
   return withClient(ctx, async (c) => {
     // Whole cookie jar (no url scope). chrome backend only.
-    const cookies = (await c.request("cookie-get-all", [undefined])) as Cookie[];
+    const cookies = await c.request("cookie-get-all", [undefined]);
     const stateCookies: StorageStateCookie[] = cookies.map((ck) => ({
       name: ck.name,
       value: ck.value,
@@ -742,7 +743,7 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
       sameSite: normalizeSameSite(ck.sameSite),
     }));
 
-    const state = (await c.request("state")) as { url: string; title: string };
+    const state = await c.request("state");
     const origin = pageOrigin(state.url);
     const entries = (await c.request("evaluate", [
       storageScript("localStorage", LOCALSTORAGE_DUMP),
@@ -794,7 +795,7 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
       await c.request("cookie-set", [param]);
     }
 
-    const state = (await c.request("state")) as { url: string; title: string };
+    const state = await c.request("state");
     const current = pageOrigin(state.url);
     let originsRestored = 0;
     let originsSkipped = 0;

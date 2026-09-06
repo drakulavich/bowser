@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import type { DaemonClient } from "../src/daemon.ts";
+import type { DaemonConnection } from "../src/daemon/protocol.ts";
 import {
   cmdClick, cmdFill, cmdType, cmdPress, cmdHover, cmdSelect,
   cmdCheck, cmdUncheck, cmdScreenshot, cmdResize, cmdHistory,
@@ -40,7 +40,7 @@ function fakeClient(handlers: {
   let currentUrl = "";
   let currentTitle = "";
 
-  const c: DaemonClient & { calls: typeof calls } = {
+  const c: DaemonConnection & { calls: typeof calls } = {
     calls,
     async connect() {},
     async request(op: string, args: unknown[] = []) {
@@ -105,7 +105,7 @@ function fakeClient(handlers: {
       }
     },
     close() {},
-  } as unknown as DaemonClient & { calls: typeof calls };
+  } as unknown as DaemonConnection & { calls: typeof calls };
   return c;
 }
 

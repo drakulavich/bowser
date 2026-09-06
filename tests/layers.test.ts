@@ -45,19 +45,21 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/browser.ts" && /new\s+Bun\.WebView\s*\(/.test(text),
   },
   {
-    // src/daemon.ts and src/daemon/server.ts both call openBrowser during the
-    // PR2 migration — Task 3 deletes the former, at which point this rule
-    // should narrow back to naming only src/daemon/server.ts.
-    name: "only src/daemon.ts and src/daemon/server.ts call openBrowser",
-    violates: (file, text) =>
-      file !== "src/daemon.ts" && file !== "src/daemon/server.ts" && file !== "src/browser.ts" &&
-      /\bopenBrowser\s*\(/.test(text),
+    name: "only src/daemon/server.ts calls openBrowser",
+    // browser.ts is exempt because the regex also matches its own definition site.
+    violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
     name: "snapshot.ts, serialize.ts and socket-write.ts have no value imports from src",
     violates: (file, text) =>
-      ["src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts"].includes(file) &&
+      ["src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
       valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
+  },
+  {
+    name: "commands.ts talks to the daemon only through client.ts and protocol.ts",
+    // PR 3 adds browser.ts here once install's helpers move to backend.ts.
+    violates: (file, text) =>
+      file === "src/commands.ts" && valueImports(text).some((s) => s.endsWith("daemon/server.ts")),
   },
 ];
 

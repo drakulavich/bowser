@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { connectOrSpawn, socketPath } from "../src/daemon.ts";
+import { connectOrSpawn, socketPath } from "../src/daemon/client.ts";
 
 describe("socketPath", () => {
   test("resolves under process.env.HOME at call time", () => {

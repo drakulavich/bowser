@@ -6,7 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { DaemonClient } from "../src/daemon.ts";
+import type { DaemonConnection } from "../src/daemon/protocol.ts";
 import {
   cmdCookieList,
   cmdCookieGet,
@@ -30,7 +30,7 @@ function fakeCookieClient(handlers: {
 }) {
   const calls: Array<[string, unknown[]]> = [];
 
-  const c: DaemonClient & { calls: typeof calls } = {
+  const c: DaemonConnection & { calls: typeof calls } = {
     calls,
     async connect() {},
     async request(op: string, args: unknown[] = []) {
@@ -55,7 +55,7 @@ function fakeCookieClient(handlers: {
       }
     },
     close() {},
-  } as unknown as DaemonClient & { calls: typeof calls };
+  } as unknown as DaemonConnection & { calls: typeof calls };
   return c;
 }
 
