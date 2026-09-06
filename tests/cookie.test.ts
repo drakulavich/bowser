@@ -190,9 +190,10 @@ describe("cookie-set", () => {
   });
 
   test("fails when the browser refuses the cookie", async () => {
-    // CDP answers Network.setCookie with whether the cookie was stored, for a
-    // domain that does not match the page or Secure without https. That answer
-    // used to be discarded: this printed "set nope" and exited 0.
+    // CDP answers Network.setCookie with whether the cookie was stored, and
+    // that answer used to be discarded. No probe has reached success: false on
+    // a real browser, so this pins the branch a fake can reach; the ticket's
+    // actual fix is the parser rejecting an unknown --same-site.
     await seedState("https://example.com/");
     const c = fakeClient({
       "cookie-set": () => ({ success: false }),

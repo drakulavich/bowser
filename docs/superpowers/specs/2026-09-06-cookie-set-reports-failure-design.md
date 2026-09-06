@@ -26,7 +26,7 @@ Both tools, same local HTTP fixture, same flags.
 | | `cookie-set bad v --sameSite=garbage` |
 |---|---|
 | `playwright-cli` 0.1.13 | `Error: '--sameSite' option: Invalid option: expected one of "Strict"\|"Lax"\|"None"` — the cookie is never created |
-| `bowser` (main, 8621fbd) | prints `set bad`, exit 0 — and `cookie-list --json` returns `[]`, so nothing was created |
+| `bowser` (main, 8621fbd) | prints `set bad`, exit 0 — and the cookie **is** stored, listed by `cookie-list` with no `sameSite` key at all |
 
 ### Correction, measured during implementation
 
@@ -43,7 +43,9 @@ stored: bad/-  good/Strict
 ```
 
 So checking `success` would **not** have caught the ticket's case: the browser
-reported success. What actually fixes the report is rejecting the value in the
+reported success and stored the cookie. An earlier draft of the table above said
+`cookie-list` came back empty; that was a scoping artefact of one probe, and the
+row is corrected. What actually fixes the report is rejecting the value in the
 CLI, because the browser will not complain. A malformed cookie (`__Host-` with a
 domain) makes CDP *throw*, which already surfaced as an error before this work.
 

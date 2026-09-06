@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parse, str } from "../src/cli/parser.ts";
+import { run } from "../src/cli.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 
 describe("parse", () => {
@@ -62,6 +63,23 @@ describe("parse", () => {
   });
   test("--depth=N on snapshot is parsed", () => {
     expect(parse(SCHEMAS, ["snapshot", "--depth=3"]).flags.depth).toBe("3");
+  });
+});
+
+describe("run() rejects an invalid enum value before reaching a browser", () => {
+  // The only assertion covering the reported case through the real argv path:
+  // the e2e cookie tests call the command functions directly and never parse
+  // a command line, so nothing else exercises this.
+  test("cookie-set --same-site=garbage never reaches the daemon", async () => {
+    await expect(run(["cookie-set", "k", "v", "--same-site=garbage"]))
+      .rejects.toThrow("invalid --same-site: must be one of Strict, Lax, None");
+  });
+
+  test("a valid value gets past the parser", async () => {
+    // Fails later for wanting a browser, which is the point: the parser let it
+    // through, so the rejection above is about the value and not the command.
+    await expect(run(["cookie-set", "k", "v", "--same-site=Strict"]))
+      .rejects.not.toThrow("invalid --same-site");
   });
 });
 

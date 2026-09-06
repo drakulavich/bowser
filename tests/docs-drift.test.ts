@@ -49,6 +49,28 @@ describe("docs list every command", () => {
   });
 });
 
+describe("docs list an enum flag's real values", () => {
+  // The narrow half of what the README could be checked for. A full comparison
+  // against usageOf() is not possible today: the README abbreviates
+  // placeholders (`<d>` where the generated usage says `<domain>`). But a flag
+  // that declares `values` has one authoritative list, and the README quoting a
+  // different one is the exact drift this test file exists to catch — it is how
+  // `--same-site` came to advertise an order the parser did not use.
+  for (const c of COMMANDS) {
+    for (const f of c.flags) {
+      if (!f.values) continue;
+      test(`${c.name} --${f.name}`, () => {
+        // Markdown escapes the pipes inside a table cell.
+        const shown = `--${f.name}=${f.values!.join("\\|")}`;
+        // Scope the assertion to the command's own row, so a failure prints
+        // that line rather than the whole README.
+        const row = README.split("\n").find((l) => l.includes(`\`${c.name} `)) ?? "";
+        expect(row).toContain(shown);
+      });
+    }
+  }
+});
+
 describe("docs claim no command that is gone", () => {
   const names = new Set(COMMANDS.map((c) => c.name));
 

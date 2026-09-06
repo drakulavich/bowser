@@ -103,10 +103,11 @@ export async function cmdCookieSet(
     if (opts.sameSite) param.sameSite = opts.sameSite;
     if (opts.expires !== undefined) param.expires = opts.expires;
     const { success } = await c.request("cookie-set", [param]);
-    // CDP declines a cookie it cannot store — a domain that does not match the
-    // page, Secure without https. This answer used to be discarded, so
-    // cookie-set printed `set <name>` and exited 0 while cookie-list stayed
-    // empty (see the 2026-09-06 cookie-set spec).
+    // `success` is the op's declared result and discarding it is indefensible.
+    // It is defensive, not the ticket's fix: no probe reached success: false —
+    // an invalid sameSite, a mismatched domain and Secure on localhost all
+    // returned true, and a malformed cookie throws instead. See the 2026-09-06
+    // cookie-set spec.
     if (!success) throw new Error(`cookie-set: browser refused to set ${name}`);
     return reply(ctx, { ok: true }, `set ${name}`);
   });
