@@ -2,6 +2,7 @@
 
 import { resolve } from "node:path";
 import type { Command } from "../cli/registry.ts";
+import { str } from "../cli/parser.ts";
 import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import { toJson, toYaml, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
@@ -82,8 +83,8 @@ export const COMMANDS: Command[] = [
     positional: [],
     flags: [{ name: "filename", kind: "string" }, { name: "depth", kind: "string" }],
     run: (ctx, a) => cmdSnapshot(ctx, {
-      filename: a.flags.filename as string | undefined,
-      depth: a.flags.depth as string | undefined,
+      filename: str(a.flags, "filename"),
+      depth: str(a.flags, "depth"),
     }),
   },
   {
@@ -91,6 +92,6 @@ export const COMMANDS: Command[] = [
     summary: "Save a full-page PNG screenshot",
     positional: [],
     flags: [{ name: "filename", kind: "string" }],
-    run: (ctx, a) => cmdScreenshot(ctx, { filename: a.flags.filename as string | undefined }),
+    run: (ctx, a) => cmdScreenshot(ctx, { filename: str(a.flags, "filename") }),
   },
 ];

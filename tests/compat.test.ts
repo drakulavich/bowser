@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parse } from "../src/cli/parser.ts";
-import { SCHEMAS } from "../src/cli/schemas.ts";
+import { SCHEMAS } from "../src/cli/registry.ts";
 
 const CASES: { argv: string[]; expect: { command: string; session?: string; positional?: string[]; flags?: Record<string, string | boolean> } }[] = [
   { argv: ["open", "https://x"],                              expect: { command: "open",       positional: ["https://x"] } },
