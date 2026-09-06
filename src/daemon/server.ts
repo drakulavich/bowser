@@ -7,10 +7,10 @@
 // an op without a handler here does not compile.
 
 import { unlink } from "node:fs/promises";
-import { openBrowser, type Browser } from "../browser.ts";
+import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
-import type { ArgsOf, DaemonRequest, DaemonResponse, Op, ResultOf } from "./protocol.ts";
+import { REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type Op, type ResultOf } from "./protocol.ts";
 import { socketPath } from "./client.ts";
 
 /** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
@@ -76,6 +76,11 @@ export function createHandler(browser: Browser): (req: DaemonRequest) => Promise
   return async (req) => {
     const fn = Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
+    // Capability gate: a CDP-only op on webkit fails here with the shared
+    // message, so the handler never touches a view that cannot answer.
+    if (REQUIRES_CDP.has(req.op) && !browser.cdpAvailable()) {
+      return { id: req.id, ok: false, error: CDP_UNAVAILABLE };
+    }
     try {
       // The one cast at the wire boundary: args arrived as JSON, the handler
       // is typed for this op. Everything below this line is typed.

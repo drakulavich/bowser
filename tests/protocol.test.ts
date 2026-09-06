@@ -2,7 +2,8 @@
 // under `bun run typecheck` (tsconfig includes tests/); the single runtime
 // test only keeps bun from reporting an empty file.
 import { describe, expect, test } from "bun:test";
-import type { DaemonConnection, Op, ResultOf } from "../src/daemon/protocol.ts";
+import type { CdpOp, DaemonConnection, Op, ResultOf } from "../src/daemon/protocol.ts";
+import { REQUIRES_CDP } from "../src/daemon/protocol.ts";
 
 declare const c: DaemonConnection;
 
@@ -24,6 +25,12 @@ async function typeChecks(): Promise<void> {
   await c.request("dblclick", ["#x"]);
   // @ts-expect-error select needs two args
   await c.request("select", ["#x"]);
+
+  // requires: "cdp" is visible to the type system.
+  const cdpOp: CdpOp = "cookie-set";
+  // @ts-expect-error state needs no CDP
+  const notCdp: CdpOp = "state";
+  void [cdpOp, notCdp];
 }
 
 describe("daemon protocol", () => {
@@ -33,5 +40,9 @@ describe("daemon protocol", () => {
     void typeChecks;
     const okType: ResultOf<"ping"> = "pong";
     expect(okType).toBe("pong");
+  });
+
+  test("REQUIRES_CDP lists exactly the cookie ops", () => {
+    expect([...REQUIRES_CDP].sort()).toEqual(["cookie-clear", "cookie-delete", "cookie-get-all", "cookie-set"]);
   });
 });

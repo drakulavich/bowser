@@ -8,6 +8,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser } from "../src/browser.ts";
+import { CDP_UNAVAILABLE } from "../src/browser.ts";
 import { createHandler } from "../src/daemon/server.ts";
 import type { DaemonRequest } from "../src/daemon/protocol.ts";
 import type { Cookie } from "../src/cdp/types.ts";
@@ -131,5 +132,16 @@ describe("createHandler", () => {
   test("a prototype key is an unknown op, not a lookup hit", async () => {
     const res = await createHandler(fakeBrowser())({ id: 7, op: "toString" as DaemonRequest["op"], args: [] });
     expect(res).toEqual({ id: 7, ok: false, error: "unknown op: toString" });
+  });
+
+  test("a cdp op on webkit is refused with the shared message before the handler runs", async () => {
+    const b = fakeBrowser({ cdpAvailable: () => false });
+    expect(await createHandler(b)(req("cookie-clear"))).toEqual({ id: 7, ok: false, error: CDP_UNAVAILABLE });
+    expect(b.calls).toEqual([]);
+  });
+
+  test("a non-cdp op still runs when cdp is unavailable", async () => {
+    const b = fakeBrowser({ cdpAvailable: () => false });
+    expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
   });
 });

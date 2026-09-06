@@ -34,15 +34,30 @@ export interface DaemonOps {
   back:             { args: [];                                          result: void };
   forward:          { args: [];                                          result: void };
   reload:           { args: [];                                          result: void };
-  "cookie-get-all": { args: [urls?: string[]];                           result: Cookie[] };
-  "cookie-set":     { args: [param: CookieParam];                        result: { success: boolean } };
-  "cookie-delete":  { args: [name: string, opts?: DeleteCookieOptions];  result: void };
-  "cookie-clear":   { args: [];                                          result: void };
+  "cookie-get-all": { args: [urls?: string[]];                           result: Cookie[];             requires: "cdp" };
+  "cookie-set":     { args: [param: CookieParam];                        result: { success: boolean }; requires: "cdp" };
+  "cookie-delete":  { args: [name: string, opts?: DeleteCookieOptions];  result: void;                 requires: "cdp" };
+  "cookie-clear":   { args: [];                                          result: void;                 requires: "cdp" };
 }
 
 export type Op = keyof DaemonOps;
 export type ArgsOf<O extends Op> = DaemonOps[O]["args"];
 export type ResultOf<O extends Op> = DaemonOps[O]["result"];
+
+/** Ops whose handler needs Bun.WebView.cdp(), i.e. the chrome backend. */
+export type CdpOp = { [O in Op]: DaemonOps[O] extends { requires: "cdp" } ? O : never }[Op];
+
+// The runtime mirror of the `requires: "cdp"` markers. `satisfies` makes a
+// marker without a row here, or a row without a marker, fail typecheck.
+// PR 6 folds this into OP_META when urgent routing arrives.
+const CDP_OPS = {
+  "cookie-get-all": true,
+  "cookie-set": true,
+  "cookie-delete": true,
+  "cookie-clear": true,
+} satisfies Record<CdpOp, true>;
+
+export const REQUIRES_CDP: ReadonlySet<Op> = new Set<Op>(Object.keys(CDP_OPS) as CdpOp[]);
 
 /** `args` may be omitted whenever the empty tuple satisfies the op: `request("state")`,
  *  `request("screenshot")`; an op with a required argument must pass it. */
