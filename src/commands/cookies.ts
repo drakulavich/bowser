@@ -102,7 +102,12 @@ export async function cmdCookieSet(
     if (opts.secure !== undefined) param.secure = opts.secure;
     if (opts.sameSite) param.sameSite = opts.sameSite;
     if (opts.expires !== undefined) param.expires = opts.expires;
-    await c.request("cookie-set", [param]);
+    const { success } = await c.request("cookie-set", [param]);
+    // CDP declines a cookie it cannot store — a domain that does not match the
+    // page, Secure without https. This answer used to be discarded, so
+    // cookie-set printed `set <name>` and exited 0 while cookie-list stayed
+    // empty (see the 2026-09-06 cookie-set spec).
+    if (!success) throw new Error(`cookie-set: browser refused to set ${name}`);
     return reply(ctx, { ok: true }, `set ${name}`);
   });
 }
@@ -176,10 +181,8 @@ export const COMMANDS: Command[] = [
       path:     str(a.flags, "path"),
       httpOnly: a.flags["http-only"] ? true : undefined,
       secure:   a.flags.secure       ? true : undefined,
-      // Asserted, not validated: CDP accepts an unknown value silently, so
-      // `--same-site=garbage` sets a cookie today and reports success.
-      // Rejecting it in the CLI would be an improvement and a new error
-      // message, which this refactor series has kept off the table.
+      // Safe to assert: the flag declares `values`, so the parser rejected
+      // anything but these three before this ran.
       sameSite: str(a.flags, "same-site") as "Strict" | "Lax" | "None" | undefined,
       expires:  str(a.flags, "expires") !== undefined ? Number(str(a.flags, "expires")) : undefined,
     }),

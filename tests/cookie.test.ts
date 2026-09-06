@@ -189,6 +189,20 @@ describe("cookie-set", () => {
     expect((received as { url?: string }).url).toBeDefined();
   });
 
+  test("fails when the browser refuses the cookie", async () => {
+    // CDP answers Network.setCookie with whether the cookie was stored, for a
+    // domain that does not match the page or Secure without https. That answer
+    // used to be discarded: this printed "set nope" and exited 0.
+    await seedState("https://example.com/");
+    const c = fakeClient({
+      "cookie-set": () => ({ success: false }),
+      state: () => ({ url: "https://example.com/", title: "Example" }),
+    });
+    await expect(
+      cmdCookieSet({ ...ctx(), connect: async () => c }, "nope", "v"),
+    ).rejects.toThrow("cookie-set: browser refused to set nope");
+  });
+
   test("--http-only passes httpOnly:true", async () => {
     await seedState("https://example.com/");
     let received: unknown;
