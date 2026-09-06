@@ -86,18 +86,23 @@ export interface ProcessOps {
  *  `bun .../daemon/main.ts <session>` or, compiled, as `bowser --daemon
  *  <session>`, so one of those two markers must be present too. */
 export function looksLikeOurDaemon(command: string, session: string): boolean {
-  const argv = command.trim().split(/\s+/);
+  const line = command.trim();
   // The executable must be one of ours. A daemon spawned from source runs as
   // `bun <...>/daemon/main.ts <session>`; the compiled binary re-invokes itself
   // as `<...>/bowser --daemon <session>`. Without this, a stranger's
   // `other-service --daemon <session>` would pass.
-  const exe = argv[0]?.split("/").pop() ?? "";
+  const exe = line.split(/\s+/)[0]?.split("/").pop() ?? "";
   if (exe !== "bun" && !exe.includes("bowser")) return false;
-  // The marker must be followed immediately by this session's name, so neither
-  // half can be satisfied by an unrelated argument elsewhere on the line.
-  return argv.some(
-    (a, i) => (a === "--daemon" || a.endsWith("daemon/main.ts")) && argv[i + 1] === session,
-  );
+  // The session is the daemon's last argument. Match it as a suffix rather than
+  // as a whitespace-split token: `ps` prints a display line, not argv, so a
+  // session name containing a space would otherwise fail to match its own
+  // daemon — and refusing to identify a real daemon now costs a failed `close`.
+  const suffix = " " + session;
+  if (!line.endsWith(suffix)) return false;
+  // Whatever precedes it must be the marker itself, so neither half can be
+  // satisfied by an unrelated argument elsewhere on the line.
+  const marker = line.slice(0, -suffix.length).split(/\s+/).pop() ?? "";
+  return marker === "--daemon" || marker.endsWith("daemon/main.ts");
 }
 
 async function isOurDaemon(pid: number, session: string): Promise<boolean> {

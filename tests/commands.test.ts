@@ -321,6 +321,11 @@ describe("looksLikeOurDaemon", () => {
   test("accepts the source form", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts sess", "sess")).toBe(true);
   });
+  test("accepts a session name containing a space", () => {
+    // `ps` prints a display line, not argv: splitting it on whitespace would
+    // refuse this daemon, and refusing a real one now fails the close.
+    expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts team one", "team one")).toBe(true);
+  });
   test("accepts the compiled form", () => {
     expect(looksLikeOurDaemon("/usr/local/bin/bowser --daemon sess", "sess")).toBe(true);
   });
