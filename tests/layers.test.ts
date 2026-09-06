@@ -45,8 +45,13 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/browser.ts" && /new\s+Bun\.WebView\s*\(/.test(text),
   },
   {
-    name: "only src/daemon.ts calls openBrowser",
-    violates: (file, text) => file !== "src/daemon.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
+    // src/daemon.ts and src/daemon/server.ts both call openBrowser during the
+    // PR2 migration — Task 3 deletes the former, at which point this rule
+    // should narrow back to naming only src/daemon/server.ts.
+    name: "only src/daemon.ts and src/daemon/server.ts call openBrowser",
+    violates: (file, text) =>
+      file !== "src/daemon.ts" && file !== "src/daemon/server.ts" && file !== "src/browser.ts" &&
+      /\bopenBrowser\s*\(/.test(text),
   },
   {
     name: "snapshot.ts, serialize.ts and socket-write.ts have no value imports from src",
