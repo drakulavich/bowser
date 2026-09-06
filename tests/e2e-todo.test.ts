@@ -9,7 +9,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, openBrowser, resolveBackend } from "../src/browser.ts";
+import { detectChromium, resolveBackend } from "../src/backend.ts";
+import { openBrowser } from "../src/browser.ts";
 import { cmdClick, cmdClose, cmdFill, cmdOpen, cmdSnapshot } from "../src/commands.ts";
 import { loadState } from "../src/state.ts";
 

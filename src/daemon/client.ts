@@ -4,7 +4,7 @@
 import { join } from "node:path";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { sessionsRoot } from "../state.ts";
-import { assertValidBackendEnv } from "../browser.ts";
+import { assertValidBackendEnv } from "../backend.ts";
 import type { DaemonConnection, DaemonResponse, Op, RequestParams, ResultOf } from "./protocol.ts";
 
 export function socketPath(session: string): string {

@@ -50,16 +50,21 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
-    name: "snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
+    name: "backend.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
     violates: (file, text) =>
-      ["src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
+      ["src/backend.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
       valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
-    name: "commands.ts does not import daemon/server.ts directly (browser.ts deferred to PR 3)",
-    // PR 3 adds browser.ts here once install's helpers move to backend.ts.
+    name: "commands.ts talks to the daemon only through client.ts and protocol.ts",
     violates: (file, text) =>
-      file === "src/commands.ts" && valueImports(text).some((s) => s.endsWith("daemon/server.ts")),
+      file === "src/commands.ts" &&
+      valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
+  },
+  {
+    name: "daemon/client.ts does not import browser.ts (backend checks come from backend.ts)",
+    violates: (file, text) =>
+      file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
   },
 ];
 

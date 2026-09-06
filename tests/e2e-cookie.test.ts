@@ -15,7 +15,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium } from "../src/browser.ts";
+import { detectChromium } from "../src/backend.ts";
 import {
   cmdClose,
   cmdCookieClear,
