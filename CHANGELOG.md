@@ -43,6 +43,15 @@ All notable changes to this project are documented here. This project follows
   tool description.** `list`'s summary is now `"List sessions"`, matching the CLI `--help` text it
   had always used — the MCP tool description carried the stale `"List active sessions"` even though
   `cmdList` enumerates every session directory, closed sessions included.
+- **Commands are a registry.** Each `src/commands/<domain>.ts` exports `Command` objects; dispatch,
+  `bowser --help` and the MCP tool list are generated from them. `src/cli.ts`'s 39-case switch, the
+  hand-written help text, and `DESCRIPTIONS`/`MCP_EXCLUDED` in `src/mcp.ts` are gone. Command names,
+  argv shapes, exit codes and every command's output are unchanged.
+- **`bowser --help`'s column alignment changed.** The summary column now starts two spaces past the
+  widest usage that still ends by column 40 (column 38), instead of a fixed width. The `snapshot`
+  usage and the four `cookie-*` usages exceed that and now wrap onto their own line with the summary
+  beneath. Every command's summary text is otherwise the same string used for its MCP tool
+  description (see above).
 
 ## [0.5.0] — 2026-06-15
 
