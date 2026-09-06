@@ -129,6 +129,23 @@ describe("createHandler", () => {
     expect(res).toEqual({ id: 7, ok: false, error: "unknown op: dblclick" });
   });
 
+  test("shutdown replies before the process exits", async () => {
+    // The daemon writes the reply from handle().then(...); the exit must be a
+    // macrotask or it runs first and every close hangs (PR 3, Ruling 4).
+    const order: string[] = [];
+    const realExit = process.exit;
+    process.exit = ((code?: number) => { order.push(`exit:${code}`); }) as never;
+    const b = fakeBrowser();
+    try {
+      await createHandler(b)(req("shutdown")).then((res) => { order.push(`reply:${res.ok}`); });
+      await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      process.exit = realExit;
+    }
+    expect(order).toEqual(["reply:true", "exit:0"]);
+    expect(b.calls).toEqual([["close", []]]);
+  });
+
   test("a prototype key is an unknown op, not a lookup hit", async () => {
     const res = await createHandler(fakeBrowser())({ id: 7, op: "toString" as DaemonRequest["op"], args: [] });
     expect(res).toEqual({ id: 7, ok: false, error: "unknown op: toString" });

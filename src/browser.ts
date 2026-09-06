@@ -146,6 +146,8 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  started: a navigation that begins within graceMs is awaited up to
  *  settleMs; an action that navigates nowhere costs the full grace window. */
 function navigationWatch(view: ViewLike, timing: NavTiming) {
+  // One watch per view: this takes over the view's navigation callbacks, so
+  // wrapView must be called once per view (openBrowser does).
   let landed = 0;
   view.onNavigated = () => { landed++; };
   view.onNavigationFailed = () => { landed++; };

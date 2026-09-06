@@ -133,7 +133,9 @@ describe("wrapView navigation watch", () => {
     const b = wrapView(v, chrome, { graceMs: 20, settleMs: 60 });
     const t0 = Date.now();
     await b.click("#l");
-    expect(Date.now() - t0).toBeLessThan(1000);
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(55);
+    expect(elapsed).toBeLessThan(1000);
     expect(v.loading).toBe(true);
   });
 
@@ -162,8 +164,15 @@ describe("wrapView navigation watch", () => {
   });
 
   test("reload prefers the native call and waits for its navigation to land", async () => {
-    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); } });
-    await wrapView(v, chrome, fast).reload();
+    // Native reload() resolves before the reload commits (measured), so the
+    // fake resolves at once with loading=true and lands 60 ms later.
+    const v = fakeView({ reload: async () => {
+      v.calls.push(["reload", []]); v.loading = true;
+      setTimeout(() => v.land("https://x/re"), 60);
+    } });
+    const b = wrapView(v, chrome, fast);
+    await b.reload();
     expect(v.calls).toEqual([["reload", []]]);
+    expect(b.url).toBe("https://x/re");
   });
 });
