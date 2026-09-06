@@ -30,13 +30,15 @@ const handlers: Handlers = {
   ping: async () => "pong",
   shutdown: async (browser) => {
     // Respond first, then exit: the caller gets its { ok: true } before the
-    // process goes away.
-    queueMicrotask(async () => {
+    // process goes away. A macrotask, not a microtask: the reply is written
+    // from a promise continuation, and a queued microtask exit ran before it
+    // once Browser.close() stopped awaiting anything (PR 3).
+    setTimeout(async () => {
       try {
         await browser.close();
       } catch {}
       process.exit(0);
-    });
+    }, 0);
   },
   state: async (browser) => ({ url: await browser.realUrl(), title: await browser.realTitle() }),
   navigate: (browser, url) => browser.navigate(url),

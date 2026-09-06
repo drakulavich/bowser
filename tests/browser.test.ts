@@ -22,20 +22,29 @@ const cookie: Cookie = {
   session: true,
 };
 
-function fakeView(): ViewLike & { calls: Calls } {
+type Fake = ViewLike & { calls: Calls; loading: boolean; url: string; land(url: string): void };
+
+function fakeView(over: Partial<ViewLike> = {}): Fake {
   const calls: Calls = [];
-  return {
+  const v: Fake = {
     calls,
     url: "https://x/",
     title: "X",
-    navigate: async (url) => { calls.push(["navigate", [url]]); },
+    loading: false,
+    onNavigated: null,
+    onNavigationFailed: null,
+    navigate: async (url) => { calls.push(["navigate", [url]]); v.url = url; },
     evaluate: async (expr) => { calls.push(["evaluate", [expr]]); return undefined; },
     click: async (s) => { calls.push(["click", [s]]); },
     type: async (t) => { calls.push(["type", [t]]); },
     press: async (k) => { calls.push(["press", [k]]); },
     resize: async (w, h) => { calls.push(["resize", [w, h]]); },
     cdp: async (m, p) => { calls.push(["cdp", [m, p]]); return { cookies: [cookie], success: true }; },
+    /** A navigation lands: url changes, loading ends, onNavigated fires. */
+    land(url) { v.url = url; v.loading = false; v.onNavigated?.(url, ""); },
+    ...over,
   };
+  return v;
 }
 
 const chrome = { kind: "chrome" as const };
@@ -87,5 +96,74 @@ describe("wrapView cookies", () => {
     await expect(b.clearCookies()).rejects.toThrow(CDP_UNAVAILABLE);
     await expect(b.cdp("Network.enable")).rejects.toThrow(CDP_UNAVAILABLE);
     expect(v.calls).toEqual([]);
+  });
+});
+
+const fast = { graceMs: 40, settleMs: 300 };
+
+describe("wrapView navigation watch", () => {
+  test("click returns after a navigation that lands inside the grace window", async () => {
+    const v = fakeView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); setTimeout(() => v.land("https://x/two"), 10); };
+    const b = wrapView(v, chrome, fast);
+    await b.click("#l");
+    expect(b.url).toBe("https://x/two");
+  });
+
+  test("click that navigates nowhere returns after the grace window", async () => {
+    const v = fakeView();
+    const b = wrapView(v, chrome, fast);
+    const t0 = Date.now();
+    await b.click("#btn");
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(fast.graceMs - 5);
+    expect(b.url).toBe("https://x/");
+  });
+
+  test("a navigation that starts inside the grace window is awaited past it", async () => {
+    const v = fakeView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; setTimeout(() => v.land("https://x/slow"), 120); };
+    const b = wrapView(v, chrome, fast);
+    await b.click("#l");
+    expect(b.url).toBe("https://x/slow");
+  });
+
+  test("a navigation that never lands is given up after settleMs", async () => {
+    const v = fakeView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; };
+    const b = wrapView(v, chrome, { graceMs: 20, settleMs: 60 });
+    const t0 = Date.now();
+    await b.click("#l");
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(v.loading).toBe(true);
+  });
+
+  test("back and forward use goBack/goForward when the runtime has them", async () => {
+    const v = fakeView({
+      goBack: async () => { v.calls.push(["goBack", []]); },
+      goForward: async () => { v.calls.push(["goForward", []]); },
+    });
+    const b = wrapView(v, chrome, fast);
+    await b.back();
+    await b.forward();
+    expect(v.calls).toEqual([["goBack", []], ["goForward", []]]);
+  });
+
+  test("back, forward and reload fall back to history/location when the runtime lacks them", async () => {
+    const v = fakeView();
+    const b = wrapView(v, chrome, fast);
+    await b.back();
+    await b.forward();
+    await b.reload();
+    expect(v.calls).toEqual([
+      ["evaluate", ["history.back()"]],
+      ["evaluate", ["history.forward()"]],
+      ["evaluate", ["location.reload()"]],
+    ]);
+  });
+
+  test("reload prefers the native call and waits for its navigation to land", async () => {
+    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); } });
+    await wrapView(v, chrome, fast).reload();
+    expect(v.calls).toEqual([["reload", []]]);
   });
 });

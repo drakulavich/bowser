@@ -33,6 +33,14 @@ export interface ViewLike {
   reload?(): Promise<void>;
   cdp?(method: string, params?: Record<string, unknown>): Promise<unknown>;
   close?(): void;
+  /** True while a navigation is in flight. */
+  readonly loading: boolean;
+  onNavigated: ((url: string, title: string) => void) | null;
+  onNavigationFailed: ((error: Error) => void) | null;
+  /** Runtime names. @types/bun (1.4.0) declares back()/forward() instead;
+   *  those do not exist on the object. Do not "fix" these to match the types. */
+  goBack?(): Promise<void>;
+  goForward?(): Promise<void>;
 }
 
 /** Resolve the committed page URL. Bun.WebView's `view.url` returns "about:blank"
@@ -122,9 +130,46 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
   return wrapView(view, spec);
 }
 
+/** How long the navigation watch waits. Exported so tests can shorten it. */
+export interface NavTiming {
+  /** Window after an action in which a navigation may still begin. */
+  graceMs: number;
+  /** Cap on waiting for a navigation that did begin. */
+  settleMs: number;
+}
+export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
+
+/** Bun.WebView resolves click()/press()/goBack() when the input is delivered,
+ *  ~30 ms before the page it triggers commits (measured on WebKit, local
+ *  pages). `state` right after `click` therefore reported the old URL. The
+ *  watch counts navigation events and lets an action wait for the one it
+ *  started: a navigation that begins within graceMs is awaited up to
+ *  settleMs; an action that navigates nowhere costs the full grace window. */
+function navigationWatch(view: ViewLike, timing: NavTiming) {
+  let landed = 0;
+  view.onNavigated = () => { landed++; };
+  view.onNavigationFailed = () => { landed++; };
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  return {
+    async act(action: () => Promise<void>): Promise<void> {
+      const before = landed;
+      await action();
+      const start = Date.now();
+      while (Date.now() - start < timing.graceMs) {
+        if (landed !== before) return;
+        if (view.loading) break;
+        await sleep(10);
+      }
+      const began = Date.now();
+      while (view.loading && landed === before && Date.now() - began < timing.settleMs) await sleep(10);
+    },
+  };
+}
+
 /** Turn a view into a Browser. Separate from openBrowser so tests can pass a
  *  fake view; openBrowser is the only caller with a real one. */
-export function wrapView(view: ViewLike, spec: Backend): Browser {
+export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING): Browser {
+  const nav = navigationWatch(view, timing);
   const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     // view.cdp() exists on the chrome backend only. On webkit Bun throws
     // 'WebView.cdp() requires backend: "chrome"'; we raise the friendlier
@@ -142,9 +187,9 @@ export function wrapView(view: ViewLike, spec: Backend): Browser {
     realTitle: () => resolveTitle(view.title, () => view.evaluate("document.title")),
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
-    click: (selector) => view.click(selector),
+    click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
-    press: (key) => view.press(key),
+    press: (key) => nav.act(() => view.press(key)),
     hover: async (selector) => {
       await view.evaluate(`(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
@@ -183,19 +228,21 @@ export function wrapView(view: ViewLike, spec: Backend): Browser {
       return Buffer.from(bytes).toString("base64");
     },
     resize: (width, height) => view.resize(width, height),
-    back: async () => {
-      await view.evaluate("history.back()");
-    },
-    forward: async () => {
-      await view.evaluate("history.forward()");
-    },
-    reload: async () => {
-      if (typeof view.reload === "function") {
-        await view.reload();
-      } else {
-        await view.evaluate("location.reload()");
-      }
-    },
+    back: () => nav.act(async () => {
+      if (typeof view.goBack === "function") await view.goBack();
+      else await view.evaluate("history.back()");
+    }),
+    forward: () => nav.act(async () => {
+      if (typeof view.goForward === "function") await view.goForward();
+      else await view.evaluate("history.forward()");
+    }),
+    reload: () => nav.act(async () => {
+      // Native reload() resolves before the reload commits, like goBack();
+      // measured in the daemon: a navigate() 1 ms later was rejected with
+      // NSURLErrorDomain -999. The watch makes reload return once it lands.
+      if (typeof view.reload === "function") await view.reload();
+      else await view.evaluate("location.reload()");
+    }),
     close: async () => {
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
