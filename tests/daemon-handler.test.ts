@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser } from "../src/browser.ts";
 import { CDP_UNAVAILABLE } from "../src/browser.ts";
-import { createHandler } from "../src/daemon/server.ts";
-import { IS_URGENT, type DaemonRequest } from "../src/daemon/protocol.ts";
+import { createHandler, dispatch } from "../src/daemon/server.ts";
+import { IS_URGENT, type DaemonRequest, type DaemonResponse } from "../src/daemon/protocol.ts";
 import { createSerializer } from "../src/serialize.ts";
 import type { Cookie } from "../src/cdp/types.ts";
 
@@ -168,16 +168,56 @@ test("ping and shutdown are the urgent ops, and nothing else is", () => {
   expect([...IS_URGENT].sort()).toEqual(["ping", "shutdown"]);
 });
 
-test("an urgent op answers while a queued op is still running", async () => {
-  const order: string[] = [];
+test("an urgent op answers while a queued op is wedged", async () => {
+  // The regression this guards: route urgent ops through the serializer and
+  // `ping` waits for the wedged op, so a stuck daemon can never be shut down.
+  const replies: string[] = [];
   let release!: () => void;
-  const blocked = new Promise<void>((r) => { release = r; });
+  const wedged = new Promise<void>((r) => { release = r; });
   const serialize = createSerializer();
-  // A wedged queued op, exactly what shutdown exists to escape.
-  serialize(() => blocked.then(() => { order.push("queued"); }));
-  // The urgent lane does not go through `serialize`, so it settles first.
-  if (IS_URGENT.has("ping")) order.push("urgent");
-  expect(order).toEqual(["urgent"]);
+  const lane = {
+    handle: async (req: DaemonRequest) => {
+      if (req.op !== "ping") await wedged;
+      return { id: req.id, ok: true as const, result: req.op };
+    },
+    serialize,
+    timeoutMs: 0,
+    reply: (res: DaemonResponse) => { replies.push(String(res.ok && res.result)); },
+  };
+
+  dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
+  dispatch({ id: 2, op: "ping", args: [] } as DaemonRequest, lane);
+  await Bun.sleep(20);
+
+  // ping answered; click is still stuck behind its own wedge.
+  expect(replies).toEqual(["ping"]);
   release();
-  await blocked;
+  await Bun.sleep(20);
+  expect(replies).toEqual(["ping", "click"]);
+});
+
+test("a non-urgent op waits its turn behind the one before it", async () => {
+  // The other half: without the serializer two ops could touch the WebView
+  // at once. Proves the urgent lane above is a real exception, not the norm.
+  const replies: string[] = [];
+  let release!: () => void;
+  const first = new Promise<void>((r) => { release = r; });
+  const serialize = createSerializer();
+  const lane = {
+    handle: async (req: DaemonRequest) => {
+      if (req.id === 1) await first;
+      return { id: req.id, ok: true as const, result: req.op };
+    },
+    serialize,
+    timeoutMs: 0,
+    reply: (res: DaemonResponse) => { replies.push(String(res.ok && res.result)); },
+  };
+
+  dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
+  dispatch({ id: 2, op: "type", args: ["hi"] } as DaemonRequest, lane);
+  await Bun.sleep(20);
+  expect(replies).toEqual([]);
+  release();
+  await Bun.sleep(20);
+  expect(replies).toEqual(["click", "type"]);
 });

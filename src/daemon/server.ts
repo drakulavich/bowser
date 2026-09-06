@@ -13,6 +13,47 @@ import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-writ
 import { IS_URGENT, REQUIRES_CDP, type ArgsOf, type DaemonRequest, type DaemonResponse, type Op, type ResultOf } from "./protocol.ts";
 import { socketPath } from "./client.ts";
 
+/** What `dispatch` needs from the daemon. Separated from the socket so the
+ *  lane choice can be tested without one. */
+export interface Lane {
+  handle: (req: DaemonRequest) => Promise<DaemonResponse>;
+  serialize: <T>(fn: () => Promise<T>) => Promise<T>;
+  timeoutMs: number;
+  reply: (res: DaemonResponse) => void;
+}
+
+/** Route one request onto the urgent or the queued lane.
+ *
+ *  Urgent ops skip the serializer: they exist to be answerable while another
+ *  op is wedged, which is the whole point of `shutdown` being able to kill a
+ *  stuck daemon. Which ops those are is declared by `urgent: true` on the op
+ *  in `DaemonOps`, not spelled here, so adding one is a marker rather than a
+ *  branch.
+ *
+ *  The queued lane serializes on the UNDERLYING op, not the timeout: the
+ *  WebView lock is held until `handle(req)` actually settles, so a
+ *  timed-out-but-still-running op can never overlap the next one.
+ *  `withTimeout` only governs how soon the client is answered. */
+export function dispatch(req: DaemonRequest, lane: Lane): void {
+  if (IS_URGENT.has(req.op)) {
+    lane.handle(req).then(lane.reply).catch(() => {
+      // handle() never rejects; mirrors the guard on the serialized path.
+    });
+    return;
+  }
+  lane.serialize(() => {
+    const underlying = lane.handle(req);
+    withTimeout(underlying, lane.timeoutMs, req.op).then(lane.reply, (err) => {
+      // handle() catches its own errors; this path is for timeouts.
+      const msg = err instanceof Error ? err.message : String(err);
+      lane.reply({ id: req.id, ok: false, error: msg });
+    });
+    return underlying;
+  }).catch(() => {
+    // handle() never rejects; guards against an unhandled rejection.
+  });
+}
+
 /** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
  *  (set to 0 to disable). Guards a wedged WebKit call from hanging forever. */
 function opTimeoutMs(): number {
@@ -129,38 +170,9 @@ export async function startDaemon(session: string): Promise<void> {
             );
             continue;
           }
-          // Serialize on the UNDERLYING op (not the timeout): the WebView lock is
-          // held until handle(req) actually settles, so a timed-out-but-still-
-          // running op can never overlap the next one. withTimeout only governs
-          // how soon we answer the client.
-          // The urgent lane skips the serializer: these ops exist to be
-          // answerable while a queued op is wedged, which is the whole point
-          // of shutdown killing a stuck daemon. Declared in OP_META, not
-          // spelled here, so the next urgent op (dialog-handle) is one marker.
-          if (IS_URGENT.has(req.op)) {
-            handle(req).then((res) => {
-              socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
-            }).catch(() => {
-              // handle() never rejects; mirrors the guard on the serialized path.
-            });
-          } else {
-            serialize(() => {
-              const underlying = handle(req);
-              withTimeout(underlying, timeoutMs, req.op).then(
-                (res) => {
-                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
-                },
-                (err) => {
-                  // handle() catches its own errors; this path is for timeouts.
-                  const msg = err instanceof Error ? err.message : String(err);
-                  socketWriteAll(socket as unknown as WritableSocket, JSON.stringify({ id: req.id, ok: false, error: msg }) + "\n");
-                },
-              );
-              return underlying;
-            }).catch(() => {
-              // handle() never rejects; guards against an unhandled rejection.
-            });
-          }
+          dispatch(req, { handle, serialize, timeoutMs, reply: (res) => {
+            socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
+          } });
         }
       },
       open(socket) {
