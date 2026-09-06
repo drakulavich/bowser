@@ -10,7 +10,6 @@ import { unlink } from "node:fs/promises";
 import { openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
-import type { Cookie } from "../cdp/types.ts";
 import type { ArgsOf, DaemonRequest, DaemonResponse, Op, ResultOf } from "./protocol.ts";
 import { socketPath } from "./client.ts";
 
@@ -64,30 +63,11 @@ const handlers: Handlers = {
   back: (browser) => browser.back(),
   forward: (browser) => browser.forward(),
   reload: (browser) => browser.reload(),
-  // --- Cookie ops (chrome backend only; require Bun.WebView.cdp()) ---
-  "cookie-get-all": async (browser, urls) => {
-    const scoped = urls && urls.length > 0;
-    const res = (await browser.cdp(
-      scoped ? "Network.getCookies" : "Network.getAllCookies",
-      scoped ? { urls } : undefined,
-    )) as { cookies: Cookie[] };
-    return res.cookies;
-  },
-  "cookie-set": async (browser, param) => {
-    const res = (await browser.cdp("Network.setCookie", param as unknown as Record<string, unknown>)) as { success: boolean };
-    return { success: res.success };
-  },
-  "cookie-delete": async (browser, name, opts) => {
-    const o = opts ?? {};
-    const params: Record<string, unknown> = { name };
-    if (o.url) params.url = o.url;
-    if (o.domain) params.domain = o.domain;
-    if (o.path) params.path = o.path;
-    await browser.cdp("Network.deleteCookies", params);
-  },
-  "cookie-clear": async (browser) => {
-    await browser.cdp("Network.clearBrowserCookies");
-  },
+  // --- Cookie ops (chrome only; the Browser rejects them on webkit) ---
+  "cookie-get-all": (browser, urls) => browser.getCookies(urls),
+  "cookie-set": (browser, param) => browser.setCookie(param),
+  "cookie-delete": (browser, name, opts) => browser.deleteCookies(name, opts),
+  "cookie-clear": (browser) => browser.clearCookies(),
 };
 
 /** Dispatch one parsed request to its handler. Never rejects: every failure,

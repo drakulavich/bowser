@@ -1,6 +1,8 @@
 // createHandler() against a fake Browser: every op reaches the right Browser
 // method with the right arguments, errors come back as { ok: false }, and
-// the cookie ops pick the CDP method the way the old inline switch did.
+// the cookie ops forward straight to the Browser's cookie methods (the CDP
+// method selection they used to do inline now lives in Browser; see
+// tests/browser.test.ts for that).
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +10,22 @@ import { join } from "node:path";
 import type { Browser } from "../src/browser.ts";
 import { createHandler } from "../src/daemon/server.ts";
 import type { DaemonRequest } from "../src/daemon/protocol.ts";
+import type { Cookie } from "../src/cdp/types.ts";
+
+// A fully-populated CDP cookie (Cookie has more required fields than the
+// name/value pair these tests care about; mirrors tests/state-storage.test.ts's
+// cdpCookie helper).
+const cookie: Cookie = {
+  name: "a",
+  value: "1",
+  domain: "x",
+  path: "/",
+  expires: -1,
+  size: 1,
+  httpOnly: false,
+  secure: false,
+  session: true,
+};
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
   const calls: Array<[string, unknown[]]> = [];
@@ -33,6 +51,10 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     close: rec("close", undefined),
     cdpAvailable: () => true,
     cdp: rec("cdp", { cookies: [{ name: "a", value: "1" }], success: true }),
+    getCookies: rec("getCookies", [cookie]),
+    setCookie: rec("setCookie", { success: true }),
+    deleteCookies: rec("deleteCookies", undefined),
+    clearCookies: rec("clearCookies", undefined),
     ...over,
   };
   return b;
@@ -81,27 +103,19 @@ describe("createHandler", () => {
     }
   });
 
-  test("cookie-get-all scopes to Network.getCookies only when urls are given", async () => {
+  test("cookie ops forward to the Browser's cookie methods", async () => {
     const b = fakeBrowser();
     const h = createHandler(b);
-    await h(req("cookie-get-all", [["https://x/"]]));
-    await h(req("cookie-get-all", [undefined]));
+    expect(await h(req("cookie-get-all", [["https://x/"]]))).toEqual({ id: 7, ok: true, result: [cookie] });
+    await h(req("cookie-set", [{ name: "a", value: "1" }]));
+    await h(req("cookie-delete", ["sid", { domain: "x" }]));
+    await h(req("cookie-clear"));
     expect(b.calls).toEqual([
-      ["cdp", ["Network.getCookies", { urls: ["https://x/"] }]],
-      ["cdp", ["Network.getAllCookies", undefined]],
+      ["getCookies", [["https://x/"]]],
+      ["setCookie", [{ name: "a", value: "1" }]],
+      ["deleteCookies", ["sid", { domain: "x" }]],
+      ["clearCookies", []],
     ]);
-  });
-
-  test("cookie-delete forwards only the options that were set", async () => {
-    const b = fakeBrowser();
-    await createHandler(b)(req("cookie-delete", ["sid", { domain: "x" }]));
-    expect(b.calls).toEqual([["cdp", ["Network.deleteCookies", { name: "sid", domain: "x" }]]]);
-  });
-
-  test("cookie-delete treats a null options argument like an empty object", async () => {
-    const b = fakeBrowser();
-    await createHandler(b)(req("cookie-delete", ["sid", null]));
-    expect(b.calls).toEqual([["cdp", ["Network.deleteCookies", { name: "sid" }]]]);
   });
 
   test("a throwing browser method becomes { ok: false, error }", async () => {

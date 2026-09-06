@@ -2,11 +2,37 @@
 // instantiates Bun.WebView; backend choice lives in backend.ts.
 
 import { chromeBackend, resolveBackend, toBunBackend } from "./backend.ts";
+import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
+import type { Backend } from "./backend.ts";
 
 export interface BrowserOptions {
   executablePath?: string;
   width?: number;
   height?: number;
+}
+
+/** The error every CDP-only path raises on webkit. The daemon answers
+ *  `requires: "cdp"` ops with it before their handler runs; `Browser.cdp()`
+ *  raises it as a backstop. Tests and docs quote it: change it here only. */
+export const CDP_UNAVAILABLE =
+  "CDP is only available on the chrome backend (current: webkit) — " +
+  "run 'bowser install' to use Chromium-backed features";
+
+/** The slice of Bun.WebView that Browser uses. Optional members are the ones
+ *  a backend or Bun build may lack; wrapView probes them with typeof. */
+export interface ViewLike {
+  readonly url: string;
+  readonly title: string;
+  navigate(url: string): Promise<void>;
+  evaluate(expr: string): Promise<unknown>;
+  click(selector: string): Promise<void>;
+  type(text: string): Promise<void>;
+  press(key: string): Promise<void>;
+  resize(width: number, height: number): Promise<void>;
+  screenshot?(): Promise<Blob | string>;
+  reload?(): Promise<void>;
+  cdp?(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  close?(): void;
 }
 
 /** Resolve the committed page URL. Bun.WebView's `view.url` returns "about:blank"
@@ -66,6 +92,11 @@ export interface Browser {
   /** Send a raw CDP command. Chrome backend only; rejects on webkit with a
    *  clear message indicating the chrome backend is required. */
   cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  // --- Cookies: CDP-backed, so chrome only. Each rejects with CDP_UNAVAILABLE on webkit. ---
+  getCookies(urls?: string[]): Promise<Cookie[]>;
+  setCookie(param: CookieParam): Promise<{ success: boolean }>;
+  deleteCookies(name: string, opts?: DeleteCookieOptions): Promise<void>;
+  clearCookies(): Promise<void>;
 }
 
 /** Open a Bun.WebView. Backend precedence (highest first):
@@ -76,28 +107,39 @@ export interface Browser {
  *  Note: a programmatic opts.executablePath wins over BOWSER_BACKEND — a chromium
  *  binary path can't drive the webkit engine, so chrome is the only valid choice. */
 export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
-  // Choose webkit (native macOS) vs chrome. An explicit executablePath always
-  // forces chrome with that exact binary (the detect fn is unused here because
-  // pathOverride short-circuits it); otherwise resolveBackend() decides.
+  // An explicit executablePath always forces chrome with that exact binary
+  // (the detect fn is unused because pathOverride short-circuits it);
+  // otherwise resolveBackend() decides.
   const spec = opts.executablePath
     ? chromeBackend(process.env, () => undefined, opts.executablePath)
     : resolveBackend();
-
   const view = new Bun.WebView({
     backend: toBunBackend(spec),
     width: opts.width ?? 1280,
     height: opts.height ?? 800,
   });
+  // The real Bun.WebView satisfies ViewLike structurally; no cast needed here.
+  return wrapView(view, spec);
+}
+
+/** Turn a view into a Browser. Separate from openBrowser so tests can pass a
+ *  fake view; openBrowser is the only caller with a real one. */
+export function wrapView(view: ViewLike, spec: Backend): Browser {
+  const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
+    // view.cdp() exists on the chrome backend only. On webkit Bun throws
+    // 'WebView.cdp() requires backend: "chrome"'; we raise the friendlier
+    // shared message instead.
+    if (spec.kind !== "chrome" || typeof view.cdp !== "function") {
+      return Promise.reject(new Error(CDP_UNAVAILABLE));
+    }
+    return view.cdp(method, params);
+  };
 
   return {
-    get url() {
-      return view.url as string;
-    },
-    get title() {
-      return view.title as string;
-    },
-    realUrl: () => resolveUrl(view.url as string, () => view.evaluate("location.href")),
-    realTitle: () => resolveTitle(view.title as string, () => view.evaluate("document.title")),
+    get url() { return view.url; },
+    get title() { return view.title; },
+    realUrl: () => resolveUrl(view.url, () => view.evaluate("location.href")),
+    realTitle: () => resolveTitle(view.title, () => view.evaluate("document.title")),
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
     click: (selector) => view.click(selector),
@@ -132,18 +174,15 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
       // Element-bounded screenshots are not supported in v1.
-      const data = await (view as { screenshot?: () => Promise<Blob | string> }).screenshot?.();
-      if (!data) throw new Error('screenshot: not supported by this Bun.WebView');
+      const data = await view.screenshot?.();
+      if (!data) throw new Error("screenshot: not supported by this Bun.WebView");
       const bytes = await pngBytesFrom(data);
       if (!isLikelyPng(bytes)) {
-        throw new Error('screenshot: WebView returned an empty/invalid image');
+        throw new Error("screenshot: WebView returned an empty/invalid image");
       }
-      return Buffer.from(bytes).toString('base64');
+      return Buffer.from(bytes).toString("base64");
     },
-    resize: async (width: number, height: number) => {
-      // Bun.WebView.resize() is native and works on both backends.
-      await (view as unknown as { resize: (w: number, h: number) => Promise<void> }).resize(width, height);
-    },
+    resize: (width, height) => view.resize(width, height),
     back: async () => {
       await view.evaluate("history.back()");
     },
@@ -151,8 +190,8 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
       await view.evaluate("history.forward()");
     },
     reload: async () => {
-      if (typeof (view as { reload?: unknown }).reload === 'function') {
-        await (view as { reload: () => Promise<void> }).reload();
+      if (typeof view.reload === "function") {
+        await view.reload();
       } else {
         await view.evaluate("location.reload()");
       }
@@ -160,24 +199,36 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     close: async () => {
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
-      await view.close?.();
+      view.close?.();
     },
     cdpAvailable(): boolean {
       return spec.kind === "chrome";
     },
-    cdp(method: string, params?: Record<string, unknown>): Promise<unknown> {
-      // view.cdp() is available on the chrome backend only. On webkit it throws
-      // "WebView.cdp() requires backend: \"chrome\"". We surface a friendlier
-      // error that matches the daemon op's wording.
-      if (spec.kind !== "chrome") {
-        return Promise.reject(
-          new Error(
-            "CDP is only available on the chrome backend (current: webkit) — " +
-            "run 'bowser install' to use Chromium-backed features",
-          ),
-        );
-      }
-      return (view as unknown as { cdp: (m: string, p?: Record<string, unknown>) => Promise<unknown> }).cdp(method, params);
+    cdp,
+    getCookies: async (urls) => {
+      const scoped = urls !== undefined && urls.length > 0;
+      const res = (await cdp(
+        scoped ? "Network.getCookies" : "Network.getAllCookies",
+        scoped ? { urls } : undefined,
+      )) as { cookies: Cookie[] };
+      return res.cookies;
+    },
+    setCookie: async (param) => {
+      const res = (await cdp("Network.setCookie", param as unknown as Record<string, unknown>)) as { success: boolean };
+      return { success: res.success };
+    },
+    deleteCookies: async (name, opts) => {
+      // `opts ?? {}`, not a default parameter: a request carrying null must
+      // behave like one carrying nothing (wire compatibility, PR 2 review).
+      const o = opts ?? {};
+      const params: Record<string, unknown> = { name };
+      if (o.url) params.url = o.url;
+      if (o.domain) params.domain = o.domain;
+      if (o.path) params.path = o.path;
+      await cdp("Network.deleteCookies", params);
+    },
+    clearCookies: async () => {
+      await cdp("Network.clearBrowserCookies");
     },
   };
 }
