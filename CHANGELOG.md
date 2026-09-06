@@ -7,6 +7,18 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **A session name was never checked for containment.** `-s` reached the filesystem unfiltered, so
+  `bowser -s ../../Documents close` resolved outside `~/.bowser/sessions` — harmless while `close`
+  only rewrote a state file, and a recursive delete once it removed the directory. `sessionDir()`
+  now rejects anything that is not a single path segment, and `socketPath()`/`pidPath()` are built
+  from it, so every session path bowser forms is checked in one place.
+
+- **A wedged daemon hung every command.** `connectOrSpawn`'s health-check `ping` had no timeout: a
+  daemon that accepted the connection and never answered — stopped, or blocked in a syscall — hung
+  the caller forever, and the unclosed socket kept the process from exiting even after that. The
+  check now gives up after a second and treats the daemon as unreachable, which every caller
+  already handles.
+
 - **`close` could report success while leaving a browser process running.** It connected to the
   daemon with `spawn: false`, swallowed a failure to connect as "no daemon; that's ok", unlinked
   the socket and printed `closed session '<name>'`. A daemon that was running but unreachable was

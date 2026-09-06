@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveRef, type SessionState } from "../src/state.ts";
+import { resolveRef, sessionDir, sessionsRoot, type SessionState } from "../src/state.ts";
 
 const state: SessionState = {
   name: "t",
@@ -24,6 +24,20 @@ describe("resolveRef", () => {
   });
   test("throws for unknown ref", () => {
     expect(() => resolveRef(state, "e9")).toThrow(/not found/);
+  });
+});
+
+// A session name arrives from `-s` unfiltered and becomes a directory that
+// `close` removes recursively. Containment is checked here, at the one place
+// every session path is built.
+describe("sessionDir rejects a name that is not one path segment", () => {
+  for (const bad of ["..", ".", "", "../../Documents", "a/b", "a\\b", "x\0y"]) {
+    test(JSON.stringify(bad), () => {
+      expect(() => sessionDir(bad)).toThrow(/single path segment/);
+    });
+  }
+  test("an ordinary name still resolves under the sessions root", () => {
+    expect(sessionDir("s1")).toBe(join(sessionsRoot(), "s1"));
   });
 });
 

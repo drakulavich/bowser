@@ -2,14 +2,17 @@
 // spawn the daemon first), send typed requests, match replies by id.
 
 import { join } from "node:path";
+import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
-import { sessionsRoot } from "../state.ts";
+import { sessionDir } from "../state.ts";
 import { assertValidBackendEnv } from "../backend.ts";
 import type { DaemonConnection, DaemonResponse, Op, RequestParams, ResultOf } from "./protocol.ts";
 
 export function socketPath(session: string): string {
   // Use a short path — Unix socket names have a ~104-char limit on macOS.
-  return join(sessionsRoot(), session, "sock");
+  // sessionDir() is what validates the name; going through it is what keeps a
+  // traversing session name out of every path bowser builds.
+  return join(sessionDir(session), "sock");
 }
 
 /** Where the daemon records its own pid, beside its socket. `close` needs it
@@ -17,7 +20,7 @@ export function socketPath(session: string): string {
  *  to ask, so without this the only honest answer is "something may still be
  *  running". */
 export function pidPath(session: string): string {
-  return join(sessionsRoot(), session, "pid");
+  return join(sessionDir(session), "pid");
 }
 
 export class DaemonClient implements DaemonConnection {
@@ -78,6 +81,11 @@ export class DaemonClient implements DaemonConnection {
   }
 }
 
+/** How long a daemon has to answer the health check before it counts as
+ *  unreachable. It answers in microseconds when it is alive at all: `ping` is
+ *  on the daemon's urgent lane, so even a busy one replies immediately. */
+const HEALTH_PING_MS = 1000;
+
 /** Connect to a session's daemon, or spawn one if it isn't running. */
 export async function connectOrSpawn(
   session: string,
@@ -87,9 +95,16 @@ export async function connectOrSpawn(
   const client = new DaemonClient(sock);
   try {
     await client.connect();
-    await client.request("ping");
+    // Bound the health check. A daemon that accepts the connection and never
+    // answers — stopped, or blocked in a syscall — would otherwise hang every
+    // caller forever, `list` included. Treating it as unreachable is what the
+    // callers already know how to handle.
+    await withTimeout(client.request("ping"), HEALTH_PING_MS, "ping");
     return client;
   } catch {
+    // Close before falling through: a connected socket that is never closed
+    // keeps the process alive after the command has printed its answer.
+    client.close();
     if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
     // Validate backend config in the parent before spawning: the daemon opens
     // the browser (and would throw on a bad BOWSER_BACKEND) before it ever opens
@@ -100,12 +115,13 @@ export async function connectOrSpawn(
     // Poll until the socket is listening.
     const start = Date.now();
     while (Date.now() - start < 5000) {
+      const c = new DaemonClient(sock);
       try {
-        const c = new DaemonClient(sock);
         await c.connect();
-        await c.request("ping");
+        await withTimeout(c.request("ping"), HEALTH_PING_MS, "ping");
         return c;
       } catch {
+        c.close();
         await Bun.sleep(50);
       }
     }

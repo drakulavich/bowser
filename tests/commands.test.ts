@@ -1,7 +1,7 @@
 // Command-layer tests with a fake daemon client. No real Chromium needed.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -228,16 +228,34 @@ describe("close", () => {
     expect(existsSync(sessionDir(session))).toBe(false);
   });
 
-  test("never signals a live pid that is not ours", async () => {
+  test("never signals, nor writes off, a live pid it cannot identify", async () => {
     await ensureSessionDir(session);
     await Bun.write(pidPath(session), "4242");
     // procOps()'s term throws, so reaching it fails the test rather than
-    // quietly killing a stranger.
-    const out = await closeOne({ ...ctx(), connect: unreachable }, session, procOps({
+    // quietly killing a stranger. Nor may close assume the number was reused
+    // and report the session closed: that is the same lie in a smaller case.
+    const call = closeOne({ ...ctx(), connect: unreachable }, session, procOps({
       alive: () => true,
     }));
-    expect(out).toBe(`closed session '${session}'`);
-    expect(existsSync(sessionDir(session))).toBe(false);
+    await expect(call).rejects.toThrow(/does not look like a bowser daemon/);
+    expect(existsSync(sessionDir(session))).toBe(true);
+  });
+
+  test("refuses to delete a session that was reopened while closing", async () => {
+    await ensureSessionDir(session);
+    await Bun.write(pidPath(session), "4242");
+    // The daemon acknowledges the shutdown, and a concurrent `open` starts a
+    // replacement before the directory is removed. Deleting it now would take
+    // the newcomer's socket with it and orphan the very process this command
+    // exists to end.
+    const replaced = fakeClient({
+      shutdown: async () => { await Bun.write(pidPath(session), "9999"); },
+    });
+    const call = closeOne({ ...ctx(), connect: async () => replaced }, session, procOps({
+      alive: (pid) => pid === 9999,
+    }));
+    await expect(call).rejects.toThrow(/reopened while closing \(pid 9999\)/);
+    expect(existsSync(sessionDir(session))).toBe(true);
   });
 
   test("fails, and keeps the directory, when the daemon will not die", async () => {
@@ -250,6 +268,17 @@ describe("close", () => {
     }));
     await expect(call).rejects.toThrow(/pid 4242.*still running/);
     expect(existsSync(sessionDir(session))).toBe(true);
+  });
+
+  test("refuses a session name that escapes the sessions root", async () => {
+    // Before the directory was removed recursively this name only misplaced a
+    // state file. `bowser -s ../../Documents close` must not resolve outside
+    // ~/.bowser/sessions, let alone delete what it finds there.
+    const victim = join(tmp, "victim");
+    await mkdir(victim, { recursive: true });
+    const call = cmdClose({ ...ctx(), connect: unreachable }, { name: "../../victim" });
+    await expect(call).rejects.toThrow(/single path segment/);
+    expect(existsSync(victim)).toBe(true);
   });
 
   test("--all closes every session under the sessions root", async () => {
@@ -276,6 +305,12 @@ describe("looksLikeOurDaemon", () => {
   });
   test("refuses a process that is not a daemon", () => {
     expect(looksLikeOurDaemon("bun test tests/commands.test.ts sess", "sess")).toBe(false);
+  });
+  test("refuses a stranger that happens to take --daemon and the same name", () => {
+    expect(looksLikeOurDaemon("other-service --daemon sess", "sess")).toBe(false);
+  });
+  test("refuses a session name that is not the marker's own argument", () => {
+    expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts other sess", "sess")).toBe(false);
   });
   test("refuses a daemon serving a different session", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts other", "sess")).toBe(false);

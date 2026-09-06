@@ -87,8 +87,17 @@ export interface ProcessOps {
  *  <session>`, so one of those two markers must be present too. */
 export function looksLikeOurDaemon(command: string, session: string): boolean {
   const argv = command.trim().split(/\s+/);
-  const isDaemon = argv.some((a) => a === "--daemon" || a.endsWith("daemon/main.ts"));
-  return isDaemon && argv.includes(session);
+  // The executable must be one of ours. A daemon spawned from source runs as
+  // `bun <...>/daemon/main.ts <session>`; the compiled binary re-invokes itself
+  // as `<...>/bowser --daemon <session>`. Without this, a stranger's
+  // `other-service --daemon <session>` would pass.
+  const exe = argv[0]?.split("/").pop() ?? "";
+  if (exe !== "bun" && !exe.includes("bowser")) return false;
+  // The marker must be followed immediately by this session's name, so neither
+  // half can be satisfied by an unrelated argument elsewhere on the line.
+  return argv.some(
+    (a, i) => (a === "--daemon" || a.endsWith("daemon/main.ts")) && argv[i + 1] === session,
+  );
 }
 
 async function isOurDaemon(pid: number, session: string): Promise<boolean> {
@@ -173,17 +182,33 @@ export async function closeOne(
 
   let ended = false;
   if (pid !== null && !(await waitGone(proc, pid))) {
-    // Still running after being asked to stop, or never reachable to ask. A pid
-    // that is not ours is a reused number and the daemon is already gone.
-    if (await proc.ours(pid, session)) {
-      proc.term(pid);
-      ended = true;
-      if (!(await waitGone(proc, pid))) {
-        throw new Error(
-          `close: daemon for session '${session}' (pid ${pid}) is still running`,
-        );
-      }
+    // Still running after being asked to stop, or never reachable to ask.
+    if (!(await proc.ours(pid, session))) {
+      // Either the number was reused and our daemon is long gone, or the
+      // process is ours and could not be identified. Those are not
+      // distinguishable from here, and signalling on a guess is the one thing
+      // this command must never do — so nothing is removed and nothing is
+      // claimed. Deleting the pidfile is the way out of a reused number.
+      throw new Error(
+        `close: pid ${pid} recorded for session '${session}' is running but does not look ` +
+          `like a bowser daemon; if it is unrelated, delete ${pidPath(session)} and retry`,
+      );
     }
+    proc.term(pid);
+    ended = true;
+    if (!(await waitGone(proc, pid))) {
+      throw new Error(`close: daemon for session '${session}' (pid ${pid}) is still running`);
+    }
+  }
+
+  // A concurrent `open` can start a replacement daemon while the steps above
+  // are waiting. Removing the directory then deletes the newcomer's socket and
+  // pidfile while it runs — the very orphan this command exists to prevent.
+  const current = await readPid(session);
+  if (current !== null && current !== pid && proc.alive(current)) {
+    throw new Error(
+      `close: session '${session}' was reopened while closing (pid ${current}); left it running`,
+    );
   }
 
   // The directory outlives nothing now: keeping it is what let closed sessions
