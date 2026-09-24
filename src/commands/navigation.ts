@@ -88,12 +88,20 @@ export interface ProcessOps {
  *  <session>`, so one of those two markers must be present too. */
 export function looksLikeOurDaemon(command: string, session: string): boolean {
   const line = command.trim();
-  // Match the exact command that spawnDaemon uses. A basename check such as
-  // `exe.includes("bowser")` would let `not-bowser-helper` through, and any
-  // Bun script ending in `daemon/main.ts` could otherwise look like ours.
-  const compiled = `${process.execPath} --daemon ${session}`;
-  const source = `${process.execPath} ${new URL("../daemon/main.ts", import.meta.url).pathname} ${session}`;
-  return line === compiled || line === source;
+  // The session is the daemon's last argument and the marker comes right
+  // before it. `sessionDir` keeps whitespace out of session names, so the
+  // display line `ps` prints splits cleanly into words.
+  const words = line.split(/\s+/);
+  if (words.at(-1) !== session) return false;
+  const marker = words.at(-2) ?? "";
+  // Match the executable by name, not by path: the path changes across
+  // upgrades (a Homebrew Cellar path carries the version), and `close` must
+  // still recognise a daemon the previous binary started. Release assets are
+  // named `bowser-macos-arm64` and the like, so a `bowser-` or `bowser.`
+  // prefix counts too; `not-bowser-helper` does not.
+  const exe = words[0]?.split("/").pop() ?? "";
+  if (/^bowser([-.]|$)/.test(exe)) return marker === "--daemon";
+  return exe === "bun" && marker.endsWith("/src/daemon/main.ts");
 }
 
 async function isOurDaemon(pid: number, session: string): Promise<boolean> {

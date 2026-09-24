@@ -130,6 +130,7 @@ describe("connectOrSpawn health check", () => {
     try {
       const started = Date.now();
       await expect(connectOrSpawn(session, { spawn: false })).rejects.toThrow(/no daemon/);
+      await expect(connectOrSpawn(session)).rejects.toThrow(/run 'bowser close -s wedged'/);
       // The point is that it returns at all; the bound is generous so a loaded
       // CI machine does not fail on timing.
       expect(Date.now() - started).toBeLessThan(5000);

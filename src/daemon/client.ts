@@ -112,7 +112,9 @@ export async function connectOrSpawn(
     // health check timed out. Unlinking its socket and spawning another daemon
     // would leave two browser processes for one session, while the old one
     // would no longer be addressable by its pidfile.
-    if (connected) throw new Error(`daemon for session '${session}' did not answer`);
+    if (connected) {
+      throw new Error(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
+    }
     // Validate backend config in the parent before spawning: the daemon opens
     // the browser (and would throw on a bad BOWSER_BACKEND) before it ever opens
     // its socket, so that error is invisible to us and shows up only as the

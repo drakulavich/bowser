@@ -364,6 +364,7 @@ describe("looksLikeOurDaemon", () => {
   test("refuses an unrelated executable or daemon path", () => {
     expect(looksLikeOurDaemon("/usr/local/bin/not-bowser-helper --daemon sess", "sess")).toBe(false);
     expect(looksLikeOurDaemon(`${process.execPath} /tmp/daemon/main.ts sess`, "sess")).toBe(false);
+    expect(looksLikeOurDaemon(`${process.execPath} /tmp/not-bowser-helper --daemon sess`, "sess")).toBe(false);
   });
   test("refuses a daemon serving a different session", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts other", "sess")).toBe(false);
@@ -376,7 +377,10 @@ describe("looksLikeOurDaemon", () => {
     expect(looksLikeOurDaemon(`${process.execPath} ${main} sess`, "sess")).toBe(true);
   });
   test("accepts the compiled form", () => {
-    expect(looksLikeOurDaemon(`${process.execPath} --daemon sess`, "sess")).toBe(true);
+    expect(looksLikeOurDaemon("/usr/local/bin/bowser --daemon sess", "sess")).toBe(true);
+    expect(looksLikeOurDaemon(`/different/Cellar/bowser/9.9.9/bin/bowser --daemon sess`, "sess")).toBe(true);
+    // Release assets keep their platform suffix unless the user renames them.
+    expect(looksLikeOurDaemon("/Users/x/Downloads/bowser-macos-arm64 --daemon sess", "sess")).toBe(true);
   });
 });
 
