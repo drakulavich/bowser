@@ -46,8 +46,8 @@ Do **not** use for static HTTP fetches.
 | `bowser screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `bowser resize <width> <height>` | Set the viewport size in pixels (both backends) |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
-| `bowser list` | Enumerate sessions |
-| `bowser close [name]` | End a session (defaults to `--session`; positional name overrides) |
+| `bowser list` | Enumerate sessions whose daemon is running |
+| `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides) |
 | `bowser close --all` | Close every open session |
 | `bowser install [--force]` | Download headless Chromium |
 | `bowser localstorage-list` | List `localStorage` entries (`key=value` lines, or JSON) |

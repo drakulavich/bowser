@@ -3,9 +3,14 @@
 // actionable message instead of being swallowed and surfacing as a 5s startup
 // timeout. See docs/superpowers/specs/2026-06-04-macos-webkit-backend-design.md.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { connectOrSpawn, socketPath } from "../src/daemon/client.ts";
+import { ensureSessionDir } from "../src/state.ts";
+
+import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
 
 describe("socketPath", () => {
   test("resolves under process.env.HOME at call time", () => {
@@ -13,6 +18,18 @@ describe("socketPath", () => {
     process.env.HOME = "/tmp/bowser-sockpath-test";
     try {
       expect(socketPath("sess")).toBe("/tmp/bowser-sockpath-test/.bowser/sessions/sess/sock");
+    } finally {
+      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+    }
+  });
+});
+
+describe("pidPath", () => {
+  test("sits beside the socket, resolved at call time", () => {
+    const orig = process.env.HOME;
+    process.env.HOME = "/tmp/bowser-pidpath-test";
+    try {
+      expect(pidPath("sess")).toBe("/tmp/bowser-pidpath-test/.bowser/sessions/sess/pid");
     } finally {
       if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
     }
@@ -69,4 +86,38 @@ describe("connectOrSpawn backend validation", () => {
     const session = `validate-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     await expect(connectOrSpawn(session)).rejects.toThrow(/invalid BOWSER_BACKEND/);
   });
+});
+
+// A daemon can hold a connectable socket and never answer — stopped, or blocked
+// in a syscall. Every command goes through this health check, so an unbounded
+// wait there hangs the whole CLI, `list` included.
+describe("connectOrSpawn health check", () => {
+  let tmp: string;
+  let origHome: string | undefined;
+
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-wedged-"));
+    process.env.HOME = tmp;
+  });
+
+  afterAll(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  test("a socket that accepts and never answers counts as unreachable", async () => {
+    const session = "wedged";
+    await ensureSessionDir(session);
+    const server = Bun.listen({ unix: socketPath(session), socket: { data() {} } });
+    try {
+      const started = Date.now();
+      await expect(connectOrSpawn(session, { spawn: false })).rejects.toThrow(/no daemon/);
+      // The point is that it returns at all; the bound is generous so a loaded
+      // CI machine does not fail on timing.
+      expect(Date.now() - started).toBeLessThan(5000);
+    } finally {
+      server.stop(true);
+    }
+  }, 15_000);
 });

@@ -118,8 +118,8 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `resize <width> <height>` | Set the viewport size in pixels. Works on both backends. |
 | `go-back` / `go-forward` / `reload` | Navigation |
-| `list` | List sessions |
-| `close [name]` | End a session (defaults to `--session`; positional name overrides) |
+| `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
+| `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped. |
 | `close --all` | Close every open session |
 | `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
 | `localstorage-get <key>` | Read a `localStorage` value |

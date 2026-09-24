@@ -37,7 +37,22 @@ export function sessionsRoot(): string {
   return join(process.env.HOME || homedir(), ".bowser", "sessions");
 }
 
+export function isValidSessionName(name: string): boolean {
+  return /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name);
+}
+
+/** Every filesystem path for a session goes through here, so this is where a
+ *  name is checked. A session name arrives from `-s` unfiltered, and `close`
+ *  removes the directory it names recursively, so `../../Documents` must never
+ *  get this far. The name also ends up on the daemon's command line, where
+ *  `looksLikeOurDaemon` reads it back from `ps`: no spaces and no leading dash,
+ *  or `--daemon victim` would pass for the daemon of `victim`. */
 export function sessionDir(name: string): string {
+  if (!isValidSessionName(name)) {
+    throw new Error(
+      `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got ${JSON.stringify(name)}`,
+    );
+  }
   return join(sessionsRoot(), name);
 }
 
