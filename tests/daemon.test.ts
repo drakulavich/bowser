@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { ensureSessionDir } from "../src/state.ts";
 
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
+import { removePidFileIfOwned } from "../src/daemon/server.ts";
 
 describe("socketPath", () => {
   test("resolves under process.env.HOME at call time", () => {
@@ -32,6 +33,22 @@ describe("pidPath", () => {
       expect(pidPath("sess")).toBe("/tmp/bowser-pidpath-test/.bowser/sessions/sess/pid");
     } finally {
       if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+    }
+  });
+});
+
+describe("pidfile cleanup", () => {
+  test("does not remove a replacement daemon's pidfile", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bowser-pidfile-"));
+    const path = join(dir, "pid");
+    try {
+      await Bun.write(path, "9999");
+      removePidFileIfOwned(path, 4242);
+      expect(await Bun.file(path).text()).toBe("9999");
+      removePidFileIfOwned(path, 9999);
+      expect(await Bun.file(path).exists()).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
