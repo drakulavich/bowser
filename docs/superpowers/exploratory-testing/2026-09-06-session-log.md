@@ -179,3 +179,35 @@ Rained-Out tours.
   WebKit views are supported by the installed Bun runtime, then choose between
   global WebKit serialization, a single WebKit owner process, or an explicit
   capability restriction for multiple sessions.
+
+## Follow-up 2026-09-24 — ET-02 does not reproduce
+
+**Status:** closed as not reproducible. A regression test guards it.
+
+Macbook M2, macOS 27.0, disk 86 % full. Two named WebKit sessions, one local
+todo origin, a fresh temporary `HOME` for each run.
+
+| Scenario | Bun | Runs | Result |
+|---|---|---|---|
+| open both, `fill` + `click` in A, snapshot both | 1.4.2 | 1 | both pages alive |
+| session 3's flow: snapshot both, set `localStorage` in each, then `fill` + `click` in A | 1.4.2 | 5 | 5 of 5 clean, `localStorage` stays per session |
+| the same flow | 1.4.0 (the version this log was written on) | 3 | 3 of 3 clean |
+
+- **Each daemon has its own WebKit processes.** Two open sessions show two
+  sets of GPU, WebContent and Networking XPC services. So the explanation
+  "one session's crash takes down a shared process" does not hold.
+- **Killing a WebContent process by hand did not reproduce the symptom.** The
+  session kept working, which may mean WebKit relaunched the process. That run
+  is inconclusive, though: every helper's parent is launchd, so `ps` cannot
+  show which daemon owns which process.
+- **The most likely cause is the environment.** When sessions 3 and 4 ran, the
+  disk was 97 % full (see the 2026-09-05 findings in the maintainability
+  refactor spec). The symptoms look like a dead web process: `about:blank`,
+  `localStorage` refused as insecure, a snapshot with a bare `- generic`
+  root. Proving this would mean filling a disk, so it was not attempted.
+
+`tests/e2e-webkit-sessions.test.ts` runs session 3's flow under `BOWSER_E2E=1`.
+It reads every page back instead of trusting the command replies. Its failure
+mode was checked by sending B to `about:blank`: the test then fails on B's
+snapshot. If ET-02 comes back, look at free disk space first, then at the Bun
+version.
