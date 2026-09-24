@@ -39,16 +39,14 @@ export function sessionsRoot(): string {
 
 /** Every filesystem path for a session goes through here, so this is where a
  *  name is checked. A session name arrives from `-s` unfiltered, and `close`
- *  now removes the directory it names recursively: without this, `bowser -s
- *  ../../Documents close` would resolve outside the sessions root and delete
- *  it. One path segment, no traversal, no separators. */
+ *  removes the directory it names recursively, so `../../Documents` must never
+ *  get this far. The name also ends up on the daemon's command line, where
+ *  `looksLikeOurDaemon` reads it back from `ps`: no spaces and no leading dash,
+ *  or `--daemon victim` would pass for the daemon of `victim`. */
 export function sessionDir(name: string): string {
-  const bad =
-    !name || name === "." || name === ".." ||
-    name.includes("/") || name.includes("\\") || name.includes("\0");
-  if (bad) {
+  if (!/^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name)) {
     throw new Error(
-      `usage: session name must be a single path segment, got ${JSON.stringify(name)}`,
+      `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got ${JSON.stringify(name)}`,
     );
   }
   return join(sessionsRoot(), name);

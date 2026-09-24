@@ -277,8 +277,17 @@ describe("close", () => {
     const victim = join(tmp, "victim");
     await mkdir(victim, { recursive: true });
     const call = cmdClose({ ...ctx(), connect: unreachable }, { name: "../../victim" });
-    await expect(call).rejects.toThrow(/single path segment/);
+    await expect(call).rejects.toThrow(/session name/);
     expect(existsSync(victim)).toBe(true);
+  });
+
+  test("refuses a session name with spaces or a leading dash", () => {
+    // `ps` prints a display line, not argv. A session named `--daemon victim`
+    // would run as `bowser --daemon --daemon victim`, which reads exactly like
+    // the daemon for `victim`, and `close victim` could then signal it.
+    for (const name of ["--daemon victim", "team one", "-x"]) {
+      expect(() => sessionDir(name)).toThrow(/session name/);
+    }
   });
 
   test("--all closes every session under the sessions root", async () => {
@@ -320,11 +329,6 @@ describe("looksLikeOurDaemon", () => {
   });
   test("accepts the source form", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts sess", "sess")).toBe(true);
-  });
-  test("accepts a session name containing a space", () => {
-    // `ps` prints a display line, not argv: splitting it on whitespace would
-    // refuse this daemon, and refusing a real one now fails the close.
-    expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts team one", "team one")).toBe(true);
   });
   test("accepts the compiled form", () => {
     expect(looksLikeOurDaemon("/usr/local/bin/bowser --daemon sess", "sess")).toBe(true);

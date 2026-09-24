@@ -10,8 +10,11 @@ All notable changes to this project are documented here. This project follows
 - **A session name was never checked for containment.** `-s` reached the filesystem unfiltered, so
   `bowser -s ../../Documents close` resolved outside `~/.bowser/sessions` — harmless while `close`
   only rewrote a state file, and a recursive delete once it removed the directory. `sessionDir()`
-  now rejects anything that is not a single path segment, and `socketPath()`/`pidPath()` are built
-  from it, so every session path bowser forms is checked in one place.
+  now accepts only letters, digits, `.`, `_` and `-`, never `.` or `-` first, and
+  `socketPath()`/`pidPath()` are built from it, so every session path bowser forms is checked in
+  one place. The same rule keeps `close` from mistaking one daemon for another: a session named
+  `--daemon victim` would have run as `bowser --daemon --daemon victim`, which `ps` shows exactly
+  like the daemon for `victim`. **Breaking:** names with spaces or other punctuation are refused.
 
 - **A wedged daemon hung every command.** `connectOrSpawn`'s health-check `ping` had no timeout: a
   daemon that accepted the connection and never answered — stopped, or blocked in a syscall — hung

@@ -93,15 +93,12 @@ export function looksLikeOurDaemon(command: string, session: string): boolean {
   // `other-service --daemon <session>` would pass.
   const exe = line.split(/\s+/)[0]?.split("/").pop() ?? "";
   if (exe !== "bun" && !exe.includes("bowser")) return false;
-  // The session is the daemon's last argument. Match it as a suffix rather than
-  // as a whitespace-split token: `ps` prints a display line, not argv, so a
-  // session name containing a space would otherwise fail to match its own
-  // daemon — and refusing to identify a real daemon now costs a failed `close`.
-  const suffix = " " + session;
-  if (!line.endsWith(suffix)) return false;
-  // Whatever precedes it must be the marker itself, so neither half can be
-  // satisfied by an unrelated argument elsewhere on the line.
-  const marker = line.slice(0, -suffix.length).split(/\s+/).pop() ?? "";
+  // The session is the daemon's last argument and the marker comes right
+  // before it. `sessionDir` keeps whitespace out of session names, so the
+  // display line `ps` prints splits cleanly into words.
+  const words = line.split(/\s+/);
+  if (words.at(-1) !== session) return false;
+  const marker = words.at(-2) ?? "";
   return marker === "--daemon" || marker.endsWith("daemon/main.ts");
 }
 

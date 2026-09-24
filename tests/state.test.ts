@@ -33,7 +33,7 @@ describe("resolveRef", () => {
 describe("sessionDir rejects a name that is not one path segment", () => {
   for (const bad of ["..", ".", "", "../../Documents", "a/b", "a\\b", "x\0y"]) {
     test(JSON.stringify(bad), () => {
-      expect(() => sessionDir(bad)).toThrow(/single path segment/);
+      expect(() => sessionDir(bad)).toThrow(/session name/);
     });
   }
   test("an ordinary name still resolves under the sessions root", () => {
