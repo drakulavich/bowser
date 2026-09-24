@@ -15,6 +15,9 @@ All notable changes to this project are documented here. This project follows
   one place. The same rule keeps `close` from mistaking one daemon for another: a session named
   `--daemon victim` would have run as `bowser --daemon --daemon victim`, which `ps` shows exactly
   like the daemon for `victim`. **Breaking:** names with spaces or other punctuation are refused.
+  `close --all` still removes a directory left under such a name, unless the pid recorded in it
+  is alive: that daemon can no longer be identified, so it is never signalled and its directory
+  stays for a person to deal with.
 
 - **A wedged daemon hung every command.** `connectOrSpawn`'s health-check `ping` had no timeout: a
   daemon that accepted the connection and never answered — stopped, or blocked in a syscall — hung

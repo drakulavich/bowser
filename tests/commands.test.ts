@@ -290,6 +290,33 @@ describe("close", () => {
     }
   });
 
+  // Names made before the naming rule existed still sit under the sessions
+  // root. `sessionDir` refuses them, and so did `close --all`, leaving them
+  // behind forever.
+  test("--all removes a directory whose name predates the naming rule", async () => {
+    const legacy = join(tmp, ".bowser", "sessions", " m11-1 m12-2");
+    await mkdir(legacy, { recursive: true });
+    const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+    expect(out).toContain(" m11-1 m12-2");
+    expect(out).not.toContain("failed");
+    expect(existsSync(legacy)).toBe(false);
+  });
+
+  test("--all keeps a legacy directory whose recorded pid is alive", async () => {
+    // Its daemon can no longer be identified by name, so it is never signalled
+    // and its directory stays for a person to deal with.
+    const legacy = join(tmp, ".bowser", "sessions", "team one");
+    await mkdir(legacy, { recursive: true });
+    await Bun.write(join(legacy, "pid"), String(process.pid));
+    try {
+      const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+      expect(out).toContain("failed: team one");
+      expect(existsSync(legacy)).toBe(true);
+    } finally {
+      await rm(legacy, { recursive: true, force: true }); // or every later --all sees it fail
+    }
+  });
+
   test("--all closes every session under the sessions root", async () => {
     // Seed two sessions on disk (saveState creates ~/.bowser/sessions/<name>/).
     await saveState({ name: "a", url: "x", title: "", refs: [], updatedAt: Date.now() });

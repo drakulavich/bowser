@@ -1,10 +1,11 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
 import { readFile, readdir, rm, unlink } from "node:fs/promises";
+import { join } from "node:path";
 import type { Command } from "../cli/registry.ts";
 import { pidPath, socketPath } from "../daemon/client.ts";
 import {
-  ensureSessionDir, loadState, saveState, sessionDir, sessionsRoot, type SessionState,
+  ensureSessionDir, isValidSessionName, loadState, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
 import { connector, emptyState, reply, syncState, withClient, type CommandContext } from "./context.ts";
 
@@ -138,8 +139,12 @@ const realProcess: ProcessOps = {
 /** The pid the daemon recorded for this session, or null if it recorded none
  *  (a session from before pidfiles, or one whose daemon never started). */
 async function readPid(session: string): Promise<number | null> {
+  return readPidFile(pidPath(session));
+}
+
+async function readPidFile(path: string): Promise<number | null> {
   try {
-    const pid = Number((await readFile(pidPath(session), "utf8")).trim());
+    const pid = Number((await readFile(path, "utf8")).trim());
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;
@@ -223,6 +228,20 @@ export async function closeOne(
   return reply(ctx, { ok: true, session, ended }, text);
 }
 
+/** A directory under the sessions root whose name predates the naming rule,
+ *  so `sessionDir` refuses it. The name came from `readdir` of the root, so the
+ *  path cannot escape it. Its daemon cannot be reached (`socketPath` refuses the
+ *  name too) or identified from `ps` (the name may hold spaces), so it is never
+ *  signalled: a live recorded pid leaves the directory for a person. */
+async function closeLegacy(name: string): Promise<void> {
+  const dir = join(sessionsRoot(), name);
+  const pid = await readPidFile(join(dir, "pid"));
+  if (pid !== null && realProcess.alive(pid)) {
+    throw new Error(`close: pid ${pid} recorded for legacy session ${JSON.stringify(name)} is running`);
+  }
+  await rm(dir, { recursive: true, force: true });
+}
+
 async function closeAll(ctx: CommandContext): Promise<string> {
   let names: string[] = [];
   try {
@@ -235,7 +254,7 @@ async function closeAll(ctx: CommandContext): Promise<string> {
   const failed: string[] = [];
   for (const name of names) {
     try {
-      await closeOne(ctx, name);
+      await (isValidSessionName(name) ? closeOne(ctx, name) : closeLegacy(name));
       closed.push(name);
     } catch {
       failed.push(name); // best-effort: keep closing the rest
