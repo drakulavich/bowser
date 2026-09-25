@@ -75,7 +75,7 @@ If none of those exist, run `bowser install`. It uses Playwright's downloader un
 
 ```bash
 bowser open https://example.com          # navigate, save state
-bowser snapshot                          # aria-tree YAML with [ref=eN]
+bowser snapshot                          # the page's aria tree, with [ref=eN]
 bowser click e3                          # click a ref
 bowser fill e5 "hello@bowser.dev"        # fill a form field
 bowser press Enter                       # submit
@@ -94,10 +94,40 @@ bowser -s=login fill  e2 "$PASSWORD"
 bowser -s=login click e3
 ```
 
+### Snapshot output
+
+`snapshot` prints the page's full accessibility tree in `playwright-cli`'s format: headings, text, state such as `[checked]` or `[active]`, `/url` and `/placeholder` props, and an `eN` ref on every visible element, not only the interactive ones. This is the todo fixture in `tests/fixtures/`:
+
+````
+### Page
+- Page URL: http://localhost:52047/todo-app.html
+- Page Title: Bowser Todo
+### Snapshot
+```yaml
+- generic [active] [ref=e1]:
+  - heading "Todos" [level=1] [ref=e2]
+  - generic [ref=e3]:
+    - textbox "New todo" [ref=e4]:
+      - /placeholder: What needs doing?
+    - button "Add" [ref=e5] [cursor=pointer]
+  - list "Todo list" [ref=e6]:
+    - listitem [ref=e7]: No todos yet
+  - generic [ref=e8]:
+    - generic [ref=e9]: 0 items left
+    - button "Clear completed" [ref=e10] [cursor=pointer]
+```
+````
+
+A ref stays the same across snapshots of one document while the element's role and name do not change; new elements get the next free number, so gaps are normal. After `fill e4 "buy milk"` and `click e5`, the list above becomes `listitem [ref=e11]` holding `checkbox "Toggle buy milk" [ref=e12]`, and `e5`, `e10` still name the same buttons. A navigation or reload starts again at `e1`.
+
+`--depth=N` prints N levels below the first line; a node at the limit prints as a leaf. `--depth=0` or no flag prints the whole tree. Iframe contents and shadow DOM are not walked: an iframe prints as a leaf with a ref.
+
 ### JSON output for agent pipelines
 
+`--json snapshot` prints `{"snapshot": "<tree>"}`: the tree text alone, without the `### Page` wrapper.
+
 ```bash
-bowser --json snapshot | jq '.refs[] | select(.role == "button")'
+bowser --json snapshot | jq -r .snapshot | grep 'button'
 ```
 
 ## Command reference
@@ -107,7 +137,7 @@ bowser --json snapshot | jq '.refs[] | select(.role == "button")'
 | `install [--force]` | Download a headless Chromium |
 | `open [url]` | Start session; navigate if URL given |
 | `goto <url>` | Navigate within current session |
-| `snapshot [--filename=f] [--depth=N]` | aria-tree YAML of interactive refs; `--depth=N` clips landmark nesting (`N=1` is flat, default is unbounded) |
+| `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `click <ref>` | Click an element |
 | `fill <ref> <text>` | Focus, clear, type |
 | `type <text>` | Type into focused element |
@@ -166,7 +196,7 @@ Notes:
 ## How it works
 
 1. `bowser open` spawns a per-session daemon holding a `Bun.WebView`, navigates, and saves `{url, title}` to `~/.bowser/sessions/<name>/state.json`.
-2. `bowser snapshot` runs a [snapshot script](./src/snapshot.ts) in the page that walks the DOM, picks interactive elements, computes a stable CSS path (`#id` when safe, otherwise an `nth-of-type` chain), and returns the refs as aria-tree YAML. Refs are persisted so later commands can resolve `e3` → `html > body > button:nth-of-type(2)`.
+2. `bowser snapshot` runs a [snapshot script](./src/page-scripts.ts) in the page that walks the DOM into an aria tree (roles, names, text, refs) and computes a stable CSS path for every ref (`#id` when safe, otherwise an `nth-of-type` chain); [`src/snapshot.ts`](./src/snapshot.ts) renders that tree as YAML. Refs are persisted so later commands can resolve `e3` → `html > body > button:nth-of-type(2)`.
 3. `bowser click e3` resolves the ref from state and dispatches the click via the daemon, using `Bun.WebView`'s built-in actionability auto-wait — no polling, no hard-coded timeouts.
 
 Because selectors are stable paths (not injected `data-` attributes), they survive page reloads between commands.
@@ -215,6 +245,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [x] Persistent session daemon over Unix socket
 - [x] playwright-cli command compatibility for the core agent loop
 - [x] Snapshot nesting honoring `--depth=N`
+- [x] Full aria tree in `playwright-cli`'s snapshot format
 - [ ] Storage commands (`cookie-*`, `localstorage-*`, `state-save`/`load`)
   - [x] `localstorage-{list,get,set,delete,clear}`
   - [x] `sessionstorage-{list,get,set,delete,clear}`
