@@ -132,7 +132,9 @@ number; or equals, ignoring case, one of `y n yes no true false on off null`.
 
 **3.6 Refs.**
 - A node gets a ref when its box is visible (non-zero width and height, `visibility` not hidden)
-  and it can receive pointer events (`pointer-events` is not `none`). Text lines never have refs.
+  and it can receive pointer events (`pointer-events` is not `none`). A `display: contents`
+  element has no box of its own and counts as visible when any child is, as in Playwright.
+  Text lines never have refs.
 - Refs are `e` + a per-document counter, assigned in DOM pre-order during the walk, including to
   nodes that are later collapsed or cut by `--depth`; gaps in the printed numbers are expected.
 - **Refs are sticky**: the ref is remembered per element for the life of the document and reused
@@ -149,6 +151,22 @@ Depth 0 is the first printed line. With `--depth=N` (N ≥ 1), nodes deeper than
 and a node at depth exactly N prints without its children but keeps its inline text value and
 its prop lines (`/url`, `/placeholder`). `--depth=0` and no flag mean unlimited. Non-integers and negatives are a
 usage error (`usage: --depth=N …`, exit 1). Collapse happens before depth is applied.
+
+### 5. Actions refuse a ref of the wrong kind
+
+Refs now land on non-interactive nodes too, so an action must not report success on an element
+it cannot act on. Before sending anything to the daemon (no extra round trip, no side effect),
+the command checks the ref saved by the last snapshot:
+
+| command | accepted | otherwise, exit 1 with |
+| --- | --- | --- |
+| `check`, `uncheck` | role `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio` | `ref 'eN' is not a checkbox or radio button (<role>)` |
+| `select` | tag `select` | `ref 'eN' is not a <select> element (<role>)` |
+| `fill` | role `textbox`, `searchbox`, `spinbutton`, `combobox` with tag `input`, or a `contenteditable` element | `ref 'eN' is not an <input>, <textarea> or contenteditable element (<role>)` |
+
+The walker records `editable: true` on a ref whose element is `isContentEditable`, in state only;
+it does not change the printed tree. `click`, `hover` and the other ref commands accept any ref.
+`src/cli.ts`'s user-error regex covers the new messages.
 
 ## Acceptance (public seams only)
 
@@ -170,6 +188,11 @@ usage error (`usage: --depth=N …`, exit 1). Collapse happens before depth is a
 3. **Refs**: sticky across two snapshots of the todo page (after adding a todo, `Clear
    completed` keeps its ref, new nodes get new numbers), and the new refs drive the existing
    actions (`fill`, `click`, `check`) on both backends.
+5. **Wrong-kind refs** (§5): unit tests through `cmdCheck`, `cmdUncheck`, `cmdSelect`, `cmdFill` with
+   a seeded state and a `fakeClient` show each command rejects a mismatched ref with the message
+   above and sends no daemon request, and accepts each listed kind; one test through the CLI's
+   error classification shows exit code 1. One e2e step on the todo page: `check` on the
+   `listitem` ref fails and the todo stays unchecked.
 4. Existing e2e substring matchers (`"Add": [ref=` etc.) and `tests/e2e-compat.test.ts`'s
    line regex are updated to the new syntax; the whole e2e suite passes on both backends.
 
