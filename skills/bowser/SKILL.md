@@ -99,7 +99,7 @@ Do **not** use for static HTTP fetches.
 
 - Each line is `- role "name" [attrs]`, then `: text` or a nested block. Page text shows up as `- text: …` or inline after the colon; state as `[checked]`, `[disabled]`, `[expanded]`, `[active]` (focused), `[selected]`, `[level=N]`; links carry `- /url:`, textboxes `- /placeholder:`.
 - Any visible element can have a ref, not only controls. Refs stay the same across snapshots of one document while the element's role and name are unchanged, so gaps in the numbers are normal. A navigation or reload starts again at `e1`.
-- `--depth=N` prints N levels below the first line. `--json` gives `{"snapshot": "<tree>"}` without the `### Page` header.
+- `--depth=N` prints N levels below the first line: a node at the limit drops its children but keeps its inline text value and its prop lines (`/url`, `/placeholder`). `--depth=0` or no flag prints the whole tree. `--json` gives `{"snapshot": "<tree>"}` without the `### Page` header.
 
 Refs persist in `~/.bowser/sessions/<name>/state.json`. The CLI resolves refs for you.
 

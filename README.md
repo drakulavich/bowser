@@ -120,7 +120,7 @@ bowser -s=login click e3
 
 A ref stays the same across snapshots of one document while the element's role and name do not change; new elements get the next free number, so gaps are normal. After `fill e4 "buy milk"` and `click e5`, the list above becomes `listitem [ref=e11]` holding `checkbox "Toggle buy milk" [ref=e12]`, and `e5`, `e10` still name the same buttons. A navigation or reload starts again at `e1`.
 
-`--depth=N` prints N levels below the first line; a node at the limit prints as a leaf. `--depth=0` or no flag prints the whole tree. Iframe contents and shadow DOM are not walked: an iframe prints as a leaf with a ref.
+`--depth=N` prints N levels below the first line: a node at the limit drops its children but keeps its inline text value and its prop lines (`/url`, `/placeholder`). `--depth=0` or no flag prints the whole tree. Iframe contents and shadow DOM are not walked: an iframe prints as a leaf with a ref.
 
 ### JSON output for agent pipelines
 
