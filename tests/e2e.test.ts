@@ -90,8 +90,7 @@ runOrSkip("e2e: real browser (backend from resolveBackend)", () => {
   }, 30_000);
 
   test("a >8 KB snapshot response survives the socket (backpressure)", async () => {
-    // Use buttons so the aria-tree snapshot script captures them (it only
-    // records interactive elements; plain <li> nodes are invisible to it).
+    // 500 buttons: each is one ref'd line, so the tree is well over 8 KB.
     const items = Array.from({ length: 500 }, (_, i) => `<button>item-${i}</button>`).join("");
     const big = `<html><head><title>Big</title></head><body>${items}</body></html>`;
     await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(big)}`);
