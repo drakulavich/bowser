@@ -198,10 +198,8 @@ Notes:
 ## How it works
 
 1. `bowser open` spawns a per-session daemon holding a `Bun.WebView`, navigates, and saves `{url, title}` to `~/.bowser/sessions/<name>/state.json`.
-2. `bowser snapshot` runs a [snapshot script](./src/page-scripts.ts) in the page that walks the DOM into an aria tree (roles, names, text, refs) and computes a stable CSS path for every ref (`#id` when safe, otherwise an `nth-of-type` chain); [`src/snapshot.ts`](./src/snapshot.ts) renders that tree as YAML. Refs are persisted so later commands can resolve `e3` → `html > body > button:nth-of-type(2)`.
+2. `bowser snapshot` runs a [snapshot script](./src/page-scripts.ts) in the page that walks the DOM into an aria tree (roles, names, text, refs) and keeps a reference to each ref's element in the page; [`src/snapshot.ts`](./src/snapshot.ts) renders that tree as YAML. Refs are persisted with the CSS path each element had (`#id` when safe, otherwise an `nth-of-type` chain), e.g. `e3` → `html > body > button:nth-of-type(2)`.
 3. `bowser click e3` resolves the ref from state, then in the page: the snapshot script kept a reference to each ref's element, so the command checks that element is still in the document and computes its CSS path afresh (a stale ref fails here, before anything is clicked). It then dispatches the click via the daemon, using `Bun.WebView`'s built-in actionability auto-wait — no polling, no hard-coded timeouts.
-
-Because selectors are stable paths (not injected `data-` attributes), they survive page reloads between commands.
 
 ## Environment variables
 

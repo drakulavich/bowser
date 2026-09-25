@@ -150,6 +150,20 @@ runOrSkip("e2e: a stale ref fails at once (backend from resolveBackend)", () => 
     expect(await cmdEval(ctx, "document.getElementById('name').value")).toBe("");
   }, 60_000);
 
+  test("a hidden element is not stale: its ref keeps today's behaviour", async () => {
+    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdSnapshot(ctx);
+    const agree = await refNamed("Agree");
+    const hover = await refNamed("Hover me");
+    // Still connected, no longer visible. check and hover act through page
+    // scripts that do not wait for visibility, so today both go through.
+    await cmdEval(ctx, "(document.getElementById('agree').style.visibility = 'hidden', document.getElementById('hoverme').style.display = 'none')");
+    await cmdCheck(ctx, agree);
+    expect(await checked("Agree")).toBe("true");
+    await cmdHover(ctx, hover);
+    expect(await cmdEval(ctx, "document.getElementById('hovered').textContent")).toBe("hovered");
+  }, 60_000);
+
   test("refs from the current snapshot work for click, fill, hover, select, check and uncheck", async () => {
     await cmdOpen(ctx, `${base}/kitchen-sink.html`);
     await cmdSnapshot(ctx);
