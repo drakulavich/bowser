@@ -2,6 +2,7 @@
 // Entry point for the spawned daemon process. Keeps a single Bun.WebView alive
 // and services requests until told to shut down.
 
+import { DAEMON_PROFILE_ENV } from "./client.ts";
 import { startDaemon } from "./server.ts";
 
 const session = process.argv[2];
@@ -10,4 +11,4 @@ if (!session) {
   process.exit(1);
 }
 
-await startDaemon(session);
+await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);

@@ -98,6 +98,12 @@ jobs:
           BOWSER_CHROME_ARGS: "--no-sandbox"
           BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
         run: bun test tests/e2e-stale-ref.test.ts
+      - name: E2E - persistent profile survives close
+        env:
+          BOWSER_E2E: "1"
+          BOWSER_CHROME_ARGS: "--no-sandbox"
+          BOWSER_CHROMIUM_PATH: ${{ steps.chromium.outputs.path }}
+        run: bun test tests/e2e-persistent.test.ts
       - name: E2E - compiled binary daemon + screenshot
         # The unit/e2e suites run in-process via `bun test` and never exercise
         # the COMPILED binary's daemon-spawn path (it re-invokes itself with a
@@ -115,6 +121,14 @@ jobs:
           timeout 60 ./dist/bowser screenshot --session ci-smoke --filename /tmp/ci-smoke.png
           timeout 60 ./dist/bowser close --session ci-smoke
           file /tmp/ci-smoke.png | grep -q "PNG image data"
+          # --persistent must reach the daemon through --daemon too: the browser
+          # writes into the profile only if it opened with it (open itself just
+          # creates the empty directory), and close must leave it in place.
+          timeout 60 ./dist/bowser open "data:text/html,<h1>ci</h1>" --persistent --session ci-persist
+          test -n "$(ls -A ~/.bowser/profiles/ci-persist)"
+          timeout 60 ./dist/bowser close --session ci-persist
+          test -d ~/.bowser/profiles/ci-persist
+          rm -rf ~/.bowser/profiles/ci-persist
 
   e2e-webkit:
     name: e2e (WebKit, macOS)
@@ -131,7 +145,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: E2E on WebKit
         # e2e-compat skips here: the runner has no playwright-cli.
-        run: bun test tests/e2e.test.ts tests/e2e-todo.test.ts tests/e2e-snapshot.test.ts tests/e2e-stale-ref.test.ts tests/e2e-webkit.test.ts tests/e2e-webkit-sessions.test.ts tests/e2e-daemon-death.test.ts tests/e2e-compat.test.ts
+        run: bun test tests/e2e.test.ts tests/e2e-todo.test.ts tests/e2e-snapshot.test.ts tests/e2e-stale-ref.test.ts tests/e2e-webkit.test.ts tests/e2e-webkit-sessions.test.ts tests/e2e-daemon-death.test.ts tests/e2e-persistent.test.ts tests/e2e-compat.test.ts
       - name: E2E - compiled binary daemon + screenshot (WebKit)
         # Same guard as the Linux job. macOS ships no `timeout`; perl's alarm
         # survives exec, so it bounds the child the same way.
@@ -142,3 +156,9 @@ jobs:
           t ./dist/bowser screenshot --session ci-smoke --filename /tmp/ci-smoke.png
           t ./dist/bowser close --session ci-smoke
           file /tmp/ci-smoke.png | grep -q "PNG image data"
+          # Same --persistent check as the Linux job.
+          t ./dist/bowser open "data:text/html,<h1>ci</h1>" --persistent --session ci-persist
+          test -n "$(ls -A ~/.bowser/profiles/ci-persist)"
+          t ./dist/bowser close --session ci-persist
+          test -d ~/.bowser/profiles/ci-persist
+          rm -rf ~/.bowser/profiles/ci-persist

@@ -1,7 +1,7 @@
 // What every command shares: the context the CLI builds, the daemon
 // connection with its close, the empty session state, and ref lookup.
 
-import { connectOrSpawn } from "../daemon/client.ts";
+import { connectOrSpawn, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, type SessionState } from "../state.ts";
@@ -10,17 +10,17 @@ export interface CommandContext {
   session: string;
   json: boolean;
   // Injected in tests.
-  connect?: (session: string, opts?: { spawn?: boolean }) => Promise<DaemonConnection>;
+  connect?: (session: string, opts?: ConnectOptions) => Promise<DaemonConnection>;
 }
 
-export function connector(ctx: CommandContext): (session: string, opts?: { spawn?: boolean }) => Promise<DaemonConnection> {
+export function connector(ctx: CommandContext): (session: string, opts?: ConnectOptions) => Promise<DaemonConnection> {
   return ctx.connect ?? connectOrSpawn;
 }
 
 export async function withClient<T>(
   ctx: CommandContext,
   fn: (c: DaemonConnection) => Promise<T>,
-  opts: { spawn?: boolean } = {},
+  opts: ConnectOptions = {},
 ): Promise<T> {
   const client = await connector(ctx)(ctx.session, opts);
   try {

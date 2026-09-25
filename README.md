@@ -94,6 +94,22 @@ bowser -s=login fill  e2 "$PASSWORD"
 bowser -s=login click e3
 ```
 
+### Persistent profiles
+
+A session's browser store is in memory by default: `close` (or a crash) loses its logins. Open it with `--persistent` to keep cookies, `localStorage` and IndexedDB on disk, like `playwright-cli open --persistent`:
+
+```bash
+bowser -s=app open https://app.example.com/login --persistent   # profile in ~/.bowser/profiles/app/
+bowser -s=app close                                              # the profile stays
+bowser -s=app open https://app.example.com --persistent         # still logged in
+bowser -s=work open https://app.example.com --profile=./profiles/work   # a directory of your choice
+```
+
+- The profile lives outside `~/.bowser/sessions/<name>/`, so `close` leaves it alone. Delete it with `rm -rf ~/.bowser/profiles/<name>` (or your `--profile` directory).
+- The store is chosen when the session's browser starts. `open --persistent` on a session that is already running with another store fails with exit 1; run `bowser close` first. `open` without the flag reuses a running persistent session.
+- One profile directory serves one running session at a time; sharing it between two is unsupported.
+- WebKit needs macOS 15.2 or later for a persistent store.
+
 ### Snapshot output
 
 `snapshot` prints the page's full accessibility tree in `playwright-cli`'s format: headings, text, state such as `[checked]` or `[active]`, `/url` and `/placeholder` props, and an `eN` ref on every visible element, not only the interactive ones. This is the todo fixture in `tests/fixtures/`:
@@ -137,7 +153,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | Command | Description |
 | --- | --- |
 | `install [--force]` | Download a headless Chromium |
-| `open [url]` | Start session; navigate if URL given |
+| `open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies, `localStorage` and IndexedDB in `~/.bowser/profiles/<session>/` across `close` and restarts; `--profile=dir` keeps them in `dir` instead (implies `--persistent`). See [Persistent profiles](#persistent-profiles). |
 | `goto <url>` | Navigate within current session |
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `click <ref>` | Click an element |

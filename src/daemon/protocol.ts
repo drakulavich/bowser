@@ -24,6 +24,9 @@ export interface PageState {
   /** Present only while a dialog is open. Populated by the dialog task; no
    *  code in this PR sets it. */
   dialog?: DialogState;
+  /** The daemon's persistent profile directory; absent when its store is
+   *  ephemeral. `open --persistent` compares it with the one it wants. */
+  profile?: string;
 }
 
 export interface DaemonOps {

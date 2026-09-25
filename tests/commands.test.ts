@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
+import { findCommand } from "../src/cli/registry.ts";
 import { reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath } from "../src/daemon/client.ts";
 import { cmdInstall } from "../src/commands/install.ts";
@@ -86,6 +87,122 @@ describe("open", () => {
     const c = fakeClient({});
     const out = await cmdOpen({ ...ctx({ json: true }), connect: async () => c }, "https://x");
     expect(JSON.parse(out)).toEqual({ ok: true, url: "https://x", title: "Fake https://x" });
+  });
+});
+
+describe("open --persistent / --profile", () => {
+  /** Run `open` through its registry entry, as the CLI does, with a fake
+   *  connector that records the options the daemon would be spawned with. */
+  async function openWith(
+    flags: Record<string, string | boolean>,
+    running: { profile?: string } | "spawned" = "spawned",
+  ) {
+    const seen: Array<{ spawn?: boolean; profile?: string } | undefined> = [];
+    let c = fakeClient({});
+    const connect: CommandContext["connect"] = async (_s, opts) => {
+      seen.push(opts);
+      // A freshly spawned daemon runs with whatever store it was handed.
+      const profile = running === "spawned" ? opts?.profile : running.profile;
+      c = fakeClient({ state: () => ({ url: "https://x", title: "X", ...(profile ? { profile } : {}) }) });
+      return c;
+    };
+    const out = await findCommand("open")!.run({ ...ctx(), connect }, { positional: ["https://x"], flags });
+    return { out, seen, calls: () => c.calls };
+  }
+
+  test("--persistent hands the daemon ~/.bowser/profiles/<session> and creates it", async () => {
+    const { seen } = await openWith({ persistent: true });
+    const expected = join(tmp, ".bowser", "profiles", session);
+    expect(seen[0]?.profile).toBe(expected);
+    expect(existsSync(expected)).toBe(true);
+  });
+
+  test("--profile=rel/dir hands the daemon that directory resolved against the cwd", async () => {
+    const cwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const { seen } = await openWith({ profile: "rel/dir" });
+      const expected = join(process.cwd(), "rel", "dir");
+      expect(seen[0]?.profile).toBe(expected);
+      expect(isAbsolute(seen[0]!.profile!)).toBe(true);
+      expect(existsSync(expected)).toBe(true);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  test("--profile wins over --persistent", async () => {
+    const dir = join(tmp, "explicit-profile");
+    const { seen } = await openWith({ persistent: true, profile: dir });
+    expect(seen[0]?.profile).toBe(dir);
+  });
+
+  test("no flag hands the daemon no profile and asks it nothing extra", async () => {
+    const { seen, calls } = await openWith({});
+    expect(seen[0]?.profile).toBeUndefined();
+    expect(calls().map(([op]) => op)).toEqual(["navigate", "state"]);
+  });
+
+  test("a running daemon with a different store is a usage error, before any navigation", async () => {
+    const err = await openWith({ persistent: true }, { profile: "/elsewhere" }).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe(
+      `usage: session '${session}' is already open with a different profile; run 'bowser close' first`,
+    );
+  });
+
+  test("a running ephemeral daemon conflicts with --persistent too", async () => {
+    const err = await openWith({ persistent: true }, {}).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/^usage: session '.*' is already open with a different profile/);
+  });
+
+  test("a running daemon with the same store is reused", async () => {
+    const expected = join(tmp, ".bowser", "profiles", session);
+    const { out } = await openWith({ persistent: true }, { profile: expected });
+    expect(out).toContain("opened https://x");
+  });
+
+  test("open without flags reuses a running persistent session", async () => {
+    const { out } = await openWith({}, { profile: "/some/profile" });
+    expect(out).toContain("opened https://x");
+  });
+
+  test("the CLI exits 1 on the different-profile error", async () => {
+    // A stand-in daemon on the session's real socket: it answers ping, and
+    // reports an ephemeral store on state. The real CLI then refuses --persistent.
+    await ensureSessionDir(session);
+    const listener = Bun.listen({
+      unix: join(sessionDir(session), "sock"),
+      socket: {
+        data(s, data) {
+          for (const line of data.toString().split("\n").filter(Boolean)) {
+            const req = JSON.parse(line) as { id: number; op: string };
+            const result = req.op === "state" ? { url: "about:blank", title: "" } : "pong";
+            s.write(JSON.stringify({ id: req.id, ok: true, result }) + "\n");
+          }
+        },
+      },
+    });
+    try {
+      const proc = Bun.spawn(
+        [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", "--persistent", "-s", session],
+        { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
+      );
+      const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+      expect(stderr).toContain(`session '${session}' is already open with a different profile; run 'bowser close' first`);
+      expect(code).toBe(1);
+    } finally {
+      listener.stop(true);
+    }
+  });
+
+  test("close leaves the profile directory in place", async () => {
+    await openWith({ persistent: true });
+    const profile = join(tmp, ".bowser", "profiles", session);
+    await Bun.write(join(profile, "Cookies"), "x");
+    await cmdClose({ ...ctx(), connect: async () => fakeClient({}) });
+    expect(existsSync(sessionDir(session))).toBe(false);
+    expect(await Bun.file(join(profile, "Cookies")).text()).toBe("x");
   });
 });
 

@@ -13,6 +13,8 @@ export interface BrowserOptions {
   executablePath?: string;
   width?: number;
   height?: number;
+  /** Persistent profile directory (`open --persistent`); ephemeral without. */
+  profile?: string;
 }
 
 /** The error every CDP-only path raises on webkit. The daemon answers
@@ -134,13 +136,22 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
   const spec = opts.executablePath
     ? chromeBackend(process.env, () => undefined, opts.executablePath)
     : resolveBackend();
-  const view = new Bun.WebView({
-    backend: toBunBackend(spec),
-    width: opts.width ?? 1280,
-    height: opts.height ?? 800,
-  });
+  let view: Bun.WebView;
+  try {
+    view = new Bun.WebView({
+      backend: toBunBackend(spec),
+      width: opts.width ?? 1280,
+      height: opts.height ?? 800,
+      ...(opts.profile ? { dataStore: { directory: opts.profile } } : {}),
+    });
+  } catch (err) {
+    if (!opts.profile) throw err;
+    // WebKit before macOS 15.2 has no persistent store.
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`--persistent: the browser refused profile ${opts.profile}: ${msg}`);
+  }
   // The real Bun.WebView satisfies ViewLike structurally; no cast needed here.
-  return wrapView(view, spec);
+  return wrapView(view, spec, NAV_TIMING, opts.profile);
 }
 
 /** How long the navigation watch waits. Exported so tests can shorten it. */
@@ -193,7 +204,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming) {
 
 /** Turn a view into a Browser. Separate from openBrowser so tests can pass a
  *  fake view; openBrowser is the only caller with a real one. */
-export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING): Browser {
+export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING, profile?: string): Browser {
   const nav = navigationWatch(view, timing);
   const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     // view.cdp() exists on the chrome backend only. On webkit Bun throws
@@ -246,6 +257,24 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
       else await view.evaluate(RELOAD);
     }),
     close: async () => {
+      // Both engines write a persistent profile lazily, and the daemon exits
+      // right after this, so each must be made to flush first (measured: a
+      // localStorage item written just before `close` was lost 14 times in
+      // 15 on WebKit; on Chromium cookies and localStorage were both lost).
+      if (profile && spec.kind === "chrome" && typeof view.cdp === "function") {
+        // CDP Browser.close is Chromium's own orderly shutdown. The pipe
+        // closes before it has finished writing, so wait for the process.
+        try {
+          await view.cdp("Browser.close");
+        } catch {}
+        await waitForChromiumExit(profile);
+      } else if (profile) {
+        // WebKit hands a page's storage over when the page goes away;
+        // leaving it for about:blank kept the item 40 times in 40.
+        try {
+          await view.navigate("about:blank");
+        } catch {}
+      }
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
       view.close?.();
@@ -288,6 +317,24 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
       await cdp("Network.clearBrowserCookies");
     },
   };
+}
+
+/** Wait, up to `capMs`, until no Chromium process runs on `profile`.
+ *  Chromium is started with `--user-data-dir=<profile>`, and Bun exposes no
+ *  handle on it, so its command line is how to find it. */
+async function waitForChromiumExit(profile: string, capMs = 1500): Promise<void> {
+  const flag = `--user-data-dir=${profile}`;
+  const running = async (): Promise<boolean> => {
+    try {
+      const proc = Bun.spawn(["ps", "-axww", "-o", "command="], { stdout: "pipe", stderr: "ignore" });
+      const lines = (await new Response(proc.stdout).text()).split("\n");
+      return lines.some((l) => l.includes(`${flag} `) || l.endsWith(flag));
+    } catch {
+      return false;
+    }
+  };
+  const deadline = Date.now() + capMs;
+  while (Date.now() < deadline && (await running())) await Bun.sleep(20);
 }
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];

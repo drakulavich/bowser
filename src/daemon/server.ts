@@ -24,6 +24,9 @@ import { pidPath, socketPath } from "./client.ts";
  *  stale (that regression is why `nav.act()` exists). */
 export interface DaemonState {
   dialog?: DialogState;
+  /** The persistent profile directory the browser opened with; absent when
+   *  its store is ephemeral. Fixed for the daemon's life. */
+  profile?: string;
 }
 
 /** Remove only this daemon's pidfile. A replacement can overwrite the path
@@ -150,6 +153,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
           url: await b.realUrl(),
           title: await b.realTitle(),
           ...(state.dialog ? { dialog: state.dialog } : {}),
+          ...(state.profile ? { profile: state.profile } : {}),
         })
       : Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
@@ -170,7 +174,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
   };
 }
 
-export async function startDaemon(session: string): Promise<void> {
+export async function startDaemon(session: string, profile?: string): Promise<void> {
   const sock = socketPath(session);
   // Clean up any stale socket file.
   try {
@@ -187,8 +191,8 @@ export async function startDaemon(session: string): Promise<void> {
     removePidFileIfOwned(pidFile, process.pid);
   });
 
-  const browser: Browser = await openBrowser();
-  const state: DaemonState = {};
+  const browser: Browser = await openBrowser({ profile });
+  const state: DaemonState = profile ? { profile } : {};
   const handle = createHandler(browser, state);
   const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();

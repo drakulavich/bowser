@@ -112,10 +112,24 @@ export class DaemonClient implements DaemonConnection {
  *  on the daemon's urgent lane, so even a busy one replies immediately. */
 const HEALTH_PING_MS = 1000;
 
+/** How a command reaches its daemon. `spawn: false` refuses to start one;
+ *  `profile` is the persistent store a daemon spawned now opens with (a
+ *  running daemon keeps the store it started with). */
+export interface ConnectOptions {
+  spawn?: boolean;
+  profile?: string;
+}
+
+/** The environment variable that carries the profile to a spawned daemon.
+ *  Env rather than argv: `looksLikeOurDaemon` identifies a daemon by its last
+ *  two argv words, and env reaches both spawn paths (bun main.ts and the
+ *  compiled binary's --daemon) unchanged. */
+export const DAEMON_PROFILE_ENV = "BOWSER_DAEMON_PROFILE";
+
 /** Connect to a session's daemon, or spawn one if it isn't running. */
 export async function connectOrSpawn(
   session: string,
-  opts: { spawn?: boolean } = {},
+  opts: ConnectOptions = {},
 ): Promise<DaemonClient> {
   const sock = socketPath(session);
   const client = new DaemonClient(sock, session);
@@ -146,7 +160,7 @@ export async function connectOrSpawn(
     // its socket, so that error is invisible to us and shows up only as the
     // "did not start in time" timeout below. Fail fast with the real message.
     assertValidBackendEnv();
-    await spawnDaemon(session);
+    await spawnDaemon(session, opts.profile);
     // Poll until the socket is listening.
     const start = Date.now();
     while (Date.now() - start < 5000) {
@@ -160,11 +174,17 @@ export async function connectOrSpawn(
         await Bun.sleep(50);
       }
     }
-    throw new Error(`daemon for session '${session}' did not start in time`);
+    // A daemon that dies opening its browser never reaches its socket, so its
+    // error is invisible here. A persistent store is the likely cause when one
+    // was asked for (WebKit needs macOS 15.2+ for it), so say so.
+    const hint = opts.profile
+      ? ` with --persistent profile ${opts.profile}; the browser may not support a persistent profile here`
+      : "";
+    throw new Error(`daemon for session '${session}' did not start in time${hint}`);
   }
 }
 
-async function spawnDaemon(session: string): Promise<void> {
+async function spawnDaemon(session: string, profile?: string): Promise<void> {
   const { ensureSessionDir } = await import("../state.ts");
   await ensureSessionDir(session);
 
@@ -194,7 +214,7 @@ async function spawnDaemon(session: string): Promise<void> {
     // the OS environment block captured at *this* process's startup and ignores
     // runtime mutations of process.env — so a redirected HOME (set after launch,
     // e.g. by the e2e tests' beforeAll) would NOT reach the daemon.
-    env: { ...process.env },
+    env: daemonEnv(profile),
   });
   // Don't let the spawned daemon keep THIS process alive. Bun keeps the parent's
   // event loop open until a child exits — but the daemon runs forever (keepalive
@@ -203,4 +223,13 @@ async function spawnDaemon(session: string): Promise<void> {
   // returning to the shell. `bun test` masks this (the test runner force-exits);
   // the real binary does not. unref() lets the short-lived CLI exit immediately.
   proc.unref();
+}
+
+/** The daemon's environment: ours, with the profile set or cleared so a stale
+ *  value inherited from the caller never picks the store. */
+function daemonEnv(profile: string | undefined): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  if (profile) env[DAEMON_PROFILE_ENV] = profile;
+  else delete env[DAEMON_PROFILE_ENV];
+  return env;
 }

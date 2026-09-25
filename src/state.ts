@@ -37,6 +37,19 @@ export function sessionsRoot(): string {
   return join(process.env.HOME || homedir(), ".bowser", "sessions");
 }
 
+/** Root of `open --persistent` profiles. Beside the sessions root, never
+ *  inside a session directory: `close` deletes that one, and the profile must
+ *  outlive it. Call-time for the same reason as sessionsRoot(). */
+export function profilesRoot(): string {
+  return join(process.env.HOME || homedir(), ".bowser", "profiles");
+}
+
+/** The browser profile `open --persistent` gives a session. */
+export function profileDir(name: string): string {
+  sessionDir(name); // validates the name: it becomes a path here too
+  return join(profilesRoot(), name);
+}
+
 export function isValidSessionName(name: string): boolean {
   return /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name);
 }

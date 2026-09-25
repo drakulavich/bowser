@@ -106,6 +106,31 @@ describe("wrapView cookies", () => {
   });
 });
 
+describe("wrapView close", () => {
+  // A killed Chromium loses the cookies and localStorage it has not flushed
+  // yet; only its own shutdown (CDP Browser.close) writes them to the profile.
+  test("on chrome with a persistent profile, close shuts Chromium down through CDP first", async () => {
+    const v = fakeView();
+    v.close = () => { v.calls.push(["close", []]); };
+    await wrapView(v, chrome, undefined, "/tmp/no-such-bowser-profile").close();
+    expect(v.calls).toEqual([["cdp", ["Browser.close", undefined]], ["close", []]]);
+  });
+
+  test("on webkit with a persistent profile, close leaves the page first so its storage is written", async () => {
+    const v = fakeView();
+    v.close = () => { v.calls.push(["close", []]); };
+    await wrapView(v, webkit, undefined, "/tmp/no-such-bowser-profile").close();
+    expect(v.calls).toEqual([["navigate", ["about:blank"]], ["close", []]]);
+  });
+
+  test("an ephemeral view just closes", async () => {
+    const v = fakeView();
+    v.close = () => { v.calls.push(["close", []]); };
+    await wrapView(v, chrome).close();
+    expect(v.calls).toEqual([["close", []]]);
+  });
+});
+
 const fast = { graceMs: 40, settleMs: 300 };
 
 describe("wrapView navigation watch", () => {
