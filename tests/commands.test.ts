@@ -109,64 +109,30 @@ describe("open (assertNavigated guard)", () => {
 });
 
 describe("snapshot", () => {
-  test("emits aria-tree YAML to stdout", async () => {
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
-      }),
-    });
+  const snap = {
+    url: "https://x", title: "X",
+    tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
+    refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+  };
+  const yaml = "### Page\n- Page URL: https://x\n- Page Title: X\n### Snapshot\n" +
+    "```yaml\n- link \"Home\" [ref=e1]:\n  - /url: /\n```";
+
+  test("prints the page wrapper around the aria-tree YAML", async () => {
+    const c = fakeClient({ evaluate: () => snap });
     const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, {});
-    expect(out).toBe(`- generic:\n  - link "Home": [ref=e1]`);
+    expect(out).toBe(yaml);
   });
-  test("--filename writes file and prints 'wrote <path>'", async () => {
-    const tmp = `/tmp/bowser-snap-${Date.now()}.yml`;
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
-      }),
-    });
-    const out = await cmdSnapshot(
-      { ...ctx(), connect: async () => c },
-      { filename: tmp },
-    );
-    expect(out).toBe(`wrote ${tmp}`);
-    expect(await Bun.file(tmp).text()).toContain("[ref=e1]");
+  test("--filename writes the printed text and prints 'wrote <path>'", async () => {
+    const file = join(tmp, `snap-${Date.now()}.md`);
+    const c = fakeClient({ evaluate: () => snap });
+    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { filename: file });
+    expect(out).toBe(`wrote ${file}`);
+    expect(await Bun.file(file).text()).toBe(yaml + "\n");
   });
-  test("--json emits JSON", async () => {
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
-      }),
-    });
+  test("--json prints { snapshot: <tree> } only", async () => {
+    const c = fakeClient({ evaluate: () => snap });
     const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, {});
-    const obj = JSON.parse(out);
-    expect(obj.refs[0].ref).toBe("e1");
-  });
-  test("--depth=N is honored — depth=1 flattens nested refs", async () => {
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [
-          { id: "e1", selector: "a", role: "link", name: "Home", tag: "a", href: "/",
-            path: [{ role: "navigation", name: "Primary" }] },
-        ],
-      }),
-    });
-    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { depth: "1" });
-    // depth=1 → flat. No "navigation" parent line.
-    expect(out).not.toContain("navigation");
-    expect(out).toContain(`- link "Home": [ref=e1]`);
-  });
-  test("--depth=0 rejected as user error", async () => {
-    const c = fakeClient({
-      evaluate: () => ({ url: "u", title: "t", refs: [] }),
-    });
-    await expect(
-      cmdSnapshot({ ...ctx(), connect: async () => c }, { depth: "0" }),
-    ).rejects.toThrow(/usage:/);
+    expect(JSON.parse(out)).toEqual({ snapshot: '- link "Home" [ref=e1]:\n  - /url: /' });
   });
 });
 
@@ -450,6 +416,7 @@ describe("cmdClick", () => {
       evaluate: () => ({
         url: "https://example.com/",
         title: "Example",
+        tree: [],
         refs: [
           { id: "e1", selector: "html > body > button", role: "button", name: "Go", tag: "button" },
         ],
@@ -487,6 +454,7 @@ describe("cmdFill", () => {
       evaluate: () => ({
         url: "https://example.com/",
         title: "Example",
+        tree: [],
         refs: [
           { id: "e1", selector: "html > body > input", role: "textbox", name: "Email", tag: "input" },
         ],
