@@ -151,7 +151,7 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     throw new Error(`--persistent: the browser refused profile ${opts.profile}: ${msg}`);
   }
   // The real Bun.WebView satisfies ViewLike structurally; no cast needed here.
-  return wrapView(view, spec, NAV_TIMING, opts.profile);
+  return wrapView(view, spec, NAV_TIMING, opts.profile ? { profile: opts.profile } : undefined);
 }
 
 /** How long the navigation watch waits. Exported so tests can shorten it. */
@@ -202,9 +202,20 @@ function navigationWatch(view: ViewLike, timing: NavTiming) {
   };
 }
 
+/** A persistent store, and how `close` waits for Chromium to write it.
+ *  The check and the cap are injectable for tests. */
+export interface PersistentStore {
+  profile: string;
+  /** Whether our Chromium still runs on `profile`. Must stop when `signal` aborts. */
+  chromiumRunning?: (signal: AbortSignal) => Promise<boolean>;
+  /** Hard deadline for the whole wait, checks included. */
+  exitCapMs?: number;
+}
+
 /** Turn a view into a Browser. Separate from openBrowser so tests can pass a
  *  fake view; openBrowser is the only caller with a real one. */
-export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING, profile?: string): Browser {
+export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING, store?: PersistentStore): Browser {
+  const profile = store?.profile;
   const nav = navigationWatch(view, timing);
   const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     // view.cdp() exists on the chrome backend only. On webkit Bun throws
@@ -267,7 +278,10 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
         try {
           await view.cdp("Browser.close");
         } catch {}
-        await waitForChromiumExit(profile);
+        await waitUntilGone(
+          store?.chromiumRunning ?? ((signal) => chromiumRunning(profile, signal)),
+          store?.exitCapMs ?? 1500,
+        );
       } else if (profile) {
         // WebKit hands a page's storage over when the page goes away;
         // leaving it for about:blank kept the item 40 times in 40.
@@ -319,22 +333,38 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
   };
 }
 
-/** Wait, up to `capMs`, until no Chromium process runs on `profile`.
- *  Chromium is started with `--user-data-dir=<profile>`, and Bun exposes no
- *  handle on it, so its command line is how to find it. */
-async function waitForChromiumExit(profile: string, capMs = 1500): Promise<void> {
+/** Poll `running` until it reports false, under one hard deadline that
+ *  also bounds each check: a check still pending at the deadline is aborted
+ *  and abandoned. Chromium's profile has no lock file to watch
+ *  (chrome-headless-shell writes no SingletonLock), so the check is `ps`. */
+async function waitUntilGone(running: (signal: AbortSignal) => Promise<boolean>, capMs: number): Promise<void> {
+  const ctl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((r) => { timer = setTimeout(r, capMs); });
+  const poll = (async () => {
+    while (!ctl.signal.aborted && (await running(ctl.signal))) await Bun.sleep(20);
+  })().catch(() => {});
+  await Promise.race([poll, deadline]);
+  clearTimeout(timer);
+  ctl.abort();
+}
+
+/** True while a Chromium started by this process runs on `profile`: a direct
+ *  child of ours (Bun spawns it) with `--user-data-dir=<profile>`, so no other
+ *  process using the same directory counts. Aborting kills the `ps`. */
+async function chromiumRunning(profile: string, signal: AbortSignal): Promise<boolean> {
   const flag = `--user-data-dir=${profile}`;
-  const running = async (): Promise<boolean> => {
-    try {
-      const proc = Bun.spawn(["ps", "-axww", "-o", "command="], { stdout: "pipe", stderr: "ignore" });
-      const lines = (await new Response(proc.stdout).text()).split("\n");
-      return lines.some((l) => l.includes(`${flag} `) || l.endsWith(flag));
-    } catch {
-      return false;
-    }
-  };
-  const deadline = Date.now() + capMs;
-  while (Date.now() < deadline && (await running())) await Bun.sleep(20);
+  try {
+    const proc = Bun.spawn(["ps", "-axww", "-o", "ppid=,command="], { stdout: "pipe", stderr: "ignore", signal });
+    const lines = (await new Response(proc.stdout).text()).split("\n");
+    return lines.some((line) => {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+      if (!m || Number(m[1]) !== process.pid) return false;
+      return m[2]!.includes(`${flag} `) || m[2]!.endsWith(flag);
+    });
+  } catch {
+    return false;
+  }
 }
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];

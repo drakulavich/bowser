@@ -112,15 +112,48 @@ describe("wrapView close", () => {
   test("on chrome with a persistent profile, close shuts Chromium down through CDP first", async () => {
     const v = fakeView();
     v.close = () => { v.calls.push(["close", []]); };
-    await wrapView(v, chrome, undefined, "/tmp/no-such-bowser-profile").close();
+    await wrapView(v, chrome, undefined, { profile: "/p", chromiumRunning: async () => false }).close();
     expect(v.calls).toEqual([["cdp", ["Browser.close", undefined]], ["close", []]]);
   });
 
   test("on webkit with a persistent profile, close leaves the page first so its storage is written", async () => {
     const v = fakeView();
     v.close = () => { v.calls.push(["close", []]); };
-    await wrapView(v, webkit, undefined, "/tmp/no-such-bowser-profile").close();
+    await wrapView(v, webkit, undefined, { profile: "/p" }).close();
     expect(v.calls).toEqual([["navigate", ["about:blank"]], ["close", []]]);
+  });
+
+  test("close returns within the cap when the Chromium exit check never answers", async () => {
+    // A stalled check (a hung `ps`) must not hold close past its cap: the
+    // daemon's own close grace is 2 s and is spent next.
+    const v = fakeView();
+    v.close = () => { v.calls.push(["close", []]); };
+    let aborted = false;
+    const t0 = Date.now();
+    await wrapView(v, chrome, undefined, {
+      profile: "/p",
+      exitCapMs: 100,
+      chromiumRunning: (signal) => {
+        signal.addEventListener("abort", () => { aborted = true; });
+        return new Promise<boolean>(() => {});
+      },
+    }).close();
+    expect(Date.now() - t0).toBeLessThan(400);
+    expect(aborted).toBe(true);
+    expect(v.calls.at(-1)).toEqual(["close", []]);
+  });
+
+  test("close returns within the cap when Chromium never exits", async () => {
+    const v = fakeView();
+    v.close = () => { v.calls.push(["close", []]); };
+    let checks = 0;
+    const t0 = Date.now();
+    await wrapView(v, chrome, undefined, {
+      profile: "/p", exitCapMs: 100, chromiumRunning: async () => { checks++; return true; },
+    }).close();
+    expect(Date.now() - t0).toBeLessThan(400);
+    expect(checks).toBeGreaterThan(1);
+    expect(v.calls.at(-1)).toEqual(["close", []]);
   });
 
   test("an ephemeral view just closes", async () => {
