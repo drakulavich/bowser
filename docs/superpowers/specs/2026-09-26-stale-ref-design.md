@@ -7,7 +7,7 @@ by the owner on 2026-09-26).
 
 A ref is saved in `state.json` as a CSS selector (`cssPath`, an `nth-of-type` chain from `html`).
 When the element is gone after a re-render (the ET-03 case: a todo removed by "Clear completed"),
-an action on its ref waits the full `BOWSER_OP_TIMEOUT_MS` (8 s) and fails with
+an action on its ref waits the full `BOWSER_OP_TIMEOUT_MS` (30 s by default; the ET-03 session had it set to 8 s) and fails with
 `operation 'click' timed out` (exit 2). Worse, when the DOM shifts, the saved selector can match a
 *different* element, and the action lands on the wrong target.
 
