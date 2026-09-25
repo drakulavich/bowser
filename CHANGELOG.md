@@ -22,6 +22,11 @@ All notable changes to this project are documented here. This project follows
     unchanged. A navigation or reload starts again at `e1`.
   - **`--json`** prints `{"snapshot": "<tree>"}`; the `url`, `title` and `refs` keys are gone.
   - **`--depth=0`** is now valid and means unlimited, like no flag; it was a usage error.
+  - **Actions check the ref's kind.** Since a ref can now be a listitem or a paragraph, `check`
+    and `uncheck` accept only a checkbox, radio, switch or checkable menu item, `select` only a
+    `<select>`, and `fill` only an `<input>`, `<textarea>` or contenteditable element. Any other
+    ref exits 1 with `ref 'eN' is not …` before anything reaches the browser; before, `check` on
+    a listitem clicked it and reported success.
 
   Not covered: iframe contents (an iframe prints as a leaf with a ref), shadow DOM, `aria-owns`,
   the `- Console:` line and the global `--raw` flag. Known gap: on Chromium, `check` does not

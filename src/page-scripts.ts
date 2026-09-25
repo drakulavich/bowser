@@ -431,6 +431,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     const saved = { id: r.ref, selector: cssPath(el), role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
     if (tagOf(el) === 'A' && el.getAttribute('href')) saved.href = el.getAttribute('href');
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && el.value) saved.value = String(el.value).slice(0, 120);
+    if (el.isContentEditable) saved.editable = true;
     refs.push(saved);
   }
 

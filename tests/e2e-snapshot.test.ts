@@ -177,6 +177,13 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
     expect(await refNamed("Toggle buy milk")).toBe("e12");
   }, 60_000);
 
+  test("check refuses the listitem ref and leaves the todo unchecked", async () => {
+    // e11 is the listitem around "buy milk" (see todo-app-added.yaml).
+    await expect(cmdCheck(ctx, "e11")).rejects.toThrow("ref 'e11' is not a checkbox or radio button (listitem)");
+    const after = tree(await cmdSnapshot(ctx));
+    expect(after).toContain('\n      - checkbox "Toggle buy milk" [ref=e12]\n');
+  }, 60_000);
+
   test("check through the new ref prints the toggled tree", async () => {
     await cmdCheck(ctx, "e12");
     // playwright-cli's check clicks the checkbox, which takes focus and is then

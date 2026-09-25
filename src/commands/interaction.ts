@@ -3,7 +3,27 @@
 
 import type { Command } from "../cli/registry.ts";
 import { clearForFillScript } from "../page-scripts.ts";
+import type { Ref } from "../state.ts";
 import { loadRef, reply, syncState, withClient, type CommandContext } from "./context.ts";
+
+// Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so
+// check/uncheck/select/fill refuse a ref that cannot take the action, from the
+// saved ref alone: no daemon request, no side effect. Spec §5.
+const CHECKABLE = ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"];
+const FILLABLE = ["textbox", "searchbox", "spinbutton", "combobox"];
+const KINDS = {
+  check: { what: "a checkbox or radio button", ok: (r: Ref) => CHECKABLE.includes(r.role) },
+  select: { what: "a <select> element", ok: (r: Ref) => r.tag === "select" },
+  fill: {
+    what: "an <input>, <textarea> or contenteditable element",
+    ok: (r: Ref) => r.editable === true || (["input", "textarea"].includes(r.tag) && FILLABLE.includes(r.role)),
+  },
+};
+
+function requireKind(kind: keyof typeof KINDS, ref: string, target: Ref): void {
+  const k = KINDS[kind];
+  if (!k.ok(target)) throw new Error(`ref '${ref}' is not ${k.what} (${target.role})`);
+}
 
 export async function cmdClick(
   ctx: CommandContext,
@@ -25,6 +45,7 @@ export async function cmdFill(
 ): Promise<string> {
   if (text === undefined) throw new Error("usage: bowser fill <ref> <text>");
   const { target } = await loadRef(ctx.session, ref);
+  requireKind("fill", ref, target);
   return withClient(ctx, async (c) => {
     await c.request("click", [target.selector]);
     // JSON.stringify so selectors with quotes are safely embedded.
@@ -60,6 +81,7 @@ export async function cmdHover(ctx: CommandContext, ref: string): Promise<string
 export async function cmdSelect(ctx: CommandContext, ref: string, value: string): Promise<string> {
   if (value === undefined) throw new Error("usage: bowser select <ref> <value>");
   const { target } = await loadRef(ctx.session, ref);
+  requireKind("select", ref, target);
   return withClient(ctx, async (c) => {
     await c.request("select", [target.selector, value]);
     return reply(ctx, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
@@ -68,6 +90,7 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
 
 export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string> {
   const { target } = await loadRef(ctx.session, ref);
+  requireKind("check", ref, target);
   return withClient(ctx, async (c) => {
     await c.request("check", [target.selector]);
     return reply(ctx, { ok: true, ref }, `checked ${ref}`);
@@ -76,6 +99,7 @@ export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string
 
 export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<string> {
   const { target } = await loadRef(ctx.session, ref);
+  requireKind("check", ref, target);
   return withClient(ctx, async (c) => {
     await c.request("uncheck", [target.selector]);
     return reply(ctx, { ok: true, ref }, `unchecked ${ref}`);

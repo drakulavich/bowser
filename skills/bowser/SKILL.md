@@ -140,6 +140,7 @@ bowser install                            # one-time Chromium download
 - **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
 - **`BOWSER_OP_TIMEOUT_MS`** — per-operation timeout in ms (default `30000`; `0` disables). Set higher if a slow page causes timeout errors.
 - **"ref 'eN' not found"** — snapshot is stale. Run `bowser snapshot`.
+- **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.
 - **No Chromium found** — run `bowser install` or set `BOWSER_CHROMIUM_PATH`.
