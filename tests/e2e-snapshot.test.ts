@@ -102,11 +102,11 @@ const EDGES_HTML = `<!doctype html>
 </body></html>`;
 
 /** A contenteditable element whose role alone (textbox on a <div>) would not
- *  let `fill` through: only the walker's `editable` flag does. Empty, because
- *  fill does not clear contenteditable content. */
+ *  let `fill` through: only the walker's `editable` flag does. It starts with
+ *  text, which `fill` must replace, as playwright's does. */
 const EDITABLE_HTML = `<!doctype html>
 <html><head><title>Editable</title></head>
-<body><div id="notes" contenteditable="true" role="textbox" aria-label="Notes" style="min-height:2em"></div></body></html>`;
+<body><div id="notes" contenteditable="true" role="textbox" aria-label="Notes" style="min-height:2em">old text</div></body></html>`;
 
 runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveBackend)", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
@@ -250,11 +250,11 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
     ].join("\n"));
   }, 60_000);
 
-  test("fill accepts a contenteditable ref and its text changes", async () => {
+  test("fill accepts a contenteditable ref and replaces its text", async () => {
     await cmdGoto(ctx, `${base}/editable.html`);
     await cmdSnapshot(ctx);
     await cmdFill(ctx, await refNamed("Notes"), "hello editable");
-    expect(await cmdEval(ctx, "document.getElementById('notes').textContent")).toContain("hello editable");
+    expect(await cmdEval(ctx, "JSON.stringify(document.getElementById('notes').textContent)")).toContain('"hello editable"');
   }, 60_000);
 
   // One page, several rules; the golden line that breaks names the rule:

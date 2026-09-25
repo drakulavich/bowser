@@ -568,8 +568,15 @@ export function setCheckedScript(selector: string, checked: boolean): string {
       })()`;
 }
 
+/** Empties the element `fill` is about to type into, like playwright's fill:
+ *  an input/textarea's value, or a contenteditable element's content, with the
+ *  caret put back inside it (the text node the click placed it in is gone). */
 export function clearForFillScript(selector: string): string {
-  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (el && 'value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); } })()`;
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return;
+    if ('value' in el) el.value = '';
+    else if (el.isContentEditable) { el.textContent = ''; el.focus(); getSelection().collapse(el, 0); }
+    else return;
+    el.dispatchEvent(new Event('input', { bubbles: true })); })()`;
 }
 
 export type StorageArea = "localStorage" | "sessionStorage";
