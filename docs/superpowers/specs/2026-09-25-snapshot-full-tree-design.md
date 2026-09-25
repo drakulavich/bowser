@@ -146,8 +146,8 @@ number; or equals, ignoring case, one of `y n yes no true false on off null`.
 ### 4. `--depth=N`
 
 Depth 0 is the first printed line. With `--depth=N` (N ≥ 1), nodes deeper than N are not printed,
-and a node at depth exactly N prints as a leaf but keeps its inline text value, and a link keeps
-its `/url` prop line. `--depth=0` and no flag mean unlimited. Non-integers and negatives are a
+and a node at depth exactly N prints without its children but keeps its inline text value and
+its prop lines (`/url`, `/placeholder`). `--depth=0` and no flag mean unlimited. Non-integers and negatives are a
 usage error (`usage: --depth=N …`, exit 1). Collapse happens before depth is applied.
 
 ## Acceptance (public seams only)
