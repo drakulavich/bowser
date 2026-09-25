@@ -224,7 +224,9 @@ describe("open --persistent / --profile", () => {
     const t0 = Date.now();
     const proc = Bun.spawn(
       [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", `--profile=${target}`, "-s", session],
-      { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
+      // No inherited backend settings: an invalid BOWSER_BACKEND is refused
+      // before mkdir, and would fail this test for the wrong reason.
+      { env: { ...process.env, HOME: tmp, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined }, stdout: "pipe", stderr: "pipe" },
     );
     const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
     expect(stderr).toContain(target);
