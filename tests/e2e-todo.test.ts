@@ -71,9 +71,9 @@ runOrSkip("e2e: local todo app (backend from resolveBackend)", () => {
 
     // 2. First snapshot — we should see the input, Add button, and Clear button.
     const snap1 = await cmdSnapshot({ session, json: false });
-    expect(snap1).toContain('"New todo": [ref=');
-    expect(snap1).toContain('"Add": [ref=');
-    expect(snap1).toContain('"Clear completed": [ref=');
+    expect(snap1).toContain('textbox "New todo" [ref=');
+    expect(snap1).toContain('button "Add" [ref=');
+    expect(snap1).toContain('button "Clear completed" [ref=');
 
     const state1 = await loadState(session);
     const inputRef = state1!.refs.find((r) => r.name === "New todo")!;
@@ -120,7 +120,7 @@ runOrSkip("e2e: local todo app (backend from resolveBackend)", () => {
 
     // 5. Toggle the first todo via Bowser (checkbox is a new ref after re-snap).
     const snap2 = await cmdSnapshot({ session, json: false });
-    expect(snap2).toContain('"Toggle buy milk": [ref=');
+    expect(snap2).toContain('checkbox "Toggle buy milk" [ref=');
     const state2 = await loadState(session);
     const toggleFirst = state2!.refs.find((r) => r.name === "Toggle buy milk")!;
     await cmdClick({ session, json: true }, toggleFirst.id);
@@ -133,8 +133,8 @@ runOrSkip("e2e: local todo app (backend from resolveBackend)", () => {
 
     // Re-snap once more to capture the resulting DOM.
     const snap4 = await cmdSnapshot({ session, json: false });
-    expect(snap4).not.toContain('"Toggle buy milk": [ref=');
-    expect(snap4).toContain('"Toggle write tests": [ref=');
-    expect(snap4).toContain('"Toggle ship bowser": [ref=');
+    expect(snap4).not.toContain('checkbox "Toggle buy milk" [ref=');
+    expect(snap4).toContain('checkbox "Toggle write tests" [ref=');
+    expect(snap4).toContain('checkbox "Toggle ship bowser" [ref=');
   }, 120_000);
 });

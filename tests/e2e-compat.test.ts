@@ -1,7 +1,9 @@
 // Differential test: the same todo flow through playwright-cli (WebKit) and
 // bowser (WebKit) against the same fixture. playwright-cli 0.1.x prints the
-// full accessibility tree, bowser prints interactive elements only, so the
-// assertion is subset, not equality: every (role, name) bowser reports must
+// full accessibility tree and so does bowser, but bowser's walker skips
+// iframes' contents and the engines differ in details (tests/e2e-snapshot
+// has the byte-exact goldens), so the assertion here is subset, not
+// equality: every (role, name) bowser reports must
 // appear in playwright-cli's tree, before and after the flow.
 //
 // Skips unless BOWSER_E2E=1, on macOS, with playwright-cli in $PATH and its
@@ -57,11 +59,11 @@ function parsePlaywright(stdout: string): Entry[] {
   return out;
 }
 
-/** (role, name) pairs for bowser's leaf refs. */
+/** (role, name) pairs for bowser's named, ref-bearing nodes. */
 function parseBowser(yaml: string): Entry[] {
   const out: Entry[] = [];
   for (const line of yaml.split("\n")) {
-    const r = line.match(/^\s*- (\S+) "([^"]*)": \[ref=e\d+\]/);
+    const r = line.match(/^\s*- '?(\S+) "([^"]*)"[^\n]*\[ref=e\d+\]/);
     if (r) out.push({ role: r[1]!, name: r[2]! });
   }
   return out;

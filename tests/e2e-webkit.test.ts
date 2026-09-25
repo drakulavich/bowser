@@ -103,12 +103,12 @@ runOrSkip("e2e: WebKit agent loop", () => {
   test("snapshot lists every interactive element with a ref", async () => {
     const yaml = await cmdSnapshot(text);
     for (const line of [
-      'textbox "Name": [ref=',
-      'combobox "Color": [ref=',
-      'checkbox "Agree": [ref=',
-      'button "Submit": [ref=',
-      'button "Hover me": [ref=',
-      'link "Page two": [ref=',
+      'textbox "Name" [ref=',
+      'combobox "Color" [ref=',
+      'checkbox "Agree" [ref=',
+      'button "Submit" [ref=',
+      'button "Hover me" [ref=',
+      'link "Page two" [ref=',
     ]) {
       expect(yaml).toContain(line);
     }

@@ -11,7 +11,7 @@ User docs live in `README.md`, `CHANGELOG.md`, and `skills/bowser/SKILL.md`. Thi
 | What command does X? | `src/cli/registry.ts` (the `COMMANDS` list), `src/commands/<domain>.ts` (the `Command` objects and their implementations; `context.ts` has what they share) |
 | A script injected into the page? | `src/page-scripts.ts` — the only file that builds one |
 | How is a flag parsed? | `src/cli/parser.ts` |
-| What does the snapshot YAML look like? | `src/snapshot.ts` (`toYaml`, `toJson`); the page-side walker is `SNAPSHOT_SCRIPT` in `src/page-scripts.ts` |
+| What does the snapshot YAML look like? | `tests/fixtures/snapshots/*.yaml` (real output); the renderer is `src/snapshot.ts` (`renderTree`, `renderPage`), the page-side walker `SNAPSHOT_SCRIPT` in `src/page-scripts.ts` |
 | Where is session state? | `src/state.ts` — also `~/.bowser/sessions/<name>/state.json` at runtime |
 | Daemon protocol? | `src/daemon/protocol.ts` (the `DaemonOps` map), `src/daemon/server.ts` (`createHandler`, `startDaemon`), `src/daemon/client.ts` (`DaemonClient`, `connectOrSpawn`), `src/daemon/main.ts` (spawn entry) |
 | WebView glue (Browser, cookies, navigation watch)? | `src/browser.ts` (`wrapView`, `openBrowser`) |
@@ -35,9 +35,10 @@ BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub sea
 
 `tests/e2e-compat.test.ts` diffs bowser against `playwright-cli` on WebKit and
 skips unless `playwright-cli` is in `$PATH` with its WebKit installed
-(`playwright-cli install-browser webkit`). It asserts bowser's refs are a
-subset of `playwright-cli`'s tree; the formats themselves differ on purpose
-until the snapshot-parity task (see the 2026-09-05 refactor spec, "Findings").
+(`playwright-cli install-browser webkit`). It asserts every (role, name)
+bowser reports appears in `playwright-cli`'s tree, a subset rather than
+equality because bowser skips iframe contents and the engines differ in
+details. Byte-exact parity is `tests/e2e-snapshot.test.ts`'s job.
 
 Requires Bun ≥ 1.3.12 — `Bun.WebView` does not exist in 1.3.11, and devs on it hit confusing failures inside the daemon. `engines.bun` and the CI `bun-version` constraints catch this; don't loosen them. Bumping the floor means updating `package.json`, the README, and `test.yml`'s four `bun-version` pins — `release.yml` uses `bun-version: latest` and enforces no floor.
 
@@ -62,8 +63,8 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 ## Conventions
 
 - **Refs are bare `eN`** (no `@` prefix). `resolveRef` rejects `@`-prefixed input.
-- **Snapshot output is aria-tree YAML** matching `playwright-cli` byte-for-byte (no `url:`/`title:` header). `--depth=N` is honored in `toYaml` (`src/snapshot.ts`): default unbounded, `depth=1` reproduces the flat v0.2 output, `depth=0` is a user error. Change nesting there, not in the parser or callers.
-- **Exit codes**: `0` success, `1` user error (`usage:`, `unknown command`, `expected a ref`, `ref '...' not found`, `no open page`, `invalid BOWSER_BACKEND`, `BOWSER_BACKEND=webkit`), `2` runtime error. The regex lives in `src/cli.ts`'s `import.meta.main` block — keep error messages aligned with it.
+- **Snapshot output is `playwright-cli` 0.1.x's**: a `### Page` / `- Page URL:` / `- Page Title:` / `### Snapshot` wrapper around a ```` ```yaml ```` fenced full aria tree (`--json` is `{"snapshot": "<tree>"}`). Refs are sticky per document and not limited to interactive elements, so numbering has gaps. The work is split: the walker (`SNAPSHOT_SCRIPT` in `src/page-scripts.ts`) is semantic — roles, names, text, generic collapse, refs; the renderer (`src/snapshot.ts`) is layout — YAML quoting, inline vs block shapes, `--depth`, the wrapper. `--depth=0` or no flag is unlimited. Put a change on the side it belongs to. The spec is `docs/superpowers/specs/2026-09-25-snapshot-full-tree-design.md`; iframe contents, shadow DOM, `aria-owns` and the `- Console:` line are out of scope.
+- **Exit codes**: `0` success, `1` user error (`usage:`, `unknown command`, `expected a ref`, `ref '...' not found`, `ref '...' is not a …` (a `check`/`uncheck`/`select`/`fill` ref of the wrong kind, checked in `interaction.ts`'s `KINDS` from the saved ref), `no open page`, `invalid BOWSER_BACKEND`, `BOWSER_BACKEND=webkit`), `2` runtime error. The regex lives in `src/cli.ts`'s `import.meta.main` block — keep error messages aligned with it.
 - **Per-command implementations** live in `src/commands/<domain>.ts` and use the `context.ts` helpers: `withClient`, `loadRef(session, ref)` for ref-action commands, `emptyState(name)` for null-state fallbacks, `reply(ctx, json, text)` for the answer, `syncState(prev, state)` after an action that may navigate.
 - **Daemon round-trips are not free** — one Unix socket RTT per `c.request(...)`. `cmdFill` already costs 3 (click → evaluate(clear) → type); collapse if you add a similar command.
 - **Bun-native, not Node-native**: prefer `Bun.file`, `Bun.write`, `Bun.spawn`, `Bun.connect`. Avoid npm dependencies — the package is intentionally devDep-only.
@@ -80,7 +81,7 @@ The workflow then cross-compiles 4 binaries, creates the GitHub Release, and pub
 3. Add a unit test in `tests/commands.test.ts`.
 4. Add a row to the README table and the SKILL.md command reference — `tests/docs-drift.test.ts` fails until you do.
 
-Changing snapshot output means updating `src/snapshot.ts`, the golden in `tests/snapshot.test.ts`, **and** the substring matchers in `tests/e2e*.test.ts` (they assert things like `"Add": [ref=`).
+Snapshot output is pinned by the goldens in `tests/fixtures/snapshots/`, each the tree block of a `playwright-cli` 0.1.13 capture (Edge, `--browser=msedge`) of the matching fixture, compared byte-for-byte by `tests/e2e-snapshot.test.ts`. They are `playwright-cli`'s text, not bowser's: to recapture one, serve `tests/fixtures/`, run `playwright-cli` through the same command sequence the test runs (refs and `[active]` depend on it), and paste the lines inside the ```` ```yaml ```` fence. Never edit a golden to match bowser; the one ruled edit is `probe.yaml`'s iframe, printed as a leaf. A platform difference goes in that test as a line-scoped `Deviation`, with its reason in the header comment. Renderer changes also need `tests/snapshot.test.ts`, and the line matchers in the other `tests/e2e*.test.ts` (they assert things like `button "Add" [ref=`).
 
 ## Gotchas (lessons learned)
 

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import type { Command } from "../cli/registry.ts";
 import { str } from "../cli/parser.ts";
 import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
-import { toJson, toYaml, type SnapshotResult } from "../snapshot.ts";
+import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
 import { reply, withClient, type CommandContext } from "./context.ts";
 
@@ -12,26 +12,25 @@ export async function cmdSnapshot(
   ctx: CommandContext,
   opts: { filename?: string; depth?: string } = {},
 ): Promise<string> {
-  let depth: number | undefined;
-  if (opts.depth !== undefined) {
-    const n = Number(opts.depth);
-    if (!Number.isInteger(n) || n < 1) {
-      throw new Error(`usage: --depth=N requires a positive integer (got '${opts.depth}')`);
-    }
-    depth = n;
+  // 0 (the default) means unlimited, as in playwright-cli.
+  if (opts.depth !== undefined && !/^\d+$/.test(opts.depth)) {
+    throw new Error(`usage: --depth=N requires a non-negative integer (got '${opts.depth}')`);
   }
+  const depth = Number(opts.depth ?? 0);
   return withClient(ctx, async (c) => {
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
     await saveState({
       name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
     });
-    const out = ctx.json ? toJson(snap) : toYaml(snap, depth);
+    const out = ctx.json
+      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth) }, null, 2)
+      : renderPage(snap, depth);
     if (opts.filename) {
-      await Bun.write(opts.filename, out);
+      // The file holds exactly what stdout would: the text plus the CLI's newline.
+      await Bun.write(opts.filename, out + "\n");
       return `wrote ${opts.filename}`;
     }
-    // toYaml ends with a newline; trim it because the CLI layer adds one.
-    return out.endsWith("\n") ? out.slice(0, -1) : out;
+    return out;
   });
 }
 

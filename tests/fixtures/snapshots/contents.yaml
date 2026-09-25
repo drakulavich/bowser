@@ -1,0 +1,8 @@
+- generic [active] [ref=e1]:
+  - button "Wrapped button" [ref=e3]
+  - text: wrapped text
+  - generic [ref=e4]:
+    - button "One" [ref=e5]
+    - button "Two" [ref=e6]
+  - navigation "Contents nav" [ref=e7]:
+    - button "Nav button" [ref=e8]

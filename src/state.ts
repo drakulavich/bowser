@@ -18,8 +18,8 @@ export interface Ref {
   tag: string;
   href?: string;
   value?: string;
-  /** Landmark ancestors (root-most first) for nested snapshot rendering. */
-  path?: Array<{ role: string; name: string }>;
+  /** The element is contentEditable; `fill` accepts it whatever its role. */
+  editable?: boolean;
 }
 
 export interface SessionState {

@@ -109,64 +109,30 @@ describe("open (assertNavigated guard)", () => {
 });
 
 describe("snapshot", () => {
-  test("emits aria-tree YAML to stdout", async () => {
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
-      }),
-    });
+  const snap = {
+    url: "https://x", title: "X",
+    tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
+    refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+  };
+  const yaml = "### Page\n- Page URL: https://x\n- Page Title: X\n### Snapshot\n" +
+    "```yaml\n- link \"Home\" [ref=e1]:\n  - /url: /\n```";
+
+  test("prints the page wrapper around the aria-tree YAML", async () => {
+    const c = fakeClient({ evaluate: () => snap });
     const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, {});
-    expect(out).toBe(`- generic:\n  - link "Home": [ref=e1]`);
+    expect(out).toBe(yaml);
   });
-  test("--filename writes file and prints 'wrote <path>'", async () => {
-    const tmp = `/tmp/bowser-snap-${Date.now()}.yml`;
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
-      }),
-    });
-    const out = await cmdSnapshot(
-      { ...ctx(), connect: async () => c },
-      { filename: tmp },
-    );
-    expect(out).toBe(`wrote ${tmp}`);
-    expect(await Bun.file(tmp).text()).toContain("[ref=e1]");
+  test("--filename writes the printed text and prints 'wrote <path>'", async () => {
+    const file = join(tmp, `snap-${Date.now()}.md`);
+    const c = fakeClient({ evaluate: () => snap });
+    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { filename: file });
+    expect(out).toBe(`wrote ${file}`);
+    expect(await Bun.file(file).text()).toBe(yaml + "\n");
   });
-  test("--json emits JSON", async () => {
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
-      }),
-    });
+  test("--json prints { snapshot: <tree> } only", async () => {
+    const c = fakeClient({ evaluate: () => snap });
     const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, {});
-    const obj = JSON.parse(out);
-    expect(obj.refs[0].ref).toBe("e1");
-  });
-  test("--depth=N is honored — depth=1 flattens nested refs", async () => {
-    const c = fakeClient({
-      evaluate: () => ({
-        url: "https://x", title: "X",
-        refs: [
-          { id: "e1", selector: "a", role: "link", name: "Home", tag: "a", href: "/",
-            path: [{ role: "navigation", name: "Primary" }] },
-        ],
-      }),
-    });
-    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { depth: "1" });
-    // depth=1 → flat. No "navigation" parent line.
-    expect(out).not.toContain("navigation");
-    expect(out).toContain(`- link "Home": [ref=e1]`);
-  });
-  test("--depth=0 rejected as user error", async () => {
-    const c = fakeClient({
-      evaluate: () => ({ url: "u", title: "t", refs: [] }),
-    });
-    await expect(
-      cmdSnapshot({ ...ctx(), connect: async () => c }, { depth: "0" }),
-    ).rejects.toThrow(/usage:/);
+    expect(JSON.parse(out)).toEqual({ snapshot: '- link "Home" [ref=e1]:\n  - /url: /' });
   });
 });
 
@@ -450,6 +416,7 @@ describe("cmdClick", () => {
       evaluate: () => ({
         url: "https://example.com/",
         title: "Example",
+        tree: [],
         refs: [
           { id: "e1", selector: "html > body > button", role: "button", name: "Go", tag: "button" },
         ],
@@ -487,6 +454,7 @@ describe("cmdFill", () => {
       evaluate: () => ({
         url: "https://example.com/",
         title: "Example",
+        tree: [],
         refs: [
           { id: "e1", selector: "html > body > input", role: "textbox", name: "Email", tag: "input" },
         ],
@@ -620,6 +588,114 @@ describe("check / uncheck", () => {
     const c = fakeClient({});
     await cmdUncheck({ ...ctx(), connect: async () => c }, "e4");
     expect(c.calls).toContainEqual(["uncheck", ["input.cb"]]);
+  });
+});
+
+describe("actions refuse a ref of the wrong kind", () => {
+  // One ref per kind the spec (§5) names, plus non-interactive ones that full-tree
+  // snapshots now give refs to.
+  const REFS = [
+    { id: "e1",  selector: "li",       role: "listitem",         name: "",       tag: "li" },
+    { id: "e2",  selector: "input.cb", role: "checkbox",         name: "Agree",  tag: "input" },
+    { id: "e3",  selector: "input.r",  role: "radio",            name: "Red",    tag: "input" },
+    { id: "e4",  selector: "button.s", role: "switch",           name: "Dark",   tag: "button" },
+    { id: "e5",  selector: "div.mc",   role: "menuitemcheckbox", name: "Bold",   tag: "div" },
+    { id: "e6",  selector: "div.mr",   role: "menuitemradio",    name: "Left",   tag: "div" },
+    { id: "e7",  selector: "select",   role: "combobox",         name: "Color",  tag: "select" },
+    { id: "e8",  selector: "input.t",  role: "textbox",          name: "Email",  tag: "input" },
+    { id: "e9",  selector: "textarea", role: "textbox",          name: "Notes",  tag: "textarea" },
+    { id: "e10", selector: "input.q",  role: "searchbox",        name: "Search", tag: "input" },
+    { id: "e11", selector: "input.n",  role: "spinbutton",       name: "Qty",    tag: "input" },
+    { id: "e12", selector: "input.l",  role: "combobox",         name: "City",   tag: "input" },
+    { id: "e13", selector: "div.ce",   role: "generic",          name: "",       tag: "div", editable: true },
+    { id: "e14", selector: "p",        role: "paragraph",        name: "",       tag: "p" },
+  ];
+
+  let connected: boolean;
+  let c: ReturnType<typeof fakeClient>;
+  const actx = () => ({ ...ctx(), connect: async () => { connected = true; return c; } });
+
+  beforeEach(async () => {
+    connected = false;
+    c = fakeClient({});
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+  });
+
+  const rejects = async (p: Promise<string>, message: string) => {
+    await expect(p).rejects.toThrow(message);
+    expect(connected).toBe(false);
+    expect(c.calls).toEqual([]);
+  };
+
+  test("check refuses a listitem and a textbox, sending nothing", async () => {
+    await rejects(cmdCheck(actx(), "e1"), "ref 'e1' is not a checkbox or radio button (listitem)");
+    await rejects(cmdCheck(actx(), "e8"), "ref 'e8' is not a checkbox or radio button (textbox)");
+  });
+
+  test("uncheck refuses a paragraph, sending nothing", async () => {
+    await rejects(cmdUncheck(actx(), "e14"), "ref 'e14' is not a checkbox or radio button (paragraph)");
+  });
+
+  test("select refuses a non-<select> combobox and a listitem, sending nothing", async () => {
+    await rejects(cmdSelect(actx(), "e12", "Paris"), "ref 'e12' is not a <select> element (combobox)");
+    await rejects(cmdSelect(actx(), "e1", "x"), "ref 'e1' is not a <select> element (listitem)");
+  });
+
+  test("fill refuses a listitem, a <select> and a checkbox, sending nothing", async () => {
+    const msg = (id: string, role: string) =>
+      `ref '${id}' is not an <input>, <textarea> or contenteditable element (${role})`;
+    await rejects(cmdFill(actx(), "e1", "x"), msg("e1", "listitem"));
+    await rejects(cmdFill(actx(), "e7", "x"), msg("e7", "combobox"));
+    await rejects(cmdFill(actx(), "e2", "x"), msg("e2", "checkbox"));
+    await rejects(cmdFill(actx(), "e14", "x"), msg("e14", "paragraph"));
+  });
+
+  test("check and uncheck accept checkbox, radio, switch, menuitemcheckbox, menuitemradio", async () => {
+    for (const id of ["e2", "e3", "e4", "e5", "e6"]) {
+      const sel = REFS.find((r) => r.id === id)!.selector;
+      await cmdCheck(actx(), id);
+      await cmdUncheck(actx(), id);
+      expect(c.calls).toContainEqual(["check", [sel]]);
+      expect(c.calls).toContainEqual(["uncheck", [sel]]);
+    }
+  });
+
+  test("select accepts a <select>", async () => {
+    await cmdSelect(actx(), "e7", "red");
+    expect(c.calls).toContainEqual(["select", ["select", "red"]]);
+  });
+
+  test("fill accepts textbox, textarea, searchbox, spinbutton, input combobox and contenteditable", async () => {
+    for (const id of ["e8", "e9", "e10", "e11", "e12", "e13"]) {
+      await cmdFill(actx(), id, "hi");
+    }
+    expect(c.calls.filter(([op]) => op === "type")).toHaveLength(6);
+  });
+
+  test("the CLI exits 1 on a wrong-kind ref", async () => {
+    const home = await mkdtemp(join(tmpdir(), "bowser-kind-"));
+    const prevHome = process.env.HOME;
+    const inHome = async <T>(fn: () => Promise<T>): Promise<T> => {
+      process.env.HOME = home;
+      try { return await fn(); } finally { process.env.HOME = prevHome; }
+    };
+    try {
+      await inHome(() => saveState({ name: "kind", url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() }));
+      const p = Bun.spawn({
+        cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", "kind", "check", "e1"],
+        env: { ...process.env, HOME: home },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
+      expect(stderr).toContain("ref 'e1' is not a checkbox or radio button (listitem)");
+      expect(code).toBe(1);
+    } finally {
+      // Without the guard the CLI spawns a real daemon; do not leave it running.
+      const pid = Number(await inHome(() => Bun.file(pidPath("kind")).text()).catch(() => ""));
+      if (pid > 0) try { process.kill(pid); } catch {}
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
 

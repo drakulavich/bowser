@@ -1,0 +1,51 @@
+- generic [active] [ref=e1]:
+  - navigation "Primary" [ref=e2]:
+    - link "Home" [ref=e3] [cursor=pointer]:
+      - /url: /a
+    - link "Say \"hi\"" [ref=e4] [cursor=pointer]:
+      - /url: "#x"
+  - banner [ref=e5]:
+    - 'heading "Sub: title" [level=2] [ref=e6]'
+  - main [ref=e7]:
+    - paragraph [ref=e8]:
+      - text: Hello bold world
+      - link "inline link" [ref=e9] [cursor=pointer]:
+        - /url: /in
+      - text: tail.
+    - paragraph [ref=e10]: "- starts with dash"
+    - paragraph [ref=e11]: "42"
+    - paragraph [ref=e12]: "yes"
+    - paragraph [ref=e13]: "a # hash"
+    - paragraph [ref=e14]: back\slash and "dq" and 'sq'
+    - 'button "Key: value" [ref=e15]': x
+    - button "Disabled btn" [disabled] [ref=e16]
+    - button "Pressed" [pressed] [ref=e17]
+    - button "Expanded" [expanded] [ref=e18]
+    - checkbox "Mixed" [checked=mixed] [ref=e19]
+    - radio "Radio A" [checked] [ref=e20]
+    - textbox "Notes" [ref=e21]: line1 line2
+    - img "Pixel" [ref=e22]
+    - text: inline span text
+    - generic [ref=e23]: block div text
+    - generic [ref=e24]: nested spans
+    - list [ref=e25]:
+      - listitem [ref=e26]: One
+      - listitem [ref=e27]:
+        - text: Two
+        - link "link" [ref=e28] [cursor=pointer]:
+          - /url: /t
+    - table [ref=e29]:
+      - rowgroup [ref=e30]:
+        - row "H" [ref=e31]:
+          - columnheader "H" [ref=e32]
+        - row "C" [ref=e33]:
+          - cell "C" [ref=e34]
+    - region "Named region" [ref=e35]:
+      - paragraph [ref=e36]: in region
+    - generic [ref=e37] [cursor=pointer]: clickable div
+    - link "span in link" [ref=e38] [cursor=pointer]:
+      - /url: /p
+    - group [ref=e39]:
+      - generic "More" [ref=e40]
+    - iframe [ref=e41]
+  - contentinfo [ref=e42]: Foot

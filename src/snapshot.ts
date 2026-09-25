@@ -1,95 +1,114 @@
-// Snapshot: walk the page, assign eN refs to interactive elements,
-// and return a compact human- and agent-readable representation.
-//
-// The script itself lives in page-scripts.ts; it runs inside the page via
-// view.evaluate() so it stays in-process and doesn't require a second
-// round-trip. The returned JSON is then formatted as YAML (a stripped-down
-// subset we generate by hand — no dep needed) or raw JSON.
+// Snapshot rendering: the page-side walker (SNAPSHOT_SCRIPT in page-scripts.ts)
+// returns a SnapshotResult whose tree already carries every semantic decision
+// (roles, names, text, refs, cursor). This file does layout only, in
+// playwright-cli's aria-tree YAML: key, attribute order, YAML quoting,
+// leaf/inline/block shapes, props, --depth, and the `### Page` wrapper.
 
 import type { Ref } from "./state.ts";
+
+export interface AriaNode {
+  role: string;
+  name: string;                    // "" = no name
+  checked?: true | "mixed";
+  disabled?: true;
+  expanded?: true;
+  active?: true;
+  level?: number;
+  pressed?: true | "mixed";
+  selected?: true;
+  ref?: string;                    // "eN"
+  cursor?: true;                   // walker already applied the no-ancestor-cursor rule
+  props?: { url?: string; placeholder?: string };
+  children: Array<AriaNode | string>;   // strings are text lines, already normalized/merged
+}
 
 export interface SnapshotResult {
   url: string;
   title: string;
-  refs: Ref[];
+  tree: Array<AriaNode | string>;  // top level after generic collapse (usually one node)
+  refs: Ref[];                     // every ref-bearing node, for state.json
 }
 
-function escapeQuoted(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+const YAML_WORDS = ["y", "n", "yes", "no", "true", "false", "on", "off", "null"];
+
+/** playwright's yamlStringNeedsQuotes, plus tab (spec 3.5: any control char). */
+function needsQuotes(s: string): boolean {
+  return s === ""
+    || /^\s|\s$/.test(s)
+    || /[\x00-\x1f\x7f-\x9f]/.test(s)
+    || /^[-&*\],?!>|@"'#%[]/.test(s)
+    || /:(\s|$)/.test(s)
+    || /\s#/.test(s)
+    || /[{}`]/.test(s)
+    || !isNaN(Number(s))
+    || YAML_WORDS.includes(s.toLowerCase());
 }
 
-function indent(level: number): string {
-  return "  ".repeat(level);
+const ESCAPES: Record<string, string> = {
+  "\\": "\\\\", '"': '\\"', "\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t",
+};
+
+function quoteValue(s: string): string {
+  if (!needsQuotes(s)) return s;
+  return '"' + s.replace(/[\\"\x00-\x1f\x7f-\x9f]/g, (c) =>
+    ESCAPES[c] ?? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")) + '"';
 }
 
-function refLine(r: Ref, level: number): string {
-  let line = `${indent(level)}- ${r.role} "${escapeQuoted(r.name)}": [ref=${r.id}]`;
-  if (r.href) line += ` ${r.href}`;
-  else if (r.value) line += ` "${escapeQuoted(r.value)}"`;
-  return line;
+function quoteKey(s: string): string {
+  return needsQuotes(s) ? `'${s.replace(/'/g, "''")}'` : s;
 }
 
-/**
- * Render aria-tree-flavored YAML matching playwright-cli `snapshot`.
- *
- * Refs carry a `path` of landmark ancestors (e.g. `main`, `navigation`,
- * `form`, `list`). We render those landmarks as parent nodes, with refs as
- * leaves. `depth` clips the path: depth=1 is flat (root only), depth=2
- * permits one level of landmark nesting, etc. Default (undefined) is no clip.
- */
-export function toYaml(snap: SnapshotResult, depth?: number): string {
-  const maxAncestors =
-    typeof depth === "number" && depth >= 1 ? depth - 1 : Infinity;
-  const out: string[] = ["- generic:"];
+function key(n: AriaNode): string {
+  let k = n.role;
+  if (n.name) k += " " + JSON.stringify(n.name);
+  if (n.checked) k += n.checked === "mixed" ? " [checked=mixed]" : " [checked]";
+  if (n.disabled) k += " [disabled]";
+  if (n.expanded) k += " [expanded]";
+  if (n.active) k += " [active]";
+  if (n.level) k += ` [level=${n.level}]`;
+  if (n.pressed) k += n.pressed === "mixed" ? " [pressed=mixed]" : " [pressed]";
+  if (n.selected) k += " [selected]";
+  if (n.ref) k += ` [ref=${n.ref}]`;
+  if (n.cursor) k += " [cursor=pointer]";
+  return quoteKey(k);
+}
 
-  // Walk refs in order, maintaining a stack of currently-open landmark nodes.
-  // When the next ref's clipped path shares a prefix with the open stack, we
-  // reuse it; otherwise we close back to the shared prefix and open new nodes.
-  const openStack: { role: string; name: string }[] = [];
-
-  for (const r of snap.refs) {
-    const fullPath = r.path ?? [];
-    const path = fullPath.slice(0, maxAncestors);
-
-    // Find shared prefix length with openStack.
-    let shared = 0;
-    while (
-      shared < openStack.length &&
-      shared < path.length &&
-      openStack[shared]!.role === path[shared]!.role &&
-      openStack[shared]!.name === path[shared]!.name
-    ) {
-      shared++;
+/** The tree as YAML lines, no trailing newline. depth 0 = unlimited; with
+ *  depth N a node at level N prints as a leaf but keeps its props and its
+ *  inline text. */
+export function renderTree(tree: Array<AriaNode | string>, depth = 0): string {
+  const lines: string[] = [];
+  const limit = depth || Infinity;
+  const visit = (item: AriaNode | string, level: number): void => {
+    if (level > limit) return;
+    const pad = "  ".repeat(level);
+    if (typeof item === "string") {
+      lines.push(`${pad}- text: ${quoteValue(item)}`);
+      return;
     }
-    // Pop divergent suffix and push new nodes.
-    openStack.length = shared;
-    for (let k = shared; k < path.length; k++) {
-      const node = path[k]!;
-      // Level of this landmark node: 1 (under "- generic:") + k.
-      out.push(`${indent(1 + k)}- ${node.role} "${escapeQuoted(node.name)}":`);
-      openStack.push(node);
+    const props: Array<[string, string]> = [];
+    if (item.props?.url !== undefined) props.push(["url", item.props.url]);
+    if (item.props?.placeholder !== undefined) props.push(["placeholder", item.props.placeholder]);
+    const head = `${pad}- ${key(item)}`;
+    const [only] = item.children;
+    if (!props.length && item.children.length === 1 && typeof only === "string") {
+      lines.push(`${head}: ${quoteValue(only)}`);
+    } else if (!props.length && (!item.children.length || level === limit)) {
+      lines.push(head);
+    } else {
+      lines.push(`${head}:`);
+      for (const [name, value] of props) lines.push(`${pad}  - /${name}: ${quoteValue(value)}`);
+      for (const child of item.children) visit(child, level + 1);
     }
-    // Ref leaf level: 1 + openStack.length (children of the deepest open node,
-    // or of "- generic:" when stack is empty).
-    out.push(refLine(r, 1 + openStack.length));
-  }
-
-  return out.join("\n") + "\n";
+  };
+  for (const item of tree) visit(item, 0);
+  return lines.join("\n");
 }
 
-/** JSON form for `--json`. Selector is included for debugging. */
-export function toJson(snap: SnapshotResult): string {
-  const refs = snap.refs.map((r) => {
-    const o: Record<string, unknown> = {
-      ref: r.id,
-      role: r.role,
-      name: r.name,
-      selector: r.selector,
-    };
-    if (r.href) o.href = r.href;
-    if (r.value) o.value = r.value;
-    if (r.path && r.path.length > 0) o.path = r.path;
-    return o;
-  });
-  return JSON.stringify({ url: snap.url, title: snap.title, refs });
+/** playwright-cli's `### Page` / `### Snapshot` wrapper, no trailing newline. */
+export function renderPage(snap: SnapshotResult, depth = 0): string {
+  const lines = ["### Page", `- Page URL: ${snap.url}`];
+  if (snap.title) lines.push(`- Page Title: ${snap.title}`);
+  lines.push("### Snapshot", "```yaml", renderTree(snap.tree, depth), "```");
+  return lines.join("\n");
 }

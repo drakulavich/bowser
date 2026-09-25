@@ -5,6 +5,33 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Breaking
+
+- **`snapshot` prints the full aria tree in `playwright-cli`'s format.** It printed only
+  interactive elements under landmarks, so an agent could not read page text, headings, checkbox
+  state or placeholders without extra `eval` calls, and prompts written for `playwright-cli` did
+  not carry over. The output now has `playwright-cli` 0.1.x's `### Page` / `- Page URL:` /
+  `- Page Title:` / `### Snapshot` header and a fenced tree with headings, text, state attributes
+  (`[checked]`, `[disabled]`, `[expanded]`, `[active]`, `[level=N]`, `[pressed]`,
+  `[selected]`) and `/url` / `/placeholder` props. Goldens captured from `playwright-cli` 0.1.13
+  pin it byte-for-byte on both backends. What breaks:
+  - **Line syntax.** `button "Add": [ref=e2]` is now `button "Add" [ref=e5] [cursor=pointer]`.
+  - **Refs.** Any visible element can have one, not only interactive ones. They are numbered in
+    document order across the whole tree, so the printed numbers have gaps, and they are sticky:
+    an element keeps its ref across snapshots of one document while its role and name are
+    unchanged. A navigation or reload starts again at `e1`.
+  - **`--json`** prints `{"snapshot": "<tree>"}`; the `url`, `title` and `refs` keys are gone.
+  - **`--depth=0`** is now valid and means unlimited, like no flag; it was a usage error.
+  - **Actions check the ref's kind.** Since a ref can now be a listitem or a paragraph, `check`
+    and `uncheck` accept only a checkbox, radio, switch or checkable menu item, `select` only a
+    `<select>`, and `fill` only an `<input>`, `<textarea>` or contenteditable element. Any other
+    ref exits 1 with `ref 'eN' is not …` before anything reaches the browser; before, `check` on
+    a listitem clicked it and reported success.
+
+  Not covered: iframe contents (an iframe prints as a leaf with a ref), shadow DOM, `aria-owns`,
+  the `- Console:` line and the global `--raw` flag. Known gap: on Chromium, `check` does not
+  move focus the way `playwright-cli`'s does, so `[active]` can sit on a different node after it.
+
 ### Fixed
 
 - **A session name was never checked for containment.** `-s` reached the filesystem unfiltered, so
