@@ -150,6 +150,36 @@ runOrSkip("e2e: a stale ref fails at once (backend from resolveBackend)", () => 
     expect(await cmdEval(ctx, "document.getElementById('name').value")).toBe("");
   }, 60_000);
 
+  // A long-lived daemon may hold a page the previous bowser snapshotted: its
+  // store has no byRef map. The new scripts must work with it, not throw.
+  const OLD_STORE = "(window[Symbol.for('bowser.aria-refs')] = { refs: new WeakMap(), last: 5 }, 'planted')";
+
+  test("snapshot on a page with a previous version's ref store works and continues its numbering", async () => {
+    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdEval(ctx, OLD_STORE);
+    await cmdSnapshot(ctx);
+    const ids = (await loadState(ctx.session))!.refs.map((r) => Number(r.id.slice(1)));
+    expect(Math.min(...ids)).toBe(6);
+  }, 60_000);
+
+  test("an action on a page with a previous version's ref store fails as stale, exit 1", async () => {
+    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdSnapshot(ctx);
+    const submit = await refNamed("Submit");
+    await cmdGoto(ctx, `${base}/kitchen-sink.html`);
+    await cmdEval(ctx, OLD_STORE);
+    await expect(cmdClick(ctx, submit)).rejects.toThrow(stale(submit));
+    const p = Bun.spawn({
+      cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", ctx.session, "click", submit],
+      env: process.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
+    expect(stderr).toContain(stale(submit));
+    expect(code).toBe(1);
+  }, 60_000);
+
   test("a hidden element is not stale: its ref keeps today's behaviour", async () => {
     await cmdOpen(ctx, `${base}/kitchen-sink.html`);
     await cmdSnapshot(ctx);

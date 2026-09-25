@@ -59,6 +59,8 @@ const CSS_PATH = String.raw`
 export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const KEY = Symbol.for('bowser.aria-refs');
   const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
+  // A store from a previous bowser version has no byRef.
+  if (!store.byRef) store.byRef = new Map();
   // Forget refs whose element is gone, so byRef does not grow with every re-render.
   for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
 
@@ -639,7 +641,7 @@ export function runCodeScript(code: string): string {
 export function resolveRefScript(ref: string): string {
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
-  const el = store && store.byRef.get(${JSON.stringify(ref)})?.deref();
+  const el = store?.byRef?.get(${JSON.stringify(ref)})?.deref();
   if (!el || !el.isConnected) return null;
   ${CSS_PATH}
   return cssPath(el);
