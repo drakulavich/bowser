@@ -37,8 +37,8 @@ export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptio
   const profile = opts.profile !== undefined
     ? resolve(opts.profile)
     : opts.persistent ? profileDir(ctx.session) : undefined;
-  // The daemon creates the directory when it opens the browser, so a refused
-  // open (below) leaves nothing behind.
+  // The directory is created only when a new daemon is spawned for it
+  // (spawnDaemon), so a refused open (below) leaves nothing behind.
   return withClient(ctx, async (c) => {
     // The store is fixed when the daemon starts. A daemon that was already
     // running may have another one, and navigating it would silently lose

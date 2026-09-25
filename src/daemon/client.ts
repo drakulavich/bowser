@@ -1,6 +1,7 @@
 // Client side of the daemon protocol: connect to a session's Unix socket (or
 // spawn the daemon first), send typed requests, match replies by id.
 
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
@@ -187,6 +188,19 @@ export async function connectOrSpawn(
 async function spawnDaemon(session: string, profile?: string): Promise<void> {
   const { ensureSessionDir } = await import("../state.ts");
   await ensureSessionDir(session);
+  // Create the profile here, in the CLI, and only for a daemon about to be
+  // spawned: no daemon runs, so there is no store conflict to refuse and
+  // nothing is left behind by a refused open. A failure (permissions, a file
+  // in the way) is reported now, with its cause; inside the daemon it would
+  // only show up as a startup timeout.
+  if (profile) {
+    try {
+      await mkdir(profile, { recursive: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`cannot create profile directory ${profile}: ${msg}`);
+    }
+  }
 
   // When running as a compiled single-file binary, import.meta.url points to
   // a virtual /$bunfs/root/ path that Bun.spawn cannot execute. In that case

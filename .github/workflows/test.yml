@@ -121,9 +121,9 @@ jobs:
           timeout 60 ./dist/bowser screenshot --session ci-smoke --filename /tmp/ci-smoke.png
           timeout 60 ./dist/bowser close --session ci-smoke
           file /tmp/ci-smoke.png | grep -q "PNG image data"
-          # --persistent must reach the daemon through --daemon too: the browser
-          # writes into the profile only if it opened with it (open itself just
-          # creates the empty directory), and close must leave it in place.
+          # --persistent must reach the daemon through --daemon too: the CLI
+          # creates the empty profile directory before it spawns the daemon, and
+          # only a browser opened with it writes into it. close must leave it.
           timeout 60 ./dist/bowser open "data:text/html,<h1>ci</h1>" --persistent --session ci-persist
           test -n "$(ls -A ~/.bowser/profiles/ci-persist)"
           timeout 60 ./dist/bowser close --session ci-persist

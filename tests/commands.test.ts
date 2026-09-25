@@ -215,6 +215,25 @@ describe("open --persistent / --profile", () => {
     }
   });
 
+  test("a profile directory that cannot be created fails at once with its path and cause", async () => {
+    // A regular file where a parent directory should be: mkdir must fail in
+    // the CLI, before a daemon is spawned, not as a startup timeout.
+    const blocker = join(tmp, `blocker-${session}`);
+    await Bun.write(blocker, "not a directory");
+    const target = join(blocker, "profile");
+    const t0 = Date.now();
+    const proc = Bun.spawn(
+      [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", `--profile=${target}`, "-s", session],
+      { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
+    );
+    const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    expect(stderr).toContain(target);
+    expect(stderr).toMatch(/ENOTDIR|not a directory/i);
+    expect(stderr).not.toContain("did not start in time");
+    expect(code).toBe(2);
+    expect(Date.now() - t0).toBeLessThan(4000);
+  });
+
   test("close leaves the profile directory in place", async () => {
     await openWith({ persistent: true });
     const profile = join(tmp, ".bowser", "profiles", session);

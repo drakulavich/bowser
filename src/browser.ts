@@ -1,7 +1,6 @@
 // The daemon's handle on one Bun.WebView. This is the only file that
 // instantiates Bun.WebView; backend choice lives in backend.ts.
 
-import { mkdir } from "node:fs/promises";
 import { chromeBackend, resolveBackend, toBunBackend } from "./backend.ts";
 import {
   HISTORY_BACK, HISTORY_FORWARD, READ_TITLE, READ_URL, RELOAD,
@@ -137,9 +136,6 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
   const spec = opts.executablePath
     ? chromeBackend(process.env, () => undefined, opts.executablePath)
     : resolveBackend();
-  // Created here, by the daemon about to use it, not by `open`: an open
-  // refused for a store conflict must leave no directory behind.
-  if (opts.profile) await mkdir(opts.profile, { recursive: true });
   let view: Bun.WebView;
   try {
     view = new Bun.WebView({
