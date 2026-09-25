@@ -139,3 +139,93 @@ describe("connectOrSpawn health check", () => {
     }
   }, 15_000);
 });
+
+// A daemon that exits, crashes or is killed mid-request must not leave the
+// request hanging: the CLI would stall with nothing to report.
+describe("daemon goes away mid-request", () => {
+  let tmp: string;
+  let origHome: string | undefined;
+
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-gone-"));
+    process.env.HOME = tmp;
+  });
+
+  afterAll(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  /** A fake daemon that answers `ping` and hangs up on any other op. */
+  async function listenHangingUpDaemon(session: string) {
+    await ensureSessionDir(session);
+    return Bun.listen({
+      unix: socketPath(session),
+      socket: {
+        data(s, data) {
+          for (const line of data.toString().split("\n")) {
+            if (!line) continue;
+            const req = JSON.parse(line) as { id: number; op: string };
+            if (req.op === "ping") s.write(JSON.stringify({ id: req.id, ok: true, result: "pong" }) + "\n");
+            else s.end();
+          }
+        },
+      },
+    });
+  }
+
+  /** How `p` settles within `ms`, as a string, so a hang fails the assertion
+   *  instead of stalling the run. */
+  async function outcomeWithin(p: Promise<unknown>, ms: number): Promise<string> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const pending = new Promise<string>((r) => {
+      timer = setTimeout(() => r(`still pending after ${ms} ms`), ms);
+    });
+    try {
+      return await Promise.race([
+        p.then(
+          (v) => `resolved: ${JSON.stringify(v)}`,
+          (e: unknown) => `rejected: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+        pending,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  test("a request in flight fails when its daemon closes the connection", async () => {
+    const session = "gone-in-flight";
+    const server = await listenHangingUpDaemon(session);
+    try {
+      const client = await connectOrSpawn(session, { spawn: false });
+      try {
+        expect(await outcomeWithin(client.request("state"), 1000)).toBe(
+          `rejected: daemon for session '${session}' closed the connection`,
+        );
+      } finally {
+        client.close();
+      }
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("a request after the daemon has gone fails at once", async () => {
+    const session = "gone-after";
+    const server = await listenHangingUpDaemon(session);
+    try {
+      const client = await connectOrSpawn(session, { spawn: false });
+      try {
+        const expected = `rejected: daemon for session '${session}' closed the connection`;
+        expect(await outcomeWithin(client.request("state"), 1000)).toBe(expected);
+        expect(await outcomeWithin(client.request("state"), 1000)).toBe(expected);
+      } finally {
+        client.close();
+      }
+    } finally {
+      server.stop(true);
+    }
+  });
+});
