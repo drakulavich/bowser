@@ -220,6 +220,12 @@ describe("daemon goes away mid-request", () => {
       try {
         const expected = `rejected: daemon for session '${session}' closed the connection`;
         expect(await outcomeWithin(client.request("state"), 1000)).toBe(expected);
+        // Setup, not the pass condition: one hangup delivers `end` and then
+        // `close` to the client, and a request issued between the two would be
+        // failed by the late `close` rather than by the client knowing it is
+        // closed. Bun delivers both within the same I/O turn, so letting the
+        // event loop run past them puts this request after the socket is gone.
+        await Bun.sleep(50);
         expect(await outcomeWithin(client.request("state"), 1000)).toBe(expected);
       } finally {
         client.close();
