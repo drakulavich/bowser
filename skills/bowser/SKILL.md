@@ -99,6 +99,7 @@ Do **not** use for static HTTP fetches.
 
 - Each line is `- role "name" [attrs]`, then `: text` or a nested block. Page text shows up as `- text: …` or inline after the colon; state as `[checked]`, `[disabled]`, `[expanded]`, `[active]` (focused), `[selected]`, `[level=N]`; links carry `- /url:`, textboxes `- /placeholder:`.
 - Any visible element can have a ref, not only controls. Refs stay the same across snapshots of one document while the element's role and name are unchanged, so gaps in the numbers are normal. A navigation or reload starts again at `e1`.
+- An action on a ref whose element is gone (re-rendered away, or from before a navigation or reload) fails at once with `ref 'eN' not found in the current page snapshot. Try capturing new snapshot.` (exit 1). Snapshot again and use the new refs.
 - `--depth=N` prints N levels below the first line: a node at the limit drops its children but keeps its inline text value and its prop lines (`/url`, `/placeholder`). `--depth=0` or no flag prints the whole tree. `--json` gives `{"snapshot": "<tree>"}` without the `### Page` header.
 
 Refs persist in `~/.bowser/sessions/<name>/state.json`. The CLI resolves refs for you.
@@ -139,7 +140,8 @@ bowser install                            # one-time Chromium download
   `BOWSER_BACKEND=webkit|chrome`.
 - **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
 - **`BOWSER_OP_TIMEOUT_MS`** — per-operation timeout in ms (default `30000`; `0` disables). Set higher if a slow page causes timeout errors.
-- **"ref 'eN' not found"** — snapshot is stale. Run `bowser snapshot`.
+- **"ref 'eN' not found in the current page snapshot"** — the element behind the ref is gone: the page re-rendered, navigated or reloaded since that snapshot. Run `bowser snapshot` and use the new refs.
+- **"ref 'eN' not found in last snapshot"** — the ref was never in the last snapshot. Run `bowser snapshot`.
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.

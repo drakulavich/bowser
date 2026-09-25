@@ -25,6 +25,17 @@ import {
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
+import { clearForFillScript, resolveRefScript } from "../src/page-scripts.ts";
+
+/** An evaluate handler that answers the ref-resolve script the way the page
+ *  would: the element's fresh selector, or null when it is gone. Any other
+ *  script evaluates to undefined, the fake's default. */
+function resolving(live: Record<string, string | null>) {
+  return (expr: string): unknown => {
+    for (const [id, selector] of Object.entries(live)) if (expr === resolveRefScript(id)) return selector;
+    return undefined;
+  };
+}
 
 async function seedRefs() {
   await saveState({
@@ -426,7 +437,7 @@ describe("cmdClick", () => {
     await cmdSnapshot({ ...ctx(), connect: async () => snapC }, {});
 
     let clicked: string | undefined;
-    const clickC = fakeClient({ click: (s) => { clicked = s; } });
+    const clickC = fakeClient({ click: (s) => { clicked = s; }, evaluate: resolving({ e1: "html > body > button" }) });
     const out = await cmdClick(
       { ...ctx({ json: true }), connect: async () => clickC },
       "e1",
@@ -467,7 +478,7 @@ describe("cmdFill", () => {
     const fillC = fakeClient({
       click: () => { clicked = true; },
       type: (t) => { typed = t; },
-      evaluate: () => undefined,
+      evaluate: resolving({ e1: "html > body > input" }),
     });
     await cmdFill(
       { ...ctx({ json: true }), connect: async () => fillC },
@@ -495,7 +506,7 @@ describe("click", () => {
       refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
       updatedAt: Date.now(),
     });
-    const c = fakeClient({});
+    const c = fakeClient({ evaluate: resolving({ e1: "a" }) });
     const out = await cmdClick({ ...ctx(), connect: async () => c }, "e1");
     expect(out).toContain("clicked e1");
     expect(c.calls).toContainEqual(["click", ["a"]]);
@@ -511,10 +522,10 @@ describe("fill", () => {
       refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
       updatedAt: Date.now(),
     });
-    const c = fakeClient({});
+    const c = fakeClient({ evaluate: resolving({ e2: "input" }) });
     await cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi");
     const ops = c.calls.map((cl) => cl[0]);
-    expect(ops).toEqual(["click", "evaluate", "type"]);
+    expect(ops).toEqual(["evaluate", "click", "evaluate", "type"]);
   });
 });
 
@@ -543,7 +554,7 @@ describe("hover", () => {
       refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
       updatedAt: Date.now(),
     });
-    const c = fakeClient({});
+    const c = fakeClient({ evaluate: resolving({ e1: "a" }) });
     await cmdHover({ ...ctx(), connect: async () => c }, "e1");
     expect(c.calls).toContainEqual(["hover", ["a"]]);
   });
@@ -558,7 +569,7 @@ describe("select", () => {
       refs: [{ id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" }],
       updatedAt: Date.now(),
     });
-    const c = fakeClient({});
+    const c = fakeClient({ evaluate: resolving({ e3: "select" }) });
     await cmdSelect({ ...ctx(), connect: async () => c }, "e3", "red");
     expect(c.calls).toContainEqual(["select", ["select", "red"]]);
   });
@@ -573,7 +584,7 @@ describe("check / uncheck", () => {
       refs: [{ id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" }],
       updatedAt: Date.now(),
     });
-    const c = fakeClient({});
+    const c = fakeClient({ evaluate: resolving({ e4: "input.cb" }) });
     await cmdCheck({ ...ctx(), connect: async () => c }, "e4");
     expect(c.calls).toContainEqual(["check", ["input.cb"]]);
   });
@@ -585,7 +596,7 @@ describe("check / uncheck", () => {
       refs: [{ id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" }],
       updatedAt: Date.now(),
     });
-    const c = fakeClient({});
+    const c = fakeClient({ evaluate: resolving({ e4: "input.cb" }) });
     await cmdUncheck({ ...ctx(), connect: async () => c }, "e4");
     expect(c.calls).toContainEqual(["uncheck", ["input.cb"]]);
   });
@@ -617,7 +628,7 @@ describe("actions refuse a ref of the wrong kind", () => {
 
   beforeEach(async () => {
     connected = false;
-    c = fakeClient({});
+    c = fakeClient({ evaluate: resolving(Object.fromEntries(REFS.map((r) => [r.id, r.selector]))) });
     await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
   });
 
@@ -696,6 +707,57 @@ describe("actions refuse a ref of the wrong kind", () => {
       if (pid > 0) try { process.kill(pid); } catch {}
       await rm(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe("ref commands resolve the ref in the live page first", () => {
+  // Saved selectors start with "saved-"; the page answers with "fresh-" ones.
+  const REFS = [
+    { id: "e1", selector: "saved-a",      role: "link",     name: "Home",  tag: "a" },
+    { id: "e2", selector: "saved-input",  role: "textbox",  name: "Email", tag: "input" },
+    { id: "e3", selector: "saved-select", role: "combobox", name: "Color", tag: "select" },
+    { id: "e4", selector: "saved-cb",     role: "checkbox", name: "Agree", tag: "input" },
+  ];
+  // Each ref command, the ref it acts on, and the action op that must carry the fresh selector.
+  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>]> = [
+    ["click",   "e1", "click",   (x) => cmdClick(x, "e1")],
+    ["fill",    "e2", "click",   (x) => cmdFill(x, "e2", "hi")],
+    ["hover",   "e1", "hover",   (x) => cmdHover(x, "e1")],
+    ["select",  "e3", "select",  (x) => cmdSelect(x, "e3", "red")],
+    ["check",   "e4", "check",   (x) => cmdCheck(x, "e4")],
+    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4")],
+  ];
+
+  beforeEach(async () => {
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+  });
+
+  for (const [name, ref, op, run] of COMMANDS) {
+    test(`${name} on a ref whose element is gone fails with playwright-cli's message and sends no action`, async () => {
+      const c = fakeClient({ evaluate: resolving({ [ref]: null }) });
+      await expect(run({ ...ctx(), connect: async () => c })).rejects.toThrow(
+        new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`),
+      );
+      expect(c.calls).toEqual([["evaluate", [resolveRefScript(ref)]]]);
+    });
+
+    test(`${name} acts on the fresh selector the page returns, not the saved one`, async () => {
+      const c = fakeClient({ evaluate: resolving({ [ref]: `fresh-${ref}` }) });
+      await run({ ...ctx(), connect: async () => c });
+      expect(c.calls[0]).toEqual(["evaluate", [resolveRefScript(ref)]]);
+      expect(c.calls.find(([o]) => o === op)?.[1][0]).toBe(`fresh-${ref}`);
+      expect(JSON.stringify(c.calls)).not.toContain("saved-");
+    });
+  }
+
+  test("fill clears the fresh selector", async () => {
+    const c = fakeClient({ evaluate: resolving({ e2: "fresh-e2" }) });
+    await cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi");
+    expect(c.calls).toContainEqual(["evaluate", [clearForFillScript("fresh-e2")]]);
+  });
+
+  test("the resolve script embeds the ref with JSON.stringify", () => {
+    expect(resolveRefScript("e7")).toContain(JSON.stringify("e7"));
   });
 });
 
