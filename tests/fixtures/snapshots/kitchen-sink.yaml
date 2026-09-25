@@ -1,0 +1,17 @@
+- main [ref=e2]:
+  - heading "Kitchen Sink" [level=1] [ref=e3]
+  - generic [ref=e4]:
+    - textbox "Name" [ref=e5]:
+      - /placeholder: Your name
+    - combobox "Color" [ref=e6]:
+      - option "red" [selected]
+      - option "blue"
+    - checkbox "Agree" [ref=e7]
+    - button "Submit" [ref=e8]
+  - paragraph
+  - button "Hover me" [ref=e9]
+  - paragraph
+  - paragraph
+  - paragraph [ref=e10]: 1280x720
+  - link "Page two" [ref=e11] [cursor=pointer]:
+    - /url: /two

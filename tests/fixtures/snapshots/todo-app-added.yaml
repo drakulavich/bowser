@@ -1,0 +1,13 @@
+- generic [ref=e1]:
+  - heading "Todos" [level=1] [ref=e2]
+  - generic [ref=e3]:
+    - textbox "New todo" [ref=e4]:
+      - /placeholder: What needs doing?
+    - button "Add" [active] [ref=e5] [cursor=pointer]
+  - list "Todo list" [ref=e6]:
+    - listitem [ref=e11]:
+      - checkbox "Toggle buy milk" [ref=e12]
+      - generic [ref=e13]: buy milk
+  - generic [ref=e8]:
+    - generic [ref=e9]: 1 item left
+    - button "Clear completed" [ref=e10] [cursor=pointer]
