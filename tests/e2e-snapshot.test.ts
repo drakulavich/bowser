@@ -5,8 +5,9 @@
 // The command sequence reproduces the capture's, because refs and [active]
 // depend on it; kitchen-sink is resized to the capture's 1280x720 first.
 //
-// coverage.yaml is a later capture of tests/fixtures/snapshot-coverage.html
-// (playwright-cli 0.1.13, Edge, same way), for rules the other pages miss.
+// coverage.yaml and contents.yaml are later captures of their fixtures of tests/fixtures/snapshot-coverage.html
+// (tests/fixtures/snapshot-*.html; playwright-cli 0.1.13, Edge, same way),
+// for rules the other pages miss.
 //
 // Documented deviations (each swaps named golden lines, see Deviation; the
 // golden files stay playwright-cli's text):
@@ -120,6 +121,7 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
       "/kitchen-sink.html": "kitchen-sink.html",
       "/probe.html": "snapshot-probe.html",
       "/coverage.html": "snapshot-coverage.html",
+      "/contents.html": "snapshot-contents.html",
     };
     server = Bun.serve({
       port: 0,
@@ -246,5 +248,15 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
   test("labels, placeholder, pointer-events, nested cursor, scoped header/footer and labelledby-value match playwright-cli", async () => {
     await cmdGoto(ctx, `${base}/coverage.html`);
     expect(tree(await cmdSnapshot(ctx))).toBe(await golden("coverage"));
+  }, 60_000);
+
+  // playwright-cli gives a display:contents element a ref when a child is
+  // visible, though it has no box of its own (computeBox looks through to the
+  // children). Matched for parity: the collapsed wrapper still takes e2, so
+  // its button is e3; `generic [ref=e4]` and `navigation "Contents nav"
+  // [ref=e7]` are display:contents themselves; a text-only one flattens.
+  test("display:contents elements take a ref from a visible child, like playwright-cli", async () => {
+    await cmdGoto(ctx, `${base}/contents.html`);
+    expect(tree(await cmdSnapshot(ctx))).toBe(await golden("contents"));
   }, 60_000);
 });
