@@ -162,7 +162,7 @@ the command checks the ref saved by the last snapshot:
 | --- | --- | --- |
 | `check`, `uncheck` | role `checkbox`, `radio`, `switch`, `menuitemcheckbox`, `menuitemradio` | `ref 'eN' is not a checkbox or radio button (<role>)` |
 | `select` | tag `select` | `ref 'eN' is not a <select> element (<role>)` |
-| `fill` | role `textbox`, `searchbox`, `spinbutton`, `combobox` with tag `input`, or a `contenteditable` element | `ref 'eN' is not an <input>, <textarea> or contenteditable element (<role>)` |
+| `fill` | role `textbox`, `searchbox`, `spinbutton`, `combobox` on an `input` or `textarea`, or a `contenteditable` element | `ref 'eN' is not an <input>, <textarea> or contenteditable element (<role>)` |
 
 The walker records `editable: true` on a ref whose element is `isContentEditable`, in state only;
 it does not change the printed tree. `click`, `hover` and the other ref commands accept any ref.
