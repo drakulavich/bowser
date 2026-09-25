@@ -100,8 +100,9 @@ child, it is text, and there are no props.
   `generic "More"`).
 - **Text.** Text nodes are collected in DOM order and whitespace-normalized; runs of text between
   element children merge into one `- text:` line. An element whose computed `display` is
-  `inline`, whose role would be `generic`, with no ref-bearing reason to exist (only text
-  inside) is not a node: its text flows into the parent's text run. A node whose only text child
+  `inline`, whose role would be `generic`, and whose only child is one text node is not a node:
+  its text flows into the parent's text run. This holds even when the element is focusable or
+  has a click handler (`<span tabindex="0">`), as in Playwright; such a span has no ref. A node whose only text child
   equals its name drops that text.
 - **Form values.** For `input` (not checkbox/radio/file/hidden) and `textarea`, the only child is
   the current `value`, whitespace-normalized; an empty value gives no child. Text inside them is
