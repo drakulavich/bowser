@@ -1,6 +1,6 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
-import { mkdir, readFile, readdir, rm, unlink } from "node:fs/promises";
+import { readFile, readdir, rm, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import type { Command } from "../cli/registry.ts";
@@ -28,11 +28,17 @@ export interface OpenOptions {
 }
 
 export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptions = {}): Promise<string> {
+  // The parser accepts `--profile=`; treating it as absent would quietly
+  // start an ephemeral session the caller believes is persistent.
+  if (opts.profile !== undefined && !opts.profile.trim()) {
+    throw new Error("usage: --profile needs a directory, e.g. --profile=./profile");
+  }
   await ensureSessionDir(ctx.session);
-  const profile = opts.profile
+  const profile = opts.profile !== undefined
     ? resolve(opts.profile)
     : opts.persistent ? profileDir(ctx.session) : undefined;
-  if (profile) await mkdir(profile, { recursive: true });
+  // The daemon creates the directory when it opens the browser, so a refused
+  // open (below) leaves nothing behind.
   return withClient(ctx, async (c) => {
     // The store is fixed when the daemon starts. A daemon that was already
     // running may have another one, and navigating it would silently lose

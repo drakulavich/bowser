@@ -110,11 +110,10 @@ describe("open --persistent / --profile", () => {
     return { out, seen, calls: () => c.calls };
   }
 
-  test("--persistent hands the daemon ~/.bowser/profiles/<session> and creates it", async () => {
+  test("--persistent hands the daemon ~/.bowser/profiles/<session>", async () => {
     const { seen } = await openWith({ persistent: true });
     const expected = join(tmp, ".bowser", "profiles", session);
     expect(seen[0]?.profile).toBe(expected);
-    expect(existsSync(expected)).toBe(true);
   });
 
   test("--profile=rel/dir hands the daemon that directory resolved against the cwd", async () => {
@@ -125,7 +124,6 @@ describe("open --persistent / --profile", () => {
       const expected = join(process.cwd(), "rel", "dir");
       expect(seen[0]?.profile).toBe(expected);
       expect(isAbsolute(seen[0]!.profile!)).toBe(true);
-      expect(existsSync(expected)).toBe(true);
     } finally {
       process.chdir(cwd);
     }
@@ -141,6 +139,27 @@ describe("open --persistent / --profile", () => {
     const { seen, calls } = await openWith({});
     expect(seen[0]?.profile).toBeUndefined();
     expect(calls().map(([op]) => op)).toEqual(["navigate", "state"]);
+  });
+
+  for (const empty of ["", "   "]) {
+    test(`--profile=${JSON.stringify(empty)} is a usage error before any daemon is reached`, async () => {
+      const err = await openWith({ profile: empty }).then(() => null, (e: Error) => e);
+      expect(err?.message).toMatch(/^usage: /);
+      expect(err?.message).toContain("--profile");
+    });
+  }
+
+  test("an empty --profile never reaches the connector", async () => {
+    let connected = false;
+    const connect: CommandContext["connect"] = async () => { connected = true; return fakeClient({}); };
+    await findCommand("open")!.run({ ...ctx(), connect }, { positional: [], flags: { profile: "" } }).catch(() => {});
+    expect(connected).toBe(false);
+  });
+
+  test("a conflicting --profile leaves no new directory behind", async () => {
+    const dir = join(tmp, "never-created-profile");
+    await openWith({ profile: dir }, { profile: "/elsewhere" }).catch(() => {});
+    expect(existsSync(dir)).toBe(false);
   });
 
   test("a running daemon with a different store is a usage error, before any navigation", async () => {
