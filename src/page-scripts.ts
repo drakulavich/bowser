@@ -4,22 +4,65 @@
 // file imports nothing from src/ and is the only one allowed to build an
 // IIFE string (tests/layers.test.ts).
 
+// cssPath(el): a unique id, else an nth-of-type chain from <html>. The
+// selector a ref is saved with and the one an action on it uses, inlined into
+// SNAPSHOT_SCRIPT and resolveRefScript so both compute it the same way. Chains
+// and sibling indexes are memoized per evaluation: a ref'd node's ancestors
+// are ref'd too, and a long list would otherwise rescan its siblings for
+// every item. Plain JavaScript under String.raw: no backticks, no dollar-brace.
+const CSS_PATH = String.raw`
+  const chains = new Map();
+  const nthIndex = new Map();
+  function nthOfType(el) {
+    if (!nthIndex.has(el)) {
+      const counts = {};
+      for (const c of el.parentElement.children) {
+        counts[c.tagName] = (counts[c.tagName] || 0) + 1;
+        nthIndex.set(c, counts[c.tagName]);
+      }
+    }
+    return nthIndex.get(el);
+  }
+  function chain(el) {
+    let s = chains.get(el);
+    if (s === undefined) {
+      const parent = el.parentElement;
+      s = el.tagName.toLowerCase() + ':nth-of-type(' + nthOfType(el) + ')';
+      if (parent !== document.documentElement) s = chain(parent) + ' > ' + s;
+      chains.set(el, s);
+    }
+    return s;
+  }
+  function cssPath(el) {
+    if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) {
+      const byId = document.querySelectorAll('#' + el.id);
+      if (byId.length === 1) return '#' + el.id;
+    }
+    return 'html > ' + chain(el);
+  }`;
+
 // The snapshot walker, serialized into the page. It builds the aria tree from
 // document.body the way playwright-cli 0.1.x does (its injected script's
 // generateAriaTree, trimmed to what bowser prints: no iframes' contents, no
 // shadow DOM, no aria-owns) and returns SnapshotResult (src/snapshot.ts).
 // Written with String.raw, so backslashes below are plain JavaScript; the
-// only things this text may not contain are backticks and dollar-brace.
+// only things this text may not contain are backticks and dollar-brace,
+// apart from the one interpolation, CSS_PATH.
 //
 // Refs: every visible node that receives pointer events gets `e<N>`, in DOM
-// pre-order. The element -> {ref, role, name} map and the counter live on
-// window, so a ref survives between snapshots of one document while the
-// element's role and name are unchanged, and a new document starts at e1.
-// Each ref is saved with a stable nth-of-type CSS path, which is what the
-// action commands resolve.
+// pre-order. The element -> {ref, role, name} map, the reverse ref ->
+// WeakRef(element) map and the counter live on window, so a ref survives
+// between snapshots of one document while the element's role and name are
+// unchanged, and a new document starts at e1. Each ref is saved with its
+// CSS_PATH; an action resolves the ref through the reverse map first
+// (resolveRefScript) and uses a path computed at that moment.
 export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const KEY = Symbol.for('bowser.aria-refs');
-  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), last: 0 });
+  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
+  // A store from a previous bowser version has no byRef.
+  if (!store.byRef) store.byRef = new Map();
+  // Forget refs whose element is gone, so byRef does not grow with every re-render.
+  for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
 
   const styleCache = new Map();
   const styleOf = (el) => {
@@ -388,38 +431,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   }
 
   // ---- refs ----
-  // A unique id, else an nth-of-type chain from <html>. Chains and sibling
-  // indexes are memoized: a ref'd node's ancestors are ref'd too, and a long
-  // list would otherwise rescan its siblings for every item.
-  const chains = new Map();
-  const nthIndex = new Map();
-  function nthOfType(el) {
-    if (!nthIndex.has(el)) {
-      const counts = {};
-      for (const c of el.parentElement.children) {
-        counts[c.tagName] = (counts[c.tagName] || 0) + 1;
-        nthIndex.set(c, counts[c.tagName]);
-      }
-    }
-    return nthIndex.get(el);
-  }
-  function chain(el) {
-    let s = chains.get(el);
-    if (s === undefined) {
-      const parent = el.parentElement;
-      s = el.tagName.toLowerCase() + ':nth-of-type(' + nthOfType(el) + ')';
-      if (parent !== document.documentElement) s = chain(parent) + ' > ' + s;
-      chains.set(el, s);
-    }
-    return s;
-  }
-  function cssPath(el) {
-    if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) {
-      const byId = document.querySelectorAll('#' + el.id);
-      if (byId.length === 1) return '#' + el.id;
-    }
-    return 'html > ' + chain(el);
-  }
+  ${CSS_PATH}
   const refs = [];
   function assignRef(n, el) {
     let r = store.refs.get(el);
@@ -427,6 +439,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
       r = { ref: 'e' + (++store.last), role: n.role, name: n.name };
       store.refs.set(el, r);
     }
+    store.byRef.set(r.ref, new WeakRef(el));
     n.ref = r.ref;
     const saved = { id: r.ref, selector: cssPath(el), role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
     if (tagOf(el) === 'A' && el.getAttribute('href')) saved.href = el.getAttribute('href');
@@ -620,4 +633,17 @@ export function storageRestoreScript(
 
 export function runCodeScript(code: string): string {
   return `(() => { ${code} })()`;
+}
+
+/** The ref's element in the live page, as a CSS_PATH computed now, or null
+ *  when it is gone: no ref store (a new document), a ref this document never
+ *  handed out, an element collected or no longer connected. */
+export function resolveRefScript(ref: string): string {
+  return String.raw`(() => {
+  const store = window[Symbol.for('bowser.aria-refs')];
+  const el = store?.byRef?.get(${JSON.stringify(ref)})?.deref();
+  if (!el || !el.isConnected) return null;
+  ${CSS_PATH}
+  return cssPath(el);
+})()`;
 }

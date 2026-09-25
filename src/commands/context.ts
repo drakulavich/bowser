@@ -3,6 +3,7 @@
 
 import { connectOrSpawn } from "../daemon/client.ts";
 import type { DaemonConnection, PageState } from "../daemon/protocol.ts";
+import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, type SessionState } from "../state.ts";
 
 export interface CommandContext {
@@ -37,6 +38,19 @@ export async function loadRef(session: string, ref: string) {
   const prev = await loadState(session);
   if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
   return { prev, target: resolveRef(prev, ref) };
+}
+
+/** The selector of the ref's element in the live page, computed now. A ref
+ *  whose element is gone (removed, or from a previous document) fails here,
+ *  before any action, with playwright-cli's message; acting on the saved
+ *  selector instead would wait out the op timeout or hit whatever element
+ *  moved into its place. One daemon round trip. */
+export async function liveSelector(c: DaemonConnection, ref: string): Promise<string> {
+  const selector = await c.request("evaluate", [resolveRefScript(ref)]);
+  if (typeof selector !== "string") {
+    throw new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`);
+  }
+  return selector;
 }
 
 /** Every command answers the same way: a JSON object under --json, a line

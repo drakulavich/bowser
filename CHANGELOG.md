@@ -34,6 +34,16 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **An action on a stale ref waited 30 s or hit the wrong element.** A ref was acted on through
+  the CSS path saved at snapshot time. When its element was gone (a todo removed by "Clear
+  completed"), `click` waited out the op timeout and exited 2; when the list shifted, the path
+  matched the next element and the action landed there. The snapshot now keeps a reference to
+  each ref's element, and `click`, `fill`, `hover`, `select`, `check` and `uncheck` first ask the
+  page for that element's current path. A ref whose element is gone, including every ref from
+  before a navigation or reload, fails at once with `ref 'eN' not found in the current page snapshot. Try capturing new snapshot.`
+  and exit code 1, the message `playwright-cli` prints. It costs one more daemon round trip per
+  ref action.
+
 - **A session name was never checked for containment.** `-s` reached the filesystem unfiltered, so
   `bowser -s ../../Documents close` resolved outside `~/.bowser/sessions` — harmless while `close`
   only rewrote a state file, and a recursive delete once it removed the directory. `sessionDir()`
