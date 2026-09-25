@@ -5,6 +5,9 @@
 // The command sequence reproduces the capture's, because refs and [active]
 // depend on it; kitchen-sink is resized to the capture's 1280x720 first.
 //
+// coverage.yaml is a later capture of tests/fixtures/snapshot-coverage.html
+// (playwright-cli 0.1.13, Edge, same way), for rules the other pages miss.
+//
 // Documented deviations (each swaps named golden lines, see Deviation; the
 // golden files stay playwright-cli's text):
 // - WebKit, todo-app-added: a mouse click does not focus a <button> on macOS,
@@ -116,6 +119,7 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
       "/todo-app.html": "todo-app.html",
       "/kitchen-sink.html": "kitchen-sink.html",
       "/probe.html": "snapshot-probe.html",
+      "/coverage.html": "snapshot-coverage.html",
     };
     server = Bun.serve({
       port: 0,
@@ -224,5 +228,23 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
       "  - iframe",
       "  - iframe [ref=e6]",
     ].join("\n"));
+  }, 60_000);
+
+  // One page, several rules; the golden line that breaks names the rule:
+  // - `button "Inert"` has no ref: pointer-events:none takes the ref away;
+  // - `textbox "First name"` / `textbox "Wrapped"`: names from a <label>,
+  //   by for= and by wrapping;
+  // - `textbox "Email"` and `textbox "Search here"` print no /placeholder:
+  //   it equals the name;
+  // - `paragraph [ref=e10]` has no [cursor=pointer] though it inherits the
+  //   cursor: its parent already printed it;
+  // - `generic [ref=e3]` / `generic [ref=e14]` / `generic [ref=e16]`: a
+  //   header or footer inside main/article is no banner/contentinfo, while the
+  //   top-level ones are;
+  // - `button "typed value"`: aria-labelledby pointing at an input reads its
+  //   value.
+  test("labels, placeholder, pointer-events, nested cursor, scoped header/footer and labelledby-value match playwright-cli", async () => {
+    await cmdGoto(ctx, `${base}/coverage.html`);
+    expect(tree(await cmdSnapshot(ctx))).toBe(await golden("coverage"));
   }, 60_000);
 });

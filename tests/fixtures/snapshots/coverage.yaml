@@ -1,0 +1,22 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]: Header in main
+    - button "Inert"
+    - text: First name
+    - textbox "First name" [ref=e4]
+    - generic [ref=e5]:
+      - text: Wrapped
+      - textbox "Wrapped" [ref=e6]
+    - textbox "Email" [ref=e7]
+    - textbox "Search here" [ref=e8]
+    - generic [ref=e9] [cursor=pointer]:
+      - paragraph [ref=e10]: Inner paragraph
+      - button "Inner" [ref=e11]
+      - text: outer text
+    - textbox [ref=e12]: typed value
+    - button "typed value" [ref=e13]: x
+    - generic [ref=e14]: Footer in main
+  - article [ref=e15]:
+    - generic [ref=e16]: Header in article
+  - banner [ref=e17]: Top header
+  - contentinfo [ref=e18]: Top footer
