@@ -26,10 +26,27 @@ export function pidPath(session: string): string {
 export class DaemonClient implements DaemonConnection {
   private sock: Awaited<ReturnType<typeof Bun.connect>> | undefined;
   private nextId = 1;
-  private pending = new Map<number, (res: DaemonResponse) => void>();
+  private pending = new Map<number, { resolve: (result: unknown) => void; reject: (err: Error) => void }>();
   private buf = "";
+  private closed = false;
 
-  constructor(private readonly path: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly session: string,
+  ) {}
+
+  private get closedMessage(): string {
+    return `daemon for session '${this.session}' closed the connection`;
+  }
+
+  /** The socket is gone, whoever closed it: nothing pending will ever get a
+   *  reply, so fail it all now instead of leaving the caller hanging. */
+  private markClosed(message = this.closedMessage): void {
+    this.closed = true;
+    const waiting = [...this.pending.values()];
+    this.pending.clear();
+    for (const { reject } of waiting) reject(new Error(message));
+  }
 
   async connect(): Promise<void> {
     const self = this;
@@ -45,10 +62,11 @@ export class DaemonClient implements DaemonConnection {
             if (!line) continue;
             try {
               const res = JSON.parse(line) as DaemonResponse;
-              const cb = self.pending.get(res.id);
-              if (cb) {
+              const entry = self.pending.get(res.id);
+              if (entry) {
                 self.pending.delete(res.id);
-                cb(res);
+                if (res.ok) entry.resolve(res.result);
+                else entry.reject(new Error(res.error ?? "daemon error"));
               }
             } catch {
               // swallow
@@ -58,6 +76,15 @@ export class DaemonClient implements DaemonConnection {
         drain(s) {
           flushSocket(s as unknown as WritableSocket);
         },
+        end() {
+          self.markClosed();
+        },
+        close() {
+          self.markClosed();
+        },
+        error(_s, err) {
+          self.markClosed(`${self.closedMessage}: ${err.message}`);
+        },
       },
     });
   }
@@ -65,19 +92,18 @@ export class DaemonClient implements DaemonConnection {
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>> {
     const [op, args = []] = params;
     if (!this.sock) throw new Error("client not connected");
+    if (this.closed) return Promise.reject(new Error(this.closedMessage));
     const id = this.nextId++;
     const line = JSON.stringify({ id, op, args }) + "\n";
     return new Promise((resolve, reject) => {
-      this.pending.set(id, (res) => {
-        if (res.ok) resolve(res.result as ResultOf<O>);
-        else reject(new Error(res.error ?? "daemon error"));
-      });
+      this.pending.set(id, { resolve: (result) => resolve(result as ResultOf<O>), reject });
       socketWriteAll(this.sock! as unknown as WritableSocket, line);
     });
   }
 
   close(): void {
     this.sock?.end();
+    this.markClosed();
   }
 }
 
@@ -92,7 +118,7 @@ export async function connectOrSpawn(
   opts: { spawn?: boolean } = {},
 ): Promise<DaemonClient> {
   const sock = socketPath(session);
-  const client = new DaemonClient(sock);
+  const client = new DaemonClient(sock, session);
   let connected = false;
   try {
     await client.connect();
@@ -124,7 +150,7 @@ export async function connectOrSpawn(
     // Poll until the socket is listening.
     const start = Date.now();
     while (Date.now() - start < 5000) {
-      const c = new DaemonClient(sock);
+      const c = new DaemonClient(sock, session);
       try {
         await c.connect();
         await withTimeout(c.request("ping"), HEALTH_PING_MS, "ping");
