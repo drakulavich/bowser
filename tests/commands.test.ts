@@ -317,6 +317,19 @@ describe("close", () => {
     }
   });
 
+  test("--all keeps a legacy directory with an unaccounted socket", async () => {
+    const legacy = join(tmp, ".bowser", "sessions", "old session");
+    await mkdir(legacy, { recursive: true });
+    await Bun.write(join(legacy, "sock"), "");
+    try {
+      const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+      expect(out).toContain("failed: old session");
+      expect(existsSync(legacy)).toBe(true);
+    } finally {
+      await rm(legacy, { recursive: true, force: true });
+    }
+  });
+
   test("--all closes every session under the sessions root", async () => {
     // Seed two sessions on disk (saveState creates ~/.bowser/sessions/<name>/).
     await saveState({ name: "a", url: "x", title: "", refs: [], updatedAt: Date.now() });
@@ -348,6 +361,11 @@ describe("looksLikeOurDaemon", () => {
   test("refuses a session name that is not the marker's own argument", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts other sess", "sess")).toBe(false);
   });
+  test("refuses an unrelated executable or daemon path", () => {
+    expect(looksLikeOurDaemon("/usr/local/bin/not-bowser-helper --daemon sess", "sess")).toBe(false);
+    expect(looksLikeOurDaemon(`${process.execPath} /tmp/daemon/main.ts sess`, "sess")).toBe(false);
+    expect(looksLikeOurDaemon(`${process.execPath} /tmp/not-bowser-helper --daemon sess`, "sess")).toBe(false);
+  });
   test("refuses a daemon serving a different session", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts other", "sess")).toBe(false);
   });
@@ -355,10 +373,14 @@ describe("looksLikeOurDaemon", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts abc", "ab")).toBe(false);
   });
   test("accepts the source form", () => {
-    expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts sess", "sess")).toBe(true);
+    const main = new URL("../src/daemon/main.ts", import.meta.url).pathname;
+    expect(looksLikeOurDaemon(`${process.execPath} ${main} sess`, "sess")).toBe(true);
   });
   test("accepts the compiled form", () => {
     expect(looksLikeOurDaemon("/usr/local/bin/bowser --daemon sess", "sess")).toBe(true);
+    expect(looksLikeOurDaemon(`/different/Cellar/bowser/9.9.9/bin/bowser --daemon sess`, "sess")).toBe(true);
+    // Release assets keep their platform suffix unless the user renames them.
+    expect(looksLikeOurDaemon("/Users/x/Downloads/bowser-macos-arm64 --daemon sess", "sess")).toBe(true);
   });
 });
 

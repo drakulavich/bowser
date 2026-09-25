@@ -88,19 +88,20 @@ export interface ProcessOps {
  *  <session>`, so one of those two markers must be present too. */
 export function looksLikeOurDaemon(command: string, session: string): boolean {
   const line = command.trim();
-  // The executable must be one of ours. A daemon spawned from source runs as
-  // `bun <...>/daemon/main.ts <session>`; the compiled binary re-invokes itself
-  // as `<...>/bowser --daemon <session>`. Without this, a stranger's
-  // `other-service --daemon <session>` would pass.
-  const exe = line.split(/\s+/)[0]?.split("/").pop() ?? "";
-  if (exe !== "bun" && !exe.includes("bowser")) return false;
   // The session is the daemon's last argument and the marker comes right
   // before it. `sessionDir` keeps whitespace out of session names, so the
   // display line `ps` prints splits cleanly into words.
   const words = line.split(/\s+/);
   if (words.at(-1) !== session) return false;
   const marker = words.at(-2) ?? "";
-  return marker === "--daemon" || marker.endsWith("daemon/main.ts");
+  // Match the executable by name, not by path: the path changes across
+  // upgrades (a Homebrew Cellar path carries the version), and `close` must
+  // still recognise a daemon the previous binary started. Release assets are
+  // named `bowser-macos-arm64` and the like, so a `bowser-` or `bowser.`
+  // prefix counts too; `not-bowser-helper` does not.
+  const exe = words[0]?.split("/").pop() ?? "";
+  if (/^bowser([-.]|$)/.test(exe)) return marker === "--daemon";
+  return exe === "bun" && marker.endsWith("/src/daemon/main.ts");
 }
 
 async function isOurDaemon(pid: number, session: string): Promise<boolean> {
@@ -238,6 +239,12 @@ async function closeLegacy(name: string): Promise<void> {
   const pid = await readPidFile(join(dir, "pid"));
   if (pid !== null && realProcess.alive(pid)) {
     throw new Error(`close: pid ${pid} recorded for legacy session ${JSON.stringify(name)} is running`);
+  }
+  // A legacy daemon may predate pidfiles. Its socket is not enough to identify
+  // a process safely, but it is enough to avoid deleting the only path back to
+  // one that may still be alive.
+  if (pid === null && await Bun.file(join(dir, "sock")).exists()) {
+    throw new Error(`close: legacy session ${JSON.stringify(name)} has no pidfile but still has a socket`);
   }
   await rm(dir, { recursive: true, force: true });
 }

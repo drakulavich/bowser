@@ -11,7 +11,7 @@
 // and Handlers excludes `state`, so the lookup stops being index-safe.
 
 import { unlink } from "node:fs/promises";
-import { unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
@@ -24,6 +24,14 @@ import { pidPath, socketPath } from "./client.ts";
  *  stale (that regression is why `nav.act()` exists). */
 export interface DaemonState {
   dialog?: DialogState;
+}
+
+/** Remove only this daemon's pidfile. A replacement can overwrite the path
+ *  before the old process's exit handler runs. */
+export function removePidFileIfOwned(pidFile: string, pid: number): void {
+  try {
+    if (readFileSync(pidFile, "utf8").trim() === String(pid)) unlinkSync(pidFile);
+  } catch {}
 }
 
 /** What `dispatch` needs from the daemon. Separated from the socket so the
@@ -176,9 +184,7 @@ export async function startDaemon(session: string): Promise<void> {
   const pidFile = pidPath(session);
   await Bun.write(pidFile, String(process.pid));
   process.on("exit", () => {
-    try {
-      unlinkSync(pidFile);
-    } catch {}
+    removePidFileIfOwned(pidFile, process.pid);
   });
 
   const browser: Browser = await openBrowser();

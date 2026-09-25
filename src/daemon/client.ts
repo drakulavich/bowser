@@ -93,8 +93,10 @@ export async function connectOrSpawn(
 ): Promise<DaemonClient> {
   const sock = socketPath(session);
   const client = new DaemonClient(sock);
+  let connected = false;
   try {
     await client.connect();
+    connected = true;
     // Bound the health check. A daemon that accepts the connection and never
     // answers — stopped, or blocked in a syscall — would otherwise hang every
     // caller forever, `list` included. Treating it as unreachable is what the
@@ -106,6 +108,13 @@ export async function connectOrSpawn(
     // keeps the process alive after the command has printed its answer.
     client.close();
     if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
+    // Do not replace a daemon whose socket accepted our connection but whose
+    // health check timed out. Unlinking its socket and spawning another daemon
+    // would leave two browser processes for one session, while the old one
+    // would no longer be addressable by its pidfile.
+    if (connected) {
+      throw new Error(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
+    }
     // Validate backend config in the parent before spawning: the daemon opens
     // the browser (and would throw on a bad BOWSER_BACKEND) before it ever opens
     // its socket, so that error is invisible to us and shows up only as the
