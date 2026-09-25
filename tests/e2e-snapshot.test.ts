@@ -72,6 +72,30 @@ function tree(out: string): string {
   return m[1]!;
 }
 
+/** Review edge cases. playwright-cli 0.1.13 (Edge) prints for this page:
+ *    - generic [active] [ref=e1]:
+ *      - paragraph [ref=e2]: a focusable span b
+ *      - paragraph [ref=e3]: c clickable span d
+ *      - paragraph [ref=e4]:
+ *        - text: e
+ *        - button "role span" [ref=e5]
+ *        - text: f
+ *      - iframe [ref=e6]:
+ *        - paragraph [ref=f1e2]: x
+ *      - iframe [ref=e7]:
+ *        - paragraph [ref=f2e2]: "y"
+ *  Its rule (toAriaNode) flattens every inline generic whose only child is a
+ *  text node, focusable or clickable or not; a span with a real role stays. */
+const EDGES_HTML = `<!doctype html>
+<html><head><title>Edges</title></head>
+<body>
+  <p>a <span tabindex="0">focusable span</span> b</p>
+  <p>c <span onclick="1" style="cursor:pointer">clickable span</span> d</p>
+  <p>e <span role="button">role span</span> f</p>
+  <iframe srcdoc="<p>x</p>" width="100" height="40" style="pointer-events:none"></iframe>
+  <iframe srcdoc="<p>y</p>" width="100" height="40"></iframe>
+</body></html>`;
+
 runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveBackend)", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
   let tmp: string;
@@ -96,6 +120,9 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
     server = Bun.serve({
       port: 0,
       fetch(req) {
+        if (new URL(req.url).pathname === "/edges.html") {
+          return new Response(EDGES_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
         const file = pages[new URL(req.url).pathname];
         if (!file) return new Response("not found", { status: 404 });
         return new Response(Bun.file(join(FIXTURES, file)), {
@@ -179,5 +206,23 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
     expect(tree(await cmdSnapshot(ctx))).toBe(withDeviations(want, backend === "webkit"
       ? webkitLinkCursor(want, ["Home", 'Say "hi"', "inline link", "link"])
       : []));
+  }, 60_000);
+
+  test("inline text-only generics flatten like playwright-cli's; a pointer-events:none iframe gets no ref", async () => {
+    await cmdGoto(ctx, `${base}/edges.html`);
+    // Differs from playwright-cli (above) only by the ruled iframe leaves and
+    // spec 3.6: playwright hard-codes pointer events on for iframes, bowser
+    // requires them, so the first iframe has no ref and the second is e6.
+    expect(tree(await cmdSnapshot(ctx))).toBe([
+      "- generic [active] [ref=e1]:",
+      "  - paragraph [ref=e2]: a focusable span b",
+      "  - paragraph [ref=e3]: c clickable span d",
+      "  - paragraph [ref=e4]:",
+      "    - text: e",
+      '    - button "role span" [ref=e5]',
+      "    - text: f",
+      "  - iframe",
+      "  - iframe [ref=e6]",
+    ].join("\n"));
   }, 60_000);
 });

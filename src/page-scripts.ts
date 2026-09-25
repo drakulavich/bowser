@@ -439,7 +439,8 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   function toNode(el) {
     if (tagOf(el) === 'IFRAME') {
       const n = { role: 'iframe', name: '', children: [] };
-      if (box(el).visible) assignRef(n, el);
+      // Playwright hard-codes pointer events on for iframes; spec 3.6 does not.
+      if (box(el).visible && styleOf(el).pointerEvents !== 'none') assignRef(n, el);
       if (el === document.activeElement) n.active = true;
       cursorOf.set(n, styleOf(el).cursor);
       return n;
