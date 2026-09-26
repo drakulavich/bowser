@@ -5,7 +5,8 @@ on:
     tags:
       - "v*"
   # Allow manual runs from the Actions UI (handy for re-publishing binaries
-  # against an already-pushed tag).
+  # against an already-pushed tag). Every job checks out that tag, not the
+  # branch the run was started from.
   workflow_dispatch:
     inputs:
       tag:
@@ -13,7 +14,7 @@ on:
         required: true
 
 permissions:
-  contents: write # needed to create the GitHub Release + upload assets
+  contents: read
 
 jobs:
   build:
@@ -33,6 +34,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -58,13 +62,18 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release + upload assets
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
       - name: Resolve tag
         id: tag
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: echo "name=$TAG" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -87,27 +96,51 @@ jobs:
             dist/SHA256SUMS.txt
 
   npm:
-    # Publish to npm as @drakulavich/bowser-cli. Requires NPM_TOKEN secret
-    # on the repo (Automation token with "Publish" permission).
+    # Publish @drakulavich/bowser-cli through npm trusted publishing (OIDC):
+    # npmjs.com trusts this repository and this workflow file name, and no npm
+    # token exists anywhere. access: public comes from package.json's
+    # publishConfig.
     needs: publish
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.ref_name, '-') }} # skip prereleases like v0.1.0-rc.1
+    if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }} # skip prereleases like v0.1.0-rc.1
+    permissions:
+      contents: read
+      id-token: write # the OIDC token npm exchanges for a publish credential
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+      # Trusted publishing needs npm 11.5.1 or newer, which Node 24 bundles.
+      # Nothing is installed from the network into the job that holds the
+      # OIDC token.
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
-      - name: Verify version matches tag
+          package-manager-cache: false
+      - name: npm must be 11.5.1 or newer
         run: |
-          PKG=$(node -p "require('./package.json').version")
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          TAG_VER="${TAG#v}"
-          if [ "$PKG" != "$TAG_VER" ]; then
-            echo "package.json version ($PKG) does not match tag ($TAG_VER)"
+          have=$(npm --version)
+          [ "$(printf '11.5.1\n%s\n' "$have" | sort -V | head -1)" = "11.5.1" ] || { echo "::error::npm $have is older than 11.5.1"; exit 1; }
+      # The tag reaches the shell through env, never by interpolation: this
+      # job holds id-token: write.
+      - name: Verify version matches tag
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          PKG=$(jq -r .version package.json)
+          if [ "$PKG" != "${TAG#v}" ]; then
+            echo "::error::package.json version ($PKG) does not match tag ($TAG)"
             exit 1
           fi
+      # A rerun after a successful publish skips instead of failing on E403.
       - name: Publish to npm
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          NAME=$(jq -r .name package.json)
+          VERSION=$(jq -r .version package.json)
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already on npm; skipping"
+            exit 0
+          fi
+          npm publish --provenance
