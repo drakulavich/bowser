@@ -1672,3 +1672,41 @@ describe("a failed page command still reports its dialogs", () => {
     expect(reportFailure(err)).toEqual({ stderr: "bowser: Error: boom", code: 2 });
   });
 });
+
+describe("fill and type errors never carry the entered text", () => {
+  const SECRET = "hunter2-S3cr3t!";
+  const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
+  const MODAL = '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
+  const withheld = (cmd: string) => `${cmd}: the browser's error message was withheld because it contained the entered text`;
+  /** A client whose `type` request fails with `message`. */
+  const failing = (message: string, opts: Parameters<typeof fakeClient>[1] = {}) =>
+    fakeClient({ evaluate: resolving({ e2: "input" }), type: () => { throw new Error(message); } }, opts);
+
+  beforeEach(async () => {
+    await saveState({ name: session, url: "https://x", title: "X", updatedAt: Date.now(),
+      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Password", tag: "input" }] });
+  });
+
+  const RUNS: Array<[string, string, (c: ReturnType<typeof fakeClient>) => Promise<string>]> = [
+    ["fill <ref> <text>", "fill", (c) => cmdFill({ ...ctx(), connect: async () => c }, "e2", SECRET)],
+    ["fill --stdin", "fill", (c) => cmdFill({ ...ctx(), connect: async () => c, readStdin: async () => `${SECRET}\n` }, "e2", undefined, { stdin: true })],
+    ["type", "type", (c) => cmdType({ ...ctx(), connect: async () => c }, SECRET)],
+  ];
+  for (const [name, cmd, go] of RUNS) {
+    test(`${name}: a browser error containing the text is withheld from stderr`, async () => {
+      const err = await go(failing(`failed: ${SECRET}`)).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(reportFailure(err)).toEqual({ stderr: `bowser: ${withheld(cmd)}`, code: 2 });
+    });
+
+    test(`${name}: the withheld error keeps the dialogs the command answered`, async () => {
+      const err = await go(failing(`failed: ${SECRET}`, { dialogs: [dismissed] })).catch((e: unknown) => e);
+      expect(reportFailure(err)).toEqual({ stderr: `bowser: ${withheld(cmd)}\n${MODAL}`, code: 2 });
+    });
+
+    test(`${name}: an error without the text passes through unchanged`, async () => {
+      const err = await go(failing("failed: boom")).catch((e: unknown) => e);
+      expect(reportFailure(err)).toEqual({ stderr: "bowser: failed: boom", code: 2 });
+    });
+  }
+});

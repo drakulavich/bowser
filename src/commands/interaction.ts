@@ -49,6 +49,28 @@ function withoutFinalNewline(s: string): string {
   return s;
 }
 
+/** Runs `fn`, the request that is given the entered text, and if it throws
+ *  an error whose message contains `text` (the browser may quote its input),
+ *  replaces the message so the text never reaches stderr or an MCP result.
+ *  The same error object is rethrown, so its class stays, and
+ *  `withPageClient` still hangs the dialogs on it. Its stack is reset
+ *  because it repeats the message. Only that request is wrapped: bowser's own
+ *  messages never contain the text, and a short text such as "x" would
+ *  otherwise match one and turn a user error (exit 1) into exit 2. */
+async function withholdingText<T>(command: string, text: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!text || !message.includes(text)) throw err;
+    const withheld = `${command}: the browser's error message was withheld because it contained the entered text`;
+    if (!(err instanceof Error)) throw new Error(withheld);
+    err.message = withheld;
+    err.stack = `${err.name}: ${withheld}`;
+    throw err;
+  }
+}
+
 /** With `stdin`, the text comes from standard input so a secret never
  *  reaches argv. In every mode the text is never echoed back. */
 export async function cmdFill(
@@ -66,7 +88,7 @@ export async function cmdFill(
     const selector = await liveSelector(c, ref);
     await c.request("click", [selector]);
     await c.request("evaluate", [clearForFillScript(selector)]);
-    await c.request("type", [value]);
+    await withholdingText("fill", value, () => c.request("type", [value]));
     return replyPage(ctx, c, { ok: true, ref }, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
@@ -74,7 +96,7 @@ export async function cmdFill(
 /** Answers with the length in code points, never the text: it may be a secret. */
 export async function cmdType(ctx: CommandContext, text: string): Promise<string> {
   return withPageClient(ctx, async (c) => {
-    await c.request("type", [text]);
+    await withholdingText("type", text, () => c.request("type", [text]));
     const length = [...text].length;
     return replyPage(ctx, c, { ok: true, length }, `typed ${length} character${length === 1 ? "" : "s"}`);
   });

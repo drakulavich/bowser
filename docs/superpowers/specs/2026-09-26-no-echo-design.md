@@ -22,7 +22,7 @@ text they entered, passwords included, so a secret lands in the agent's context 
 1. **`fill`.** `fill --json` gives `{"ok":true,"ref":"<ref>"}` in every mode, the same shape `--stdin` already has. The plain-text output is unchanged.
 2. **`type`.** `type` prints `typed N characters`, where N is the number of characters (code points), and `typed 1 character` when N is 1. `type --json` gives `{"ok":true,"length":N}`.
 3. **MCP.** The MCP tools follow from 1 and 2 with no MCP-specific code.
-4. **Other output.** No other output of either command, and no error message, contains the entered text.
+4. **Other output.** bowser itself never echoes the entered text in either command's output or error messages; page content the command reports (dialog messages, which the page controls) is out of scope, as it is in `snapshot`.
 
 ## Acceptance
 

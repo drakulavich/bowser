@@ -16,6 +16,9 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
   points, instead of `typed "<text>"`. `type --json` gives `{"ok":true,"length":N}` instead of
   `{"ok":true,"text":"<text>"}`.
 - The MCP `fill` and `type` tools follow, since they return the `--json` answer.
+- A browser error from either command that contains the entered text is replaced by
+  `<command>: the browser's error message was withheld because it contained the entered text`
+  (exit 2, dialogs still reported). Dialog messages are page content and are printed as is.
 
 ## [0.6.0] — 2026-09-26
 

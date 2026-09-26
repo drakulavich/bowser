@@ -156,7 +156,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `click <ref>` | Click an element |
 | `fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type. `--stdin` reads the text from piped input and drops one trailing newline, so a secret never appears in the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed, with or without `--stdin`: `filled e4 (textbox "Password")`, and `--json` answers `{"ok":true,"ref":"e4"}`. `--stdin` is not offered over MCP. |
-| `type <text>` | Type into focused element. The text is never echoed: it prints `typed N characters` (`typed 1 character` for one), counting code points, and `--json` answers `{"ok":true,"length":N}` |
+| `type <text>` | Type into focused element. The text is never echoed: it prints `typed N characters` (`typed 1 character` for one), counting code points, and `--json` answers `{"ok":true,"length":N}`. For `fill` and `type` alike, a browser error that quotes the text is replaced by `<command>: the browser's error message was withheld because it contained the entered text`; a dialog message the page shows is page content and is printed as is |
 | `press <key>` | Press a keyboard key |
 | `hover <ref>` | Hover an element |
 | `select <ref> <value>` | Choose a `<select>` option |
