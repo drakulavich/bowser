@@ -31,6 +31,19 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
 
 ### Fixed
 
+- **A dialog that fires between commands is no longer lost when the next command leaves the page.**
+  A timer's `confirm`, then `reload`, `goto`, `open`, `go-back` or `press Enter` submitting a form,
+  used to report nothing: the report left with the old page. That command now reports it under
+  `### Modal state`, and a later `go-back` to the cached page does not report it again.
+- **A page's own `window.alert`, `confirm` or `prompt` runs.** bowser replaced it with its dialog
+  handler, so a page's in-page modal or test stub never ran and its caller got `false`. bowser now
+  replaces only the browser's own functions, as `playwright-cli` leaves the page's alone. A page
+  wrapper that calls a saved browser function (`const c = confirm; window.confirm = m => c(m)`) is
+  dismissed by WebKit and not reported, like a saved reference.
+- **A dialog in a same-origin iframe is reported and takes the prepared answer.** It used to be
+  dismissed unreported, and the answer set by `dialog-accept` carried over to the next top-level
+  dialog. A dialog in a cross-origin iframe, or one that loaded after bowser's last command, is
+  still dismissed and not reported, and the answer still waits.
 - **`select` matches an option's value or its label**, as `playwright-cli` does: `select e3 Red`
   picks `<option value="r">Red</option>`, the first match in document order. A text that matches
   no option fails at once with `ref 'eN' has no option "<text>"` (exit 1), and the select keeps its

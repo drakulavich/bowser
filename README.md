@@ -105,7 +105,16 @@ The command that caused the dialog reports it under `### Modal state`. With `--j
 **Differences from `playwright-cli`:**
 
 - In `playwright-cli`, the dialog stays open and `dialog-accept` answers it *after* the action. In bowser, `dialog-accept` after the action prepares the *next* dialog. It does not answer the one already reported.
-- WebKit has no dialog events, so bowser replaces `window.alert`/`confirm`/`prompt` in the page before it acts there. A dialog the page opens while loading, before bowser's first command on that document, is dismissed by WebKit and not reported. A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page. A dialog opened through a reference the page saved at load time (`const c = window.confirm`) is dismissed by WebKit and not reported, and a prepared answer stays set until the next dialog bowser sees or a navigation. `beforeunload` is not handled.
+- WebKit has no dialog events, so bowser replaces `window.alert`/`confirm`/`prompt` in the page, and in every same-origin iframe it can reach, before it acts there. A dialog in such an iframe is reported like the page's own and takes the prepared answer. A dialog that fires between commands (a timer) is reported by the next command that prints dialogs, even when that command leaves the page (`reload`, `goto`, `open`, `go-back`, `press Enter` on a form).
+- A function the page defined itself (`window.confirm = m => …`) is left alone and runs, as in `playwright-cli`; its calls are not dialogs and are not reported.
+- Not reported, and dismissed by WebKit:
+  - a dialog the page opens while loading, before bowser's first command on that document;
+  - a dialog in a cross-origin iframe, or in an iframe that loaded after bowser's last command;
+  - a dialog opened through a reference the page saved at load time (`const c = window.confirm`), including a page wrapper around it (`window.confirm = m => c(m)`).
+
+  In each of these cases a prepared answer stays set until the next dialog bowser sees or a navigation.
+- A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page.
+- `beforeunload` is not handled.
 
 ### Snapshot output
 
