@@ -44,8 +44,9 @@ leaves one open, so none of that machinery exists.
    (the hint only when dismissed for lack of a one-shot answer). `--json`: the command's object gains
    `"dialogs": [...]`, absent when none. A command that fails reports its dialogs too, then forgets
    them: the error message unchanged, then `### Modal state` on stderr (in an MCP tool error, in its
-   text); the exit code does not change. If the browser refuses both the answer and a dismiss, the
-   dialog is recorded with `state: "failed"` and its error, printed `: could not be answered (<error>)`.
+   text); the exit code does not change. If the browser refuses both the answer and a dismiss, or does
+   not answer within 2 s (no dismiss is tried then: the answer may still land), the dialog is recorded
+   with `state: "failed"` and its error, printed `: could not be answered (<error>)`.
 4. **Chromium.** The daemon subscribes to `Page.javascriptDialogOpening` **before the first
    navigation**, so a dialog during the very first page load is answered too, and handles each one
    at once with `Page.handleJavaScriptDialog`. The log lives in the daemon.

@@ -338,26 +338,34 @@ function answerDialog(browser: Browser, state: DaemonState, d: DialogState): Pro
     ...(promptText !== undefined ? { answer: promptText } : {}),
     ...(given ? {} : { unanswered: true as const }),
   });
+  const failed = (err: unknown): DialogReport => ({ ...d, state: "failed", error: err instanceof Error ? err.message : String(err) });
   return first.then(
     () => answered(accept, text),
     // A dialog left open blocks the page, so a refused answer is tried once
     // more as a dismiss; failing that, the report says so rather than lie.
-    () => bounded(browser.answerDialog(false)).then(
-      () => answered(false),
-      (err: unknown): DialogReport => ({ ...d, state: "failed", error: err instanceof Error ? err.message : String(err) }),
-    ),
+    // A timed-out answer is not retried: it may still land, and a dismiss
+    // sent meanwhile would fail with "no dialog" after it did, so the
+    // outcome is unknown and the report says only that.
+    (err: unknown) => err instanceof AnswerTimeout
+      ? failed(err)
+      : bounded(browser.answerDialog(false)).then(() => answered(false), failed),
   );
 }
 
-/** How long one answer attempt may take before it counts as refused. */
+/** How long one answer attempt may take before its outcome is unknown. */
 const ANSWER_TIMEOUT_MS = 2000;
 
-/** `p`, or a rejection with "answer timed out" after ANSWER_TIMEOUT_MS: a
- *  browser that never answers must not stall the report chain. */
+/** An answer attempt that ran out of time: it may still land. */
+class AnswerTimeout extends Error {
+  constructor() { super("answer timed out"); }
+}
+
+/** `p`, or an AnswerTimeout after ANSWER_TIMEOUT_MS: a browser that never
+ *  answers must not stall the report chain. */
 function bounded(p: Promise<void>): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("answer timed out")), ANSWER_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new AnswerTimeout()), ANSWER_TIMEOUT_MS);
   });
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }

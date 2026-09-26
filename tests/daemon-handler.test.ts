@@ -447,28 +447,30 @@ describe("dialogs: answered the moment they open", () => {
     expect(answers(b)).toHaveLength(2);
   });
 
-  test("an answer that never settles counts as refused: reported failed, and a later dialog is still reported, in order, within two bounds", async () => {
+  test("an answer that never settles is reported failed within one bound, and a later dialog is still reported, in order", async () => {
     const b = dialogBrowser({ answerDialog: () => new Promise<void>(() => {}) });
     b.click = async () => { b.on().opened(confirmBox); };
     const h = createHandler(b);
     const t0 = performance.now();
     const first = await h(rep("click", ["#go"]));
-    expect(performance.now() - t0).toBeLessThan(2 * 2000 + 500);
+    expect(performance.now() - t0).toBeLessThan(2000 + 500);
     expect(first.dialogs).toEqual([{ ...confirmBox, state: "failed", error: "answer timed out" }]);
     b.answerDialog = async () => {};
     b.click = async () => { b.on().opened(promptBox); };
     expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
   }, 15_000);
 
-  test("a first answer that never settles is retried as a dismiss, which lands", async () => {
-    let n = 0;
-    const b = dialogBrowser({ answerDialog: () => (n++ === 0 ? new Promise<void>(() => {}) : Promise.resolve()) });
+  test("a first answer that times out is not retried: its outcome is unknown, so the report says failed", async () => {
+    // A dismiss sent while a slow accept is still in flight could fail with
+    // "no dialog" after the accept lands, and the report would then lie.
+    const b = dialogBrowser({ answerDialog: (...a) => { b.calls.push(["answerDialog", a]); return new Promise<void>(() => {}); } });
     b.click = async () => { b.on().opened(confirmBox); };
     const h = createHandler(b);
     await h(req("dialog-answer", [true]));
     const t0 = performance.now();
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...confirmBox, state: "dismissed" }]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...confirmBox, state: "failed", error: "answer timed out" }]);
     expect(performance.now() - t0).toBeLessThan(2000 + 500);
+    expect(answers(b)).toEqual([["answerDialog", [true, undefined]]]);
   }, 15_000);
 
   test("two dialogs whose answers settle out of order are reported in the order they opened", async () => {
