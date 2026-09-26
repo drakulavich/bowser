@@ -34,7 +34,7 @@ Do **not** use for static HTTP fetches.
 | Command | Purpose |
 | --- | --- |
 | `bowser open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies/localStorage/IndexedDB in `~/.bowser/profiles/<session>/` across `close`; `--profile=dir` uses `dir` (implies `--persistent`). `close` keeps the profile; `rm -rf` it to delete. One running session per profile. |
-| `bowser goto <url>` | Navigate within current session |
+| `bowser goto <url>` | Navigate within current session. `open` and `goto` add a missing scheme: `http://` for `localhost`, `127.0.0.1`, `[::1]` (`localhost:3000/x`), `https://` otherwise (`example.com`); a URL with a scheme is used as typed |
 | `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `bowser click <ref>` | Click an element by ref |
 | `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin` |
@@ -70,6 +70,10 @@ Do **not** use for static HTTP fetches.
 
 `bowser <command> --help` prints that command's usage and flags without running it, so it is safe on
 `close` or `open`. After `--`, `--help` is plain text: `bowser fill e1 -- --help` types it.
+
+Quote any argument with spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. An extra word
+fails the command with `usage: too many arguments for '<cmd>': expected <n>, received <m>` (exit 1),
+words after `--` included.
 
 ## Snapshot Format
 

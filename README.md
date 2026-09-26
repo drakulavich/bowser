@@ -152,7 +152,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | Command | Description |
 | --- | --- |
 | `open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies, `localStorage` and IndexedDB in `~/.bowser/profiles/<session>/` across `close` and restarts; `--profile=dir` keeps them in `dir` instead (implies `--persistent`). See [Persistent profiles](#persistent-profiles). |
-| `goto <url>` | Navigate within current session |
+| `goto <url>` | Navigate within current session. For `open` and `goto` alike, a URL without a scheme gets one, as in `playwright-cli`: `http://` for `localhost`, `127.0.0.1` and `[::1]` (`localhost:3000/x` → `http://localhost:3000/x`), `https://` for any other host (`example.com` → `https://example.com`). A URL with a scheme (`http:`, `file:`, `about:`, `data:`, …) is used as typed. Unlike `playwright-cli`, `127.0.0.1` gets `http://`, not `https://`. |
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `click <ref>` | Click an element |
 | `fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type. `--stdin` reads the text from piped input and drops one trailing newline, so a secret never appears in the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed, with or without `--stdin`: `filled e4 (textbox "Password")`, and `--json` answers `{"ok":true,"ref":"e4"}`. `--stdin` is not offered over MCP. |
@@ -189,6 +189,12 @@ Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 `bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
 flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text
 like any other argument.
+
+A command given more arguments than it takes fails before it runs, with
+`usage: too many arguments for '<cmd>': expected <n>, received <m>` and exit code 1. Quote an
+argument that has spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. Words after `--`
+count too, so `fill e1 -- a b` is too many. `bowser mcp` with any extra word fails the same way and
+does not start the server.
 
 ## MCP bridge
 

@@ -5,6 +5,15 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed: extra arguments are an error
+
+- **A command given more arguments than it takes fails** with `usage: too many arguments for '<cmd>':
+  expected <n>, received <m>` (exit 1), before it starts or reaches a browser. The extra words used
+  to be dropped silently: `eval 1 + 1` printed `1`, `goto <url> extra` navigated, `localstorage-set a
+  b c` set `a`, and `fill e4 hello world` filled `hello`. Words after `--` count too. Quote an
+  argument with spaces. `bowser mcp extra` no longer starts the server. MCP tool calls are
+  unaffected.
+
 ### Changed: `fill` and `type` never echo the text they entered
 
 Through MCP, `fill` and `type` returned the text they entered, passwords included, so a secret
@@ -22,6 +31,11 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
 
 ### Fixed
 
+- **`open` and `goto` add a scheme to a URL typed without one**, as `playwright-cli` does:
+  `example.com` goes to `https://example.com`, and `localhost:3000/x`, `127.0.0.1:3000` and
+  `[::1]:3000` go to `http://…`. `open example.com` failed with `The URL can’t be shown`, and
+  `goto localhost:<port>/x` timed out, because WebKit read `localhost:` as a scheme. A URL with a
+  scheme is used as typed. `playwright-cli` gives `127.0.0.1` `https://`; bowser gives it `http://`.
 - **`<command> --help` prints that command's help and runs nothing.** It used to run the command:
   `close --help` closed the session, `open --help` opened one, and `mcp --help` started the MCP
   server. `-h`/`--help` anywhere before `--` now prints the usage line, summary, arguments and flags
