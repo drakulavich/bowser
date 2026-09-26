@@ -15,9 +15,10 @@
 // with the dialog pending, instead of waiting for the page it blocks; the op
 // itself settles in the background once `dialog-answer` (urgent lane) has
 // answered it. While one is pending every other queued op fails at once, so
-// nothing can queue behind it. After the answer, the next page op waits for
-// that blocked call to settle (bounded by the op timeout) before it touches
-// the page: one browser operation at a time still holds.
+// nothing can queue behind it. `dialog-answer` then waits briefly for the
+// blocked call to settle; if it has not, the page stays busy until it does,
+// and page ops fail at once meanwhile. No op ever waits on it, so none can be
+// reported failed and still reach the browser.
 
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
@@ -118,6 +119,15 @@ type Handlers = {
  *  which the command that opened the dialog reads right after. */
 const PASS_A_DIALOG: ReadonlySet<Op> = new Set<Op>([...IS_URGENT, "state"]);
 
+/** How long `dialog-answer` waits for the call its dialog blocked. Normally
+ *  that call settles within milliseconds of the answer. */
+export const DIALOG_SETTLE_MS = 2000;
+
+/** The fail-fast error while a call a dialog blocked is still settling. */
+function busyError(op: Op): string {
+  return `the page is still finishing ${op} after a dialog; try again`;
+}
+
 /** The prompt text a dialog is answered with: a prompt's, when accepted. */
 function promptText(d: DialogState, accept: boolean, text?: string): string | undefined {
   return d.type === "prompt" && accept ? text ?? d.defaultValue ?? "" : undefined;
@@ -177,14 +187,14 @@ const handlers: Handlers = {
  *
  *  `state` defaults to `{}` so the call sites that pass only a browser keep
  *  compiling unchanged; only `state`, `dialog-answer` and the dialog
- *  listener read it. `settleMs` bounds how long a later op waits for a call
- *  a dialog blocked (the op timeout; 0 waits without bound). */
-export function createHandler(browser: Browser, state: DaemonState = {}, settleMs = opTimeoutMs()): (req: DaemonRequest) => Promise<DaemonResponse> {
+ *  listener read it. `settleMs` is how long `dialog-answer` waits for the
+ *  call its dialog blocked (tests shorten it). */
+export function createHandler(browser: Browser, state: DaemonState = {}, settleMs = DIALOG_SETTLE_MS): (req: DaemonRequest) => Promise<DaemonResponse> {
   // Wakes the op in flight when its dialog opens.
   const waiters = new Set<() => void>();
   // The browser call a dialog blocked, after its op already replied. It still
-  // owns the page until it settles.
-  let blocked: Promise<unknown> | undefined;
+  // owns the page until it settles; its own `finally` clears this.
+  let blocked: { op: Op; done: Promise<unknown> } | undefined;
   browser.watchDialogs({
     opened: (d) => {
       const a = state.answer;
@@ -206,8 +216,8 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
     // While a dialog is open the page cannot evaluate, so url and title come
     // from the view's own getters instead of realUrl()/realTitle().
     state: async (b) => ({
-      url: state.dialog ? b.url : await b.realUrl(),
-      title: state.dialog ? b.title : await b.realTitle(),
+      url: state.dialog || blocked ? b.url : await b.realUrl(),
+      title: state.dialog || blocked ? b.title : await b.realTitle(),
       ...(state.dialog ? { dialog: state.dialog } : {}),
       ...(state.profile ? { profile: state.profile } : {}),
     }),
@@ -220,6 +230,17 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
       const answer = promptText(d, accept, text);
       await b.answerDialog(accept, answer);
       state.dialog = undefined;
+      // Give the blocked call a moment to finish, so the next command finds
+      // the page free. Stop early if it opens another dialog instead.
+      if (blocked) {
+        let wake!: () => void;
+        const next = new Promise<void>((r) => { wake = r; });
+        waiters.add(wake);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([blocked.done, next, new Promise<void>((r) => { timer = setTimeout(r, settleMs); })]);
+        clearTimeout(timer);
+        waiters.delete(wake);
+      }
       return { answered: answered(d, accept, answer) };
     },
   };
@@ -232,13 +253,11 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
     if (state.dialog && !PASS_A_DIALOG.has(req.op)) {
       return { id: req.id, ok: false, error: dialogOpenError(state.dialog) };
     }
-    // Once the dialog is answered, wait for the call it blocked before
-    // touching the page. While it is pending there is nothing to wait for:
-    // only `state` gets here, and it reads the view's getters.
-    if (blocked && !state.dialog && !IS_URGENT.has(req.op)) {
-      await withTimeout(blocked, settleMs, "blocked").catch(() => {});
-      blocked = undefined;
-      return run(req);
+    // After the answer, the call the dialog blocked may still be settling;
+    // refuse rather than overlap it. Checked after the dialog guard, so a
+    // second dialog is reported first.
+    if (blocked && !PASS_A_DIALOG.has(req.op)) {
+      return { id: req.id, ok: false, error: busyError(blocked.op) };
     }
     // Capability gate: a CDP-only op on webkit fails here with the shared
     // message, so the handler never touches a view that cannot answer.
@@ -263,7 +282,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
       return await Promise.race([
         work,
         opened.then(() => {
-          blocked = work;
+          const mark = { op: req.op, done: work };
+          blocked = mark;
+          work.finally(() => { if (blocked === mark) blocked = undefined; });
           return req.op === "state" ? run(req) : { id: req.id, ok: true };
         }),
       ]);
@@ -300,9 +321,9 @@ export async function startDaemon(session: string, profile?: string): Promise<vo
 
   const browser: Browser = await openBrowser({ profile });
   const state: DaemonState = profile ? { profile } : {};
-  const timeoutMs = opTimeoutMs();
-  const handle = createHandler(browser, state, timeoutMs);
+  const handle = createHandler(browser, state);
   const serialize = createSerializer();
+  const timeoutMs = opTimeoutMs();
 
   Bun.listen({
     unix: sock,

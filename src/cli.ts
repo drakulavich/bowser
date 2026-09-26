@@ -17,7 +17,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
 
 /** Errors the user can fix (exit 1), as opposed to runtime failures (exit 2). */
 export function isUserError(msg: string): boolean {
-  return /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit|an? \w+ dialog is open)/i.test(msg);
+  return /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit|an? \w+ dialog is open|the page is still finishing )/i.test(msg);
 }
 
 if (import.meta.main) {

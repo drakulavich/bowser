@@ -404,35 +404,85 @@ describe("dialogs", () => {
 });
 
 describe("dialogs: the call a dialog blocked still owns the page", () => {
-  test("after the answer, the next page op does not reach the browser until the blocked click settles", async () => {
-    let settle!: () => void;
-    const b = dialogBrowser();
-    b.click = () => { b.on().opened(confirmBox); return new Promise<void>((r) => { settle = r; }); };
-    const h = createHandler(b, {}, 5_000);
-    expect(await h(req("click", ["#go"]))).toMatchObject({ ok: true, dialogs: [{ state: "pending" }] });
-    await h(req("dialog-answer", [true]));
-    const next = h(req("evaluate", ["1"]));
-    await Bun.sleep(30);
-    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
-    settle();
-    expect(await next).toEqual({ id: 7, ok: true, result: 42 });
-    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([["evaluate", ["1"]]]);
-  });
+  const BUSY = "the page is still finishing click after a dialog; try again";
 
-  test("a blocked call that never settles holds the page only for the op timeout", async () => {
-    const b = dialogBrowser();
-    b.click = () => { b.on().opened(confirmBox); return new Promise<void>(() => {}); };
-    const h = createHandler(b, {}, 40);
+  /** A click that opens `dialog` and then stays blocked until `settle()`. */
+  function blockingClick(dialog: DialogState = confirmBox) {
+    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); } });
+    let settle!: () => void;
+    b.click = () => { b.on().opened(dialog); return new Promise<void>((r) => { settle = r; }); };
+    return Object.assign(b, { settle: () => settle() });
+  }
+
+  test("while the answered dialog's click is still pending, a page op fails at once and never reaches the browser", async () => {
+    const b = blockingClick();
+    const h = createHandler(b, {}, 20);
     await h(req("click", ["#go"]));
     await h(req("dialog-answer", [true]));
     const t0 = performance.now();
+    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: false, error: BUSY });
+    expect(performance.now() - t0).toBeLessThan(100);
+    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
+    b.settle();
+    await Bun.sleep(0);
     expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
-    expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  test("while busy, state reads the view's getters instead of evaluating in the page", async () => {
+    const b = blockingClick();
+    const h = createHandler(b, {}, 20);
+    await h(req("click", ["#go"]));
+    await h(req("dialog-answer", [true]));
+    expect(await h(req("state"))).toMatchObject({ ok: true, result: { url: "https://x/", title: "X" } });
+    expect(b.calls.filter(([n]) => n === "realUrl" || n === "realTitle")).toEqual([]);
+  });
+
+  test("dialog-answer replies only after the blocked call settles, when it does within the bound", async () => {
+    const b = blockingClick();
+    const h = createHandler(b, {}, 5_000);
+    await h(req("click", ["#go"]));
+    let settled = false;
+    setTimeout(() => { settled = true; b.settle(); }, 50);
+    const res = await h(req("dialog-answer", [true]));
+    expect(settled).toBe(true);
+    expect(res).toMatchObject({ ok: true, result: { answered: { state: "accepted" } } });
+    // Nothing is left busy: the next page op runs.
+    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
+  });
+
+  test("dialog-answer stops waiting when the blocked call opens another dialog", async () => {
+    const b = blockingClick();
+    const h = createHandler(b, {}, 5_000);
+    await h(req("click", ["#go"]));
+    setTimeout(() => b.on().opened({ type: "alert", message: "next" }), 20);
+    const t0 = performance.now();
+    await h(req("dialog-answer", [true]));
+    expect(performance.now() - t0).toBeLessThan(1000);
+  });
+
+  test("a second dialog opened while busy is reported at once, ahead of the busy error", async () => {
+    const b = blockingClick();
+    const h = createHandler(b, {}, 20);
+    await h(req("click", ["#go"]));
+    await h(req("dialog-answer", [true]));
+    b.on().opened({ type: "alert", message: "next" });
+    expect(await h(req("evaluate", ["1"]))).toMatchObject({
+      ok: false, error: 'an alert dialog is open ("next"); run dialog-accept or dialog-dismiss',
+    });
+    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
+  });
+
+  test("while busy, urgent ops still answer", async () => {
+    const b = blockingClick();
+    const h = createHandler(b, {}, 20);
+    await h(req("click", ["#go"]));
+    await h(req("dialog-answer", [true]));
+    expect(await h(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
+    expect(await h(req("dialog-answer", [false]))).toEqual({ id: 7, ok: true, result: {} });
   });
 
   test("while the dialog is pending, state and the fail-fast error do not wait for the blocked click", async () => {
-    const b = dialogBrowser();
-    b.click = () => { b.on().opened(confirmBox); return new Promise<void>(() => {}); };
+    const b = blockingClick();
     const h = createHandler(b, {}, 5_000);
     await h(req("click", ["#go"]));
     const t0 = performance.now();

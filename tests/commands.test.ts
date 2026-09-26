@@ -1584,6 +1584,7 @@ describe("dialogs", () => {
     await expect(cmdEval({ ...ctx(), connect: async () => c }, "1")).rejects.toThrow(msg);
     expect(isUserError(msg)).toBe(true);
     expect(isUserError('an alert dialog is open ("hi"); run dialog-accept or dialog-dismiss')).toBe(true);
+    expect(isUserError("the page is still finishing click after a dialog; try again")).toBe(true);
   });
 
   test("dialog-accept answers the pending dialog and says how", async () => {
