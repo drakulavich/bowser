@@ -8,6 +8,15 @@ import {
 } from "./page-scripts.ts";
 import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
 import type { Backend } from "./backend.ts";
+import type { DialogState } from "./daemon/protocol.ts";
+
+/** What the daemon hears about dialogs. `navigated` fires on both backends
+ *  (a one-shot answer is lost on navigation); `opened`/`closed` on chrome only. */
+export interface DialogListener {
+  opened(dialog: DialogState): void;
+  closed(): void;
+  navigated(): void;
+}
 
 export interface BrowserOptions {
   executablePath?: string;
@@ -115,6 +124,13 @@ export interface Browser {
    *  cdp("Page.enable", {})). Returns false on webkit, where no such event is
    *  ever delivered — check the result rather than assuming it fired. */
   subscribe(event: string, handler: (data: unknown) => void): boolean;
+  /** Report dialogs and navigations to `on`. Returns false on webkit, where
+   *  only `navigated` is ever called. Call once, before the first navigate:
+   *  chrome enables its Page domain on the first navigation (CDP has no
+   *  session before one). */
+  watchDialogs(on: DialogListener): boolean;
+  /** Answer the open dialog (chrome: Page.handleJavaScriptDialog). */
+  answerDialog(accept: boolean, promptText?: string): Promise<void>;
   // --- Cookies: CDP-backed, so chrome only. Each rejects with CDP_UNAVAILABLE on webkit. ---
   getCookies(urls?: string[]): Promise<Cookie[]>;
   setCookie(param: CookieParam): Promise<{ success: boolean }>;
@@ -169,7 +185,7 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  watch counts navigation events and lets an action wait for the one it
  *  started: a navigation that begins within graceMs is awaited up to
  *  settleMs; an action that navigates nowhere costs the full grace window. */
-function navigationWatch(view: ViewLike, timing: NavTiming) {
+function navigationWatch(view: ViewLike, timing: NavTiming, onLanded: () => void = () => {}) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
   // A failed navigation ends the wait but does not fail the action: WebKit
@@ -177,7 +193,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming) {
   // navigating right after a click), and `state` reads the real URL anyway.
   // Surfacing the last navigation error is future DaemonState work.
   let landed = 0;
-  view.onNavigated = () => { landed++; };
+  view.onNavigated = () => { landed++; onLanded(); };
   view.onNavigationFailed = () => { landed++; };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   return {
@@ -216,7 +232,10 @@ export interface PersistentStore {
  *  fake view; openBrowser is the only caller with a real one. */
 export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING, store?: PersistentStore): Browser {
   const profile = store?.profile;
-  const nav = navigationWatch(view, timing);
+  let dialogs: DialogListener | undefined;
+  // Chrome only, and only once a navigation has created the CDP session.
+  let pageEnabled = false;
+  const nav = navigationWatch(view, timing, () => dialogs?.navigated());
   const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     // view.cdp() exists on the chrome backend only. On webkit Bun throws
     // 'WebView.cdp() requires backend: "chrome"'; we raise the friendlier
@@ -232,7 +251,18 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     get title() { return view.title; },
     realUrl: () => resolveUrl(view.url, () => view.evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => view.evaluate(READ_TITLE)),
-    navigate: (url) => view.navigate(url),
+    navigate: async (url) => {
+      await view.navigate(url);
+      if (dialogs && spec.kind === "chrome" && !pageEnabled) {
+        // Without the Page domain a dialog is never reported, and the op that
+        // opened it hangs until the op timeout. A failure is retried on the
+        // next navigate rather than failing this one.
+        try {
+          await cdp("Page.enable", {});
+          pageEnabled = true;
+        } catch {}
+      }
+    },
     evaluate: (expr) => view.evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
@@ -303,6 +333,23 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
       if (spec.kind !== "chrome") return false;
       view.addEventListener(event, (e) => handler(e.data));
       return true;
+    },
+    watchDialogs(on) {
+      dialogs = on;
+      if (spec.kind !== "chrome") return false;
+      view.addEventListener("Page.javascriptDialogOpening", (e) => {
+        const d = e.data as { type: DialogState["type"]; message: string; defaultPrompt?: string };
+        on.opened({
+          type: d.type,
+          message: d.message,
+          ...(d.type === "prompt" ? { defaultValue: d.defaultPrompt ?? "" } : {}),
+        });
+      });
+      view.addEventListener("Page.javascriptDialogClosed", () => on.closed());
+      return true;
+    },
+    answerDialog: async (accept, promptText) => {
+      await cdp("Page.handleJavaScriptDialog", promptText === undefined ? { accept } : { accept, promptText });
     },
     getCookies: async (urls) => {
       // `!= null`: the wire delivers JSON null for an omitted url list.

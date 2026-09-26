@@ -2,7 +2,7 @@
 // connection with its close, the empty session state, and ref lookup.
 
 import { connectOrSpawn, type ConnectOptions } from "../daemon/client.ts";
-import type { DaemonConnection, PageState } from "../daemon/protocol.ts";
+import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, type SessionState } from "../state.ts";
 
@@ -73,6 +73,38 @@ export async function liveSelector(c: DaemonConnection, ref: string): Promise<st
  *  otherwise. The object is stringified here so all commands agree on it. */
 export function reply(ctx: CommandContext, json: Record<string, unknown>, text: string): string {
   return ctx.json ? JSON.stringify(json) : text;
+}
+
+/** The `### Modal state` section for the dialogs a command saw, as
+ *  playwright-cli prints it. */
+export function modalState(dialogs: DialogReport[]): string {
+  return ["### Modal state", ...dialogs.map((d) => `- ${dialogLine(d)}`)].join("\n");
+}
+
+/** One dialog, as `["confirm" dialog with message "sure?"]: <what happened>`. */
+export function dialogLine(d: DialogReport): string {
+  const what = d.state === "pending"
+    ? "can be handled by dialog-accept or dialog-dismiss"
+    : d.unanswered ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
+  return `[${JSON.stringify(d.type)} dialog with message ${JSON.stringify(d.message)}]: ${what}`;
+}
+
+/** A dialog as --json reports it: the wire report without `unanswered`. */
+export function dialogJson({ unanswered: _, ...d }: DialogReport): Omit<DialogReport, "unanswered"> {
+  return d;
+}
+
+/** True when the page has a dialog open that blocks further actions. */
+export function dialogPending(c: DaemonConnection): boolean {
+  return c.dialogs().some((d) => d.state === "pending");
+}
+
+/** `reply` for a command that acts on the page: any dialog it opened or the
+ *  daemon answered follows the answer (`dialogs` under --json). */
+export function replyPage(ctx: CommandContext, c: DaemonConnection, json: Record<string, unknown>, text: string): string {
+  const dialogs = c.dialogs();
+  if (dialogs.length === 0) return reply(ctx, json, text);
+  return reply(ctx, { ...json, dialogs: dialogs.map(dialogJson) }, `${text}\n${modalState(dialogs)}`);
 }
 
 /** After an action that may have navigated, persist the page the daemon

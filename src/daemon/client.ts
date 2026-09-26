@@ -7,7 +7,7 @@ import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { sessionDir } from "../state.ts";
 import { assertValidBackendEnv } from "../backend.ts";
-import type { DaemonConnection, DaemonResponse, Op, RequestParams, ResultOf } from "./protocol.ts";
+import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 
 export function socketPath(session: string): string {
   // Use a short path — Unix socket names have a ~104-char limit on macOS.
@@ -30,6 +30,8 @@ export class DaemonClient implements DaemonConnection {
   private pending = new Map<number, { resolve: (result: unknown) => void; reject: (err: Error) => void }>();
   private buf = "";
   private closed = false;
+  private answered: DialogReport[] = [];
+  private open: DialogReport | undefined;
 
   constructor(
     private readonly path: string,
@@ -65,6 +67,7 @@ export class DaemonClient implements DaemonConnection {
               const res = JSON.parse(line) as DaemonResponse;
               const entry = self.pending.get(res.id);
               if (entry) {
+                self.noteDialogs(res.dialogs);
                 self.pending.delete(res.id);
                 if (res.ok) entry.resolve(res.result);
                 else entry.reject(new Error(res.error ?? "daemon error"));
@@ -88,6 +91,19 @@ export class DaemonClient implements DaemonConnection {
         },
       },
     });
+  }
+
+  /** Answered dialogs accumulate; the open one is whatever the latest reply says. */
+  private noteDialogs(dialogs: DialogReport[] = []): void {
+    this.open = undefined;
+    for (const d of dialogs) {
+      if (d.state === "pending") this.open = d;
+      else this.answered.push(d);
+    }
+  }
+
+  dialogs(): DialogReport[] {
+    return this.open ? [...this.answered, this.open] : [...this.answered];
   }
 
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>> {

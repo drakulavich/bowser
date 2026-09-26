@@ -165,6 +165,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `hover <ref>` | Hover an element |
 | `select <ref> <value>` | Choose a `<select>` option |
 | `check <ref>` / `uncheck <ref>` | Toggle a checkbox |
+| `dialog-accept [text]` / `dialog-dismiss` | Answer the open `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value), or, with none open, the next one. Chromium reports an open dialog under `### Modal state`. |
 | `screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `resize <width> <height>` | Set the viewport size in pixels. Works on both backends. |
 | `go-back` / `go-forward` / `reload` | Navigation |

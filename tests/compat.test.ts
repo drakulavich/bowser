@@ -36,6 +36,9 @@ const CASES: { argv: string[]; expect: { command: string; session?: string; posi
   { argv: ["sessionstorage-clear"],                           expect: { command: "sessionstorage-clear" } },
   { argv: ["eval", "document.title"],                         expect: { command: "eval",      positional: ["document.title"] } },
   { argv: ["run-code", "return 1+1"],                         expect: { command: "run-code",  positional: ["return 1+1"] } },
+  { argv: ["dialog-accept"],                                  expect: { command: "dialog-accept", positional: [] } },
+  { argv: ["dialog-accept", "my text"],                       expect: { command: "dialog-accept", positional: ["my text"] } },
+  { argv: ["dialog-dismiss"],                                 expect: { command: "dialog-dismiss" } },
 ];
 
 describe("playwright-cli compat parse table", () => {

@@ -43,6 +43,7 @@ Do **not** use for static HTTP fetches.
 | `bowser hover <ref>` | Hover an element |
 | `bowser select <ref> <value>` | Choose a `<select>` option |
 | `bowser check <ref>` / `uncheck <ref>` | Toggle a checkbox/radio |
+| `bowser dialog-accept [text]` / `dialog-dismiss` | Answer the open dialog (a prompt gets `text`), or, with none open, the next one |
 | `bowser screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `bowser resize <width> <height>` | Set the viewport size in pixels (both backends) |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |

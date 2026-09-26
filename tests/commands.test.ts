@@ -6,7 +6,9 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
+import { isUserError } from "../src/cli.ts";
 import { findCommand } from "../src/cli/registry.ts";
+import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath } from "../src/daemon/client.ts";
 import { cmdInstall } from "../src/commands/install.ts";
@@ -1462,5 +1464,157 @@ describe("fill --stdin", () => {
       if (pid > 0) try { process.kill(pid); } catch {}
       await rm(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe("dialogs", () => {
+  const pending = { type: "confirm" as const, message: "sure?", state: "pending" as const };
+  const PENDING_OUT = '### Modal state\n- ["confirm" dialog with message "sure?"]: can be handled by dialog-accept or dialog-dismiss';
+
+  async function clickable() {
+    await saveState({
+      name: session, url: "https://x", title: "X", updatedAt: Date.now(),
+      refs: [
+        { id: "e1", selector: "button", role: "button", name: "go", tag: "button" },
+        { id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" },
+      ],
+    });
+  }
+
+  test("a click that opens a dialog prints its answer and then the pending modal state", async () => {
+    await clickable();
+    const c = fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: [pending] });
+    const out = await cmdClick({ ...ctx(), connect: async () => c }, "e1");
+    expect(out).toBe(`clicked e1 (button "go")\n${PENDING_OUT}`);
+  });
+
+  test("--json: the command's object gains a dialogs array", async () => {
+    await clickable();
+    const c = fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: [pending] });
+    const out = JSON.parse(await cmdClick({ ...ctx({ json: true }), connect: async () => c }, "e1"));
+    expect(out.dialogs).toEqual([{ type: "confirm", message: "sure?", state: "pending" }]);
+  });
+
+  test("no dialog, no modal state and no dialogs key", async () => {
+    await clickable();
+    const c = fakeClient({ evaluate: resolving({ e1: "button" }) });
+    expect(await cmdClick({ ...ctx(), connect: async () => c }, "e1")).toBe('clicked e1 (button "go")');
+    const json = JSON.parse(await cmdClick({ ...ctx({ json: true }), connect: async () => c }, "e1"));
+    expect("dialogs" in json).toBe(false);
+  });
+
+  test("handled dialogs print their answer; a dismissal for lack of an answer carries the hint", async () => {
+    const c = fakeClient({ evaluate: () => "done" }, {
+      dialogs: [
+        { type: "confirm", message: "sure?", state: "accepted" },
+        { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
+        { type: "alert", message: "hi", state: "dismissed" },
+      ],
+    });
+    const out = await cmdEval({ ...ctx(), connect: async () => c }, "go()");
+    expect(out).toBe([
+      "done",
+      "### Modal state",
+      '- ["confirm" dialog with message "sure?"]: accepted',
+      '- ["prompt" dialog with message "name?"]: dismissed (run dialog-accept before the action to accept it)',
+      '- ["alert" dialog with message "hi"]: dismissed',
+    ].join("\n"));
+  });
+
+  test("--json dialogs carry type, message, defaultValue, state and answer, and nothing else", async () => {
+    const c = fakeClient({ evaluate: () => 1 }, {
+      dialogs: [
+        { type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" },
+        { type: "prompt", message: "again?", defaultValue: "", state: "dismissed", unanswered: true },
+      ],
+    });
+    const out = JSON.parse(await cmdEval({ ...ctx({ json: true }), connect: async () => c }, "go()"));
+    expect(out).toEqual({
+      ok: true, result: 1,
+      dialogs: [
+        { type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" },
+        { type: "prompt", message: "again?", defaultValue: "", state: "dismissed" },
+      ],
+    });
+  });
+
+  test("fill stops after a click that opens a dialog: it neither clears nor types", async () => {
+    await clickable();
+    const c = fakeClient({ evaluate: resolving({ e2: "input" }) }, { dialogs: [pending] });
+    const out = await cmdFill({ ...ctx(), connect: async () => c }, "e2", "x");
+    expect(out.endsWith(PENDING_OUT)).toBe(true);
+    expect(c.calls.map(([op]) => op)).toEqual(["evaluate", "click"]);
+  });
+
+  test("press, hover, select, check, type, run-code and go-back report a pending dialog too", async () => {
+    await saveState({
+      name: session, url: "https://x", title: "X", updatedAt: Date.now(),
+      refs: [
+        { id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" },
+        { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
+      ],
+    });
+    const c = () => fakeClient({ evaluate: resolving({ e3: "select", e4: "input.cb" }) }, { dialogs: [pending] });
+    const outs = [
+      await cmdPress({ ...ctx(), connect: async () => c() }, "Enter"),
+      await cmdHover({ ...ctx(), connect: async () => c() }, "e4"),
+      await cmdSelect({ ...ctx(), connect: async () => c() }, "e3", "blue"),
+      await cmdCheck({ ...ctx(), connect: async () => c() }, "e4"),
+      await cmdType({ ...ctx(), connect: async () => c() }, "hi"),
+      await cmdRunCode({ ...ctx(), connect: async () => c() }, "return 1"),
+      await cmdHistory({ ...ctx(), connect: async () => c() }, "back"),
+    ];
+    for (const out of outs) expect(out.endsWith(PENDING_OUT)).toBe(true);
+  });
+
+  test("snapshot while a dialog is pending prints the page and the modal state, and no tree", async () => {
+    const c = fakeClient({
+      evaluate: () => { throw new Error('a confirm dialog is open ("sure?"); run dialog-accept or dialog-dismiss'); },
+      state: () => ({ url: "https://x/", title: "X", dialog: { type: "confirm", message: "sure?" } }),
+    }, { dialogs: [pending] });
+    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, {});
+    expect(out).toBe(`### Page\n- Page URL: https://x/\n- Page Title: X\n${PENDING_OUT}`);
+    const json = JSON.parse(await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, {}));
+    expect(json.dialogs).toEqual([{ type: "confirm", message: "sure?", state: "pending" }]);
+  });
+
+  test("a page command while a dialog is pending fails with the daemon's user error, exit 1", async () => {
+    const msg = 'a confirm dialog is open ("sure?"); run dialog-accept or dialog-dismiss';
+    const c = fakeClient({ evaluate: () => { throw new Error(msg); } }, { dialogs: [pending] });
+    await expect(cmdEval({ ...ctx(), connect: async () => c }, "1")).rejects.toThrow(msg);
+    expect(isUserError(msg)).toBe(true);
+    expect(isUserError('an alert dialog is open ("hi"); run dialog-accept or dialog-dismiss')).toBe(true);
+  });
+
+  test("dialog-accept answers the pending dialog and says how", async () => {
+    const answered = { type: "prompt" as const, message: "name?", defaultValue: "def", state: "accepted" as const, answer: "typed" };
+    const c = fakeClient({ "dialog-answer": () => ({ answered }) });
+    const out = await cmdDialog({ ...ctx(), connect: async () => c }, true, "typed");
+    expect(c.calls).toEqual([["dialog-answer", [true, "typed"]]]);
+    expect(out).toBe('["prompt" dialog with message "name?"]: accepted');
+    const json = JSON.parse(await cmdDialog({ ...ctx({ json: true }), connect: async () => c }, true, "typed"));
+    expect(json).toEqual({ ok: true, dialogs: [answered] });
+  });
+
+  test("dialog-dismiss answers the pending dialog", async () => {
+    const c = fakeClient({ "dialog-answer": () => ({ answered: { type: "confirm", message: "sure?", state: "dismissed" } }) });
+    const out = await cmdDialog({ ...ctx(), connect: async () => c }, false);
+    expect(c.calls).toEqual([["dialog-answer", [false]]]);
+    expect(out).toBe('["confirm" dialog with message "sure?"]: dismissed');
+  });
+
+  test("with no dialog pending, dialog-accept and dialog-dismiss set the answer for the next one", async () => {
+    const c = fakeClient({ "dialog-answer": () => ({}) });
+    expect(await cmdDialog({ ...ctx(), connect: async () => c }, true)).toBe("next dialog will be accepted");
+    expect(await cmdDialog({ ...ctx(), connect: async () => c }, false)).toBe("next dialog will be dismissed");
+    expect(JSON.parse(await cmdDialog({ ...ctx({ json: true }), connect: async () => c }, true, "x")))
+      .toEqual({ ok: true, next: "accepted" });
+  });
+
+  test("dialog-accept [text] and dialog-dismiss are registered commands", async () => {
+    const c = fakeClient({ "dialog-answer": () => ({}) });
+    await findCommand("dialog-accept")!.run({ ...ctx(), connect: async () => c }, { positional: ["typed"], flags: {} });
+    await findCommand("dialog-dismiss")!.run({ ...ctx(), connect: async () => c }, { positional: [], flags: {} });
+    expect(c.calls).toEqual([["dialog-answer", [true, "typed"]], ["dialog-answer", [false]]]);
   });
 });

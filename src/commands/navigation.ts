@@ -8,7 +8,7 @@ import { pidPath, socketPath } from "../daemon/client.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
-import { connector, emptyState, reply, syncState, withClient, type CommandContext } from "./context.ts";
+import { connector, emptyState, reply, replyPage, syncState, withClient, type CommandContext } from "./context.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
  *  state op resolves the URL via realUrl() (which falls back to location.href),
@@ -68,7 +68,7 @@ export async function cmdGoto(ctx: CommandContext, url: string): Promise<string>
     const state = await c.request("state");
     assertNavigated(url, state.url);
     await syncState(prev, state);
-    return reply(ctx, { ok: true, url: state.url }, `navigated to ${state.url}`);
+    return replyPage(ctx, c, { ok: true, url: state.url }, `navigated to ${state.url}`);
   });
 }
 
@@ -82,7 +82,7 @@ export async function cmdHistory(
     const state = await c.request("state");
     await syncState(prev, state);
     const text = which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`;
-    return reply(ctx, { ok: true, url: state.url }, text);
+    return replyPage(ctx, c, { ok: true, url: state.url }, text);
   });
 }
 

@@ -6,7 +6,7 @@ import { str } from "../cli/parser.ts";
 import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
-import { reply, withClient, type CommandContext } from "./context.ts";
+import { dialogJson, dialogPending, modalState, reply, withClient, type CommandContext } from "./context.ts";
 
 export async function cmdSnapshot(
   ctx: CommandContext,
@@ -18,13 +18,27 @@ export async function cmdSnapshot(
   }
   const depth = Number(opts.depth ?? 0);
   return withClient(ctx, async (c) => {
-    const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
-    await saveState({
-      name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
-    });
-    const out = ctx.json
-      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth) }, null, 2)
-      : renderPage(snap, depth);
+    // A pending dialog refuses the snapshot script (or opens during it); like
+    // playwright-cli, show the modal state in place of a tree then.
+    const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT]).catch((err) => {
+      if (dialogPending(c)) return undefined;
+      throw err;
+    })) as SnapshotResult | undefined;
+    let out: string;
+    if (!snap || dialogPending(c)) {
+      const page = await c.request("state");
+      const dialogs = c.dialogs();
+      out = ctx.json
+        ? JSON.stringify({ url: page.url, title: page.title, dialogs: dialogs.map(dialogJson) }, null, 2)
+        : renderModalPage(page.url, page.title, modalState(dialogs));
+    } else {
+      await saveState({
+        name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
+      });
+      out = ctx.json
+        ? JSON.stringify({ snapshot: renderTree(snap.tree, depth) }, null, 2)
+        : renderPage(snap, depth);
+    }
     if (opts.filename) {
       // The file holds exactly what stdout would: the text plus the CLI's newline.
       await Bun.write(opts.filename, out + "\n");
@@ -32,6 +46,13 @@ export async function cmdSnapshot(
     }
     return out;
   });
+}
+
+function renderModalPage(url: string, title: string, modal: string): string {
+  const lines = ["### Page", `- Page URL: ${url}`];
+  if (title) lines.push(`- Page Title: ${title}`);
+  lines.push(modal);
+  return lines.join("\n");
 }
 
 /** Find a non-colliding path: returns `base` if free, else base-1, base-2, …

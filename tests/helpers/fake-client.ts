@@ -11,8 +11,11 @@
 // default. A test-supplied `screenshot` handler only supplies the base64
 // bytes — used when it returns a string, treated as "" otherwise — and can
 // never skip the write.
+//
+// `opts.dialogs` is what the connection's dialogs() reports, as if the
+// daemon's replies had carried them.
 
-import type { ArgsOf, DaemonConnection, Op, ResultOf } from "../../src/daemon/protocol.ts";
+import type { ArgsOf, DaemonConnection, DialogReport, Op, ResultOf } from "../../src/daemon/protocol.ts";
 
 export type FakeHandlers = {
   [O in Op]?: (...args: ArgsOf<O>) => ResultOf<O> | Promise<ResultOf<O>>;
@@ -20,7 +23,7 @@ export type FakeHandlers = {
 
 export type FakeClient = DaemonConnection & { calls: Array<[string, unknown[]]> };
 
-export function fakeClient(handlers: FakeHandlers = {}): FakeClient {
+export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: DialogReport[] } = {}): FakeClient {
   const calls: Array<[string, unknown[]]> = [];
   let currentUrl = "";
   let currentTitle = "";
@@ -54,6 +57,7 @@ export function fakeClient(handlers: FakeHandlers = {}): FakeClient {
       const fn = (handlers[op] ?? defaults[op]) as ((...a: unknown[]) => unknown) | undefined;
       return (fn ? await fn(...args) : undefined) as never;
     },
+    dialogs: () => [...(opts.dialogs ?? [])],
     close() {},
   };
 }
