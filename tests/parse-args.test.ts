@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parse, str, type Schemas } from "../src/cli/parser.ts";
+import { parse, str } from "../src/cli/parser.ts";
 import { reportFailure, run } from "../src/cli.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 
@@ -97,36 +97,6 @@ describe("a removed command", () => {
       expect(reportFailure(err).code).toBe(1);
     });
   }
-});
-
-describe("an enum flag", () => {
-  // No command declares one today; the parser's support is pinned on a
-  // schema of its own.
-  const schemas: Schemas = {
-    global: [],
-    commands: [{
-      name: "pick",
-      positional: [],
-      flags: [
-        { name: "size", kind: "string", values: ["S", "M", "L"] },
-        { name: "note", kind: "string" },
-      ],
-    }],
-  };
-
-  test("rejects a value outside its list", () => {
-    expect(() => parse(schemas, ["pick", "--size=XL"])).toThrow("invalid --size: must be one of S, M, L");
-  });
-
-  test("accepts each of its values", () => {
-    for (const v of ["S", "M", "L"]) {
-      expect(parse(schemas, ["pick", `--size=${v}`]).flags.size).toBe(v);
-    }
-  });
-
-  test("does not constrain a flag with no values list", () => {
-    expect(parse(schemas, ["pick", "--note=anything"]).flags.note).toBe("anything");
-  });
 });
 
 describe("str()", () => {

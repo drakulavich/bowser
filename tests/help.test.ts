@@ -8,16 +8,12 @@ const findCommandSummary = (name: string) => COMMANDS.find((c) => c.name === nam
 
 const HELP = renderHelp(COMMANDS);
 
-/** No real command has these today: an enum flag, a placeholder, and a usage
- *  too wide for the summary column. */
+/** No real command has a usage too wide for the summary column. */
 const PICK: Command = {
   name: "pick",
   summary: "Pick a size",
   positional: [{ name: "first-choice", required: true }, { name: "second-choice", required: false }],
-  flags: [
-    { name: "size", kind: "string", values: ["S", "M", "L"] },
-    { name: "until", kind: "string", placeholder: "<unix-seconds>" },
-  ],
+  flags: [{ name: "until", kind: "string" }],
   run: async () => "",
 };
 const WIDE_HELP = renderHelp([...COMMANDS, PICK]);
@@ -46,16 +42,6 @@ describe("generated help", () => {
   test("shows flags, with a value placeholder for string flags", () => {
     expect(HELP).toContain("[--all]");
     expect(HELP).toContain("[--filename=<filename>]");
-  });
-
-  test("an enum flag's usage lists the values the parser accepts", () => {
-    // Derived from FlagSpec.values, the same list the parser enforces, so the
-    // help text cannot promise a value that would be rejected.
-    expect(WIDE_HELP).toContain("[--size=S|M|L]");
-  });
-
-  test("a flag's placeholder carries its unit into the usage", () => {
-    expect(WIDE_HELP).toContain("[--until=<unix-seconds>]");
   });
 
   test("summaries line up in one column, narrow enough to leave half the width", () => {

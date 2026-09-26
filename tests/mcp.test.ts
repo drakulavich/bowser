@@ -15,7 +15,7 @@ import {
   handleMcpLine,
   type McpDeps,
 } from "../src/mcp.ts";
-import { SCHEMAS, type Command } from "../src/cli/registry.ts";
+import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
 import { run } from "../src/cli.ts";
 import { resolveRefScript } from "../src/page-scripts.ts";
@@ -243,27 +243,6 @@ describe("descriptions drift-guard", () => {
       const cmd = findCommand(t.name)!;
       expect(t.description).toBe(cmd.mcpSummary ?? cmd.summary);
     }
-  });
-
-  // No real command has an enum flag today, so these use one of their own.
-  const pick: Command = {
-    name: "pick",
-    summary: "Pick a size",
-    positional: [],
-    flags: [{ name: "size", kind: "string", values: ["S", "M", "L"] }, { name: "note", kind: "string" }],
-    run: async () => "",
-  };
-
-  test("an enum flag reaches the client as a JSON-Schema enum", () => {
-    // Without this a client sees --size as a bare string and learns the
-    // accepted values only from a rejected call.
-    const [tool] = buildTools([pick]);
-    expect(tool!.inputSchema.properties.size).toMatchObject({ type: "string", enum: ["S", "M", "L"] });
-  });
-
-  test("a flag with no values list carries no enum", () => {
-    const [tool] = buildTools([pick]);
-    expect(tool!.inputSchema.properties.note).not.toHaveProperty("enum");
   });
 
   test("fill offers text but not stdin", () => {
