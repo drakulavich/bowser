@@ -548,10 +548,9 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
 })()`;
 
 // The WebKit dialog shim (dialogs spec, item 5). WebKit has no dialog events:
-// its engine dismisses every dialog itself and tells nobody. So on webkit the
-// daemon replaces window.alert/confirm/prompt with functions that answer the
-// way it answers on Chromium (server.ts answerDialog): the one-shot answer if
-// set, then cleared, else dismissed; an accepted prompt with no text gets its
+// its engine dismisses every dialog itself and tells nobody. So the daemon
+// replaces window.alert/confirm/prompt with functions that answer at once:
+// the one-shot answer if set, then cleared, else dismissed; an accepted prompt with no text gets its
 // default. Each answer is logged as a DialogReport for the daemon to read.
 // The shim, its answer and its log live on window, so a new document has
 // none. A document the back-forward cache restores keeps its shim, so the

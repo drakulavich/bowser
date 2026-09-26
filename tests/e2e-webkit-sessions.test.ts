@@ -5,7 +5,7 @@
 // 1.4.2 (2026-09-24); this pins that both pages survive, so a recurrence fails
 // here instead of in an agent's session.
 //
-// macOS only (webkit is a macOS backend). Run with:
+// macOS only (WebKit is). Run with:
 //   BOWSER_E2E=1 bun test tests/e2e-webkit-sessions.test.ts
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -26,7 +26,6 @@ const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.ski
 runOrSkip("e2e: two WebKit sessions at once (ET-02)", () => {
   let tmp: string;
   let origHome: string | undefined;
-  let origBackend: string | undefined;
   let server: { stop: () => void } | undefined;
   let url: string;
 
@@ -35,10 +34,8 @@ runOrSkip("e2e: two WebKit sessions at once (ET-02)", () => {
 
   beforeAll(async () => {
     origHome = process.env.HOME;
-    origBackend = process.env.BOWSER_BACKEND;
     tmp = await mkdtemp(join(tmpdir(), "bowser-webkit-sessions-"));
     process.env.HOME = tmp;
-    process.env.BOWSER_BACKEND = "webkit"; // the daemons inherit the live env
     const todo = Bun.file(join(import.meta.dir, "fixtures/todo-app.html"));
     // One origin for both, as in the original report: localStorage must still
     // be per session.
@@ -51,8 +48,6 @@ runOrSkip("e2e: two WebKit sessions at once (ET-02)", () => {
     for (const ctx of [a, b]) try { await cmdClose(ctx); } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
-    if (origBackend === undefined) delete process.env.BOWSER_BACKEND;
-    else process.env.BOWSER_BACKEND = origBackend;
     await rm(tmp, { recursive: true, force: true });
   });
 

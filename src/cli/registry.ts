@@ -3,8 +3,8 @@
 // list (mcp.ts) all read this, so a command cannot exist in one and not the
 // others. SCHEMAS is derived here; the parser still owns argv parsing.
 //
-// COMMANDS groups by the module that owns each command (install, navigation,
-// snapshot, interaction, dialog, web-storage, scripting, cookies, storage-state, then
+// COMMANDS groups by the module that owns each command (navigation,
+// snapshot, interaction, dialog, web-storage, scripting, storage-state, then
 // mcp), not by today's hand-maintained SCHEMAS.commands order — a module's own
 // COMMANDS array can only be spread as one contiguous block, and interaction's
 // commands (click..uncheck, resize) are split around snapshot's `screenshot`
@@ -12,9 +12,7 @@
 // (findCommand, parser.ts's `find`), so the grouping is cosmetic.
 
 import type { CommandContext } from "../commands/context.ts";
-import { COMMANDS as COOKIES } from "../commands/cookies.ts";
 import { COMMANDS as DIALOG } from "../commands/dialog.ts";
-import { COMMANDS as INSTALL } from "../commands/install.ts";
 import { COMMANDS as INTERACTION } from "../commands/interaction.ts";
 import { COMMANDS as NAVIGATION } from "../commands/navigation.ts";
 import { COMMANDS as SCRIPTING } from "../commands/scripting.ts";
@@ -63,14 +61,12 @@ const MCP_COMMAND: Command = {
 
 /** Order is the order `--help` prints. */
 export const COMMANDS: readonly Command[] = [
-  ...INSTALL,
   ...NAVIGATION,
   ...SNAPSHOT,
   ...INTERACTION,
   ...DIALOG,
   ...WEB_STORAGE,
   ...SCRIPTING,
-  ...COOKIES,
   ...STORAGE_STATE,
   MCP_COMMAND,
 ];

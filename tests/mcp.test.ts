@@ -42,25 +42,28 @@ describe("buildTools", () => {
     expect(tools.length).toBe(SCHEMAS.commands.length - MCP_EXCLUDED_COUNT);
   });
 
-  test("excludes mcp and install", () => {
+  test("excludes mcp", () => {
     const names = buildTools().map((t) => t.name);
     expect(names).not.toContain("mcp");
-    expect(names).not.toContain("install");
     expect(names).toContain("open");
-    expect(names).toContain("cookie-set");
+    expect(names).toContain("fill");
   });
 
-  test("cookie-set inputSchema: required positionals, optional session, typed flags", () => {
-    const tool = buildTools().find((t) => t.name === "cookie-set")!;
+  test("open inputSchema: optional positional, optional session, typed flags", () => {
+    const tool = buildTools().find((t) => t.name === "open")!;
     const s = tool.inputSchema;
     expect(s.type).toBe("object");
-    expect(s.required).toContain("name");
-    expect(s.required).toContain("value");
-    expect(s.required).not.toContain("session");
+    expect(s.required).toEqual([]);
     expect(s.properties.session).toEqual({ type: "string", description: expect.any(String) });
-    expect(s.properties.name.type).toBe("string");
-    expect(s.properties["http-only"].type).toBe("boolean");
-    expect(s.properties.domain.type).toBe("string");
+    expect(s.properties.url.type).toBe("string");
+    expect(s.properties.persistent.type).toBe("boolean");
+    expect(s.properties.profile.type).toBe("string");
+  });
+
+  test("select inputSchema: required positionals", () => {
+    const s = buildTools().find((t) => t.name === "select")!.inputSchema;
+    expect(s.required).toEqual(["ref", "value"]);
+    expect(s.required).not.toContain("session");
   });
 
   test("every tool carries a non-empty description", () => {
@@ -73,31 +76,28 @@ describe("buildTools", () => {
 
 describe("toArgv", () => {
   test("reconstructs session, --json, typed flags, then -- and positionals (schema order)", () => {
-    const argv = toArgv(schema("cookie-set"), {
-      name: "sid",
-      value: "abc",
-      "http-only": true,
-      domain: "x.com",
+    const argv = toArgv(schema("open"), {
+      url: "https://x.com/",
+      profile: "./p",
+      persistent: true,
       session: "s1",
     });
     expect(argv).toEqual([
       "--session", "s1",
       "--json",
-      "cookie-set",
-      "--domain=x.com",
-      "--http-only",
-      "--", "sid", "abc",
+      "open",
+      "--persistent",
+      "--profile=./p",
+      "--", "https://x.com/",
     ]);
   });
 
   test("omits a false boolean flag and an absent session", () => {
-    const argv = toArgv(schema("cookie-set"), {
-      name: "sid",
-      value: "abc",
-      "http-only": false,
-      secure: true,
+    const argv = toArgv(schema("open"), {
+      url: "https://x.com/",
+      persistent: false,
     });
-    expect(argv).toEqual(["--json", "cookie-set", "--secure", "--", "sid", "abc"]);
+    expect(argv).toEqual(["--json", "open", "--", "https://x.com/"]);
   });
 
   test("no-positional, no-flag command", () => {
@@ -213,7 +213,7 @@ describe("handleMcpRequest — tools/call", () => {
 
   test("an excluded command is not callable as a tool", async () => {
     const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "install", arguments: {} } },
+      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "mcp", arguments: {} } },
       okRun(),
     );
     expect(res.result.isError).toBe(true);
@@ -245,21 +245,6 @@ describe("descriptions drift-guard", () => {
     }
   });
 
-  test("an enum flag reaches the client as a JSON-Schema enum", () => {
-    // Without this a client sees --same-site as a bare string and learns the
-    // accepted values only from a rejected call.
-    const setCookie = buildTools().find((t) => t.name === "cookie-set")!;
-    expect(setCookie.inputSchema.properties["same-site"]).toMatchObject({
-      type: "string",
-      enum: ["Strict", "Lax", "None"],
-    });
-  });
-
-  test("a flag with no values list carries no enum", () => {
-    const setCookie = buildTools().find((t) => t.name === "cookie-set")!;
-    expect(setCookie.inputSchema.properties.domain).not.toHaveProperty("enum");
-  });
-
   test("fill offers text but not stdin", () => {
     const fill = buildTools().find((t) => t.name === "fill")!;
     expect(fill.inputSchema.properties).toHaveProperty("text");
@@ -279,10 +264,9 @@ describe("descriptions drift-guard", () => {
     expect(findCommand("fill")!.summary).toContain("--stdin");
   });
 
-  test("mcp and install are not exposed as tools", () => {
+  test("mcp is not exposed as a tool", () => {
     const names = buildTools().map((t) => t.name);
     expect(names).not.toContain("mcp");
-    expect(names).not.toContain("install");
   });
 });
 
@@ -324,7 +308,7 @@ describe("bowser mcp never reads its own stdin for a command", () => {
     const proc = Bun.spawn(
       [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "mcp"],
       {
-        env: { ...process.env, HOME: home, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined },
+        env: { ...process.env, HOME: home },
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",

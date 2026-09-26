@@ -32,7 +32,7 @@ export interface SessionState {
 
 /** Root of per-session state, resolved at call time from process.env.HOME so
  *  tests that redirect HOME stay isolated. A module-level const would capture
- *  the real home at import (before beforeAll runs). Mirrors bowserCacheRoot(). */
+ *  the real home at import (before beforeAll runs). */
 export function sessionsRoot(): string {
   return join(process.env.HOME || homedir(), ".bowser", "sessions");
 }

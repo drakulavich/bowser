@@ -13,7 +13,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium } from "../src/backend.ts";
 import { cmdClick, cmdFill } from "../src/commands/interaction.ts";
 import { cmdOpen } from "../src/commands/navigation.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -30,7 +29,6 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
   const session = "search";
 
   beforeAll(async () => {
-    if (!detectChromium()) throw new Error("no Chromium binary found");
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-search-"));
     process.env.HOME = tmp;

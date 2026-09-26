@@ -2,25 +2,17 @@
 // Spec: docs/superpowers/specs/2026-09-26-dialogs-design.md, Acceptance 2 and 3.
 //
 // Every dialog is answered the moment it opens (the one-shot answer if set,
-// else dismissed) and reported by the command that caused it. Before this, a
-// click that opened confirm() on Chromium hung until the op timeout and
-// wedged the session. The expectations are the same on both backends: on
-// WebKit a page shim answers dialogs (page-scripts.ts dialogShim), and a
-// dialog raised before bowser first acts on a new document is answered by
-// the engine and not reported, which is why Acceptance 3 is Chromium only.
+// else dismissed) and reported by the command that caused it. A page shim
+// answers dialogs (page-scripts.ts dialogShim). A dialog raised before bowser
+// first acts on a new document is answered by the engine and not reported.
 //
-//   BOWSER_E2E=1 BOWSER_BACKEND=webkit bun test tests/e2e-dialogs.test.ts
-//
-//   BOWSER_E2E=1 BOWSER_BACKEND=chrome \
-//     BOWSER_CHROMIUM_PATH=$(find ~/.bowser/chromium -type f -name chrome-headless-shell | head -1) \
-//     bun test tests/e2e-dialogs.test.ts
+//   BOWSER_E2E=1 bun test tests/e2e-dialogs.test.ts
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { cmdClick, cmdPress } from "../src/commands/interaction.ts";
@@ -30,10 +22,7 @@ import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
-const CHROME = E2E && resolveBackend().kind === "chrome";
 const run = E2E ? describe : describe.skip;
-/** Chromium only: a dialog during page load (WebKit's engine answers those). */
-const chromeOnly = CHROME ? test : test.skip;
 
 const PAGE = `<!doctype html><title>Dialogs</title>
 <script>const savedConfirm = window.confirm</script>
@@ -45,7 +34,6 @@ const PAGE = `<!doctype html><title>Dialogs</title>
 <button onclick="setTimeout(() => { out.textContent = 'later:' + confirm('later') }, 500)">Later</button>
 <button onclick="if (confirm('Leave?')) location = '/?left=1'">Leave</button>
 <button onclick="setTimeout(() => { location = '/?keys=1' }, 300)">Self</button>
-<a href="/?load=1">Load</a>
 <p id="out"></p>`;
 
 // A page whose key handler opens a confirm(), for an action with no eval before it.
@@ -53,10 +41,6 @@ const KEYS_PAGE = `<!doctype html><title>Keys</title>
 <script>addEventListener('keydown', () => { document.title = 'key:' + confirm('key?') })</script>`;
 
 const OTHER_PAGE = `<!doctype html><title>Other</title><p>other</p>`;
-
-// A confirm() in an inline script, during the page's very first load.
-const LOAD_PAGE = `<!doctype html><title>Load</title>
-<script>document.title = 'load:' + confirm('onload?')</script>`;
 
 const line = (type: string, message: string, what: string) => `- ["${type}" dialog with message "${message}"]: ${what}`;
 const HINT = "dismissed (run dialog-accept before the action to accept it)";
@@ -74,7 +58,7 @@ run("e2e: dialogs", () => {
     process.env.HOME = tmp;
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response(({ "?load=1": LOAD_PAGE, "?keys=1": KEYS_PAGE, "?other=1": OTHER_PAGE } as Record<string, string>)[new URL(req.url).search] ?? PAGE, {
+      fetch: (req) => new Response(({ "?keys=1": KEYS_PAGE, "?other=1": OTHER_PAGE } as Record<string, string>)[new URL(req.url).search] ?? PAGE, {
         headers: { "content-type": "text/html; charset=utf-8" },
       }),
     });
@@ -161,18 +145,6 @@ run("e2e: dialogs", () => {
     expect(await out()).toBe("two:done");
   }, 60_000);
 
-  chromeOnly("a confirm() during the very first page load neither hangs open nor goes unreported", async () => {
-    try { await cmdClose(ctx); } catch {}
-    const t0 = performance.now();
-    const opened = await cmdOpen(ctx, `${url}?load=1`);
-    expect(performance.now() - t0).toBeLessThan(10_000);
-    expect(opened).toEndWith(line("confirm", "onload?", HINT));
-    expect(await cmdEval(ctx, "document.title")).toBe("load:false");
-    const t1 = performance.now();
-    expect(await cmdGoto(ctx, `${url}?load=1`)).toEndWith(line("confirm", "onload?", HINT));
-    expect(performance.now() - t1).toBeLessThan(2000);
-  }, 60_000);
-
   test("a dialog a timer opens between commands waits for a command that prints it", async () => {
     await fresh();
     expect(await click("Later")).not.toContain("Modal state");
@@ -185,33 +157,15 @@ run("e2e: dialogs", () => {
     expect(await out()).toBe("later:false");
   }, 60_000);
 
-  chromeOnly("a one-shot answer set on one page does not answer the next page's load-time dialog (goto)", async () => {
-    await fresh();
-    await cmdDialog(ctx, true);
-    expect(await cmdGoto(ctx, `${url}?load=1`)).toEndWith(line("confirm", "onload?", HINT));
-    expect(await cmdEval(ctx, "document.title")).toBe("load:false");
-  }, 60_000);
-
-  chromeOnly("a one-shot answer set on one page does not answer the next page's load-time dialog (click)", async () => {
-    await fresh();
-    await cmdDialog(ctx, true);
-    expect(await click("Load")).toEndWith(line("confirm", "onload?", HINT));
-    expect(await cmdEval(ctx, "document.title")).toBe("load:false");
-  }, 60_000);
-
   test("a confirm whose handler navigates is answered; on WebKit its report is lost with the old document (documented limitation)", async () => {
     await fresh();
     await cmdDialog(ctx, true);
     const text = await click("Leave");
     // The navigation happened, so the confirm returned true: the answer was applied.
     expect(await cmdEval(ctx, "location.search")).toBe("?left=1");
-    if (CHROME) {
-      expect(text).toEndWith(line("confirm", "Leave?", "accepted"));
-    } else {
-      // Documented WebKit limitation (spec item 5, README "Dialogs"): the page
-      // shim's log lived in the document the handler navigated away from.
-      expect(text).not.toContain("Modal state");
-    }
+    // Documented limitation (spec item 5, README "Dialogs"): the page
+    // shim's log lived in the document the handler navigated away from.
+    expect(text).not.toContain("Modal state");
   }, 60_000);
 
   test("an answer set on a page is gone when back restores that page from the back-forward cache", async () => {
@@ -220,9 +174,9 @@ run("e2e: dialogs", () => {
     await cmdDialog(ctx, true);
     await cmdGoto(ctx, `${url}?other=1`);
     await cmdHistory(ctx, "back");
-    // WebKit restores the document itself, shim and answer included (measured);
-    // headless Chromium may load it anew. Either way the answer must be gone.
-    if (!CHROME) expect(await cmdEval(ctx, "window.kept")).toBe("yes");
+    // WebKit restores the document itself, shim and answer included
+    // (measured). The answer must be gone all the same.
+    expect(await cmdEval(ctx, "window.kept")).toBe("yes");
     await cmdSnapshot(ctx);
     expect(await click("Confirm")).toEndWith(line("confirm", "sure?", HINT));
     expect(await out()).toBe("confirm:false");
@@ -263,20 +217,15 @@ run("e2e: dialogs", () => {
     expect(await cmdSnapshot(ctx)).not.toContain("Modal state");
   }, 60_000);
 
-  test("a confirm the page saved at load: Chromium answers it; WebKit's engine dismisses it unreported and the answer waits (documented)", async () => {
+  test("a confirm the page saved at load: the engine dismisses it unreported and the answer waits (documented)", async () => {
     await fresh();
     await cmdDialog(ctx, true);
     const text = await click("Saved");
-    if (CHROME) {
-      expect(text).toEndWith(line("confirm", "saved?", "accepted"));
-      expect(await out()).toBe("saved:true");
-    } else {
-      // Documented WebKit limitation (spec item 5): a reference the page saved
-      // before bowser first acted skips the shim, so the engine dismisses it.
-      expect(text).not.toContain("Modal state");
-      expect(await out()).toBe("saved:false");
-      // The prepared answer is still set, for the next dialog the shim sees.
-      expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
-    }
+    // Documented limitation (spec item 5): a reference the page saved before
+    // bowser first acted skips the shim, so the engine dismisses it.
+    expect(text).not.toContain("Modal state");
+    expect(await out()).toBe("saved:false");
+    // The prepared answer is still set, for the next dialog the shim sees.
+    expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
   }, 60_000);
 });

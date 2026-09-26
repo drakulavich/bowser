@@ -2,8 +2,7 @@
 // under `bun run typecheck` (tsconfig includes tests/); the single runtime
 // test only keeps bun from reporting an empty file.
 import { describe, expect, test } from "bun:test";
-import type { CdpOp, DaemonConnection, Op, ResultOf } from "../src/daemon/protocol.ts";
-import { REQUIRES_CDP } from "../src/daemon/protocol.ts";
+import type { DaemonConnection, Op, ResultOf } from "../src/daemon/protocol.ts";
 
 declare const c: DaemonConnection;
 
@@ -12,10 +11,9 @@ async function typeChecks(): Promise<void> {
   const pong: "pong" = await c.request("ping");
   const st: { url: string; title: string } = await c.request("state", []);
   // Results are typed without casts.
-  const cookies: Array<{ name: string; value: string }> = await c.request("cookie-get-all", [undefined]);
   const shot: { path: string } | string = await c.request("screenshot", ["/tmp/x.png"]);
   const r: unknown = await c.request("evaluate", ["1"]);
-  void [pong, st, cookies, shot, r];
+  void [pong, st, shot, r];
 
   // @ts-expect-error navigate requires a url
   await c.request("navigate");
@@ -25,24 +23,14 @@ async function typeChecks(): Promise<void> {
   await c.request("dblclick", ["#x"]);
   // @ts-expect-error select needs two args
   await c.request("select", ["#x"]);
-
-  // requires: "cdp" is visible to the type system.
-  const cdpOp: CdpOp = "cookie-set";
-  // @ts-expect-error state needs no CDP
-  const notCdp: CdpOp = "state";
-  void [cdpOp, notCdp];
 }
 
 describe("daemon protocol", () => {
   test("op names are the wire names", () => {
-    const ops: Op[] = ["ping", "state", "cookie-get-all"];
+    const ops: Op[] = ["ping", "state", "dialog-answer"];
     expect(ops).toHaveLength(3);
     void typeChecks;
     const okType: ResultOf<"ping"> = "pong";
     expect(okType).toBe("pong");
-  });
-
-  test("REQUIRES_CDP lists exactly the cookie ops", () => {
-    expect([...REQUIRES_CDP].sort()).toEqual(["cookie-clear", "cookie-delete", "cookie-get-all", "cookie-set"]);
   });
 });

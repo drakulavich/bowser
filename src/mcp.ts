@@ -11,8 +11,7 @@
 //
 // STDOUT PURITY: only JSON-RPC messages may be written to stdout. Diagnostics go
 // to stderr. We never console.log here, and we call run() (which RETURNS a
-// string) rather than letting a command print — that is also why `install`
-// (which inherits child stdio) is excluded from the tool set.
+// string) rather than letting a command print.
 
 import { COMMANDS, findCommand } from "./cli/registry.ts";
 import { failedModalState } from "./commands/context.ts";
@@ -34,9 +33,6 @@ export interface McpDeps {
 interface JsonSchemaProp {
   type: "string" | "boolean";
   description?: string;
-  /** From FlagSpec.values, so a client sees the accepted values up front
-   *  instead of discovering them from a rejected call. */
-  enum?: string[];
 }
 
 export interface McpTool {
@@ -68,7 +64,6 @@ export function buildTools(): McpTool[] {
       properties[f.name] = {
         type: f.kind === "boolean" ? "boolean" : "string",
         description: `--${f.name}`,
-        ...(f.values ? { enum: f.values } : {}),
       };
     }
     properties.session = { type: "string", description: 'bowser session name (default: "default")' };

@@ -20,20 +20,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # bowser runs only on macOS (WebKit through Bun.WebView). Both targets
+        # build on macos-latest (Apple silicon); the x64 one is a cross-compile,
+        # which avoids queuing on the scarce Intel runners.
         include:
-          - os: ubuntu-latest
-            target: bun-linux-x64
-            asset: bowser-linux-x64
-          - os: ubuntu-latest
-            target: bun-linux-arm64
-            asset: bowser-linux-arm64
-          # Cross-compile Darwin targets from Linux — avoids queuing on the
-          # scarce macos-13 (Intel) runners that Apple is deprecating. Bun's
-          # compiler fully supports cross-targeting.
-          - os: ubuntu-latest
+          - os: macos-latest
             target: bun-darwin-arm64
             asset: bowser-macos-arm64
-          - os: ubuntu-latest
+          - os: macos-latest
             target: bun-darwin-x64
             asset: bowser-macos-x64
     runs-on: ${{ matrix.os }}
@@ -53,7 +47,7 @@ jobs:
       - name: Smoke-test the binary
         # Only run when the compiled target matches the runner — everything
         # else is a cross-compile that can't execute here.
-        if: matrix.target == 'bun-linux-x64'
+        if: matrix.target == 'bun-darwin-arm64'
         run: ./dist/${{ matrix.asset }} --help
       - uses: actions/upload-artifact@v7
         with:
@@ -88,8 +82,6 @@ jobs:
           name: Bowser ${{ steps.tag.outputs.name }}
           generate_release_notes: true
           files: |
-            dist/bowser-linux-x64
-            dist/bowser-linux-arm64
             dist/bowser-macos-arm64
             dist/bowser-macos-x64
             dist/SHA256SUMS.txt

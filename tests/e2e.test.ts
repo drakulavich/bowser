@@ -1,7 +1,6 @@
-// End-to-end test against a real headless Chromium.
+// End-to-end test against a real WebKit view.
 //
-// Skipped by default so the test suite stays green on machines without a
-// Chromium install. Enable with BOWSER_E2E=1.
+// Skipped by default. Enable with BOWSER_E2E=1.
 //
 //   BOWSER_E2E=1 bun test tests/e2e.test.ts
 
@@ -10,7 +9,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, resolveBackend } from "../src/backend.ts";
 import { isLikelyPng } from "../src/browser.ts";
 import { cmdClick } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
@@ -20,7 +18,7 @@ import { loadState } from "../src/state.ts";
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
 
-runOrSkip("e2e: real browser (backend from resolveBackend)", () => {
+runOrSkip("e2e: real browser", () => {
   let tmp: string;
   let origHome: string | undefined;
 
@@ -28,18 +26,10 @@ runOrSkip("e2e: real browser (backend from resolveBackend)", () => {
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-e2e-"));
     process.env.HOME = tmp;
-    // Only the chrome backend needs a binary. On macOS with no explicit
-    // Chromium this resolves to webkit and runs without one.
-    if (resolveBackend().kind === "chrome" && !detectChromium()) {
-      throw new Error(
-        "BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found. " +
-          "Install chromium-headless-shell, set BOWSER_CHROMIUM_PATH, or set BOWSER_BACKEND=webkit on macOS.",
-      );
-    }
   });
 
   afterAll(async () => {
-    // Shut down the daemon + Chrome before cleanup so we don't leak processes
+    // Shut down the daemon and its browser before cleanup so we don't leak processes
     // into the next test file.
     try {
       await cmdClose({ session, json: true });

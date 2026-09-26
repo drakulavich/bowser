@@ -1,12 +1,22 @@
 // --help is generated from the registry. These pin the parts an agent reads:
 // every command appears exactly once, with its argument shape and summary.
 import { describe, expect, test } from "bun:test";
-import { COMMANDS } from "../src/cli/registry.ts";
+import { COMMANDS, type Command } from "../src/cli/registry.ts";
 import { renderHelp } from "../src/cli/help.ts";
 
 const findCommandSummary = (name: string) => COMMANDS.find((c) => c.name === name)!.summary;
 
 const HELP = renderHelp(COMMANDS);
+
+/** No real command has a usage too wide for the summary column. */
+const PICK: Command = {
+  name: "pick",
+  summary: "Pick a size",
+  positional: [{ name: "first-choice", required: true }, { name: "second-choice", required: false }],
+  flags: [{ name: "until", kind: "string" }],
+  run: async () => "",
+};
+const WIDE_HELP = renderHelp([...COMMANDS, PICK]);
 
 describe("generated help", () => {
   test("lists every command exactly once, in registry order", () => {
@@ -34,16 +44,6 @@ describe("generated help", () => {
     expect(HELP).toContain("[--filename=<filename>]");
   });
 
-  test("an enum flag's usage lists the values the parser accepts", () => {
-    // Derived from FlagSpec.values, the same list the parser enforces, so the
-    // help text cannot promise a value that would be rejected.
-    expect(HELP).toContain("[--same-site=Strict|Lax|None]");
-  });
-
-  test("a flag's placeholder carries its unit into the usage", () => {
-    expect(HELP).toContain("[--expires=<unix-seconds>]");
-  });
-
   test("summaries line up in one column, narrow enough to leave half the width", () => {
     const cols = new Set<number>();
     for (const c of COMMANDS) {
@@ -55,11 +55,11 @@ describe("generated help", () => {
   });
 
   test("a usage too wide for the column wraps instead of widening it", () => {
-    const lines = HELP.split("\n");
+    const lines = WIDE_HELP.split("\n");
     const col = lines.find((l) => l.includes("Reload the current page"))!.indexOf("Reload");
-    const i = lines.findIndex((l) => l.startsWith("  cookie-set "));
+    const i = lines.findIndex((l) => l.startsWith("  pick "));
     expect(lines[i]!.length).toBeGreaterThan(col);
-    expect(lines[i + 1]).toBe(" ".repeat(col) + "Set a cookie (chrome backend only)");
+    expect(lines[i + 1]).toBe(" ".repeat(col) + "Pick a size");
   });
 
   test("every summary appears", () => {

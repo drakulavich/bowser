@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { sessionDir } from "../state.ts";
-import { assertValidBackendEnv } from "../backend.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 
 export function socketPath(session: string): string {
@@ -130,7 +129,14 @@ const HEALTH_PING_MS = 1000;
 export interface ConnectOptions {
   spawn?: boolean;
   profile?: string;
+  /** The platform a daemon would run on; `process.platform` unless a test
+   *  fakes it. */
+  platform?: string;
 }
+
+/** Why bowser cannot start a daemon off macOS: its only engine is WebKit's
+ *  Bun.WebView, which throws on other platforms. A user error (exit 1). */
+export const REQUIRES_MACOS = "bowser requires macOS (WebKit)";
 
 /** The environment variable that carries the profile to a spawned daemon.
  *  Env rather than argv: `looksLikeOurDaemon` identifies a daemon by its last
@@ -167,11 +173,10 @@ export async function connectOrSpawn(
     if (connected) {
       throw new Error(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
     }
-    // Validate backend config in the parent before spawning: the daemon opens
-    // the browser (and would throw on a bad BOWSER_BACKEND) before it ever opens
-    // its socket, so that error is invisible to us and shows up only as the
-    // "did not start in time" timeout below. Fail fast with the real message.
-    assertValidBackendEnv();
+    // The one platform check. The daemon opens its WebView before it opens its
+    // socket, so off macOS it would die unseen, and the caller would get only
+    // the "did not start in time" timeout below. Refuse with the real reason.
+    if ((opts.platform ?? process.platform) !== "darwin") throw new Error(REQUIRES_MACOS);
     await spawnDaemon(session, opts.profile);
     // Poll until the socket is listening.
     const start = Date.now();
@@ -225,9 +230,9 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
     ? [process.execPath, "--daemon", session]
     : [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
 
-  // When BOWSER_CHROME_DEBUG is set, let the daemon's stdio through so spawn
+  // When BOWSER_DAEMON_DEBUG is set, let the daemon's stdio through so spawn
   // failures are diagnosable.
-  const debug = process.env.BOWSER_CHROME_DEBUG === "1";
+  const debug = process.env.BOWSER_DAEMON_DEBUG === "1";
   const stdio: "ignore" | "inherit" = debug ? "inherit" : "ignore";
 
   const proc = Bun.spawn({

@@ -1,4 +1,4 @@
-// Unit tests for the document.title fallback. On the webkit backend
+// Unit tests for the document.title fallback. On WebKit
 // view.title is still "" when navigate() resolves, while the page's own
 // document.title is already set. Mirrors tests/resolve-url.test.ts.
 import { describe, expect, test } from "bun:test";

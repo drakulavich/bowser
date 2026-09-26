@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parse, str } from "../src/cli/parser.ts";
-import { run } from "../src/cli.ts";
+import { reportFailure, run } from "../src/cli.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 
 describe("parse", () => {
@@ -55,9 +55,9 @@ describe("parse", () => {
     const r = parse(SCHEMAS, ["snapshot", "--filename", "out.yml"]);
     expect(r.flags.filename).toBe("out.yml");
   });
-  test("install --force boolean flag", () => {
-    const r = parse(SCHEMAS, ["install", "--force"]);
-    expect(r.flags.force).toBe(true);
+  test("open --persistent boolean flag", () => {
+    const r = parse(SCHEMAS, ["open", "--persistent"]);
+    expect(r.flags.persistent).toBe(true);
   });
   test("click <ref> positional", () => {
     const r = parse(SCHEMAS, ["click", "e3"]);
@@ -85,36 +85,18 @@ describe("parse", () => {
   });
 });
 
-describe("run() rejects an invalid enum value before reaching a browser", () => {
-  // The only assertion covering the reported case through the real argv path:
-  // the e2e cookie tests call the command functions directly and never parse
-  // a command line, so nothing else exercises this. parse() throws before any
-  // daemon work, which is what keeps this a unit test — the sibling assertion
-  // for a *valid* value would reach a real browser, and belongs (and already
-  // lives) in the parse() tests below.
-  test("cookie-set --same-site=garbage never reaches the daemon", async () => {
-    await expect(run(["cookie-set", "k", "v", "--same-site=garbage"]))
-      .rejects.toThrow("invalid --same-site: must be one of Strict, Lax, None");
-  });
-});
-
-describe("an enum flag", () => {
-  test("rejects a value outside its list", () => {
-    expect(() => parse(SCHEMAS, ["cookie-set", "k", "v", "--same-site=garbage"]))
-      .toThrow("invalid --same-site: must be one of Strict, Lax, None");
-  });
-
-  test("accepts each of its values", () => {
-    for (const v of ["Strict", "Lax", "None"]) {
-      const p = parse(SCHEMAS, ["cookie-set", "k", "v", `--same-site=${v}`]);
-      expect(p.flags["same-site"]).toBe(v);
-    }
-  });
-
-  test("does not constrain a flag with no values list", () => {
-    const p = parse(SCHEMAS, ["cookie-set", "k", "v", "--domain=anything.example"]);
-    expect(p.flags.domain).toBe("anything.example");
-  });
+describe("a removed command", () => {
+  // install and the cookie commands went with the second engine: bowser is
+  // WebKit only. Each is now an ordinary unknown command, a user error
+  // (exit 1), before any daemon work.
+  for (const name of ["install", "cookie-list", "cookie-get", "cookie-set", "cookie-delete", "cookie-clear"]) {
+    test(`${name} is an unknown command, exit 1`, async () => {
+      const err = await run([name]).then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe(`unknown command: ${name}`);
+      expect(reportFailure(err).code).toBe(1);
+    });
+  }
 });
 
 describe("str()", () => {

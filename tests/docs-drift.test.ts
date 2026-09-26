@@ -11,19 +11,27 @@ const ROOT = join(import.meta.dir, "..");
 const README = readFileSync(join(ROOT, "README.md"), "utf8");
 const SKILL = readFileSync(join(ROOT, "skills/bowser/SKILL.md"), "utf8");
 
-/** Only the reference tables count as documenting a command. Searching the
- *  whole file would let an incidental example stand in for a deleted row:
- *  drop README's `install` row and `bowser install` still appears in the
- *  install instructions. Every command has a table row in both files today,
- *  so this costs nothing and means what it says. */
-const table = (text: string): string =>
-  text.split("\n").filter((l) => l.startsWith("|")).join("\n");
-
-/** A command counts as documented when its name appears in a code span,
- *  optionally prefixed with `bowser ` (SKILL.md's Command Reference table
- *  writes every entry as `` `bowser <name> ...` ``). */
-const documented = (text: string, name: string) =>
-  new RegExp("`(?:bowser )?" + name.replace(/-/g, "\\-") + "[ `\\[<]").test(text);
+/** The command names in a file's command-reference table: the section under
+ *  its `## Command reference` heading (either case), up to the next `## `.
+ *  Only the table's first column counts, and each code span in it names one
+ *  command by its first word after an optional `bowser `, so
+ *  `` `bowser check <ref>` / `uncheck <ref>` `` yields check and uncheck.
+ *  Scoped to that table on purpose: searching the whole file would let an
+ *  incidental example stand in for a deleted row, and a whole-file match on
+ *  bare names would fire on ordinary code spans. */
+const tableCommands = (text: string): Set<string> => {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => /^## Command reference\s*$/i.test(l));
+  if (start < 0) throw new Error("no '## Command reference' section");
+  const names = new Set<string>();
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith("## ")) break;
+    if (!line.startsWith("| `")) continue; // header, separator, prose
+    const cell = line.slice(2).split(/(?<!\\)\|/)[0]!;
+    for (const m of cell.matchAll(/`(?:bowser )?([a-z][a-z-]*)/g)) names.add(m[1]!);
+  }
+  return names;
+};
 
 /** The names a doc file presents as commands. Only the `` `bowser <name>` ``
  *  form counts: it is unambiguous, so this never fires on an ordinary code
@@ -37,48 +45,27 @@ const claimed = (text: string): string[] => {
   return [...names];
 };
 
-describe("docs list every command", () => {
-  test("README", () => {
-    const rows = table(README);
-    expect(COMMANDS.filter((c) => !documented(rows, c.name)).map((c) => c.name)).toEqual([]);
-  });
+const REGISTERED = new Set(COMMANDS.map((c) => c.name));
 
-  test("SKILL.md", () => {
-    const rows = table(SKILL);
-    expect(COMMANDS.filter((c) => !documented(rows, c.name)).map((c) => c.name)).toEqual([]);
-  });
-});
+describe("the command-reference table matches the registry", () => {
+  for (const [file, text] of [["README", README], ["SKILL.md", SKILL]] as const) {
+    test(`${file}: every registered command has a row`, () => {
+      const rows = tableCommands(text);
+      expect([...REGISTERED].filter((n) => !rows.has(n))).toEqual([]);
+    });
 
-describe("docs list an enum flag's real values", () => {
-  // The narrow half of what the README could be checked for. A full comparison
-  // against usageOf() is not possible today: the README abbreviates
-  // placeholders (`<d>` where the generated usage says `<domain>`). But a flag
-  // that declares `values` has one authoritative list, and the README quoting a
-  // different one is the exact drift this test file exists to catch — it is how
-  // `--same-site` came to advertise an order the parser did not use.
-  for (const c of COMMANDS) {
-    for (const f of c.flags) {
-      if (!f.values) continue;
-      test(`${c.name} --${f.name}`, () => {
-        // Markdown escapes the pipes inside a table cell.
-        const shown = `--${f.name}=${f.values!.join("\\|")}`;
-        // Scope the assertion to the command's own row, so a failure prints
-        // that line rather than the whole README.
-        const row = README.split("\n").find((l) => l.includes(`\`${c.name} `)) ?? "";
-        expect(row).toContain(shown);
-      });
-    }
+    test(`${file}: every row names a registered command`, () => {
+      expect([...tableCommands(text)].filter((n) => !REGISTERED.has(n))).toEqual([]);
+    });
   }
 });
 
 describe("docs claim no command that is gone", () => {
-  const names = new Set(COMMANDS.map((c) => c.name));
-
   test("README", () => {
-    expect(claimed(README).filter((n) => !names.has(n))).toEqual([]);
+    expect(claimed(README).filter((n) => !REGISTERED.has(n))).toEqual([]);
   });
 
   test("SKILL.md", () => {
-    expect(claimed(SKILL).filter((n) => !names.has(n))).toEqual([]);
+    expect(claimed(SKILL).filter((n) => !REGISTERED.has(n))).toEqual([]);
   });
 });
