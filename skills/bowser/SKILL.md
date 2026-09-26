@@ -37,8 +37,8 @@ Do **not** use for static HTTP fetches.
 | `bowser goto <url>` | Navigate within current session |
 | `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `bowser click <ref>` | Click an element by ref |
-| `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The value is not echoed back, plain or `--json` |
-| `bowser type <text>` | Type into focused element |
+| `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin` |
+| `bowser type <text>` | Type into focused element. Prints `typed N characters` (`typed 1 character` for one), never the text; `--json` gives `{"ok":true,"length":N}` |
 | `bowser press <key>` | Press a keyboard key |
 | `bowser hover <ref>` | Hover an element |
 | `bowser select <ref> <value>` | Choose a `<select>` option |

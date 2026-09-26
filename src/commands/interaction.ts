@@ -50,7 +50,7 @@ function withoutFinalNewline(s: string): string {
 }
 
 /** With `stdin`, the text comes from standard input so a secret never
- *  reaches argv, and it is never echoed back. */
+ *  reaches argv. In every mode the text is never echoed back. */
 export async function cmdFill(
   ctx: CommandContext,
   ref: string,
@@ -67,15 +67,16 @@ export async function cmdFill(
     await c.request("click", [selector]);
     await c.request("evaluate", [clearForFillScript(selector)]);
     await c.request("type", [value]);
-    const json = opts.stdin ? { ok: true, ref } : { ok: true, ref, text };
-    return replyPage(ctx, c, json, `filled ${ref} (${target.role} "${target.name}")`);
+    return replyPage(ctx, c, { ok: true, ref }, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
 
+/** Answers with the length in code points, never the text: it may be a secret. */
 export async function cmdType(ctx: CommandContext, text: string): Promise<string> {
   return withPageClient(ctx, async (c) => {
     await c.request("type", [text]);
-    return replyPage(ctx, c, { ok: true, text }, `typed "${text}"`);
+    const length = [...text].length;
+    return replyPage(ctx, c, { ok: true, length }, `typed ${length} character${length === 1 ? "" : "s"}`);
   });
 }
 

@@ -678,6 +678,38 @@ describe("type", () => {
     await cmdType({ ...ctx(), connect: async () => c }, "abc");
     expect(c.calls).toContainEqual(["type", ["abc"]]);
   });
+
+  const SECRET = "hunter2-S3cr3t!";
+
+  test("the plain answer counts characters and does not echo the text", async () => {
+    const out = await cmdType({ ...ctx(), connect: async () => fakeClient({}) }, SECRET);
+    expect(out).toBe(`typed ${[...SECRET].length} characters`);
+    expect(out).not.toContain(SECRET);
+  });
+
+  test("one character is singular", async () => {
+    expect(await cmdType({ ...ctx(), connect: async () => fakeClient({}) }, "x")).toBe("typed 1 character");
+  });
+
+  test("the count is code points, not UTF-16 units", async () => {
+    // "👍" is one code point and two UTF-16 units.
+    expect(await cmdType({ ...ctx(), connect: async () => fakeClient({}) }, "👍")).toBe("typed 1 character");
+    expect(await cmdType({ ...ctx(), connect: async () => fakeClient({}) }, "a👍")).toBe("typed 2 characters");
+  });
+
+  test("the --json answer has a length and no text", async () => {
+    const out = await cmdType({ ...ctx({ json: true }), connect: async () => fakeClient({}) }, "a👍");
+    expect(JSON.parse(out)).toEqual({ ok: true, length: 2 });
+    const secret = await cmdType({ ...ctx({ json: true }), connect: async () => fakeClient({}) }, SECRET);
+    expect(secret).not.toContain(SECRET);
+  });
+
+  test("a failed type does not put the text in the error", async () => {
+    const c = fakeClient({ type: () => { throw new Error("operation 'type' timed out after 30000ms"); } });
+    const err = await cmdType({ ...ctx(), connect: async () => c }, SECRET).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).not.toContain(SECRET);
+  });
 });
 
 describe("press", () => {
@@ -1343,10 +1375,31 @@ describe("fill --stdin", () => {
     expect(out).not.toContain(SECRET);
   });
 
-  test("fill <ref> <text> still echoes the text under --json", async () => {
-    const out = await cmdFill(sctx("", { json: true }), "e2", "visible");
-    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2", text: "visible" });
+  test("fill <ref> <text> answers --json without the text", async () => {
+    const out = await cmdFill(sctx("", { json: true }), "e2", SECRET);
+    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2" });
+    expect(out).not.toContain(SECRET);
     expect(reads).toBe(0);
+  });
+
+  test("fill <ref> <text> answers in plain text without the text", async () => {
+    const out = await cmdFill(sctx(""), "e2", SECRET);
+    expect(out).toBe(`filled e2 (textbox "Password")`);
+    expect(out).not.toContain(SECRET);
+  });
+
+  test("fill <ref> <text>: a missing, wrong-kind or stale ref error does not contain the text", async () => {
+    await saveState({ name: session, url: "https://x", title: "X", refs: [
+      ...REFS, { id: "e1", selector: "li", role: "listitem", name: "", tag: "li" },
+    ], updatedAt: Date.now() });
+    // e2 is stale: the page no longer has it, so liveSelector refuses.
+    c = fakeClient({ evaluate: resolving({ e2: null }) });
+    for (const ref of ["e1", "e9", "e2"]) {
+      const err = await cmdFill(sctx(""), ref, SECRET).catch((e: Error) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).not.toContain(SECRET);
+    }
+    expect(typed()).toEqual([]);
   });
 
   test("--stdin with a <text> positional is a usage error before stdin or the daemon", async () => {
