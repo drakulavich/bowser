@@ -547,6 +547,80 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   return { url: location.href, title: document.title, tree: root.children, refs };
 })()`;
 
+// The WebKit dialog shim (dialogs spec, item 5). WebKit has no dialog events:
+// its engine dismisses every dialog itself and tells nobody. So on webkit the
+// daemon replaces window.alert/confirm/prompt with functions that answer the
+// way it answers on Chromium (server.ts answerDialog): the one-shot answer if
+// set, then cleared, else dismissed; an accepted prompt with no text gets its
+// default. Each answer is logged as a DialogReport for the daemon to read.
+// The shim, its answer and its log live on window, so a new document has
+// none. A document the back-forward cache restores keeps its shim, so the
+// answer is also dropped twice over: by the page on pagehide, and by `drop`
+// when the daemon saw a navigation or ran a navigating op. The expression evaluates to
+// the shim. No backticks or dollar-brace below, apart from the interpolation.
+function dialogShim(drop: boolean): string {
+  return String.raw`(() => {
+  const KEY = Symbol.for('bowser.dialogs');
+  let shim = window[KEY];
+  if (!shim) {
+    shim = { answer: null, log: [] };
+    Object.defineProperty(window, KEY, { value: shim });
+    const str = (v) => v === undefined ? '' : String(v);
+    const answer = (type, message, defaultValue) => {
+      const given = shim.answer;
+      shim.answer = null;
+      const accept = given ? given.accept : false;
+      const d = { type, message: str(message) };
+      if (type === 'prompt') d.defaultValue = str(defaultValue);
+      d.state = accept ? 'accepted' : 'dismissed';
+      let reply = accept;
+      if (type === 'prompt') {
+        reply = accept ? (typeof given.text === 'string' ? given.text : d.defaultValue) : null;
+        if (accept) d.answer = reply;
+      }
+      if (!given) d.unanswered = true;
+      shim.log.push(d);
+      return reply;
+    };
+    window.alert = function alert(message) { answer('alert', message); };
+    window.confirm = function confirm(message) { return answer('confirm', message); };
+    window.prompt = function prompt(message, defaultValue) { return answer('prompt', message, defaultValue); };
+    // Leaving the document (a link, a form, history.back() in a handler)
+    // drops the answer, so a cached copy of it comes back without one.
+    window.addEventListener('pagehide', () => { shim.answer = null; });
+  }
+  if (${JSON.stringify(drop)}) shim.answer = null;
+  return shim;
+})()`;
+}
+
+/** `expr` evaluated with the dialog shim installed first. Evaluates to
+ *  `{ value, dialogs }`: expr's value, and the shim's log read after it
+ *  settles. Newlines around `expr` keep a trailing line comment in it. */
+export function withDialogShim(expr: string, drop: boolean): string {
+  return `(async () => {
+  const shim = ${dialogShim(drop)};
+  const value = await (
+${expr}
+);
+  return { value, dialogs: shim.log.splice(0) };
+})()`;
+}
+
+/** Install the dialog shim if this document lacks it; read and clear its log. */
+export function dialogSyncScript(drop: boolean): string {
+  return `${dialogShim(drop)}.log.splice(0)`;
+}
+
+/** Set the shim's one-shot answer (installing it first); read and clear its log. */
+export function dialogAnswerScript(answer: { accept: boolean; text?: string }): string {
+  return `(() => {
+  const shim = ${dialogShim(false)};
+  shim.answer = ${JSON.stringify(answer)};
+  return shim.log.splice(0);
+})()`;
+}
+
 // Bare expressions, not IIFEs: they take no input, so there is nothing to
 // quote. Named here so this file really is every string bowser evaluates in
 // the page, which is what the layer rule and CLAUDE.md claim.

@@ -6,7 +6,7 @@ import { str } from "../cli/parser.ts";
 import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
-import { reply, withClient, type CommandContext } from "./context.ts";
+import { dialogsJson, modalState, reply, withClient, withPageClient, type CommandContext } from "./context.ts";
 
 export async function cmdSnapshot(
   ctx: CommandContext,
@@ -17,14 +17,17 @@ export async function cmdSnapshot(
     throw new Error(`usage: --depth=N requires a non-negative integer (got '${opts.depth}')`);
   }
   const depth = Number(opts.depth ?? 0);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
     await saveState({
       name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
     });
+    // Dialogs the daemon answered since the last command that printed them
+    // (a page timer's, say). Nothing is blocked, so the tree renders too.
+    const dialogs = dialogsJson(c);
     const out = ctx.json
-      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth) }, null, 2)
-      : renderPage(snap, depth);
+      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...(dialogs.length ? { dialogs } : {}) }, null, 2)
+      : renderPage(snap, depth, modalState(c));
     if (opts.filename) {
       // The file holds exactly what stdout would: the text plus the CLI's newline.
       await Bun.write(opts.filename, out + "\n");

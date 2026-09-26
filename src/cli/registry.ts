@@ -4,7 +4,7 @@
 // others. SCHEMAS is derived here; the parser still owns argv parsing.
 //
 // COMMANDS groups by the module that owns each command (install, navigation,
-// snapshot, interaction, web-storage, scripting, cookies, storage-state, then
+// snapshot, interaction, dialog, web-storage, scripting, cookies, storage-state, then
 // mcp), not by today's hand-maintained SCHEMAS.commands order — a module's own
 // COMMANDS array can only be spread as one contiguous block, and interaction's
 // commands (click..uncheck, resize) are split around snapshot's `screenshot`
@@ -13,6 +13,7 @@
 
 import type { CommandContext } from "../commands/context.ts";
 import { COMMANDS as COOKIES } from "../commands/cookies.ts";
+import { COMMANDS as DIALOG } from "../commands/dialog.ts";
 import { COMMANDS as INSTALL } from "../commands/install.ts";
 import { COMMANDS as INTERACTION } from "../commands/interaction.ts";
 import { COMMANDS as NAVIGATION } from "../commands/navigation.ts";
@@ -66,6 +67,7 @@ export const COMMANDS: readonly Command[] = [
   ...NAVIGATION,
   ...SNAPSHOT,
   ...INTERACTION,
+  ...DIALOG,
   ...WEB_STORAGE,
   ...SCRIPTING,
   ...COOKIES,

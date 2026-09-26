@@ -8,7 +8,7 @@ import { pidPath, socketPath } from "../daemon/client.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
-import { connector, emptyState, reply, syncState, withClient, type CommandContext } from "./context.ts";
+import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext } from "./context.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
  *  state op resolves the URL via realUrl() (which falls back to location.href),
@@ -39,7 +39,7 @@ export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptio
     : opts.persistent ? profileDir(ctx.session) : undefined;
   // The directory is created only when a new daemon is spawned for it
   // (spawnDaemon), so a refused open (below) leaves nothing behind.
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     // The store is fixed when the daemon starts. A daemon that was already
     // running may have another one, and navigating it would silently lose
     // the persistence asked for, so refuse before touching the page.
@@ -56,19 +56,19 @@ export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptio
     };
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
-    return reply(ctx, { ok: true, url: state.url, title: state.title }, text);
+    return replyPage(ctx, c, { ok: true, url: state.url, title: state.title }, text);
   }, { profile });
 }
 
 export async function cmdGoto(ctx: CommandContext, url: string): Promise<string> {
   if (!url) throw new Error("usage: bowser goto <url>");
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("navigate", [url]);
     const state = await c.request("state");
     assertNavigated(url, state.url);
     await syncState(prev, state);
-    return reply(ctx, { ok: true, url: state.url }, `navigated to ${state.url}`);
+    return replyPage(ctx, c, { ok: true, url: state.url }, `navigated to ${state.url}`);
   });
 }
 
@@ -77,12 +77,12 @@ export async function cmdHistory(
   which: "back" | "forward" | "reload",
 ): Promise<string> {
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request(which, []);
     const state = await c.request("state");
     await syncState(prev, state);
     const text = which === "reload" ? `reloaded ${state.url}` : `${which} -> ${state.url}`;
-    return reply(ctx, { ok: true, url: state.url }, text);
+    return replyPage(ctx, c, { ok: true, url: state.url }, text);
   });
 }
 

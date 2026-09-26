@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import { findCommand } from "../src/cli/registry.ts";
+import { reportFailure, run } from "../src/cli.ts";
+import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath } from "../src/daemon/client.ts";
 import { cmdInstall } from "../src/commands/install.ts";
@@ -17,6 +19,7 @@ import {
   closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, looksLikeOurDaemon,
   type ProcessOps,
 } from "../src/commands/navigation.ts";
+import { cmdCookieList } from "../src/commands/cookies.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import {
@@ -1462,5 +1465,186 @@ describe("fill --stdin", () => {
       if (pid > 0) try { process.kill(pid); } catch {}
       await rm(home, { recursive: true, force: true });
     }
+  });
+});
+describe("dialogs", () => {
+  const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
+  const DISMISSED_OUT = '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
+
+  async function clickable() {
+    await saveState({
+      name: session, url: "https://x", title: "X", updatedAt: Date.now(),
+      refs: [
+        { id: "e1", selector: "button", role: "button", name: "go", tag: "button" },
+        { id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" },
+      ],
+    });
+  }
+
+  test("a click during which a dialog was answered prints its answer and then the modal state", async () => {
+    await clickable();
+    const c = fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: [dismissed] });
+    const out = await cmdClick({ ...ctx(), connect: async () => c }, "e1");
+    expect(out).toBe(`clicked e1 (button "go")\n${DISMISSED_OUT}`);
+  });
+
+  test("--json: the command's object gains a dialogs array, without the internal hint flag", async () => {
+    await clickable();
+    const c = fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: [dismissed] });
+    const out = JSON.parse(await cmdClick({ ...ctx({ json: true }), connect: async () => c }, "e1"));
+    expect(out.dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed" }]);
+  });
+
+  test("no dialog, no modal state and no dialogs key", async () => {
+    await clickable();
+    const c = fakeClient({ evaluate: resolving({ e1: "button" }) });
+    expect(await cmdClick({ ...ctx(), connect: async () => c }, "e1")).toBe('clicked e1 (button "go")');
+    const json = JSON.parse(await cmdClick({ ...ctx({ json: true }), connect: async () => c }, "e1"));
+    expect("dialogs" in json).toBe(false);
+  });
+
+  test("answered dialogs print their answer; only a dismissal for lack of an answer carries the hint, and never an alert's", async () => {
+    const c = fakeClient({ evaluate: () => "done" }, {
+      dialogs: [
+        { type: "confirm", message: "sure?", state: "accepted" },
+        { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
+        { type: "alert", message: "hi", state: "dismissed", unanswered: true },
+      ],
+    });
+    const out = await cmdEval({ ...ctx(), connect: async () => c }, "go()");
+    expect(out).toBe([
+      "done",
+      "### Modal state",
+      '- ["confirm" dialog with message "sure?"]: accepted',
+      '- ["prompt" dialog with message "name?"]: dismissed (run dialog-accept before the action to accept it)',
+      '- ["alert" dialog with message "hi"]: dismissed',
+    ].join("\n"));
+  });
+
+  test("a dialog that could not be answered says so, with the error and no hint", async () => {
+    const failed = { type: "confirm" as const, message: "sure?", state: "failed" as const, error: "gone" };
+    const c = fakeClient({ evaluate: () => "done" }, { dialogs: [failed] });
+    expect(await cmdEval({ ...ctx(), connect: async () => c }, "go()")).toBe(
+      'done\n### Modal state\n- ["confirm" dialog with message "sure?"]: could not be answered (gone)',
+    );
+    const json = JSON.parse(await cmdEval({ ...ctx({ json: true }), connect: async () => c }, "go()"));
+    expect(json.dialogs).toEqual([failed]);
+  });
+
+  test("--json dialogs carry type, message, defaultValue, state and answer, and nothing else", async () => {
+    const c = fakeClient({ evaluate: () => 1 }, {
+      dialogs: [
+        { type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" },
+        { type: "prompt", message: "again?", defaultValue: "", state: "dismissed", unanswered: true },
+      ],
+    });
+    const out = JSON.parse(await cmdEval({ ...ctx({ json: true }), connect: async () => c }, "go()"));
+    expect(out).toEqual({
+      ok: true, result: 1,
+      dialogs: [
+        { type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" },
+        { type: "prompt", message: "again?", defaultValue: "", state: "dismissed" },
+      ],
+    });
+  });
+
+  test("goto, fill, press, hover, select, check, uncheck, type, run-code, go-back and open report dialogs too", async () => {
+    await saveState({
+      name: session, url: "https://x", title: "X", updatedAt: Date.now(),
+      refs: [
+        { id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" },
+        { id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" },
+        { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
+      ],
+    });
+    const c = () => fakeClient({ evaluate: resolving({ e2: "input", e3: "select", e4: "input.cb" }) }, { dialogs: [dismissed] });
+    const outs = [
+      await cmdGoto({ ...ctx(), connect: async () => c() }, "https://x/"),
+      await cmdFill({ ...ctx(), connect: async () => c() }, "e2", "x"),
+      await cmdPress({ ...ctx(), connect: async () => c() }, "Enter"),
+      await cmdHover({ ...ctx(), connect: async () => c() }, "e4"),
+      await cmdSelect({ ...ctx(), connect: async () => c() }, "e3", "blue"),
+      await cmdCheck({ ...ctx(), connect: async () => c() }, "e4"),
+      await cmdUncheck({ ...ctx(), connect: async () => c() }, "e4"),
+      await cmdType({ ...ctx(), connect: async () => c() }, "hi"),
+      await cmdRunCode({ ...ctx(), connect: async () => c() }, "return 1"),
+      await cmdHistory({ ...ctx(), connect: async () => c() }, "back"),
+      // Last: open starts a fresh page, so it clears the saved refs.
+      await cmdOpen({ ...ctx(), connect: async () => c() }, "https://x/"),
+    ];
+    for (const out of outs) expect(out.endsWith(DISMISSED_OUT)).toBe(true);
+  });
+
+  test("dialog-accept [text] and dialog-dismiss set the answer for the next dialog and say so", async () => {
+    const c = fakeClient();
+    expect(await cmdDialog({ ...ctx(), connect: async () => c }, true, "typed")).toBe("next dialog will be accepted");
+    expect(await cmdDialog({ ...ctx(), connect: async () => c }, false)).toBe("next dialog will be dismissed");
+    expect(c.calls).toEqual([["dialog-answer", [true, "typed"]], ["dialog-answer", [false]]]);
+    expect(JSON.parse(await cmdDialog({ ...ctx({ json: true }), connect: async () => c }, true)))
+      .toEqual({ ok: true, next: "accepted" });
+  });
+
+  test("dialog-accept [text] and dialog-dismiss are registered commands", async () => {
+    const c = fakeClient();
+    await findCommand("dialog-accept")!.run({ ...ctx(), connect: async () => c }, { positional: ["typed"], flags: {} });
+    await findCommand("dialog-dismiss")!.run({ ...ctx(), connect: async () => c }, { positional: [], flags: {} });
+    expect(c.calls).toEqual([["dialog-answer", [true, "typed"]], ["dialog-answer", [false]]]);
+  });
+
+  test("snapshot prints the queued dialogs after the page lines and still renders the tree", async () => {
+    const snap = { url: "https://x/", title: "X", tree: [{ role: "button", name: "go", ref: "e1", children: [] }], refs: [] };
+    const c = fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] });
+    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, {});
+    expect(out.startsWith(`### Page\n- Page URL: https://x/\n- Page Title: X\n${DISMISSED_OUT}\n### Snapshot\n`)).toBe(true);
+    expect(out).toContain('button "go" [ref=e1]');
+    const json = JSON.parse(await cmdSnapshot({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] }) }, {}));
+    expect(json.dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed" }]);
+    expect(typeof json.snapshot).toBe("string");
+  });
+
+  test("snapshot with no dialogs has no modal state and no dialogs key", async () => {
+    const snap = { url: "https://x/", title: "X", tree: [], refs: [] };
+    expect(await cmdSnapshot({ ...ctx(), connect: async () => fakeClient({ evaluate: () => snap }) }, {})).not.toContain("Modal state");
+    const json = JSON.parse(await cmdSnapshot({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }) }, {}));
+    expect("dialogs" in json).toBe(false);
+  });
+
+  test("commands that print no dialogs do not take the daemon's queued reports", async () => {
+    const shot = fakeClient({}, { dialogs: [dismissed] });
+    await cmdScreenshot({ ...ctx(), connect: async () => shot }, { filename: join(tmpdir(), `bowser-shot-${Date.now()}.png`) });
+    expect(shot.reporting).toBe(false);
+    const cookies = fakeClient({}, { dialogs: [dismissed] });
+    await cmdCookieList({ ...ctx(), connect: async () => cookies });
+    expect(cookies.reporting).toBe(false);
+  });
+});
+
+describe("a failed page command still reports its dialogs", () => {
+  const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
+  const MODAL = '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
+
+  test("eval that throws after a confirm: the error unchanged, then the report, exit code 2", async () => {
+    const c = fakeClient({ evaluate: () => { throw new Error("Error: boom"); } }, { dialogs: [dismissed] });
+    const err = await run([`--session=${session}`, "eval", "confirm('sure?'); throw new Error('boom')"], { connect: async () => c }).catch((e) => e);
+    expect(reportFailure(err)).toEqual({ stderr: `bowser: Error: boom\n${MODAL}`, code: 2 });
+  });
+
+  test("a user error keeps exit code 1 and its message first, so the CLI still classifies it", async () => {
+    await saveState({
+      name: session, url: "https://x", title: "X", updatedAt: Date.now(),
+      refs: [{ id: "e1", selector: "button", role: "button", name: "go", tag: "button" }],
+    });
+    const c = fakeClient({ evaluate: () => null }, { dialogs: [dismissed] });
+    const err = await run([`--session=${session}`, "click", "e1"], { connect: async () => c }).catch((e) => e);
+    const { stderr, code } = reportFailure(err);
+    expect(stderr).toStartWith("bowser: ref 'e1' not found in the current page snapshot.");
+    expect(stderr).toEndWith(`\n${MODAL}`);
+    expect(code).toBe(1);
+  });
+
+  test("a failure with no dialogs prints only the error", async () => {
+    const c = fakeClient({ evaluate: () => { throw new Error("Error: boom"); } });
+    const err = await run([`--session=${session}`, "eval", "x"], { connect: async () => c }).catch((e) => e);
+    expect(reportFailure(err)).toEqual({ stderr: "bowser: Error: boom", code: 2 });
   });
 });

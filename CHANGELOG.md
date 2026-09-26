@@ -7,6 +7,22 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- **`dialog-accept [text]` and `dialog-dismiss`** set the answer for the next `alert`, `confirm` or
+  `prompt` on the current page. A prompt gets `text`, or its own default value when no text is given.
+  Every dialog is answered the moment it opens: with that one-shot answer if one is set, otherwise
+  it is dismissed. The command that caused a dialog reports it under `### Modal state`, for example
+  `- ["confirm" dialog with message "sure?"]: accepted`, and `--json` gives a `dialogs` array. A command that fails prints them on stderr after its error,
+  with the same exit code. The
+  answer is used once and dropped when the page navigates. **Difference from `playwright-cli`:**
+  run the command *before* the action that opens the dialog. Run after it, it prepares the next
+  dialog and does not answer the one already reported. On WebKit, which has no dialog events, a page
+  shim answers dialogs. A dialog raised during page load, before bowser's first command on that
+  document, is dismissed by the engine and not reported there. A dialog whose handler then
+  navigates the page is answered but not reported on WebKit. So is a dialog opened through a
+  reference the page saved at load time, which the engine dismisses; a prepared answer then stays
+  set until the next dialog bowser sees or a navigation. If the browser refuses to close a dialog,
+  it is reported as `could not be answered (<error>)`.
+
 - **`fill <ref> --stdin`** takes the text from standard input, so a secret never reaches the
   `bowser` process's arguments, where `ps` shows it to any local user:
   `op read op://vault/site/password | bowser fill e4 --stdin`. One trailing `\n` or `\r\n` is
@@ -58,6 +74,11 @@ All notable changes to this project are documented here. This project follows
   move focus the way `playwright-cli`'s does, so `[active]` can sit on a different node after it.
 
 ### Fixed
+
+- **A dialog wedged the session on Chromium.** A `click` that opened a `confirm()` hung until the op
+  timeout (exit 2), and later commands hung too. Dialogs are now answered as they open (see
+  `dialog-accept` under Added). On WebKit the engine used to answer them silently, so the agent
+  never learned of them. They are now reported on WebKit too.
 
 - **An action on a stale ref waited 30 s or hit the wrong element.** A ref was acted on through
   the CSS path saved at snapshot time. When its element was gone (a todo removed by "Clear

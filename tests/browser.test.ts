@@ -290,3 +290,112 @@ describe("wrapView subscribe", () => {
     expect(calls).toBe(0);
   });
 });
+
+describe("wrapView dialogs", () => {
+  /** A chrome view that remembers its listeners, so a test can deliver a CDP event. */
+  function listening(mainFrame = "f") {
+    const listeners = new Map<string, (e: { type: string; data?: unknown }) => void>();
+    const v = fakeView({
+      addEventListener: (n, h) => { listeners.set(n, h); },
+      cdp: async (m, p) => {
+        v.calls.push(["cdp", [m, p]]);
+        return m === "Target.getTargetInfo" ? { targetInfo: { targetId: mainFrame, type: "page" } } : {};
+      },
+    });
+    const emit = (type: string, data: unknown) => listeners.get(type)?.({ type, data });
+    return { v, emit };
+  }
+
+  test("on chrome, CDP dialog events reach the listener as DialogState, and a navigation when it starts, not when it lands", async () => {
+    const { v, emit } = listening();
+    const seen: unknown[] = [];
+    const b = wrapView(v, chrome);
+    expect(b.watchDialogs({
+      opened: (d) => seen.push(["opened", d]),
+      navigation: () => seen.push(["navigation"]),
+    })).toBe(true);
+    emit("Page.javascriptDialogOpening", { url: "u", frameId: "f", message: "name?", type: "prompt", hasBrowserHandler: false, defaultPrompt: "def" });
+    emit("Page.javascriptDialogOpening", { url: "u", frameId: "f", message: "sure?", type: "confirm", hasBrowserHandler: false, defaultPrompt: "" });
+    emit("Page.frameStartedNavigating", { frameId: "f", url: "https://x/next", loaderId: "l", navigationType: "differentDocument" });
+    await Bun.sleep(0); // the main frame's id is asked for once
+    // Bun fires onNavigated for an iframe landing too, so a landing says nothing on chrome.
+    v.land("https://x/frame");
+    expect(seen).toEqual([
+      ["opened", { type: "prompt", message: "name?", defaultValue: "def" }],
+      ["opened", { type: "confirm", message: "sure?" }],
+      ["navigation"],
+    ]);
+  });
+
+  test("on chrome an iframe starting a navigation is not a navigation of the page, even when it is the first frame seen", async () => {
+    const { v, emit } = listening("MAIN");
+    let navigations = 0;
+    wrapView(v, chrome).watchDialogs({ opened() {}, navigation: () => { navigations++; } });
+    const started = async (frameId: string) => {
+      emit("Page.frameStartedNavigating", { frameId, url: "https://x/", loaderId: "l", navigationType: "differentDocument" });
+      await Bun.sleep(0);
+    };
+    await started("CHILD"); // an iframe of the initial about:blank, before the page's first navigation
+    expect(navigations).toBe(0);
+    await started("MAIN");
+    await started("CHILD");
+    await started("MAIN");
+    expect(navigations).toBe(2);
+    // The main frame's id is asked for once, then remembered.
+    expect(v.calls.filter(([n, a]) => n === "cdp" && a[0] === "Target.getTargetInfo")).toHaveLength(1);
+  });
+
+  test("on chrome, when the main frame cannot be asked for, a navigation still counts: the answer is dropped", async () => {
+    const { v, emit } = listening();
+    v.cdp = async () => { throw new Error("no session"); };
+    let navigations = 0;
+    wrapView(v, chrome).watchDialogs({ opened() {}, navigation: () => { navigations++; } });
+    emit("Page.frameStartedNavigating", { frameId: "X", url: "https://x/", loaderId: "l", navigationType: "differentDocument" });
+    await Bun.sleep(0);
+    expect(navigations).toBe(1);
+  });
+
+  test("on chrome watching needs no CDP call, so it works before the first navigation (Bun enables the Page domain)", async () => {
+    const v = fakeView();
+    const b = wrapView(v, chrome);
+    b.watchDialogs({ opened() {}, navigation() {} });
+    await b.navigate("https://x/1");
+    expect(v.calls).toEqual([
+      ["addEventListener", ["Page.javascriptDialogOpening"]],
+      ["addEventListener", ["Page.frameStartedNavigating"]],
+      ["navigate", ["https://x/1"]],
+    ]);
+  });
+
+  test("answerDialog sends Page.handleJavaScriptDialog, with prompt text only when given", async () => {
+    const v = fakeView();
+    const b = wrapView(v, chrome);
+    await b.answerDialog(true, "typed");
+    await b.answerDialog(false);
+    expect(v.calls).toEqual([
+      ["cdp", ["Page.handleJavaScriptDialog", { accept: true, promptText: "typed" }]],
+      ["cdp", ["Page.handleJavaScriptDialog", { accept: false }]],
+    ]);
+  });
+
+  test("on webkit no dialog events exist: watchDialogs says so, subscribes to nothing, still reports navigations", async () => {
+    const v = fakeView();
+    const b = wrapView(v, webkit);
+    let navigated = 0;
+    expect(b.watchDialogs({ opened() {}, navigation: () => { navigated++; } })).toBe(false);
+    await b.navigate("https://x/1");
+    v.land("https://x/1");
+    expect(navigated).toBe(1);
+    expect(v.calls).toEqual([["navigate", ["https://x/1"]]]);
+  });
+
+  test("an action whose navigation starts reports it before the navigation lands", async () => {
+    const v = fakeView();
+    const seen: string[] = [];
+    v.click = async () => { v.loading = true; setTimeout(() => { seen.push("landed"); v.land("https://x/2"); }, 60); };
+    const b = wrapView(v, webkit, { graceMs: 40, settleMs: 300 });
+    b.watchDialogs({ opened() {}, navigation: () => seen.push("navigation") });
+    await b.click("a");
+    expect(seen).toEqual(["navigation", "landed", "navigation"]);
+  });
+});

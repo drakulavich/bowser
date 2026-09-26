@@ -8,22 +8,33 @@
 
 import type { Cookie, CookieParam, DeleteCookieOptions } from "../cdp/types.ts";
 
-/** A dialog the page opened. Chrome only: webkit delivers no dialog events
- *  (see the 2026-09-05 refactor spec, Section 4). `defaultValue` carries
- *  CDP's `defaultPrompt`, renamed here to match the other fields' style. */
+/** A dialog the page opened. `defaultValue` carries CDP's `defaultPrompt`,
+ *  renamed here to match the other fields' style; only a prompt has one. */
 export interface DialogState {
   type: "alert" | "confirm" | "prompt" | "beforeunload";
   message: string;
   defaultValue?: string;
 }
 
+/** A dialog as a command reports it. No dialog stays open: each is answered
+ *  the moment it opens, with the one-shot answer or else dismissed. The
+ *  --json form is this minus `unanswered`. */
+export interface DialogReport extends DialogState {
+  /** "failed": the browser refused both the answer and a dismiss. */
+  state: "accepted" | "dismissed" | "failed";
+  /** The text an accepted prompt was answered with. */
+  answer?: string;
+  /** Why a "failed" dialog could not be answered. */
+  error?: string;
+  /** Dismissed because no one-shot answer was set; the plain output adds a
+   *  hint. */
+  unanswered?: true;
+}
+
 /** What the `state` op returns. */
 export interface PageState {
   url: string;
   title: string;
-  /** Present only while a dialog is open. Populated by the dialog task; no
-   *  code in this PR sets it. */
-  dialog?: DialogState;
   /** The daemon's persistent profile directory; absent when its store is
    *  ephemeral. `open --persistent` compares it with the one it wants. */
   profile?: string;
@@ -33,6 +44,8 @@ export interface DaemonOps {
   ping:             { args: [];                                          result: "pong";               urgent: true };
   shutdown:         { args: [];                                          result: void;                 urgent: true };
   state:            { args: [];                                          result: PageState };
+  /** Set the one-shot answer for the next dialog on this page. */
+  "dialog-answer":  { args: [accept: boolean, text?: string];            result: void };
   navigate:         { args: [url: string];                               result: void };
   evaluate:         { args: [expr: string];                              result: unknown };
   click:            { args: [selector: string];                          result: void };
@@ -96,6 +109,9 @@ export interface DaemonRequest {
   args?: unknown[];
   /** Reserved for tab support. Ignored by the server today; never set by the client. */
   page?: string;
+  /** The sender prints dialog reports: the reply hands over the queued ones.
+   *  Without it they stay queued for a command that prints them. */
+  report?: true;
 }
 
 export interface DaemonResponse {
@@ -103,11 +119,19 @@ export interface DaemonResponse {
   ok: boolean;
   result?: unknown;
   error?: string;
+  /** On a queued op's reply: the dialogs the daemon answered since the last
+   *  such reply. Absent when there are none. */
+  dialogs?: DialogReport[];
 }
 
 /** What a command needs from a daemon: typed requests and a close. The real
  *  DaemonClient implements it; tests implement it with a fake. */
 export interface DaemonConnection {
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>>;
+  /** Every dialog this connection's replies reported, in order. Empty unless
+   *  reportDialogs() was called. */
+  dialogs(): DialogReport[];
+  /** This command prints dialog reports: ask the daemon for them. */
+  reportDialogs(): void;
   close(): void;
 }

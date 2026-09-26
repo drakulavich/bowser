@@ -2,7 +2,7 @@
 import { renderHelp } from "./cli/help.ts";
 import { parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
-import type { CommandContext } from "./commands/context.ts";
+import { failedModalState, type CommandContext } from "./commands/context.ts";
 
 /** `base` seeds the command context; tests inject `connect` through it. */
 export async function run(argv: string[], base: Partial<CommandContext> = {}): Promise<string> {
@@ -13,6 +13,16 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   if (!command) throw new Error(`unknown command: ${args.command}`);
   const ctx: CommandContext = { ...base, session: args.session, json: args.json };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
+}
+
+/** What the CLI prints for a failed command, and its exit code: `1` for a
+ *  user error, `2` otherwise, read from the message alone. A page command's
+ *  dialogs follow the message as `### Modal state`. */
+export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
+  const msg = err instanceof Error ? err.message : String(err);
+  const userError = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
+  const modal = failedModalState(err);
+  return { stderr: `bowser: ${msg}${modal ? `\n${modal}` : ""}`, code: userError ? 1 : 2 };
 }
 
 if (import.meta.main) {
@@ -49,10 +59,9 @@ if (import.meta.main) {
       const out = await run(process.argv.slice(2));
       if (out) console.log(out);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`bowser: ${msg}`);
-      const userError = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
-      process.exit(userError ? 1 : 2);
+      const { stderr, code } = reportFailure(err);
+      console.error(stderr);
+      process.exit(code);
     }
   }
 }

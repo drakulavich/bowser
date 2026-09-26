@@ -106,9 +106,10 @@ export function renderTree(tree: Array<AriaNode | string>, depth = 0): string {
 }
 
 /** playwright-cli's `### Page` / `### Snapshot` wrapper, no trailing newline. */
-export function renderPage(snap: SnapshotResult, depth = 0): string {
+export function renderPage(snap: SnapshotResult, depth = 0, modalState = ""): string {
   const lines = ["### Page", `- Page URL: ${snap.url}`];
   if (snap.title) lines.push(`- Page Title: ${snap.title}`);
+  if (modalState) lines.push(modalState);
   lines.push("### Snapshot", "```yaml", renderTree(snap.tree, depth), "```");
   return lines.join("\n");
 }

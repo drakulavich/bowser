@@ -15,6 +15,7 @@
 // (which inherits child stdio) is excluded from the tool set.
 
 import { COMMANDS, findCommand } from "./cli/registry.ts";
+import { failedModalState } from "./commands/context.ts";
 import type { CommandSchema } from "./cli/parser.ts";
 import pkg from "../package.json";
 
@@ -136,7 +137,10 @@ async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
     const out = await deps.run(toArgv(schema, args));
     return toolResult(id, out || "");
   } catch (e) {
-    return toolResult(id, e instanceof Error ? e.message : String(e), true);
+    // A failed page command still reports the dialogs it answered.
+    const modal = failedModalState(e);
+    const msg = e instanceof Error ? e.message : String(e);
+    return toolResult(id, modal ? `${msg}\n${modal}` : msg, true);
   }
 }
 

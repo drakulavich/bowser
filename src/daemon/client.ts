@@ -7,7 +7,7 @@ import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { sessionDir } from "../state.ts";
 import { assertValidBackendEnv } from "../backend.ts";
-import type { DaemonConnection, DaemonResponse, Op, RequestParams, ResultOf } from "./protocol.ts";
+import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 
 export function socketPath(session: string): string {
   // Use a short path — Unix socket names have a ~104-char limit on macOS.
@@ -30,6 +30,8 @@ export class DaemonClient implements DaemonConnection {
   private pending = new Map<number, { resolve: (result: unknown) => void; reject: (err: Error) => void }>();
   private buf = "";
   private closed = false;
+  private reported: DialogReport[] = [];
+  private report = false;
 
   constructor(
     private readonly path: string,
@@ -65,6 +67,7 @@ export class DaemonClient implements DaemonConnection {
               const res = JSON.parse(line) as DaemonResponse;
               const entry = self.pending.get(res.id);
               if (entry) {
+                if (res.dialogs) self.reported.push(...res.dialogs);
                 self.pending.delete(res.id);
                 if (res.ok) entry.resolve(res.result);
                 else entry.reject(new Error(res.error ?? "daemon error"));
@@ -90,12 +93,20 @@ export class DaemonClient implements DaemonConnection {
     });
   }
 
+  dialogs(): DialogReport[] {
+    return [...this.reported];
+  }
+
+  reportDialogs(): void {
+    this.report = true;
+  }
+
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>> {
     const [op, args = []] = params;
     if (!this.sock) throw new Error("client not connected");
     if (this.closed) return Promise.reject(new Error(this.closedMessage));
     const id = this.nextId++;
-    const line = JSON.stringify({ id, op, args }) + "\n";
+    const line = JSON.stringify(this.report ? { id, op, args, report: true } : { id, op, args }) + "\n";
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: (result) => resolve(result as ResultOf<O>), reject });
       socketWriteAll(this.sock! as unknown as WritableSocket, line);

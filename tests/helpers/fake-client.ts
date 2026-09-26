@@ -11,16 +11,21 @@
 // default. A test-supplied `screenshot` handler only supplies the base64
 // bytes — used when it returns a string, treated as "" otherwise — and can
 // never skip the write.
+//
+// `opts.dialogs` is what the connection's dialogs() reports, as if the
+// daemon's replies had carried them — but only once the command has called
+// reportDialogs(), as the real daemon hands reports only to a command that
+// prints them. `reporting` says whether it did.
 
-import type { ArgsOf, DaemonConnection, Op, ResultOf } from "../../src/daemon/protocol.ts";
+import type { ArgsOf, DaemonConnection, DialogReport, Op, ResultOf } from "../../src/daemon/protocol.ts";
 
 export type FakeHandlers = {
   [O in Op]?: (...args: ArgsOf<O>) => ResultOf<O> | Promise<ResultOf<O>>;
 };
 
-export type FakeClient = DaemonConnection & { calls: Array<[string, unknown[]]> };
+export type FakeClient = DaemonConnection & { calls: Array<[string, unknown[]]>; reporting: boolean };
 
-export function fakeClient(handlers: FakeHandlers = {}): FakeClient {
+export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: DialogReport[] } = {}): FakeClient {
   const calls: Array<[string, unknown[]]> = [];
   let currentUrl = "";
   let currentTitle = "";
@@ -32,8 +37,10 @@ export function fakeClient(handlers: FakeHandlers = {}): FakeClient {
     "cookie-set": () => ({ success: true }),
   };
 
-  return {
+  const c: FakeClient = {
     calls,
+    reporting: false,
+    reportDialogs() { c.reporting = true; },
     async request(...params) {
       const [op, args = []] = params as [Op, unknown[]?];
       calls.push([op, args]);
@@ -54,6 +61,8 @@ export function fakeClient(handlers: FakeHandlers = {}): FakeClient {
       const fn = (handlers[op] ?? defaults[op]) as ((...a: unknown[]) => unknown) | undefined;
       return (fn ? await fn(...args) : undefined) as never;
     },
+    dialogs: () => (c.reporting ? [...(opts.dialogs ?? [])] : []),
     close() {},
   };
+  return c;
 }

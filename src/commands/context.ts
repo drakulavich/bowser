@@ -2,7 +2,7 @@
 // connection with its close, the empty session state, and ref lookup.
 
 import { connectOrSpawn, type ConnectOptions } from "../daemon/client.ts";
-import type { DaemonConnection, PageState } from "../daemon/protocol.ts";
+import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, type SessionState } from "../state.ts";
 
@@ -73,6 +73,68 @@ export async function liveSelector(c: DaemonConnection, ref: string): Promise<st
  *  otherwise. The object is stringified here so all commands agree on it. */
 export function reply(ctx: CommandContext, json: Record<string, unknown>, text: string): string {
   return ctx.json ? JSON.stringify(json) : text;
+}
+
+/** One answered dialog, as `["confirm" dialog with message "sure?"]: accepted`. */
+function dialogLine(d: DialogReport): string {
+  // No hint for an alert: accepting and dismissing it are the same.
+  const what = d.state === "failed" ? `could not be answered (${d.error ?? "unknown error"})`
+    : d.unanswered && d.type !== "alert" ? "dismissed (run dialog-accept before the action to accept it)"
+    : d.state;
+  return `[${JSON.stringify(d.type)} dialog with message ${JSON.stringify(d.message)}]: ${what}`;
+}
+
+/** `reply` for a command that acts on the page: the dialogs the daemon
+ *  answered while it ran follow the answer as playwright-cli's
+ *  `### Modal state` (`dialogs` under --json, without `unanswered`). */
+export function replyPage(ctx: CommandContext, c: DaemonConnection, json: Record<string, unknown>, text: string): string {
+  const modal = modalState(c);
+  if (!modal) return reply(ctx, json, text);
+  return reply(ctx, { ...json, dialogs: dialogsJson(c) }, `${text}\n${modal}`);
+}
+
+/** The `### Modal state` section for the dialogs `c` reported, or "". */
+export function modalState(c: DaemonConnection): string {
+  return modalLines(c.dialogs());
+}
+
+function modalLines(dialogs: DialogReport[]): string {
+  return dialogs.length ? ["### Modal state", ...dialogs.map((d) => `- ${dialogLine(d)}`)].join("\n") : "";
+}
+
+/** The `### Modal state` section of a failed page command: the dialogs
+ *  answered while it ran, which `withPageClient` hangs on its error; or "". */
+export function failedModalState(err: unknown): string {
+  const dialogs = err instanceof Error ? (err as Error & { dialogs?: DialogReport[] }).dialogs : undefined;
+  return Array.isArray(dialogs) ? modalLines(dialogs) : "";
+}
+
+/** The reported dialogs as --json gives them: without `unanswered`. */
+export function dialogsJson(c: DaemonConnection): Omit<DialogReport, "unanswered">[] {
+  return c.dialogs().map(({ unanswered: _, ...d }) => d);
+}
+
+/** `withClient` for a command that prints the dialogs the daemon answered
+ *  (through `replyPage` or `modalState`): only such a command takes them,
+ *  so a report is never lost to one that would not print it. */
+export function withPageClient<T>(
+  ctx: CommandContext,
+  fn: (c: DaemonConnection) => Promise<T>,
+  opts: ConnectOptions = {},
+): Promise<T> {
+  return withClient(ctx, async (c) => {
+    c.reportDialogs();
+    try {
+      return await fn(c);
+    } catch (err) {
+      // The daemon handed this command its reports, so they are printed with
+      // the error or never: the message stays as it was (the exit code is
+      // read from it), and the dialogs ride along on the error.
+      const dialogs = c.dialogs();
+      if (dialogs.length === 0) throw err;
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { dialogs });
+    }
+  }, opts);
 }
 
 /** After an action that may have navigated, persist the page the daemon

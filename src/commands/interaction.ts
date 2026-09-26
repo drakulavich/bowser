@@ -5,7 +5,7 @@
 import type { Command } from "../cli/registry.ts";
 import { clearForFillScript } from "../page-scripts.ts";
 import type { Ref } from "../state.ts";
-import { liveSelector, loadRef, readStdin, reply, syncState, withClient, type CommandContext } from "./context.ts";
+import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext } from "./context.ts";
 
 // Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so
 // check/uncheck/select/fill refuse a ref that cannot take the action, from the
@@ -31,11 +31,11 @@ export async function cmdClick(
   ref: string,
 ): Promise<string> {
   const { prev, target } = await loadRef(ctx.session, ref);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("click", [await liveSelector(c, ref)]);
     const state = await c.request("state");
     await syncState(prev, state);
-    return reply(ctx, { ok: true, ref, url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
+    return replyPage(ctx, c, { ok: true, ref, url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
   });
 }
 
@@ -62,36 +62,36 @@ export async function cmdFill(
   const value = opts.stdin ? withoutFinalNewline(await (ctx.readStdin ?? readStdin)()) : text!;
   const { target } = await loadRef(ctx.session, ref);
   requireKind("fill", ref, target);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     const selector = await liveSelector(c, ref);
     await c.request("click", [selector]);
     await c.request("evaluate", [clearForFillScript(selector)]);
     await c.request("type", [value]);
     const json = opts.stdin ? { ok: true, ref } : { ok: true, ref, text };
-    return reply(ctx, json, `filled ${ref} (${target.role} "${target.name}")`);
+    return replyPage(ctx, c, json, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
 
 export async function cmdType(ctx: CommandContext, text: string): Promise<string> {
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("type", [text]);
-    return reply(ctx, { ok: true, text }, `typed "${text}"`);
+    return replyPage(ctx, c, { ok: true, text }, `typed "${text}"`);
   });
 }
 
 export async function cmdPress(ctx: CommandContext, key: string): Promise<string> {
   if (!key) throw new Error("usage: bowser press <key>");
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("press", [key]);
-    return reply(ctx, { ok: true, key }, `pressed ${key}`);
+    return replyPage(ctx, c, { ok: true, key }, `pressed ${key}`);
   });
 }
 
 export async function cmdHover(ctx: CommandContext, ref: string): Promise<string> {
   await loadRef(ctx.session, ref);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("hover", [await liveSelector(c, ref)]);
-    return reply(ctx, { ok: true, ref }, `hovered ${ref}`);
+    return replyPage(ctx, c, { ok: true, ref }, `hovered ${ref}`);
   });
 }
 
@@ -99,27 +99,27 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
   if (value === undefined) throw new Error("usage: bowser select <ref> <value>");
   const { target } = await loadRef(ctx.session, ref);
   requireKind("select", ref, target);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("select", [await liveSelector(c, ref), value]);
-    return reply(ctx, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
+    return replyPage(ctx, c, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
   });
 }
 
 export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string> {
   const { target } = await loadRef(ctx.session, ref);
   requireKind("check", ref, target);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("check", [await liveSelector(c, ref)]);
-    return reply(ctx, { ok: true, ref }, `checked ${ref}`);
+    return replyPage(ctx, c, { ok: true, ref }, `checked ${ref}`);
   });
 }
 
 export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<string> {
   const { target } = await loadRef(ctx.session, ref);
   requireKind("check", ref, target);
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("uncheck", [await liveSelector(c, ref)]);
-    return reply(ctx, { ok: true, ref }, `unchecked ${ref}`);
+    return replyPage(ctx, c, { ok: true, ref }, `unchecked ${ref}`);
   });
 }
 
