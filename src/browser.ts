@@ -143,7 +143,12 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  onNavigated waits for the response (measured, Bun 1.4.2: a link to a
  *  page served after 3 s showed nothing for 3 s; the navigate event fired
  *  6 ms after click() resolved). */
-function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => void) {
+function navigationWatch(
+  view: ViewLike,
+  timing: NavTiming,
+  onNavigation: () => void,
+  evaluate: (expr: string) => Promise<unknown>,
+) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
   // A failed navigation ends the wait but does not fail the action: WebKit
@@ -159,15 +164,15 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   /** Evaluate a watch script, waiting at most `ms`: a page that cannot
    *  answer in time, or at all, reads as "no". Every page read in `act` goes
-   *  through here, so none can hold it past its deadline. An evaluate given
-   *  up on stays pending in WebKit until the page answers, and until then a
-   *  new one throws ERR_INVALID_STATE: the next op fails, it does not hang. */
+   *  through here, so none can hold it past its deadline. Only the waiting
+   *  stops: the evaluate stays in wrapView's queue, and the next one waits
+   *  for it rather than failing. */
   const ask = async (expr: string, ms: number): Promise<unknown> => {
     if (!(ms > 0)) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        view.evaluate(expr),
+        evaluate(expr),
         new Promise<undefined>((r) => { timer = setTimeout(() => r(undefined), ms); }),
       ]);
     } catch {
@@ -247,21 +252,34 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
  *  the persistent store's directory, if the view has one. */
 export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile?: string): Browser {
   let navigated: () => void = () => {};
-  const nav = navigationWatch(view, timing, () => navigated());
+  // One evaluate at a time per view: WebKit throws ERR_INVALID_STATE for a
+  // second while one is pending. The daemon's serializer runs one op at a
+  // time, but inside an op the watch may stop waiting for a slow page read
+  // (ask's bound) while WebKit still runs it. So every evaluate waits for
+  // the previous one to settle, whether it resolved or failed. A page that
+  // never answers holds the queue until the op's budget runs out, and the
+  // recovery reload (which never evaluates) frees it.
+  let inflight: Promise<unknown> = Promise.resolve();
+  const evaluate = (expr: string): Promise<unknown> => {
+    const run = inflight.then(() => view.evaluate(expr));
+    inflight = run.catch(() => {});
+    return run;
+  };
+  const nav = navigationWatch(view, timing, () => navigated(), evaluate);
 
   return {
     get url() { return view.url; },
     get title() { return view.title; },
-    realUrl: () => resolveUrl(view.url, () => view.evaluate(READ_URL)),
-    realTitle: () => resolveTitle(view.title, () => view.evaluate(READ_TITLE)),
+    realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
+    realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => view.navigate(url),
-    evaluate: (expr) => view.evaluate(expr),
+    evaluate: (expr) => evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
     press: (key) => nav.act(() => view.press(key)),
-    hover: async (selector) => { await view.evaluate(hoverScript(selector)); },
-    select: async (selector, value) => { await view.evaluate(selectScript(selector, value)); },
-    setChecked: async (selector, checked) => { await view.evaluate(setCheckedScript(selector, checked)); },
+    hover: async (selector) => { await evaluate(hoverScript(selector)); },
+    select: async (selector, value) => { await evaluate(selectScript(selector, value)); },
+    setChecked: async (selector, checked) => { await evaluate(setCheckedScript(selector, checked)); },
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
       // Element-bounded screenshots are not supported in v1.
@@ -276,18 +294,18 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     resize: (width, height) => view.resize(width, height),
     back: () => nav.act(async () => {
       if (typeof view.goBack === "function") await view.goBack();
-      else await view.evaluate(HISTORY_BACK);
+      else await evaluate(HISTORY_BACK);
     }),
     forward: () => nav.act(async () => {
       if (typeof view.goForward === "function") await view.goForward();
-      else await view.evaluate(HISTORY_FORWARD);
+      else await evaluate(HISTORY_FORWARD);
     }),
     reload: () => nav.act(async () => {
       // Native reload() resolves before the reload commits, like goBack();
       // measured in the daemon: a navigate() 1 ms later was rejected with
       // NSURLErrorDomain -999. The watch makes reload return once it lands.
       if (typeof view.reload === "function") await view.reload();
-      else await view.evaluate(RELOAD);
+      else await evaluate(RELOAD);
     }),
     close: async () => {
       // WebKit writes a persistent profile lazily, and the daemon exits right
@@ -313,8 +331,8 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     // that call by design, and nothing else that touches the view: the
     // daemon's serializer holds every other queued op until the stuck one
     // settles and this has landed. That is why it uses the native reload()
-    // alone and never evaluate(): with one evaluate pending, a second
-    // throws ERR_INVALID_STATE (and RELOAD's evaluate fallback would).
+    // alone and never evaluate(): an evaluate would queue behind the stuck
+    // one (wrapView's queue) and never run, and so would RELOAD's fallback.
     interrupt: () => nav.interrupt(),
     watchNavigation(on) {
       navigated = on;

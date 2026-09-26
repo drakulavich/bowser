@@ -199,6 +199,36 @@ describe("wrapView navigation watch", () => {
     expect(elapsed).toBeLessThan(20 + 60 + 60);
   });
 
+  test("a read that act stops waiting for stays tracked: the next evaluate queues behind it instead of failing", async () => {
+    // WebKit allows one evaluate per view; a second one while the first is
+    // pending throws ERR_INVALID_STATE. On a slow machine the read at the
+    // end of the grace window outlived its bound, and the next op's
+    // evaluate failed (CI, PR #46).
+    let pending = false;
+    const log: string[] = [];
+    const v = fakeView({
+      evaluate: async (expr) => {
+        if (pending) throw new Error("Invalid state: an evaluate() is already pending");
+        log.push(`start ${expr === NAV_COUNT ? "count" : expr === NAV_ARM ? "arm" : expr}`);
+        pending = true;
+        try {
+          if (expr === NAV_COUNT) { await Bun.sleep(300); return 0; }
+          return expr === "1" ? 1 : undefined;
+        } finally {
+          pending = false;
+          log.push(`end ${expr === NAV_COUNT ? "count" : expr === NAV_ARM ? "arm" : expr}`);
+        }
+      },
+    });
+    const b = wrapView(v, { graceMs: 100, settleMs: 1000 });
+    const t0 = Date.now();
+    await b.click("#btn");
+    // act stopped waiting for the slow read at its 100 ms bound.
+    expect(Date.now() - t0).toBeLessThan(290);
+    expect(await b.evaluate("1")).toBe(1);
+    expect(log).toEqual(["start arm", "end arm", "start count", "end count", "start 1", "end 1"]);
+  });
+
   test("a failure with no navigation after it still ends the wait", async () => {
     // A 204 answer: the page's navigate event, then only a failure.
     const { v, page } = pageNavView();
