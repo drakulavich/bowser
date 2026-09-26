@@ -26,8 +26,9 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
   `close --help` closed the session, `open --help` opened one, and `mcp --help` started the MCP
   server. `-h`/`--help` anywhere before `--` now prints the usage line, summary, arguments and flags
   from the registry, and exits 0. With no command it prints the general help, as before.
-- **`click` and `fill` reach an element below the fold.** They timed out after 30 s on an element
-  outside the viewport. Every ref action now scrolls its element into view first, as
+- **`click` and `fill` reach an element below the fold or under a fixed header.** They timed out
+  after 30 s on an element outside the viewport, or one whose centre another element covered. Every
+  ref action now scrolls such an element to the centre first, as
   `playwright-cli` does, in the same page script that resolves the ref, so it costs no extra round
   trip.
 

@@ -26,6 +26,15 @@ const LONG = `<!doctype html><title>long</title>
 <input id="low" aria-label="Low">
 <a id="far" href="#" onclick="document.body.dataset.clicked = 'yes'; return false">FarLink</a>`;
 
+/** A button that sits in the viewport but under a fixed header once the
+ *  page is scrolled to 280 px: the header covers its centre point. */
+const COVERED = `<!doctype html><title>covered</title>
+<header style="position: fixed; top: 0; left: 0; right: 0; height: 120px; background: #ccc; z-index: 10"
+  onclick="document.body.dataset.header = 'hit'">Header</header>
+<div style="height: 300px"></div>
+<button id="under" onclick="document.body.dataset.clicked = 'yes'">Under</button>
+<div style="height: 3000px"></div>`;
+
 runOrSkip("e2e: click and fill reach an element below the fold", () => {
   const ctx: CommandContext = { session: "farelement", json: false };
   let tmp: string;
@@ -44,7 +53,9 @@ runOrSkip("e2e: click and fill reach an element below the fold", () => {
     process.env.BOWSER_OP_TIMEOUT_MS = "8000";
     server = Bun.serve({
       port: 0,
-      fetch: () => new Response(LONG, { headers: { "content-type": "text/html; charset=utf-8" } }),
+      fetch: (req) => new Response(new URL(req.url).pathname === "/covered" ? COVERED : LONG, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
     });
     base = server.url.toString().replace(/\/$/, "");
   });
@@ -82,5 +93,20 @@ runOrSkip("e2e: click and fill reach an element below the fold", () => {
     await cmdFill(ctx, input, "hi");
     expect(performance.now() - t0).toBeLessThan(5000);
     expect(await cmdEval(ctx, "document.getElementById('low').value")).toBe("hi");
+  }, 30_000);
+
+  test("click on a button under a fixed header scrolls it clear and clicks it", async () => {
+    await cmdOpen(ctx, `${base}/covered`);
+    await cmdSnapshot(ctx);
+    const button = await refNamed("Under");
+    // In the viewport, under the 120 px header: the viewport test alone would not scroll.
+    const top = Number(await cmdEval(ctx, "(window.scrollTo(0, 280), document.getElementById('under').getBoundingClientRect().top)"));
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(top).toBeLessThan(100);
+    const t0 = performance.now();
+    await cmdClick(ctx, button);
+    expect(performance.now() - t0).toBeLessThan(5000);
+    expect(await cmdEval(ctx, "document.body.dataset.clicked")).toBe("yes");
+    expect(await cmdEval(ctx, "String(document.body.dataset.header)")).toBe("undefined");
   }, 30_000);
 });
