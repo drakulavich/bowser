@@ -29,8 +29,39 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
   `<command>: the browser's error message was withheld because it contained the entered text`
   (exit 2, dialogs still reported). Dialog messages are page content and are printed as is.
 
+### Changed: a session whose browser exited refuses commands
+
+- **After its browser exits, a session refuses every command but `open` and `close`** with
+  `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1). Any command used
+  to start a new, empty in-memory browser and exit 0: after a crash, a `--persistent` session
+  silently lost everything done until the next `open --persistent`. `bowser open` starts it anew,
+  `bowser close` clears it. A session that never ran a browser still starts one on its first
+  command. Session directories left behind by earlier versions refuse too, until `open` or `close`.
+
+### Changed: `close --all` fails when a session could not be closed
+
+- **`close --all` exits 2 when it could not close a session**, the exit code a single `close` of it
+  gives. It still tries every session, then prints the ones it closed and each failure with its
+  reason. Under `--json` the failure is plain text on stderr, like every other error. It used to
+  exit 0 with only the names (`{"ok":false,…}` under `--json`). With no failures nothing changes.
+
+### Changed: file outputs report their absolute path
+
+- **`screenshot` and `snapshot --filename` report the absolute path they wrote**, on the CLI and
+  over MCP (`wrote /…/shot.png`, `{"ok":true,"filename":"/…/shot.png"}`), as `state-save` already
+  did.
+
 ### Fixed
 
+- **Concurrent first commands on a session start one browser.** Five `open`s at once on a new
+  session left two or three daemons, and `close` ended only one; a losing daemon could also delete
+  the winner's pidfile. The daemon now claims the session through its pidfile before anything else,
+  and a newcomer that finds a live daemon holding it exits. A daemon whose socket file was deleted
+  is no longer replaced by a second one: the next command fails with `did not start in time` until
+  `bowser close`.
+- **`bowser mcp` started from `/` or an unwritable directory writes its files.** `screenshot`,
+  `snapshot` with `filename` and `state-save` failed with `EROFS`. The server now works in
+  `<os.tmpdir()>/bowser-mcp` in that case, and every reply names the absolute path.
 - **A dialog that fires between commands is no longer lost when the next command leaves the page.**
   A timer's `confirm`, then `reload`, `goto`, `open`, `go-back` or `press Enter` submitting a form,
   used to report nothing: the report left with the old page. That command now reports it under

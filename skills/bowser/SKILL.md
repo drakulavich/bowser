@@ -49,7 +49,7 @@ Do **not** use for static HTTP fetches.
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser list` | Enumerate sessions whose daemon is running |
 | `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides) |
-| `bowser close --all` | Close every open session |
+| `bowser close --all` | Close every open session; if one fails, the rest are still closed and it exits 2 naming each failure with its reason |
 | `bowser localstorage-list` | List `localStorage` entries (`key=value` lines, or JSON) |
 | `bowser localstorage-get <key>` | Read a `localStorage` value |
 | `bowser localstorage-set <key> <value>` | Write a `localStorage` entry |
@@ -128,7 +128,7 @@ The answer covers one dialog and is dropped when the page navigates. The action 
 
 `dismissed (run dialog-accept before the action to accept it)` means no answer was set. To accept it, run `dialog-accept` and repeat the action. This is where bowser differs from `playwright-cli`: running `dialog-accept` *after* the action does not answer the dialog that action opened. It prepares the next one.
 
-A dialog in a same-origin iframe is reported like the page's own and takes your prepared answer. A dialog a timer opens between commands is reported by the next command that prints dialogs, even one that leaves the page (`reload`, `goto`, `go-back`, `press Enter` on a form). If the page defines its own `window.confirm` (an in-page modal, a test stub), bowser leaves it alone: it runs, and nothing is reported.
+A dialog in a same-origin iframe is reported like the page's own and takes your prepared answer. A dialog a timer opens between commands is reported by the next command that prints dialogs, even one that leaves the page (`reload`, `goto`, `go-back`, `press Enter` on a form). If the page defines its own `window.confirm` (an in-page modal, a test stub), bowser leaves it alone: it runs, and nothing is reported. A function the page made with `.bind()` from the browser's own (`confirm.bind(window)`) looks native to bowser: it is replaced, and the dialog is reported.
 
 These are dismissed and not reported, and your prepared answer stays set for the next dialog:
 
@@ -171,7 +171,9 @@ bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only t
 
 ## Troubleshooting
 
-- **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
+- **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). The reply names the absolute path written, as `snapshot --filename`'s does. Full-page only; element-bounded screenshots are not yet supported.
+- **MCP file paths** — `bowser mcp` resolves relative paths against its working directory, or against `$TMPDIR/bowser-mcp` when started from `/` or an unwritable directory. Use the absolute path in the reply.
+- **"session '<name>' is not open (its browser exited)"** — the session's browser crashed or was killed; its page and refs are gone. Run `bowser open <url>` (add `--persistent` again for a persistent session) to start it anew, or `bowser close` to clear it. Only `open` and `close` work on such a session.
 - **`BOWSER_OP_TIMEOUT_MS`** — per-command timeout in ms (default `30000`; `0` disables), counted from when the daemon receives the command, including time spent waiting behind a timed-out one. Set it higher if a slow page causes timeout errors. If a timed-out command is still running 2 s later (or after the budget, if that is under 2 s), the daemon reloads the page once to free the browser; if a command still fails with `waiting for '<op>', which timed out and is still running`, run `bowser close` and reopen.
 - **"ref 'eN' not found in the current page snapshot"** — the element behind the ref is gone: the page re-rendered, navigated or reloaded since that snapshot. Run `bowser snapshot` and use the new refs.
 - **"ref 'eN' not found in last snapshot"** — the ref was never in the last snapshot. Run `bowser snapshot`.

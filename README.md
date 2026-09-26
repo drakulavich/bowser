@@ -42,8 +42,9 @@ On another platform, any command that would start a session fails with the error
 Screenshots are written as PNG files. `bowser screenshot --filename out.png` writes
 to `out.png` (relative paths resolve against your current directory); without
 `--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
-if that file already exists. Captures are full-page (element-bounded screenshots are
-not supported yet).
+if that file already exists. The reply names the absolute path written (`wrote /…/out.png`,
+`{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. Captures are
+full-page (element-bounded screenshots are not supported yet).
 
 ## Quickstart
 
@@ -57,7 +58,9 @@ bowser screenshot --filename=shot.png    # capture
 bowser close                             # end session
 ```
 
-Each session runs one persistent browser process (spawned lazily on first command, addressed over a Unix socket). Commands attach, run, and detach — so typed text, modals, dynamic DOM, cookies, and auth all survive across invocations. Session state lives under `~/.bowser/sessions/<name>/`.
+Each session runs one persistent browser process (spawned lazily on first command, addressed over a Unix socket). Commands attach, run, and detach — so typed text, modals, dynamic DOM, cookies, and auth all survive across invocations. Session state lives under `~/.bowser/sessions/<name>/`. Several commands started at once on a new session still share one browser.
+
+If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1), instead of quietly starting an empty browser. `bowser open` (with `--persistent` again, for a persistent session) starts it anew; `bowser close` clears it. A session that never ran a browser still starts one on its first command.
 
 ### Multiple sessions
 
@@ -107,6 +110,7 @@ The command that caused the dialog reports it under `### Modal state`. With `--j
 - In `playwright-cli`, the dialog stays open and `dialog-accept` answers it *after* the action. In bowser, `dialog-accept` after the action prepares the *next* dialog. It does not answer the one already reported.
 - WebKit has no dialog events, so bowser replaces `window.alert`/`confirm`/`prompt` in the page, and in every same-origin iframe it can reach, before it acts there. A dialog in such an iframe is reported like the page's own and takes the prepared answer. A dialog that fires between commands (a timer) is reported by the next command that prints dialogs, even when that command leaves the page (`reload`, `goto`, `open`, `go-back`, `press Enter` on a form).
 - A function the page defined itself (`window.confirm = m => …`) is left alone and runs, as in `playwright-cli`; its calls are not dialogs and are not reported.
+- A page function made with `.bind()` from the browser's own (`window.confirm = confirm.bind(window)`) looks native to bowser: the shim replaces it, and the dialog is reported.
 - Not reported, and dismissed by WebKit:
   - a dialog the page opens while loading, before bowser's first command on that document;
   - a dialog in a cross-origin iframe, or in an iframe that loaded after bowser's last command;
@@ -176,7 +180,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
 | `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped. |
-| `close --all` | Close every open session |
+| `close --all` | Close every open session. If one cannot be closed, it still tries the rest, then fails (exit 2) naming each such session with its reason and listing the ones it closed |
 | `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
 | `localstorage-get <key>` | Read a `localStorage` value |
 | `localstorage-set <key> <value>` | Write a `localStorage` entry |
@@ -221,6 +225,7 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 
 Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
+- Relative file paths (`screenshot`, `snapshot` `filename`, `state-save`, `state-load`) resolve against the server's working directory. If the client starts it from `/` or another directory it cannot write, the server uses `<os.tmpdir()>/bowser-mcp` instead (`$TMPDIR/bowser-mcp`). Replies name the absolute path written. An absolute path is used as given.
 - The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
 - `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
