@@ -31,6 +31,19 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
 
 ### Fixed
 
+- **`select` matches an option's value or its label**, as `playwright-cli` does: `select e3 Red`
+  picks `<option value="r">Red</option>`, the first match in document order. A text that matches
+  no option fails at once with `ref 'eN' has no option "<text>"` (exit 1), and the select keeps its
+  value. Both used to report success and leave the select with nothing selected.
+- **`fill` refuses a disabled or read-only field** with `ref 'eN' is not an editable element
+  (disabled)` or `(readonly)` (exit 1). A disabled `<fieldset>` counts. It used to report success
+  and empty the field. `playwright-cli` waits out its timeout instead.
+- **`fill` sets `date`, `time`, `datetime-local`, `month`, `week` and `color` inputs**, as
+  `playwright-cli` does: `fill e9 2024-01-02` used to report success and leave the date empty. A
+  value the input does not keep (`fill e9 tomorrow`) fails with `ref 'eN' did not accept the value
+  for input[type=date]`, and text that is not a number on `type=number` fails with `ref 'eN' needs
+  a number (input[type=number])`, both exit 1 with the value unchanged and without the text in the
+  message. Both used to report success.
 - **`open` and `goto` add a scheme to a URL typed without one**, as `playwright-cli` does:
   `example.com` goes to `https://example.com`, and `localhost:3000/x`, `127.0.0.1:3000` and
   `[::1]:3000` go to `http://…`. `open example.com` failed with `The URL can’t be shown`, and

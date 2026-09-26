@@ -222,7 +222,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "select",
-    summary: "Select an option value in the element with the given ref",
+    summary: "Select the option with the given value or label in the element with the given ref",
     positional: [{ name: "ref", required: true }, { name: "value", required: true }],
     flags: [],
     run: (ctx, a) => cmdSelect(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
