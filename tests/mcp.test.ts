@@ -331,7 +331,10 @@ describe("bowser mcp never reads its own stdin for a command", () => {
         if (next.done) break;
         buf += decoder.decode(next.value);
       }
-      const [first, second] = buf.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      // Responses may come in any order (F36): the ping does not wait.
+      const lines = buf.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const first = lines.find((m) => m.id === 1);
+      const second = lines.find((m) => m.id === 2);
       expect(first?.id).toBe(1);
       expect(first?.result.isError).toBe(true);
       expect(first?.result.content[0].text).toContain("no open page");

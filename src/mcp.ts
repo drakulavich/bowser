@@ -13,7 +13,8 @@
 // to stderr. We never console.log here, and we call run() (which RETURNS a
 // string) rather than letting a command print.
 
-import { COMMANDS, findCommand } from "./cli/registry.ts";
+import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
+import { parse } from "./cli/parser.ts";
 import { failedModalState } from "./commands/context.ts";
 import type { CommandSchema } from "./cli/parser.ts";
 import pkg from "../package.json";
@@ -121,15 +122,40 @@ function toolResult(id: unknown, text: string, isError?: boolean) {
   return jsonRpcResult(id, result);
 }
 
-async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
+/** A tools/call split in two: `reply` when it is answered without running
+ *  anything (unknown tool, a flag MCP does not offer), otherwise the argv to
+ *  run and the session it runs in. */
+type PreparedCall =
+  | { reply: object }
+  | { argv: string[]; session: string | null };
+
+function prepareToolCall(id: unknown, params: unknown): PreparedCall {
   const p = (params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
   const name = p.name;
-  const args = p.arguments ?? {};
   const cmd = name ? findCommand(name) : undefined;
   const schema = cmd && cmd.mcp !== false ? cmd : undefined;
-  if (!schema) return toolResult(id, `unknown tool: ${name}`, true);
+  if (!schema) return { reply: toolResult(id, `unknown tool: ${name}`, true) };
+  let argv: string[];
   try {
-    const out = await deps.run(toArgv(schema, args));
+    argv = toArgv(schema, p.arguments ?? {});
+  } catch (e) {
+    return { reply: toolResult(id, e instanceof Error ? e.message : String(e), true) };
+  }
+  // The session is whatever run() will parse out of this same argv, default
+  // included. An argv the parser rejects gets null: run() throws the same
+  // error before it reaches any daemon, so it needs no place in a queue.
+  let session: string | null;
+  try {
+    session = parse(SCHEMAS, argv).session;
+  } catch {
+    session = null;
+  }
+  return { argv, session };
+}
+
+async function runToolCall(id: unknown, argv: string[], deps: McpDeps): Promise<object> {
+  try {
+    const out = await deps.run(argv);
     return toolResult(id, out || "");
   } catch (e) {
     // A failed page command still reports the dialogs it answered.
@@ -137,6 +163,12 @@ async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
     const msg = e instanceof Error ? e.message : String(e);
     return toolResult(id, modal ? `${msg}\n${modal}` : msg, true);
   }
+}
+
+async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
+  const prepared = prepareToolCall(id, params);
+  if ("reply" in prepared) return prepared.reply;
+  return runToolCall(id, prepared.argv, deps);
 }
 
 /** Process one parsed JSON-RPC message. Returns the response object, or null for
@@ -179,8 +211,99 @@ export async function handleMcpLine(line: string, deps: McpDeps): Promise<object
   return handleMcpRequest(req, deps);
 }
 
+export interface McpServer {
+  /** Take one stdin line. Never waits on a tool call: everything but
+   *  tools/call is answered at once, and a tools/call is queued behind its
+   *  session's earlier calls. */
+  accept(line: string): void;
+  /** Resolves once every accepted tool call has finished. */
+  idle(): Promise<void>;
+}
+
+/** The server behind `bowser mcp`, minus stdin/stdout.
+ *
+ *  CONCURRENCY: tools/call requests for different sessions run at the same
+ *  time; calls for one session run one after another, in arrival order, on a
+ *  per-session promise chain (the daemon would serialize them anyway, and
+ *  queuing here keeps a later call from overtaking an earlier one). Responses
+ *  may therefore arrive out of order, which JSON-RPC allows.
+ *
+ *  CANCELLATION: `notifications/cancelled` for a call still queued means it
+ *  never runs; for a running call it means its result is dropped. Either way
+ *  the call gets no response, per the MCP spec. A daemon op that has started
+ *  is NOT undone: `run()` has no way to stop it, and the session's next call
+ *  still waits for it to finish.
+ *
+ *  STDOUT: each response goes out as one `write(JSON + "\n")` call. A stream
+ *  keeps the chunks of separate write() calls whole and in call order, so
+ *  concurrent responses never interleave within a line. */
+export function createMcpServer(deps: McpDeps, write: (line: string) => void): McpServer {
+  const chains = new Map<string, Promise<void>>();
+  const inFlight = new Map<unknown, { cancelled: boolean }>();
+  const running = new Set<Promise<void>>();
+
+  const send = (res: object) => {
+    try {
+      write(JSON.stringify(res) + "\n");
+    } catch (e) {
+      console.error(`bowser mcp: could not write a response: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  function schedule(id: unknown, params: unknown): void {
+    const prepared = prepareToolCall(id, params);
+    if ("reply" in prepared) return send(prepared.reply);
+    const { argv, session } = prepared;
+    const token = { cancelled: false };
+    inFlight.set(id, token);
+    const prev = (session !== null && chains.get(session)) || Promise.resolve();
+    const tail: Promise<void> = prev
+      .then(async () => {
+        if (token.cancelled) return;
+        const res = await runToolCall(id, argv, deps);
+        if (!token.cancelled) send(res);
+      })
+      .finally(() => {
+        if (inFlight.get(id) === token) inFlight.delete(id);
+        if (session !== null && chains.get(session) === tail) chains.delete(session);
+        running.delete(tail);
+      });
+    if (session !== null) chains.set(session, tail);
+    running.add(tail);
+  }
+
+  function accept(line: string): void {
+    let req: unknown;
+    try {
+      req = JSON.parse(line);
+    } catch {
+      return send(jsonRpcError(null, -32700, "Parse error"));
+    }
+    const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
+    const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
+    if (hasId && r.method === "tools/call") return schedule(r.id, r.params);
+    if (!hasId && r.method === "notifications/cancelled") {
+      const requestId = (r.params as { requestId?: unknown } | undefined)?.requestId;
+      const token = inFlight.get(requestId);
+      if (token) token.cancelled = true;
+      return;
+    }
+    // Everything else never touches a daemon: answer it now.
+    void handleMcpRequest(req, deps).then((res) => {
+      if (res !== null) send(res);
+    });
+  }
+
+  async function idle(): Promise<void> {
+    while (running.size > 0) await Promise.all(running);
+  }
+
+  return { accept, idle };
+}
+
 /** The long-lived stdio loop. Reads newline-delimited JSON-RPC from stdin and
- *  writes responses to stdout. Holds the process open until stdin closes.
+ *  writes responses to stdout. Holds the process open until stdin closes and
+ *  every accepted call has finished.
  *
  *  `run` MUST be passed in by the caller (cli.ts entry layer hands its own
  *  `run`). Do NOT `import("./cli.ts")` here: cli.ts is mid-evaluation when it
@@ -188,6 +311,9 @@ export async function handleMcpLine(line: string, deps: McpDeps): Promise<object
  *  import of it deadlocks in the compiled binary. */
 export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string }): Promise<void> {
   const d: McpDeps = { run: deps.run, version: deps.version ?? VERSION };
+  const server = createMcpServer(d, (line) => {
+    process.stdout.write(line);
+  });
   const decoder = new TextDecoder();
   let buf = "";
   for await (const chunk of Bun.stdin.stream()) {
@@ -196,9 +322,8 @@ export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string
     while ((idx = buf.indexOf("\n")) !== -1) {
       const line = buf.slice(0, idx).trim();
       buf = buf.slice(idx + 1);
-      if (!line) continue;
-      const res = await handleMcpLine(line, d);
-      if (res !== null) process.stdout.write(JSON.stringify(res) + "\n");
+      if (line) server.accept(line);
     }
   }
+  await server.idle();
 }

@@ -629,6 +629,34 @@ export const HISTORY_BACK = "history.back()";
 export const HISTORY_FORWARD = "history.forward()";
 export const RELOAD = "location.reload()";
 
+// The navigation watch's page side (browser.ts, nav.act). On WebKit a
+// navigation the page starts (a link, a form submit, a script setting
+// location) shows neither in view.loading nor in onNavigated until the
+// server answers; the Navigation API's navigate event fires within ~6 ms
+// (measured, Bun 1.4.2). NAV_ARM listens for it once per document and
+// zeroes the count before each action; NAV_COUNT reads how many
+// cross-document navigations the page has started since. A same-document
+// navigation (a hash link) never lands, so it is not counted.
+// The API is reached only as `window.navigation`: a page's own global
+// `let navigation` shadows the bare name in any script run there. A missing
+// or broken API leaves the count at 0, which reads as "no navigation".
+export const NAV_ARM = String.raw`(() => {
+  const KEY = Symbol.for('bowser.nav');
+  let s = window[KEY];
+  if (!s) {
+    s = { count: 0 };
+    Object.defineProperty(window, KEY, { value: s });
+    try {
+      const api = window.navigation;
+      if (api && typeof api.addEventListener === 'function') {
+        api.addEventListener('navigate', (e) => { if (!e.destination.sameDocument) s.count++; });
+      }
+    } catch {}
+  }
+  s.count = 0;
+})()`;
+export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
+
 export function hoverScript(selector: string): string {
   return `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
@@ -714,12 +742,25 @@ export function runCodeScript(code: string): string {
 
 /** The ref's element in the live page, as a CSS_PATH computed now, or null
  *  when it is gone: no ref store (a new document), a ref this document never
- *  handed out, an element collected or no longer connected. */
+ *  handed out, an element collected or no longer connected. It also scrolls
+ *  the element to the centre when it is outside the viewport or its centre
+ *  point is covered (a fixed header), as playwright-cli does before acting:
+ *  WebKit's native click waits for its target to be hittable, so a link below
+ *  the fold timed out (spec F8). Here it costs no round trip. */
 export function resolveRefScript(ref: string): string {
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
   const el = store?.byRef?.get(${JSON.stringify(ref)})?.deref();
   if (!el || !el.isConnected) return null;
+  const r = el.getBoundingClientRect();
+  const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
+  // In view but under something else, like a fixed header: the point a
+  // click lands on belongs to another element. Asked of the element's own
+  // root, so a shadow root does not answer with its host.
+  const hit = outside ? null : el.getRootNode().elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  if (outside || (hit && hit !== el && !el.contains(hit))) {
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+  }
   ${CSS_PATH}
   return cssPath(el);
 })()`;

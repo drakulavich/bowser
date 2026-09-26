@@ -186,6 +186,10 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 
+`bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
+flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text
+like any other argument.
+
 ## MCP bridge
 
 `bowser mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing every browser command as an MCP tool — so MCP clients (Claude Desktop, etc.) can drive the browser without shelling out. Each tool maps 1:1 to a CLI command and takes an optional `session` argument; outputs are the same JSON as `--json` mode.
@@ -203,6 +207,9 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
 - The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
+- `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
+- Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
+- `notifications/cancelled` drops the call: one still queued behind its session never runs, and a running one finishes but its result is discarded. Either way no response is sent for it, per the MCP spec. A browser operation that has already started is **not** undone — a cancelled `click` may still have clicked, and the session's next call waits for it to finish.
 
 ## How it works
 
@@ -214,7 +221,7 @@ Notes:
 
 | Variable | Effect |
 | --- | --- |
-| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Bounds a wedged daemon operation — if the browser hangs, the command exits with a timeout error instead of blocking forever. |
+| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser. |
 | `BOWSER_DAEMON_DEBUG` | `1` lets the session daemon's stdout and stderr through to the terminal, for debugging a daemon that fails to start. |
 
 ## Tests

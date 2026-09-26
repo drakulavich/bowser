@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { renderHelp } from "./cli/help.ts";
-import { parse } from "./cli/parser.ts";
+import { renderCommandHelp, renderHelp } from "./cli/help.ts";
+import { helpRequested, parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { failedModalState, type CommandContext } from "./commands/context.ts";
 
@@ -9,8 +9,12 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   const args = parse(SCHEMAS, argv);
   if (!args.command) return renderHelp(COMMANDS);
   const command = findCommand(args.command);
-  // parse() already rejects an unknown command; this is the type narrowing.
+  // parse() rejects an unknown command unless --help came first; this is
+  // that case, and the type narrowing.
   if (!command) throw new Error(`unknown command: ${args.command}`);
+  // -h/--help anywhere before `--` prints the help and runs nothing:
+  // `close --help` once closed the session.
+  if (args.help) return renderCommandHelp(command);
   const ctx: CommandContext = { ...base, session: args.session, json: args.json };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
@@ -45,7 +49,7 @@ if (import.meta.main) {
     // made the compiled binary's "did not start in time"). The keepalive holds
     // the process open; the `else` keeps us out of the command dispatcher.
     await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);
-  } else if (process.argv[2] === "mcp") {
+  } else if (process.argv[2] === "mcp" && !helpRequested(SCHEMAS, process.argv.slice(2))) {
     // Long-lived stdio MCP server. Handled here at the entry layer (like
     // --daemon) because it never returns a string — keeping run()'s contract
     // string-returning. It is still listed in SCHEMAS/HELP for discoverability.

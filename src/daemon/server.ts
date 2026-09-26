@@ -19,7 +19,7 @@
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
 import { openBrowser, type Browser } from "../browser.ts";
-import { createSerializer, withTimeout } from "../serialize.ts";
+import { createSerializer, type Serializer } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
   IS_URGENT,
@@ -52,12 +52,15 @@ export function removePidFileIfOwned(pidFile: string, pid: number): void {
  *  lane choice can be tested without one. */
 export interface Lane {
   handle: (req: DaemonRequest) => Promise<DaemonResponse>;
-  serialize: <T>(fn: () => Promise<T>) => Promise<T>;
+  serialize: Serializer;
   timeoutMs: number;
   reply: (res: DaemonResponse) => void;
   /** Called when `req` overran its budget: gives up its late reply's reports
    *  and returns those queued now, which the timeout reply carries. */
   timedOut?: (req: DaemonRequest) => DialogReport[] | undefined;
+  /** Try once to free the WebView from the op that just overran its budget;
+   *  resolves when the attempt is over, whether or not it worked. */
+  recover?: () => Promise<void>;
 }
 
 /** Route one request onto the urgent or the queued lane.
@@ -71,7 +74,22 @@ export interface Lane {
  *  The queued lane serializes on the UNDERLYING op, not the timeout: the
  *  WebView lock is held until `handle(req)` actually settles, so a
  *  timed-out-but-still-running op can never overlap the next one.
- *  `withTimeout` only governs how soon the client is answered. */
+ *
+ *  The budget is one timer per request, started here, on receipt, so it
+ *  counts queue time. At the deadline:
+ *  - a request that is running gets the timeout reply. If it is still
+ *    running after a grace of RECOVERY_GRACE_MS (or the budget, if
+ *    smaller), `recover` runs once, for it. An op that was only slow and
+ *    settles within the grace is left alone, so its page survives;
+ *  - a request still queued behind an op that timed out gets its own error
+ *    naming that op, and is dropped when its turn comes, since its client
+ *    has already been told it failed.
+ *  Every request ahead of a queued one arrived earlier with the same budget,
+ *  so the op it waits for has always timed out first. */
+/** How long a timed-out op may still settle on its own before `recover`
+ *  reloads the page under it (capped by the budget). */
+export const RECOVERY_GRACE_MS = 2000;
+
 export function dispatch(req: DaemonRequest, lane: Lane): void {
   if (IS_URGENT.has(req.op)) {
     lane.handle(req).then(lane.reply).catch(() => {
@@ -79,16 +97,42 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     });
     return;
   }
-  lane.serialize(() => {
-    const underlying = lane.handle(req);
-    withTimeout(underlying, lane.timeoutMs, req.op).then(lane.reply, (err) => {
-      // handle() catches its own errors; this path is for timeouts.
-      const msg = err instanceof Error ? err.message : String(err);
-      const dialogs = lane.timedOut?.(req);
-      lane.reply({ id: req.id, ok: false, error: msg, ...(dialogs ? { dialogs } : {}) });
-    });
-    return underlying;
-  }).catch(() => {
+  let answered = false;
+  let running = false;
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  let recovery: Promise<void> | undefined;
+  const answer = (res: DaemonResponse): void => {
+    if (answered) return;
+    answered = true;
+    clearTimeout(timer);
+    lane.reply(res);
+  };
+  const ms = lane.timeoutMs;
+  const timer = ms > 0 ? setTimeout(() => {
+    if (!running) {
+      const prev = lane.serialize.running ?? "an earlier operation";
+      answer({ id: req.id, ok: false, error: `operation '${req.op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)` });
+      return;
+    }
+    const dialogs = lane.timedOut?.(req);
+    answer({ id: req.id, ok: false, error: `operation '${req.op}' timed out after ${ms}ms`, ...(dialogs ? { dialogs } : {}) });
+    // Runs while this op still holds the serializer, so no later queued op
+    // can overlap it; see Browser.interrupt for what it may overlap.
+    grace = setTimeout(() => {
+      recovery = lane.recover?.().catch(() => {});
+    }, Math.min(RECOVERY_GRACE_MS, ms));
+  }, ms) : undefined;
+  lane.serialize(async () => {
+    if (answered) return;
+    running = true;
+    const res = await lane.handle(req);
+    // Settled within the grace: no reload, and the next op starts now.
+    clearTimeout(grace);
+    answer(res);
+    // Hold the lane until the recovery's reload has landed, so the next op
+    // sees the page it left rather than racing it.
+    await recovery;
+  }, req.op).catch(() => {
     // handle() never rejects; guards against an unhandled rejection.
   });
 }
@@ -329,7 +373,7 @@ export async function startDaemon(session: string, profile?: string): Promise<vo
             );
             continue;
           }
-          dispatch(req, { handle, serialize, timeoutMs, timedOut: handle.timedOut, reply: (res) => {
+          dispatch(req, { handle, serialize, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
         }
