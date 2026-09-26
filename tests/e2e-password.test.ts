@@ -4,8 +4,7 @@
 // playwright-cli, which prints it. Spec:
 // docs/superpowers/specs/2026-09-26-hide-passwords-design.md.
 //
-// `fill <ref> --stdin` ends in the same `fill` op, so the walker sees the same
-// page; this file drives `fill <ref> <text>`.
+// Both `fill <ref> <text>` and `fill <ref> --stdin` (with an injected stdin reader).
 //
 // Skipped by default. Run with: BOWSER_E2E=1 bun test tests/e2e-password.test.ts
 
@@ -18,6 +17,7 @@ import { detectChromium, resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdFill } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState, sessionsRoot } from "../src/state.ts";
 
@@ -128,6 +128,24 @@ runOrSkip("e2e: snapshot never reveals a password field's value (backend from re
     const saved = JSON.parse(stateText).refs.find((r: { id: string }) => r.id === ids.User);
     expect(saved.value).toBe(USER);
   });
+
+  test("fill --stdin: the piped secret is in no snapshot output and not in state.json", async () => {
+    const STDIN_SECRET = "STDIN-PIPED-SECRET-31337";
+    await cmdOpen(ctx, server!.url.toString());
+    await cmdSnapshot(ctx);
+    const pw = (await loadState(ctx.session))!.refs.find((r) => r.name === "Password")!.id;
+    const stdinCtx: CommandContext = { ...ctx, readStdin: async () => `${STDIN_SECRET}\n` };
+    await cmdFill(stdinCtx, pw, undefined, { stdin: true });
+    // The fill reached the field, so the absence checks below mean something.
+    expect(await cmdEval(ctx, "document.getElementById('pw').value")).toBe(STDIN_SECRET);
+    const p = await cmdSnapshot(ctx);
+    const j = await cmdSnapshot({ ...ctx, json: true });
+    const st = await Bun.file(join(sessionsRoot(), ctx.session, "state.json")).text();
+    expect(p).not.toContain(STDIN_SECRET);
+    expect(j).not.toContain(STDIN_SECRET);
+    expect(st).not.toContain(STDIN_SECRET);
+    expect(tree(p).split("\n").map((l) => l.trim())).toContain(`- textbox "Password" [active] [ref=${pw}]`);
+  }, 60_000);
 
   test("the saved refs of password fields carry no value", () => {
     const refs = JSON.parse(stateText).refs as Array<{ id: string; value?: string }>;
