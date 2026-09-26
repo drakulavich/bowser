@@ -58,6 +58,10 @@ Intended use: `op read op://vault/site/password | bowser fill e4 --stdin`.
 
 ## Out of scope
 
-`--submit`; `--stdin` on `type`, `eval`, `run-code`; scrubbing the secret from the page or from
-`snapshot` output (a password field's value is the page's business; bowser does not print input
-values of `type=password` today — verify, and if it does, raise it as a finding, do not fix here).
+`--submit`; `--stdin` on `type`, `eval`, `run-code`.
+
+**Known gap, closed by the next PR:** `snapshot` prints an `<input type=password>` field's value (as
+`playwright-cli` 0.1.13 does), and `state.json` stores up to 120 characters of it, so a secret
+filled with `--stdin` still leaks on the next `snapshot`. The owner decided (2026-09-26) that
+`snapshot` hides password values and `state.json` does not store them; that ships as its own PR
+right after this one.
