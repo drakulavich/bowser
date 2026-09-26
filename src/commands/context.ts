@@ -75,36 +75,20 @@ export function reply(ctx: CommandContext, json: Record<string, unknown>, text: 
   return ctx.json ? JSON.stringify(json) : text;
 }
 
-/** The `### Modal state` section for the dialogs a command saw, as
- *  playwright-cli prints it. */
-export function modalState(dialogs: DialogReport[]): string {
-  return ["### Modal state", ...dialogs.map((d) => `- ${dialogLine(d)}`)].join("\n");
-}
-
-/** One dialog, as `["confirm" dialog with message "sure?"]: <what happened>`. */
-export function dialogLine(d: DialogReport): string {
-  const what = d.state === "pending"
-    ? "can be handled by dialog-accept or dialog-dismiss"
-    : d.unanswered ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
+/** One answered dialog, as `["confirm" dialog with message "sure?"]: accepted`. */
+function dialogLine(d: DialogReport): string {
+  const what = d.unanswered ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
   return `[${JSON.stringify(d.type)} dialog with message ${JSON.stringify(d.message)}]: ${what}`;
 }
 
-/** A dialog as --json reports it: the wire report without `unanswered`. */
-export function dialogJson({ unanswered: _, ...d }: DialogReport): Omit<DialogReport, "unanswered"> {
-  return d;
-}
-
-/** True when the page has a dialog open that blocks further actions. */
-export function dialogPending(c: DaemonConnection): boolean {
-  return c.dialogs().some((d) => d.state === "pending");
-}
-
-/** `reply` for a command that acts on the page: any dialog it opened or the
- *  daemon answered follows the answer (`dialogs` under --json). */
+/** `reply` for a command that acts on the page: the dialogs the daemon
+ *  answered while it ran follow the answer as playwright-cli's
+ *  `### Modal state` (`dialogs` under --json, without `unanswered`). */
 export function replyPage(ctx: CommandContext, c: DaemonConnection, json: Record<string, unknown>, text: string): string {
   const dialogs = c.dialogs();
   if (dialogs.length === 0) return reply(ctx, json, text);
-  return reply(ctx, { ...json, dialogs: dialogs.map(dialogJson) }, `${text}\n${modalState(dialogs)}`);
+  const modal = ["### Modal state", ...dialogs.map((d) => `- ${dialogLine(d)}`)].join("\n");
+  return reply(ctx, { ...json, dialogs: dialogs.map(({ unanswered: _, ...d }) => d) }, `${text}\n${modal}`);
 }
 
 /** After an action that may have navigated, persist the page the daemon

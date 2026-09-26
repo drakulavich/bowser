@@ -56,7 +56,7 @@ export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptio
     };
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
-    return reply(ctx, { ok: true, url: state.url, title: state.title }, text);
+    return replyPage(ctx, c, { ok: true, url: state.url, title: state.title }, text);
   }, { profile });
 }
 

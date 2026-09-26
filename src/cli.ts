@@ -15,11 +15,6 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 
-/** Errors the user can fix (exit 1), as opposed to runtime failures (exit 2). */
-export function isUserError(msg: string): boolean {
-  return /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit|an? \w+ dialog is open|the page is still finishing )/i.test(msg);
-}
-
 if (import.meta.main) {
   // Hidden entry point used when the compiled binary re-spawns itself as a
   // daemon (import.meta.url is virtual /$bunfs/... in a compiled binary, so
@@ -56,7 +51,8 @@ if (import.meta.main) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`bowser: ${msg}`);
-      process.exit(isUserError(msg) ? 1 : 2);
+      const userError = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
+      process.exit(userError ? 1 : 2);
     }
   }
 }

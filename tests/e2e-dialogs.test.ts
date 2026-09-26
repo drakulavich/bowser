@@ -1,9 +1,11 @@
 // End-to-end: JavaScript dialogs through the real CLI commands and daemon.
-// Spec: docs/superpowers/specs/2026-09-26-dialogs-design.md, Acceptance 2.
+// Spec: docs/superpowers/specs/2026-09-26-dialogs-design.md, Acceptance 2 and 3.
 //
-// The Chromium half runs only when the resolved backend is chrome; on WebKit
-// it skips (the WebKit half is Task 2's). Before this, a click that opened
-// confirm() on Chromium hung until the op timeout and wedged the session.
+// Every dialog is answered the moment it opens (the one-shot answer if set,
+// else dismissed) and reported by the command that caused it. Before this, a
+// click that opened confirm() on Chromium hung until the op timeout and
+// wedged the session. The expectations are the same on both backends; on
+// WebKit they are todo until the page shim lands (Task 4).
 //
 //   BOWSER_E2E=1 BOWSER_BACKEND=chrome \
 //     BOWSER_CHROMIUM_PATH=$(find ~/.bowser/chromium -type f -name chrome-headless-shell | head -1) \
@@ -14,40 +16,38 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, resolveBackend } from "../src/backend.ts";
+import { resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { cmdClick } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
-import { pidPath } from "../src/daemon/client.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
 const CHROME = E2E && resolveBackend().kind === "chrome";
-const onChrome = CHROME ? describe : describe.skip;
+const run = E2E ? describe : describe.skip;
+/** Both backends, same expectations. WebKit needs the page shim (Task 4). */
+const both = CHROME ? test : test.todo;
+/** Chromium only: a dialog during page load (WebKit's engine answers those). */
+const chromeOnly = CHROME ? test : test.skip;
 
 const PAGE = `<!doctype html><title>Dialogs</title>
 <button onclick="out.textContent = 'confirm:' + confirm('sure?')">Confirm</button>
 <button onclick="out.textContent = 'prompt:' + prompt('name?', 'def')">Prompt</button>
 <button onclick="alert('hi'); out.textContent = 'alert:done'">Alert</button>
-<button onclick="out.textContent = 'plain'">Plain</button>
-<a href="/?q=1">Next</a>
+<button onclick="confirm('one'); alert('two'); out.textContent = 'two:done'">Two</button>
 <p id="out"></p>`;
 
-// Reached by a query-string navigation, where chrome's view.url getter says
-// about:blank; it opens a confirm as soon as it has loaded.
-const Q_PAGE = `<!doctype html><title>Arrived</title>
-<script>addEventListener("load", () => setTimeout(() => confirm("arrived"), 50));</script>
-<p id="out"></p>`;
+// A confirm() in an inline script, during the page's very first load.
+const LOAD_PAGE = `<!doctype html><title>Load</title>
+<script>document.title = 'load:' + confirm('onload?')</script>`;
 
-const pending = (type: string, message: string) =>
-  `### Modal state\n- ["${type}" dialog with message "${message}"]: can be handled by dialog-accept or dialog-dismiss`;
-const openError = (type: string, message: string) =>
-  `${/^[aeiou]/.test(type) ? "an" : "a"} ${type} dialog is open ("${message}"); run dialog-accept or dialog-dismiss`;
+const line = (type: string, message: string, what: string) => `- ["${type}" dialog with message "${message}"]: ${what}`;
+const HINT = "dismissed (run dialog-accept before the action to accept it)";
 
-onChrome("e2e: dialogs on Chromium", () => {
+run("e2e: dialogs", () => {
   const ctx: CommandContext = { session: "dialogs", json: false };
   let tmp: string;
   let origHome: string | undefined;
@@ -58,10 +58,9 @@ onChrome("e2e: dialogs on Chromium", () => {
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-dialogs-"));
     process.env.HOME = tmp;
-    if (!detectChromium()) throw new Error("BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found.");
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response(new URL(req.url).search === "?q=1" ? Q_PAGE : PAGE, {
+      fetch: (req) => new Response(new URL(req.url).search === "?load=1" ? LOAD_PAGE : PAGE, {
         headers: { "content-type": "text/html; charset=utf-8" },
       }),
     });
@@ -79,169 +78,84 @@ onChrome("e2e: dialogs on Chromium", () => {
     await cmdOpen(ctx, url);
     await cmdSnapshot(ctx);
   };
-  const ref = async (name: string): Promise<string> => {
+  const click = async (name: string): Promise<string> => {
     const r = (await loadState(ctx.session))!.refs.find((x) => x.name === name);
     if (!r) throw new Error(`no ref named ${JSON.stringify(name)}`);
-    return r.id;
-  };
-  const out = () => cmdEval(ctx, "document.getElementById('out').textContent");
-  /** Click, and require it back well before the op timeout. */
-  const timedClick = async (name: string): Promise<string> => {
-    const target = await ref(name);
     const t0 = performance.now();
-    const text = await cmdClick(ctx, target);
+    const text = await cmdClick(ctx, r.id);
+    // Well before the op timeout: nothing ever waits on a dialog.
     expect(performance.now() - t0).toBeLessThan(2000);
     return text;
   };
+  const out = () => cmdEval(ctx, "document.getElementById('out').textContent");
 
-  test("confirm: click returns at once with it pending, a page command in between fails, accept answers it", async () => {
+  both("confirm with no answer set: dismissed at once with the hint, and the session keeps working", async () => {
     await fresh();
-    const clicked = await timedClick("Confirm");
-    expect(clicked).toContain(pending("confirm", "sure?"));
-    await expect(out()).rejects.toThrow(openError("confirm", "sure?"));
-    expect(await cmdDialog(ctx, true)).toBe('["confirm" dialog with message "sure?"]: accepted');
-    expect(await out()).toBe("confirm:true");
-  }, 60_000);
-
-  test("confirm: dismiss answers false", async () => {
-    await fresh();
-    await timedClick("Confirm");
-    expect(await cmdDialog(ctx, false)).toBe('["confirm" dialog with message "sure?"]: dismissed');
+    expect(await click("Confirm")).toEndWith(`### Modal state\n${line("confirm", "sure?", HINT)}`);
     expect(await out()).toBe("confirm:false");
-  }, 60_000);
-
-  test("prompt: accept with text answers the prompt with it", async () => {
-    await fresh();
-    expect(await timedClick("Prompt")).toContain(pending("prompt", "name?"));
-    expect(await cmdDialog(ctx, true, "typed")).toBe('["prompt" dialog with message "name?"]: accepted');
-    expect(await out()).toBe("prompt:typed");
-  }, 60_000);
-
-  test("alert: pending until accepted, then the page continues", async () => {
-    await fresh();
-    expect(await timedClick("Alert")).toContain(pending("alert", "hi"));
-    expect(await out().catch((e: Error) => e.message)).toBe(openError("alert", "hi"));
-    await cmdDialog(ctx, true);
-    expect(await out()).toBe("alert:done");
-  }, 60_000);
-
-  test("regression: after a dialog the session still works", async () => {
-    await fresh();
-    await timedClick("Confirm");
-    await cmdDialog(ctx, true);
-    // The click the dialog blocked has settled in the background; nothing
-    // is queued behind it and every kind of command answers promptly.
-    const t0 = performance.now();
-    await cmdSnapshot(ctx);
-    expect(await timedClick("Plain")).toBe(`clicked ${await ref("Plain")} (button "Plain")`);
-    expect(await out()).toBe("plain");
-    await cmdGoto(ctx, url);
-    expect(await cmdEval(ctx, "document.title")).toBe("Dialogs");
-    expect(performance.now() - t0).toBeLessThan(5000);
-  }, 60_000);
-
-  test("a page command while a dialog is open exits 1 with the user error", async () => {
-    await fresh();
-    await timedClick("Confirm");
-    const p = Bun.spawn({
-      cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", ctx.session, "eval", "1"],
-      env: process.env,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
-    expect(stderr).toContain(openError("confirm", "sure?"));
-    expect(code).toBe(1);
-    await cmdDialog(ctx, false);
-  }, 60_000);
-
-  test("snapshot while a dialog is open shows the modal state and no tree", async () => {
-    await fresh();
-    await timedClick("Confirm");
-    const snap = await cmdSnapshot(ctx);
-    expect(snap).toContain("### Page");
-    expect(snap).toEndWith(pending("confirm", "sure?"));
-    expect(snap).not.toContain("```yaml");
-    await cmdDialog(ctx, true);
-  }, 60_000);
-
-  test("eval that opens a dialog returns with it pending", async () => {
-    await fresh();
-    const t0 = performance.now();
-    expect(await cmdEval(ctx, "confirm('from eval')")).toBe(`\n${pending("confirm", "from eval")}`);
-    expect(performance.now() - t0).toBeLessThan(2000);
-    await cmdDialog(ctx, true);
     expect(await cmdEval(ctx, "1 + 1")).toBe("2");
   }, 60_000);
 
-  test("one-shot: an answer given before the click is applied, with no pending state", async () => {
+  both("dialog-accept, then a confirm is accepted", async () => {
     await fresh();
-    expect(await cmdDialog(ctx, true, "early")).toBe("next dialog will be accepted");
-    const clicked = await timedClick("Prompt");
-    expect(clicked).toContain('- ["prompt" dialog with message "name?"]: accepted');
-    expect(clicked).not.toContain("can be handled");
-    expect(await out()).toBe("prompt:early");
+    expect(await cmdDialog(ctx, true)).toBe("next dialog will be accepted");
+    expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
+    expect(await out()).toBe("confirm:true");
+  }, 60_000);
+
+  both("dialog-accept <text>, then a prompt gets the text", async () => {
+    await fresh();
+    await cmdDialog(ctx, true, "typed");
+    expect(await click("Prompt")).toEndWith(line("prompt", "name?", "accepted"));
+    expect(await out()).toBe("prompt:typed");
+  }, 60_000);
+
+  both("dialog-dismiss, then a prompt is dismissed without the hint", async () => {
+    await fresh();
     expect(await cmdDialog(ctx, false)).toBe("next dialog will be dismissed");
-    expect(await timedClick("Confirm")).toContain('- ["confirm" dialog with message "sure?"]: dismissed');
+    expect(await click("Prompt")).toEndWith(line("prompt", "name?", "dismissed"));
+    expect(await out()).toBe("prompt:null");
+  }, 60_000);
+
+  both("an alert is reported and the page continues", async () => {
+    await fresh();
+    expect(await click("Alert")).toContain(line("alert", "hi", ""));
+    expect(await out()).toBe("alert:done");
+  }, 60_000);
+
+  both("the one-shot answer is used once: a second confirm is dismissed", async () => {
+    await fresh();
+    await cmdDialog(ctx, true);
+    expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
+    expect(await click("Confirm")).toEndWith(line("confirm", "sure?", HINT));
     expect(await out()).toBe("confirm:false");
-    // Used once: the next dialog is pending again.
-    expect(await timedClick("Confirm")).toContain(pending("confirm", "sure?"));
-    await cmdDialog(ctx, true);
   }, 60_000);
 
-  test("close while a dialog is open returns promptly and leaves no daemon or browser running", async () => {
-    await fresh();
-    await timedClick("Confirm");
-    const daemon = Number(await Bun.file(pidPath(ctx.session)).text());
-    const children = async (): Promise<number[]> => {
-      const ps = await new Response(Bun.spawn(["ps", "-axo", "pid=,ppid="], { stdout: "pipe" }).stdout).text();
-      return ps.split("\n").map((l) => l.trim().split(/\s+/).map(Number)).filter(([, ppid]) => ppid === daemon).map(([pid]) => pid!);
-    };
-    const browsers = await children();
-    expect(browsers.length).toBeGreaterThan(0);
-    const t0 = performance.now();
-    expect(await cmdClose(ctx)).toBe(`closed session '${ctx.session}'`);
-    expect(performance.now() - t0).toBeLessThan(3000);
-    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-    expect(alive(daemon)).toBe(false);
-    // The browser goes with its daemon; give the OS a moment to reap it.
-    const deadline = Date.now() + 3000;
-    while (browsers.some(alive) && Date.now() < deadline) await Bun.sleep(50);
-    expect(browsers.filter(alive)).toEqual([]);
-  }, 60_000);
-
-  test("a click that navigates to ?q=1 whose page opens a dialog: state and snapshot report the new url", async () => {
-    await fresh();
-    const next = `${url}?q=1`;
-    await timedClick("Next");
-    // The click's reply read state after its navigation landed.
-    expect((await loadState(ctx.session))!.url).toBe(next);
-    // The dialog opens 50 ms after load, possibly after the click returned.
-    await Bun.sleep(300);
-    const page = await cmdSnapshot(ctx);
-    expect(page).toContain(`- Page URL: ${next}`);
-    expect(page).toContain("- Page Title: Arrived");
-    expect(page).toEndWith(pending("confirm", "arrived"));
-    await cmdDialog(ctx, true);
-  }, 60_000);
-
-  test("goto a ?q=1 page that opens a dialog on load: every state read reports the new url", async () => {
-    await fresh();
-    const next = `${url}?q=1`;
-    await cmdGoto(ctx, next);
-    await Bun.sleep(300);
-    const page = await cmdSnapshot(ctx);
-    expect(page).toContain(`- Page URL: ${next}`);
-    expect(page).toEndWith(pending("confirm", "arrived"));
-    await cmdDialog(ctx, false);
-  }, 60_000);
-
-  test("one-shot: a navigation drops it", async () => {
+  both("a one-shot answer does not survive goto", async () => {
     await fresh();
     await cmdDialog(ctx, true);
     await cmdGoto(ctx, url);
     await cmdSnapshot(ctx);
-    expect(await timedClick("Confirm")).toContain(pending("confirm", "sure?"));
-    await cmdDialog(ctx, false);
+    expect(await click("Confirm")).toEndWith(line("confirm", "sure?", HINT));
+    expect(await out()).toBe("confirm:false");
+  }, 60_000);
+
+  both("two dialogs from one click are both reported, in order", async () => {
+    await fresh();
+    const text = await click("Two");
+    expect(text).toEndWith(`### Modal state\n${line("confirm", "one", HINT)}\n${line("alert", "two", HINT)}`);
+    expect(await out()).toBe("two:done");
+  }, 60_000);
+
+  chromeOnly("a confirm() during the very first page load neither hangs open nor goes unreported", async () => {
+    try { await cmdClose(ctx); } catch {}
+    const t0 = performance.now();
+    const opened = await cmdOpen(ctx, `${url}?load=1`);
+    expect(performance.now() - t0).toBeLessThan(10_000);
+    expect(opened).toEndWith(line("confirm", "onload?", HINT));
+    expect(await cmdEval(ctx, "document.title")).toBe("load:false");
+    const t1 = performance.now();
+    expect(await cmdGoto(ctx, `${url}?load=1`)).toEndWith(line("confirm", "onload?", HINT));
+    expect(performance.now() - t1).toBeLessThan(2000);
   }, 60_000);
 });

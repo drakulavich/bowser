@@ -5,7 +5,7 @@
 import type { Command } from "../cli/registry.ts";
 import { clearForFillScript } from "../page-scripts.ts";
 import type { Ref } from "../state.ts";
-import { dialogPending, liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, type CommandContext } from "./context.ts";
+import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, type CommandContext } from "./context.ts";
 
 // Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so
 // check/uncheck/select/fill refuse a ref that cannot take the action, from the
@@ -65,8 +65,6 @@ export async function cmdFill(
   return withClient(ctx, async (c) => {
     const selector = await liveSelector(c, ref);
     await c.request("click", [selector]);
-    // The click opened a dialog: the page is blocked, so stop and report it.
-    if (dialogPending(c)) return replyPage(ctx, c, { ok: true, ref, filled: false }, `did not fill ${ref}: a dialog opened`);
     await c.request("evaluate", [clearForFillScript(selector)]);
     await c.request("type", [value]);
     const json = opts.stdin ? { ok: true, ref } : { ok: true, ref, text };

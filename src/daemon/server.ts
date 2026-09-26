@@ -4,21 +4,16 @@
 // everything the page accumulated (typed text, modals, dynamic DOM).
 //
 // The op set lives in ./protocol.ts. `handlers` below is typed from it, so
-// an op without a handler here does not compile. `state` is the exception
-// and is answered by a closure in createHandler(), because it alone reads
-// DaemonState, which a handlers entry is not given (`dialog-answer` too).
-// Removing either closure does not compile, for a different reason: req.op
-// spans every op, and Handlers excludes them, so the lookup stops being
-// index-safe.
+// an op without a handler here does not compile. `state` and
+// `dialog-answer` are the exceptions and are answered by closures in
+// createHandler(), because they alone use DaemonState, which a handlers entry
+// is not given. Removing either closure does not compile either, for a
+// different reason: req.op spans every op, and Handlers excludes them, so the
+// lookup stops being index-safe.
 //
-// Dialogs (chrome): a page op that opens one answers as soon as it is open,
-// with the dialog pending, instead of waiting for the page it blocks; the op
-// itself settles in the background once `dialog-answer` (urgent lane) has
-// answered it. While one is pending every other queued op fails at once, so
-// nothing can queue behind it. `dialog-answer` then waits briefly for the
-// blocked call to settle; if it has not, the page stays busy until it does,
-// and page ops fail at once meanwhile. No op ever waits on it, so none can be
-// reported failed and still reach the browser.
+// Dialogs: none ever stays open. The daemon answers each the moment it opens
+// (the one-shot answer if set, else dismiss; beforeunload is accepted), so
+// the op that opened it finishes normally, and the op's reply reports it.
 
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
@@ -26,7 +21,7 @@ import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
-  IS_URGENT, REQUIRES_CDP, dialogOpenError,
+  IS_URGENT, REQUIRES_CDP,
   type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type DialogState, type Op, type PageState, type ResultOf,
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
@@ -36,14 +31,10 @@ import { pidPath, socketPath } from "./client.ts";
  *  `state` call, because an action can navigate and a cached copy would go
  *  stale (that regression is why `nav.act()` exists). */
 export interface DaemonState {
-  /** The open dialog (chrome). Set by the page, cleared by dialog-answer or
-   *  when the page closes it. */
-  dialog?: DialogState;
-  /** The one-shot answer for the next dialog; dropped on navigation. On
-   *  webkit nothing reads it yet: the page shim (Task 2) will. */
+  /** The one-shot answer for the next dialog; dropped on navigation. */
   answer?: { accept: boolean; text?: string };
-  /** Dialogs the daemon answered that no reply has reported yet. */
-  handled?: DialogReport[];
+  /** Dialogs answered since the last queued op's reply, which reports them. */
+  dialogs?: DialogReport[];
   /** The persistent profile directory the browser opened with; absent when
    *  its store is ephemeral. Fixed for the daemon's life. */
   profile?: string;
@@ -109,33 +100,9 @@ function opTimeoutMs(): number {
 
 // `state` and `dialog-answer` are excluded: they alone need the DaemonState
 // the daemon owns, so createHandler() answers them with closures instead.
-type Stateful = "state" | "dialog-answer";
 type Handlers = {
-  [O in Exclude<Op, Stateful>]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
+  [O in Exclude<Op, "state" | "dialog-answer">]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
 };
-
-/** Ops a pending dialog does not refuse: the urgent ones (`ping` for list and
- *  every connect, `shutdown` for close, `dialog-answer`), and `state`,
- *  which the command that opened the dialog reads right after. */
-const PASS_A_DIALOG: ReadonlySet<Op> = new Set<Op>([...IS_URGENT, "state"]);
-
-/** How long `dialog-answer` waits for the call its dialog blocked. Normally
- *  that call settles within milliseconds of the answer. */
-export const DIALOG_SETTLE_MS = 2000;
-
-/** The fail-fast error while a call a dialog blocked is still settling. */
-function busyError(op: Op): string {
-  return `the page is still finishing ${op} after a dialog; try again`;
-}
-
-/** The prompt text a dialog is answered with: a prompt's, when accepted. */
-function promptText(d: DialogState, accept: boolean, text?: string): string | undefined {
-  return d.type === "prompt" && accept ? text ?? d.defaultValue ?? "" : undefined;
-}
-
-function answered(d: DialogState, accept: boolean, answer?: string): DialogReport {
-  return { ...d, state: accept ? "accepted" : "dismissed", ...(answer !== undefined ? { answer } : {}) };
-}
 
 const handlers: Handlers = {
   ping: async () => "pong",
@@ -185,126 +152,75 @@ const handlers: Handlers = {
 /** Dispatch one parsed request to its handler. Never rejects: every failure,
  *  including an op name that is not in the map, is a `{ ok: false }` reply.
  *
- *  `state` defaults to `{}` so the call sites that pass only a browser keep
- *  compiling unchanged; only `state`, `dialog-answer` and the dialog
- *  listener read it. `settleMs` is how long `dialog-answer` waits for the
- *  call its dialog blocked (tests shorten it). */
-export function createHandler(browser: Browser, state: DaemonState = {}, settleMs = DIALOG_SETTLE_MS): (req: DaemonRequest) => Promise<DaemonResponse> {
-  // Wakes the op in flight when its dialog opens.
-  const waiters = new Set<() => void>();
-  // The browser call a dialog blocked, after its op already replied. It still
-  // owns the page until it settles; its own `finally` clears this.
-  let blocked: { op: Op; done: Promise<unknown> } | undefined;
+ *  `state` defaults to `{}` so the 13 existing call sites that pass only a
+ *  browser keep compiling unchanged; only `state`, `dialog-answer` and the
+ *  dialog listener use it. */
+export function createHandler(browser: Browser, state: DaemonState = {}): (req: DaemonRequest) => Promise<DaemonResponse> {
+  // Listen now, before any op navigates, so a dialog during the first page
+  // load is answered too rather than hanging `open`.
   browser.watchDialogs({
-    opened: (d) => {
-      const a = state.answer;
-      if (a) {
-        state.answer = undefined;
-        const text = promptText(d, a.accept, a.text);
-        browser.answerDialog(a.accept, text).catch(() => {});
-        (state.handled ??= []).push(answered(d, a.accept, text));
-        return;
-      }
-      state.dialog = d;
-      for (const wake of waiters) wake();
-    },
-    closed: () => { state.dialog = undefined; },
+    opened: (d) => (state.dialogs ??= []).push(answerDialog(browser, state, d)),
     navigated: () => { state.answer = undefined; },
   });
-
-  const stateful: { [O in Stateful]: (b: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>> } = {
-    // While a dialog is open or a blocked call is settling (chrome only) the
-    // page cannot evaluate, so url and title come from the browser's own view
-    // of the target (pageInfo) instead of realUrl()/realTitle().
-    state: async (b) => {
-      const page = state.dialog || blocked
-        ? await b.pageInfo()
-        : { url: await b.realUrl(), title: await b.realTitle() };
-      return {
-        ...page,
-        ...(state.dialog ? { dialog: state.dialog } : {}),
-        ...(state.profile ? { profile: state.profile } : {}),
-      };
-    },
-    "dialog-answer": async (b, accept, text) => {
-      const d = state.dialog;
-      if (!d) {
-        state.answer = text === undefined ? { accept } : { accept, text };
-        return {};
-      }
-      const answer = promptText(d, accept, text);
-      await b.answerDialog(accept, answer);
-      // Only this dialog: the page may already have opened the next one.
-      if (state.dialog === d) state.dialog = undefined;
-      // Give the blocked call a moment to finish, so the next command finds
-      // the page free. Stop early if it opens another dialog instead.
-      if (blocked && !state.dialog) {
-        let wake!: () => void;
-        const next = new Promise<void>((r) => { wake = r; });
-        waiters.add(wake);
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([blocked.done, next, new Promise<void>((r) => { timer = setTimeout(r, settleMs); })]);
-        clearTimeout(timer);
-        waiters.delete(wake);
-      }
-      return { answered: answered(d, accept, answer) };
-    },
+  return async (req) => {
+    const res = await run(req);
+    // Urgent replies (ping from every connect) must not swallow a report.
+    if (IS_URGENT.has(req.op) || !state.dialogs) return res;
+    const dialogs = state.dialogs;
+    state.dialogs = undefined;
+    return { ...res, dialogs };
   };
 
-  const run = async (req: DaemonRequest): Promise<DaemonResponse> => {
-    const fn = req.op === "state" || req.op === "dialog-answer"
-      ? stateful[req.op]
+  async function run(req: DaemonRequest): Promise<DaemonResponse> {
+    // `state` and `dialog-answer` are answered by closures, not entries in
+    // `handlers`: they are the ops that use DaemonState, and threading a
+    // third parameter through the other ~30 handlers for that would be a
+    // change with two consumers.
+    const fn = req.op === "state"
+      ? async (b: Browser): Promise<PageState> => ({
+          url: await b.realUrl(),
+          title: await b.realTitle(),
+          ...(state.profile ? { profile: state.profile } : {}),
+        })
+      : req.op === "dialog-answer"
+      ? async (_b: Browser, accept: boolean, text?: string): Promise<void> => {
+          state.answer = text === undefined ? { accept } : { accept, text };
+        }
       : Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
-    if (state.dialog && !PASS_A_DIALOG.has(req.op)) {
-      return { id: req.id, ok: false, error: dialogOpenError(state.dialog) };
-    }
-    // After the answer, the call the dialog blocked may still be settling;
-    // refuse rather than overlap it. Checked after the dialog guard, so a
-    // second dialog is reported first.
-    if (blocked && !PASS_A_DIALOG.has(req.op)) {
-      return { id: req.id, ok: false, error: busyError(blocked.op) };
-    }
     // Capability gate: a CDP-only op on webkit fails here with the shared
     // message, so the handler never touches a view that cannot answer.
     if (REQUIRES_CDP.has(req.op) && !browser.cdpAvailable()) {
       return { id: req.id, ok: false, error: CDP_UNAVAILABLE };
     }
-    // Race the op against a dialog opening: the page stays blocked until the
-    // dialog is answered, so waiting for `work` here would wedge the session.
-    // Listen before the op starts; its dialog can open before it yields.
-    // A `state` caught by one is simply asked again, now from the getters.
-    let wake!: () => void;
-    const opened = new Promise<void>((r) => { wake = r; });
-    if (!IS_URGENT.has(req.op)) waiters.add(wake);
-    // The one cast at the wire boundary: args arrived as JSON, the handler
-    // is typed for this op. Everything below this line is typed.
-    const work = (async () => (fn as (b: Browser, ...a: unknown[]) => Promise<unknown>)(browser, ...(req.args ?? [])))().then(
-      (result): DaemonResponse => result === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result },
-      (err): DaemonResponse => ({ id: req.id, ok: false, error: err instanceof Error ? err.message : String(err) }),
-    );
-    if (IS_URGENT.has(req.op)) return work;
     try {
-      return await Promise.race([
-        work,
-        opened.then(() => {
-          const mark = { op: req.op, done: work };
-          blocked = mark;
-          work.finally(() => { if (blocked === mark) blocked = undefined; });
-          return req.op === "state" ? run(req) : { id: req.id, ok: true };
-        }),
-      ]);
-    } finally {
-      waiters.delete(wake);
+      // The one cast at the wire boundary: args arrived as JSON, the handler
+      // is typed for this op. Everything below this line is typed.
+      const result = await (fn as (b: Browser, ...a: unknown[]) => Promise<unknown>)(browser, ...(req.args ?? []));
+      return result === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { id: req.id, ok: false, error: msg };
     }
-  };
+  }
+}
 
-  return async (req) => {
-    const res = await run(req);
-    if (IS_URGENT.has(req.op)) return res;
-    const dialogs = [...(state.handled ?? []), ...(state.dialog ? [{ ...state.dialog, state: "pending" as const }] : [])];
-    state.handled = undefined;
-    return dialogs.length > 0 ? { ...res, dialogs } : res;
+/** Answer a dialog that just opened, at once, and say how. The one-shot
+ *  answer is used and cleared; without one it is dismissed. beforeunload is
+ *  always accepted so the navigation proceeds, and leaves the one-shot answer
+ *  for the next dialog. A prompt accepted without text gets its default. */
+function answerDialog(browser: Browser, state: DaemonState, d: DialogState): DialogReport {
+  const given = d.type === "beforeunload" ? { accept: true } : state.answer;
+  if (d.type !== "beforeunload") state.answer = undefined;
+  const accept = given?.accept ?? false;
+  const text = d.type === "prompt" && accept ? given?.text ?? d.defaultValue ?? "" : undefined;
+  // Nothing waits on this: the op the dialog blocked resumes once it lands.
+  browser.answerDialog(accept, text).catch(() => {});
+  return {
+    ...d,
+    state: accept ? "accepted" : "dismissed",
+    ...(text !== undefined ? { answer: text } : {}),
+    ...(given ? {} : { unanswered: true as const }),
   };
 }
 

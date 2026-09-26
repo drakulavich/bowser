@@ -56,7 +56,6 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     subscribe: (event) => { calls.push(["subscribe", [event]]); return true; },
     watchDialogs: () => false,
     answerDialog: rec("answerDialog", undefined),
-    pageInfo: rec("pageInfo", { url: "https://x/", title: "X" }),
     getCookies: rec("getCookies", [cookie]),
     setCookie: rec("setCookie", { success: true }),
     deleteCookies: rec("deleteCookies", undefined),
@@ -114,13 +113,6 @@ describe("createHandler", () => {
     const handle = createHandler(fakeBrowser(), {});
     const res = await handle({ id: 1, op: "state", args: [] });
     expect(res.ok && "dialog" in (res.result as object)).toBe(false);
-  });
-
-  test("state carries the dialog when the daemon has one", async () => {
-    const state: DaemonState = { dialog: { type: "confirm", message: "sure?" } };
-    const handle = createHandler(fakeBrowser(), state);
-    const res = await handle({ id: 1, op: "state", args: [] });
-    expect(res).toMatchObject({ ok: true, result: { dialog: { type: "confirm", message: "sure?" } } });
   });
 
   test("state reports the daemon's persistent profile, and none when ephemeral", async () => {
@@ -218,8 +210,8 @@ describe("createHandler", () => {
   });
 });
 
-test("ping, shutdown and dialog-answer are the urgent ops, and nothing else is", () => {
-  expect([...IS_URGENT].sort()).toEqual(["dialog-answer", "ping", "shutdown"]);
+test("ping and shutdown are the urgent ops, and nothing else is", () => {
+  expect([...IS_URGENT].sort()).toEqual(["ping", "shutdown"]);
 });
 
 test("an urgent op answers while a queued op is wedged", async () => {
@@ -309,239 +301,113 @@ function dialogBrowser(over: Partial<Browser> = {}) {
 
 const confirmBox: DialogState = { type: "confirm", message: "sure?" };
 const promptBox: DialogState = { type: "prompt", message: "name?", defaultValue: "def" };
-const OPEN_ERROR = 'a confirm dialog is open ("sure?"); run dialog-accept or dialog-dismiss';
+const answers = (b: { calls: Array<[string, unknown[]]> }) => b.calls.filter(([n]) => n === "answerDialog");
 
-describe("dialogs", () => {
-  test("a click that opens a dialog answers at once with it pending, not when the click settles", async () => {
+describe("dialogs: answered the moment they open", () => {
+  test("the handler listens for dialogs as soon as it exists, before any op navigates", () => {
     const b = dialogBrowser();
-    b.click = () => { b.on().opened(confirmBox); return new Promise<void>(() => {}); }; // blocked by the dialog
-    const res = await Promise.race([
-      createHandler(b)(req("click", ["#go"])),
-      Bun.sleep(500).then(() => "still waiting on the page"),
-    ]);
-    expect(res).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "pending" }] });
+    createHandler(b);
+    expect(b.on()).toBeDefined();
   });
 
-  test("while a dialog is pending a page op fails at once with the user error and never reaches the page", async () => {
+  test("with no one-shot answer a dialog is dismissed at once, and the op that opened it replies normally with it", async () => {
     const b = dialogBrowser();
-    const res = await createHandler(b, { dialog: confirmBox })(req("evaluate", ["1"]));
-    expect(res).toEqual({ id: 7, ok: false, error: OPEN_ERROR, dialogs: [{ ...confirmBox, state: "pending" }] });
-    expect(b.calls).toEqual([]);
+    b.click = async () => { b.on().opened(confirmBox); };
+    const res = await createHandler(b)(req("click", ["#go"]));
+    expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
+    expect(res).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "dismissed", unanswered: true }] });
   });
 
-  test("while a dialog is pending, state reads the page from the browser, not by evaluating in it", async () => {
+  test("a report is given once: the next reply carries none", async () => {
     const b = dialogBrowser();
-    const res = await createHandler(b, { dialog: confirmBox })(req("state"));
-    expect(res).toMatchObject({ ok: true, result: { url: "https://x/", title: "X", dialog: confirmBox } });
-    expect(b.calls).toEqual([["pageInfo", []]]);
-  });
-
-  test("dialog-answer is urgent, answers the pending dialog and clears it", async () => {
-    expect(IS_URGENT.has("dialog-answer")).toBe(true);
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); } });
-    const state: DaemonState = { dialog: promptBox };
-    const h = createHandler(b, state);
-    const res = await h(req("dialog-answer", [true, "typed"]));
-    expect(res).toEqual({ id: 7, ok: true, result: { answered: { ...promptBox, state: "accepted", answer: "typed" } } });
-    expect(b.calls).toEqual([["answerDialog", [true, "typed"]]]);
-    expect(state.dialog).toBeUndefined();
+    b.click = async () => { b.on().opened(confirmBox); };
+    const h = createHandler(b);
+    await h(req("click", ["#go"]));
     expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
   });
 
-  test("dialog-answer accepts a prompt with its default value when no text is given", async () => {
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); } });
-    await createHandler(b, { dialog: promptBox })(req("dialog-answer", [true]));
-    expect(b.calls).toEqual([["answerDialog", [true, "def"]]]);
+  test("two dialogs from one op are both answered and reported, in order", async () => {
+    const b = dialogBrowser();
+    b.click = async () => { b.on().opened(promptBox); b.on().opened({ type: "alert", message: "hi" }); };
+    const res = await createHandler(b)(req("click", ["#go"]));
+    expect(res.dialogs?.map((d) => d.type)).toEqual(["prompt", "alert"]);
+    expect(answers(b)).toHaveLength(2);
   });
 
-  test("dialog-answer dismisses a confirm without prompt text", async () => {
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); } });
-    const res = await createHandler(b, { dialog: confirmBox })(req("dialog-answer", [false]));
-    expect(res).toEqual({ id: 7, ok: true, result: { answered: { ...confirmBox, state: "dismissed" } } });
-    expect(b.calls).toEqual([["answerDialog", [false, undefined]]]);
+  test("dialog-answer is a queued op that sets a one-shot answer and touches no page", async () => {
+    expect(IS_URGENT.has("dialog-answer")).toBe(false);
+    const b = dialogBrowser();
+    expect(await createHandler(b)(req("dialog-answer", [true, "typed"]))).toEqual({ id: 7, ok: true });
+    expect(b.calls).toEqual([]);
   });
 
-  test("with nothing pending, dialog-answer is a one-shot answer the next dialog gets at once", async () => {
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); } });
+  test("a one-shot accept answers the next prompt with its text, and is used once", async () => {
+    const b = dialogBrowser();
     b.click = async () => { b.on().opened(promptBox); };
-    const state: DaemonState = {};
-    const h = createHandler(b, state);
-    expect(await h(req("dialog-answer", [true, "typed"]))).toEqual({ id: 7, ok: true, result: {} });
-    expect(b.calls).toEqual([]);
-    const res = await h(req("click", ["#go"]));
-    expect(res).toEqual({ id: 7, ok: true, dialogs: [{ ...promptBox, state: "accepted", answer: "typed" }] });
-    expect(b.calls).toEqual([["answerDialog", [true, "typed"]]]);
-    expect(state.dialog).toBeUndefined();
-    // Used once: the reply drained it, and the next dialog is pending again.
-    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
+    const h = createHandler(b);
+    await h(req("dialog-answer", [true, "typed"]));
+    expect((await h(req("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "accepted", answer: "typed" }]);
+    expect((await h(req("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
+    expect(answers(b)).toEqual([["answerDialog", [true, "typed"]], ["answerDialog", [false, undefined]]]);
+  });
+
+  test("a one-shot accept with no text answers a prompt with its default value; a confirm gets no prompt text", async () => {
+    const b = dialogBrowser();
+    const h = createHandler(b);
+    await h(req("dialog-answer", [true]));
+    b.on().opened(promptBox);
+    await h(req("dialog-answer", [true]));
     b.on().opened(confirmBox);
-    expect(state.dialog).toEqual(confirmBox);
+    expect(answers(b)).toEqual([["answerDialog", [true, "def"]], ["answerDialog", [true, undefined]]]);
+  });
+
+  test("a one-shot dismiss is reported dismissed without the hint", async () => {
+    const b = dialogBrowser();
+    b.click = async () => { b.on().opened(promptBox); };
+    const h = createHandler(b);
+    await h(req("dialog-answer", [false]));
+    expect((await h(req("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed" }]);
+  });
+
+  test("setting a one-shot answer replaces the previous one", async () => {
+    const b = dialogBrowser();
+    const h = createHandler(b);
+    await h(req("dialog-answer", [true]));
+    await h(req("dialog-answer", [false]));
+    b.on().opened(confirmBox);
+    expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
   });
 
   test("a navigation drops the one-shot answer", async () => {
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); } });
-    const state: DaemonState = {};
-    const h = createHandler(b, state);
+    const b = dialogBrowser();
+    const h = createHandler(b);
     await h(req("dialog-answer", [true]));
     b.on().navigated();
     b.on().opened(confirmBox);
-    expect(state.dialog).toEqual(confirmBox);
-    expect(b.calls).toEqual([]);
+    expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
   });
 
-  test("a dialog closed by the page itself is no longer pending", async () => {
+  test("beforeunload is accepted so the navigation proceeds, and leaves the one-shot answer for the next dialog", async () => {
     const b = dialogBrowser();
-    const state: DaemonState = {};
-    createHandler(b, state);
+    const h = createHandler(b);
+    await h(req("dialog-answer", [true]));
+    b.on().opened({ type: "beforeunload", message: "" });
     b.on().opened(confirmBox);
-    b.on().closed();
-    expect(state.dialog).toBeUndefined();
+    expect(answers(b)).toEqual([["answerDialog", [true, undefined]], ["answerDialog", [true, undefined]]]);
+    expect((await h(req("evaluate", ["1"]))).dialogs?.map((d) => d.state)).toEqual(["accepted", "accepted"]);
   });
 
-  test("urgent replies carry no dialog reports", async () => {
+  test("a failed answer does not fail the op that opened the dialog", async () => {
+    const b = dialogBrowser({ answerDialog: async () => { throw new Error("gone"); } });
+    b.click = async () => { b.on().opened(confirmBox); };
+    expect(await createHandler(b)(req("click", ["#go"]))).toMatchObject({ ok: true });
+  });
+
+  test("urgent replies carry no dialog reports, and do not consume them", async () => {
     const b = dialogBrowser();
-    expect(await createHandler(b, { dialog: confirmBox })(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
-  });
-});
-
-describe("dialogs: the call a dialog blocked still owns the page", () => {
-  const BUSY = "the page is still finishing click after a dialog; try again";
-
-  /** A click that opens `dialog` and then stays blocked until `settle()`. */
-  function blockingClick(dialog: DialogState = confirmBox) {
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); } });
-    let settle!: () => void;
-    b.click = () => { b.on().opened(dialog); return new Promise<void>((r) => { settle = r; }); };
-    return Object.assign(b, { settle: () => settle() });
-  }
-
-  test("while the answered dialog's click is still pending, a page op fails at once and never reaches the browser", async () => {
-    const b = blockingClick();
-    const h = createHandler(b, {}, 20);
-    await h(req("click", ["#go"]));
-    await h(req("dialog-answer", [true]));
-    const t0 = performance.now();
-    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: false, error: BUSY });
-    expect(performance.now() - t0).toBeLessThan(100);
-    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
-    b.settle();
-    await Bun.sleep(0);
-    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
-  });
-
-  test("while busy, state answers without evaluating in the page", async () => {
-    const b = blockingClick();
-    const h = createHandler(b, {}, 20);
-    await h(req("click", ["#go"]));
-    await h(req("dialog-answer", [true]));
-    expect(await h(req("state"))).toMatchObject({ ok: true, result: { url: "https://x/", title: "X" } });
-    expect(b.calls.filter(([n]) => n === "realUrl" || n === "realTitle" || n === "evaluate")).toEqual([]);
-  });
-
-  test("dialog-answer replies only after the blocked call settles, when it does within the bound", async () => {
-    const b = blockingClick();
-    const h = createHandler(b, {}, 5_000);
-    await h(req("click", ["#go"]));
-    let settled = false;
-    setTimeout(() => { settled = true; b.settle(); }, 50);
-    const res = await h(req("dialog-answer", [true]));
-    expect(settled).toBe(true);
-    expect(res).toMatchObject({ ok: true, result: { answered: { state: "accepted" } } });
-    // Nothing is left busy: the next page op runs.
-    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
-  });
-
-  test("dialog-answer stops waiting when the blocked call opens another dialog", async () => {
-    const b = blockingClick();
-    const h = createHandler(b, {}, 5_000);
-    await h(req("click", ["#go"]));
-    setTimeout(() => b.on().opened({ type: "alert", message: "next" }), 20);
-    const t0 = performance.now();
-    await h(req("dialog-answer", [true]));
-    expect(performance.now() - t0).toBeLessThan(1000);
-  });
-
-  test("a second dialog opened while busy is reported at once, ahead of the busy error", async () => {
-    const b = blockingClick();
-    const h = createHandler(b, {}, 20);
-    await h(req("click", ["#go"]));
-    await h(req("dialog-answer", [true]));
-    b.on().opened({ type: "alert", message: "next" });
-    expect(await h(req("evaluate", ["1"]))).toMatchObject({
-      ok: false, error: 'an alert dialog is open ("next"); run dialog-accept or dialog-dismiss',
-    });
-    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
-  });
-
-  test("while busy, urgent ops still answer", async () => {
-    const b = blockingClick();
-    const h = createHandler(b, {}, 20);
-    await h(req("click", ["#go"]));
-    await h(req("dialog-answer", [true]));
+    const h = createHandler(b);
+    b.on().opened(confirmBox);
     expect(await h(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
-    expect(await h(req("dialog-answer", [false]))).toEqual({ id: 7, ok: true, result: {} });
-  });
-
-  test("while the dialog is pending, state and the fail-fast error do not wait for the blocked click", async () => {
-    const b = blockingClick();
-    const h = createHandler(b, {}, 5_000);
-    await h(req("click", ["#go"]));
-    const t0 = performance.now();
-    expect(await h(req("state"))).toMatchObject({ ok: true, result: { dialog: confirmBox } });
-    expect(await h(req("evaluate", ["1"]))).toMatchObject({ ok: false, error: OPEN_ERROR });
-    expect(performance.now() - t0).toBeLessThan(100);
-  });
-});
-
-describe("dialogs: state stays true across answers", () => {
-  test("a dialog the answered call opens before dialog-answer resumes stays pending and can be answered", async () => {
-    const next: DialogState = { type: "alert", message: "next" };
-    const b = dialogBrowser();
-    b.answerDialog = async (...a) => { b.calls.push(["answerDialog", a]); if (b.calls.length === 1) b.on().opened(next); };
-    const state: DaemonState = { dialog: confirmBox };
-    const h = createHandler(b, state, 20);
-    expect(await h(req("dialog-answer", [true]))).toMatchObject({ ok: true, result: { answered: { type: "confirm" } } });
-    expect(state.dialog).toEqual(next);
-    expect(await h(req("evaluate", ["1"]))).toMatchObject({
-      ok: false, error: 'an alert dialog is open ("next"); run dialog-accept or dialog-dismiss',
-    });
-    expect(await h(req("dialog-answer", [true]))).toMatchObject({ ok: true, result: { answered: { type: "alert", message: "next" } } });
-    expect(state.dialog).toBeUndefined();
-  });
-
-  test("while pending or busy, state reports where the page is now, even after a navigation no state read saw", async () => {
-    // Page A is read live; a click then navigates to B and B opens a dialog
-    // before anything reads state. The browser's own view of the target is
-    // current; a cache of the last live read would still say A.
-    let page = { url: "https://a/", title: "A" };
-    const b = dialogBrowser({
-      realUrl: async () => page.url,
-      realTitle: async () => page.title,
-      pageInfo: async () => page,
-    });
-    let settle!: () => void;
-    b.click = () => {
-      page = { url: "https://b/?q=1", title: "B" };
-      b.on().opened(confirmBox);
-      return new Promise<void>((r) => { settle = r; });
-    };
-    const h = createHandler(b, {}, 20);
-    expect(await h(req("state"))).toMatchObject({ result: { url: "https://a/" } });
-    await h(req("click", ["#go"]));
-    expect(await h(req("state"))).toMatchObject({ result: { url: "https://b/?q=1", title: "B", dialog: confirmBox } });
-    await h(req("dialog-answer", [true]));
-    expect(await h(req("state"))).toMatchObject({ result: { url: "https://b/?q=1", title: "B" } });
-    settle();
-  });
-
-  test("with a blocked call, dialog-answer does not wait when answering opened the next dialog", async () => {
-    const b = dialogBrowser();
-    b.click = () => { b.on().opened(confirmBox); return new Promise<void>(() => {}); };
-    b.answerDialog = async () => { b.on().opened({ type: "alert", message: "next" }); };
-    const h = createHandler(b, {}, 5_000);
-    await h(req("click", ["#go"]));
-    const t0 = performance.now();
-    await h(req("dialog-answer", [true]));
-    expect(performance.now() - t0).toBeLessThan(500);
+    expect((await h(req("evaluate", ["1"]))).dialogs).toHaveLength(1);
   });
 });

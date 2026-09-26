@@ -1,30 +1,30 @@
-// Answering JavaScript dialogs: dialog-accept [text] and dialog-dismiss.
-// With a dialog open (chrome) they answer it; otherwise they set the answer
-// the daemon gives the next dialog on the page, once.
+// dialog-accept [text] and dialog-dismiss: the answer the daemon gives the
+// next dialog on the current page, once. Every dialog is answered the moment
+// it opens, so the answer is set before the action, not after it (unlike
+// playwright-cli).
 
 import type { Command } from "../cli/registry.ts";
-import { dialogJson, dialogLine, reply, withClient, type CommandContext } from "./context.ts";
+import { replyPage, withClient, type CommandContext } from "./context.ts";
 
 export async function cmdDialog(ctx: CommandContext, accept: boolean, text?: string): Promise<string> {
   return withClient(ctx, async (c) => {
-    const { answered } = await c.request("dialog-answer", text === undefined ? [accept] : [accept, text]);
-    if (answered) return reply(ctx, { ok: true, dialogs: [dialogJson(answered)] }, dialogLine(answered));
+    await c.request("dialog-answer", text === undefined ? [accept] : [accept, text]);
     const verb = accept ? "accepted" : "dismissed";
-    return reply(ctx, { ok: true, next: verb }, `next dialog will be ${verb}`);
+    return replyPage(ctx, c, { ok: true, next: verb }, `next dialog will be ${verb}`);
   });
 }
 
 export const COMMANDS: Command[] = [
   {
     name: "dialog-accept",
-    summary: "Accept the open dialog (a prompt gets text, default its own), or the next one",
+    summary: "Accept the next dialog (a prompt gets text, default its own)",
     positional: [{ name: "text", required: false }],
     flags: [],
     run: (ctx, a) => cmdDialog(ctx, true, a.positional[0]),
   },
   {
     name: "dialog-dismiss",
-    summary: "Dismiss the open dialog, or the next one",
+    summary: "Dismiss the next dialog",
     positional: [],
     flags: [],
     run: (ctx) => cmdDialog(ctx, false),

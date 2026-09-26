@@ -16,31 +16,22 @@ export interface DialogState {
   defaultValue?: string;
 }
 
-/** A dialog as a command reports it: still open (`pending`, chrome only), or
- *  already answered by the daemon from a one-shot answer (or, on webkit, by
- *  the page shim). The --json form is this minus `unanswered`. */
+/** A dialog as a command reports it. No dialog stays open: each is answered
+ *  the moment it opens, with the one-shot answer or else dismissed. The
+ *  --json form is this minus `unanswered`. */
 export interface DialogReport extends DialogState {
-  state: "pending" | "accepted" | "dismissed";
+  state: "accepted" | "dismissed";
   /** The text an accepted prompt was answered with. */
   answer?: string;
   /** Dismissed because no one-shot answer was set; the plain output adds a
-   *  hint. Never set on chrome, where such a dialog stays pending instead. */
+   *  hint. */
   unanswered?: true;
-}
-
-/** The fail-fast error for any page op while a dialog is open. The CLI's
- *  exit-code regex classifies it as a user error (exit 1). */
-export function dialogOpenError(d: DialogState): string {
-  const article = /^[aeiou]/.test(d.type) ? "an" : "a";
-  return `${article} ${d.type} dialog is open (${JSON.stringify(d.message)}); run dialog-accept or dialog-dismiss`;
 }
 
 /** What the `state` op returns. */
 export interface PageState {
   url: string;
   title: string;
-  /** Present only while a dialog is open (chrome). */
-  dialog?: DialogState;
   /** The daemon's persistent profile directory; absent when its store is
    *  ephemeral. `open --persistent` compares it with the one it wants. */
   profile?: string;
@@ -49,11 +40,9 @@ export interface PageState {
 export interface DaemonOps {
   ping:             { args: [];                                          result: "pong";               urgent: true };
   shutdown:         { args: [];                                          result: void;                 urgent: true };
-  /** Answer the open dialog (`answered` says how), or, with none open, keep
-   *  the answer for the next dialog (`{}`). Urgent: it must never wait
-   *  behind the op the dialog blocked. */
-  "dialog-answer":  { args: [accept: boolean, text?: string];            result: { answered?: DialogReport }; urgent: true };
   state:            { args: [];                                          result: PageState };
+  /** Set the one-shot answer for the next dialog on this page. */
+  "dialog-answer":  { args: [accept: boolean, text?: string];            result: void };
   navigate:         { args: [url: string];                               result: void };
   evaluate:         { args: [expr: string];                              result: unknown };
   click:            { args: [selector: string];                          result: void };
@@ -100,7 +89,7 @@ export type UrgentOp = { [O in Op]: DaemonOps[O] extends { urgent: true } ? O : 
 // The runtime mirror of the `urgent: true` markers, same trick as CDP_OPS:
 // `satisfies` makes a missing entry a compile error, so an op cannot be
 // declared urgent in the type and stay queued at runtime.
-const URGENT_OPS = { ping: true, shutdown: true, "dialog-answer": true } satisfies Record<UrgentOp, true>;
+const URGENT_OPS = { ping: true, shutdown: true } satisfies Record<UrgentOp, true>;
 
 export const IS_URGENT: ReadonlySet<Op> = new Set<Op>(Object.keys(URGENT_OPS) as UrgentOp[]);
 
@@ -125,7 +114,7 @@ export interface DaemonResponse {
   result?: unknown;
   error?: string;
   /** On a queued op's reply: the dialogs the daemon answered since the last
-   *  such reply, then the open one if any. Absent when there are none. */
+   *  such reply. Absent when there are none. */
   dialogs?: DialogReport[];
 }
 
@@ -133,8 +122,7 @@ export interface DaemonResponse {
  *  DaemonClient implements it; tests implement it with a fake. */
 export interface DaemonConnection {
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>>;
-  /** The dialogs this connection's replies reported: every answered one, then
-   *  the open one if the latest reply had one. */
+  /** Every dialog this connection's replies reported, in order. */
   dialogs(): DialogReport[];
   close(): void;
 }

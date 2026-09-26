@@ -11,10 +11,9 @@ import type { Backend } from "./backend.ts";
 import type { DialogState } from "./daemon/protocol.ts";
 
 /** What the daemon hears about dialogs. `navigated` fires on both backends
- *  (a one-shot answer is lost on navigation); `opened`/`closed` on chrome only. */
+ *  (a one-shot answer is lost on navigation); `opened` on chrome only. */
 export interface DialogListener {
   opened(dialog: DialogState): void;
-  closed(): void;
   navigated(): void;
 }
 
@@ -125,18 +124,13 @@ export interface Browser {
    *  ever delivered — check the result rather than assuming it fired. */
   subscribe(event: string, handler: (data: unknown) => void): boolean;
   /** Report dialogs and navigations to `on`. Returns false on webkit, where
-   *  only `navigated` is ever called. Call once, before the first navigate:
-   *  chrome enables its Page domain on the first navigation (CDP has no
-   *  session before one). */
+   *  only `navigated` is ever called. Call once, before the first navigate,
+   *  so a dialog during the first page load is seen too: the listener needs
+   *  no CDP session (measured, Bun 1.4.2: Bun enables the Page domain itself
+   *  and delivers the event during the first navigate). */
   watchDialogs(on: DialogListener): boolean;
   /** Answer the open dialog (chrome: Page.handleJavaScriptDialog). */
   answerDialog(accept: boolean, promptText?: string): Promise<void>;
-  /** The page's url and title without evaluating in it, so it answers while
-   *  a dialog blocks the page. Chrome: CDP Target.getTargetInfo for our own
-   *  target (measured: answers at once with a confirm() open, and reports the
-   *  real url after a query-string navigation, unlike view.url). Webkit never
-   *  has a blocked page, so it reads the page as realUrl/realTitle do. */
-  pageInfo(): Promise<{ url: string; title: string }>;
   // --- Cookies: CDP-backed, so chrome only. Each rejects with CDP_UNAVAILABLE on webkit. ---
   getCookies(urls?: string[]): Promise<Cookie[]>;
   setCookie(param: CookieParam): Promise<{ success: boolean }>;
@@ -239,8 +233,6 @@ export interface PersistentStore {
 export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING, store?: PersistentStore): Browser {
   const profile = store?.profile;
   let dialogs: DialogListener | undefined;
-  // Chrome only, and only once a navigation has created the CDP session.
-  let pageEnabled = false;
   const nav = navigationWatch(view, timing, () => dialogs?.navigated());
   const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     // view.cdp() exists on the chrome backend only. On webkit Bun throws
@@ -251,24 +243,20 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     }
     return view.cdp(method, params);
   };
+  const subscribe = (event: string, handler: (data: unknown) => void): boolean => {
+    // webkit accepts addEventListener and silently never fires it, so
+    // registering there would report success and deliver nothing.
+    if (spec.kind !== "chrome") return false;
+    view.addEventListener(event, (e) => handler(e.data));
+    return true;
+  };
 
   return {
     get url() { return view.url; },
     get title() { return view.title; },
     realUrl: () => resolveUrl(view.url, () => view.evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => view.evaluate(READ_TITLE)),
-    navigate: async (url) => {
-      await view.navigate(url);
-      if (dialogs && spec.kind === "chrome" && !pageEnabled) {
-        // Without the Page domain a dialog is never reported, and the op that
-        // opened it hangs until the op timeout. A failure is retried on the
-        // next navigate rather than failing this one.
-        try {
-          await cdp("Page.enable", {});
-          pageEnabled = true;
-        } catch {}
-      }
-    },
+    navigate: (url) => view.navigate(url),
     evaluate: (expr) => view.evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
@@ -333,39 +321,20 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
       return spec.kind === "chrome";
     },
     cdp,
-    subscribe: (event, handler) => {
-      // webkit accepts addEventListener and silently never fires it, so
-      // registering there would report success and deliver nothing.
-      if (spec.kind !== "chrome") return false;
-      view.addEventListener(event, (e) => handler(e.data));
-      return true;
-    },
+    subscribe,
     watchDialogs(on) {
       dialogs = on;
-      if (spec.kind !== "chrome") return false;
-      view.addEventListener("Page.javascriptDialogOpening", (e) => {
-        const d = e.data as { type: DialogState["type"]; message: string; defaultPrompt?: string };
+      return subscribe("Page.javascriptDialogOpening", (data) => {
+        const d = data as { type: DialogState["type"]; message: string; defaultPrompt?: string };
         on.opened({
           type: d.type,
           message: d.message,
           ...(d.type === "prompt" ? { defaultValue: d.defaultPrompt ?? "" } : {}),
         });
       });
-      view.addEventListener("Page.javascriptDialogClosed", () => on.closed());
-      return true;
     },
     answerDialog: async (accept, promptText) => {
       await cdp("Page.handleJavaScriptDialog", promptText === undefined ? { accept } : { accept, promptText });
-    },
-    pageInfo: async () => {
-      if (spec.kind !== "chrome") {
-        return {
-          url: await resolveUrl(view.url, () => view.evaluate(READ_URL)),
-          title: await resolveTitle(view.title, () => view.evaluate(READ_TITLE)),
-        };
-      }
-      const { targetInfo } = (await cdp("Target.getTargetInfo", {})) as { targetInfo: { url: string; title: string } };
-      return { url: targetInfo.url, title: targetInfo.title };
     },
     getCookies: async (urls) => {
       // `!= null`: the wire delivers JSON null for an omitted url list.
