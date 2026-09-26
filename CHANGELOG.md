@@ -5,6 +5,38 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-26
+
+### BREAKING: WebKit only, macOS only
+
+bowser now drives only native WebKit through `Bun.WebView`, with no browser download. The Chrome
+backend is removed. If you need Chromium, use Microsoft's
+[`playwright-cli`](https://github.com/microsoft/playwright-cli), whose commands bowser mirrors.
+
+- **macOS only.** `Bun.WebView`'s WebKit backend exists only on macOS. On another platform, any
+  command that would start a session fails with `bowser requires macOS (WebKit)` (exit 1);
+  `--help`, `--version` and the MCP tool listing still work. `package.json` declares
+  `"os": ["darwin"]`.
+- **No Linux binaries.** Releases ship `bowser-macos-arm64` and `bowser-macos-x64` only.
+- **Removed commands:** `install` (it downloaded Chromium), and `cookie-list`, `cookie-get`,
+  `cookie-set`, `cookie-delete` and `cookie-clear` (`Bun.WebView` reaches cookies only through
+  CDP, which WebKit does not have). Each now gives `unknown command` (exit 1).
+- **`state-save` / `state-load` keep only localStorage.** The file is still Playwright's
+  `storageState`: `state-save` writes `"cookies": []`, and `state-load` restores localStorage and
+  skips any cookies with one stderr line, `N cookies skipped (bowser has no cookie access on WebKit;
+  use open --persistent)`. To keep a login between sessions, use `open --persistent` or
+  `open --profile=<dir>`, which keep cookies on disk.
+- **Removed environment variables:** `BOWSER_BACKEND`, `BOWSER_CHROMIUM_PATH` and
+  `BOWSER_CHROME_ARGS`. Nothing reads them any more.
+- **`BOWSER_CHROME_DEBUG` is renamed `BOWSER_DAEMON_DEBUG`.** It still lets the daemon's output
+  through to the terminal.
+- **Dialogs** are answered only by the page shim; the `could not be answered` state was
+  Chromium's and is gone.
+
+Several entries below were written before the pivot and mention Chromium, CDP, the cookie commands
+or enum flags (`FlagSpec.values`, removed along with the cookie flags). In 0.6.0 only their WebKit
+behaviour ships.
+
 ### Added
 
 - **`dialog-accept [text]` and `dialog-dismiss`** set the answer for the next `alert`, `confirm` or
