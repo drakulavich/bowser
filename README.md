@@ -5,7 +5,7 @@
 
 A Bun-native, drop-in command-compatible alternative to Microsoft [`playwright-cli`](https://github.com/microsoft/playwright-cli) for AI agents. Same commands, same flag syntax, same snapshot YAML — replace `playwright` with `bowser` and existing playwright-cli skills work unchanged.
 
-Built on [`Bun.WebView`](https://bun.com/docs/runtime/webview) (new in Bun 1.3.12), so on macOS there's nothing to install beyond Bun itself, and on Linux / Windows it drives any installed Chrome / Chromium / Edge over the DevTools Protocol.
+Built on [`Bun.WebView`](https://bun.com/docs/runtime/webview) (new in Bun 1.3.12), it drives the native WebKit engine on macOS, so there is no browser to download: nothing to install beyond Bun itself. bowser runs on macOS only. If you need Chromium, or Linux or Windows, use [`playwright-cli`](https://github.com/microsoft/playwright-cli).
 
 ## Why
 
@@ -16,6 +16,8 @@ What sets it apart from `playwright-cli`:
 - **Persistent sessions.** Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
 ## Install
+
+bowser runs on macOS only (it needs WebKit, which `Bun.WebView` provides only there).
 
 ```bash
 # From npm (requires Bun ≥ 1.3.12 on your PATH)
@@ -28,38 +30,20 @@ bun install
 bun link                     # exposes `bowser` on $PATH
 ```
 
-Prebuilt single-file binaries for Linux (x64/arm64) and macOS (arm64/x64)
-are also attached to every GitHub Release — see
+Prebuilt single-file binaries for macOS (arm64/x64) are also attached to every GitHub Release — see
 [Releases](https://github.com/drakulavich/bowser/releases).
 
 Requires Bun ≥ 1.3.12 for the npm/source install.
 
-### Browser backend
+On another platform, any command that would start a session fails with the error "bowser requires macOS (WebKit)" (exit 1).
 
-On macOS, bowser uses the native `WKWebView` engine by default — nothing to install.
-It switches to Chrome/Chromium automatically if you opted in by
-setting `BOWSER_CHROMIUM_PATH`. On Linux and Windows it always uses Chrome/Chromium.
-
-Override the choice with `BOWSER_BACKEND`:
-
-| Value | Effect |
-| --- | --- |
-| `BOWSER_BACKEND=webkit` | Force native WebKit (macOS only; errors elsewhere). |
-| `BOWSER_BACKEND=chrome` | Force Chrome/Chromium. |
+### Screenshots
 
 Screenshots are written as PNG files. `bowser screenshot --filename out.png` writes
 to `out.png` (relative paths resolve against your current directory); without
 `--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
 if that file already exists. Captures are full-page (element-bounded screenshots are
 not supported yet).
-
-### How Chromium is resolved
-
-Bowser looks for a Chromium/Chrome binary in this order and uses the first one found:
-
-1. `$BOWSER_CHROMIUM_PATH` (explicit override)
-2. `~/.bowser/chromium/...`
-3. System-wide installs: `/usr/bin/chromium-headless-shell`, `/usr/bin/chromium`, `/usr/bin/chromium-browser`, `/usr/bin/google-chrome`, `/Applications/Google Chrome.app/...`, `/Applications/Chromium.app/...`
 
 ## Quickstart
 
@@ -86,7 +70,7 @@ bowser -s=login click e3
 
 ### Persistent profiles
 
-A session's browser store is in memory by default: `close` (or a crash) loses its logins. Open it with `--persistent` to keep cookies, `localStorage` and IndexedDB on disk, like `playwright-cli open --persistent`:
+A session's browser store is in memory by default: `close` (or a crash) loses its logins. A persistent profile is the way to keep cookies, and so logins, between sessions: bowser has no cookie commands, and `state-save`/`state-load` carry only `localStorage`. Open the session with `--persistent` to keep cookies, `localStorage` and IndexedDB on disk, like `playwright-cli open --persistent`:
 
 ```bash
 bowser -s=app open https://app.example.com/login --persistent   # profile in ~/.bowser/profiles/app/
@@ -98,7 +82,7 @@ bowser -s=work open https://app.example.com --profile=./profiles/work   # a dire
 - The profile lives outside `~/.bowser/sessions/<name>/`, so `close` leaves it alone. Delete it with `rm -rf ~/.bowser/profiles/<name>` (or your `--profile` directory).
 - The store is chosen when the session's browser starts. `open --persistent` on a session that is already running with another store fails with exit 1; run `bowser close` first. `open` without the flag reuses a running persistent session.
 - One profile directory serves one running session at a time; sharing it between two is unsupported.
-- WebKit needs macOS 15.2 or later for a persistent store.
+- A persistent store needs macOS 15.2 or later.
 
 ### Dialogs
 
@@ -121,7 +105,7 @@ The command that caused the dialog reports it under `### Modal state`. With `--j
 **Differences from `playwright-cli`:**
 
 - In `playwright-cli`, the dialog stays open and `dialog-accept` answers it *after* the action. In bowser, `dialog-accept` after the action prepares the *next* dialog. It does not answer the one already reported.
-- On WebKit, which has no dialog events, bowser replaces `window.alert`/`confirm`/`prompt` in the page before it acts there. A dialog the page opens while loading, before bowser's first command on that document, is dismissed by WebKit and not reported. A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page. A dialog opened through a reference the page saved at load time (`const c = window.confirm`) is dismissed by WebKit and not reported, and a prepared answer stays set until the next dialog bowser sees or a navigation. Chromium reports all of these. `beforeunload` is accepted on Chromium and not handled on WebKit.
+- WebKit has no dialog events, so bowser replaces `window.alert`/`confirm`/`prompt` in the page before it acts there. A dialog the page opens while loading, before bowser's first command on that document, is dismissed by WebKit and not reported. A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page. A dialog opened through a reference the page saved at load time (`const c = window.confirm`) is dismissed by WebKit and not reported, and a prepared answer stays set until the next dialog bowser sees or a navigation. `beforeunload` is not handled.
 
 ### Snapshot output
 
@@ -167,7 +151,6 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 
 | Command | Description |
 | --- | --- |
-| `install [--force]` | Download a headless Chromium |
 | `open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies, `localStorage` and IndexedDB in `~/.bowser/profiles/<session>/` across `close` and restarts; `--profile=dir` keeps them in `dir` instead (implies `--persistent`). See [Persistent profiles](#persistent-profiles). |
 | `goto <url>` | Navigate within current session |
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
@@ -180,7 +163,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `check <ref>` / `uncheck <ref>` | Toggle a checkbox |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
 | `screenshot [--filename=f]` | Full-page screenshot (PNG) |
-| `resize <width> <height>` | Set the viewport size in pixels. Works on both backends. |
+| `resize <width> <height>` | Set the viewport size in pixels |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
 | `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped. |
@@ -197,13 +180,8 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `sessionstorage-clear` | Clear all `sessionStorage` entries |
 | `eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `run-code <code>` | Run multi-statement JS in the current page; wrap in an IIFE, use `return` to produce a value |
-| `cookie-list [--domain=<d>] [--url=<u>]` | List cookies for the current page (or specified scope). HttpOnly cookies are first-class. Requires the chrome backend. |
-| `cookie-get <name> [--domain=<d>] [--url=<u>]` | Print a cookie's value (empty if not found). HttpOnly cookies are visible. Requires the chrome backend. |
-| `cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Strict\|Lax\|None] [--expires=<unix-s>]` | Set a cookie. Defaults URL to current page. `--http-only` sets the HttpOnly flag. Requires the chrome backend. |
-| `cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]` | Delete a cookie. Requires the chrome backend. |
-| `cookie-clear` | Wipe all browser cookies in this session. Requires the chrome backend. |
-| `state-save <file>` | Dump the cookie jar + current-origin localStorage to a Playwright-compatible `storageState` JSON file. Requires the chrome backend. |
-| `state-load <file>` | Restore cookies + localStorage from a `storageState` file. localStorage restores for origins matching the current page; others are reported skipped. Requires the chrome backend. |
+| `state-save <file>` | Save the current origin's localStorage to a Playwright-compatible `storageState` JSON file. Its `cookies` array is always empty: bowser has no cookie access (use `open --persistent` to keep logins). |
+| `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. |
 | `mcp` | Run a Model Context Protocol stdio server exposing every command above as an MCP tool. |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
@@ -236,23 +214,22 @@ Notes:
 
 | Variable | Effect |
 | --- | --- |
-| `BOWSER_BACKEND` | `webkit` or `chrome` — override the auto-selected browser backend. |
-| `BOWSER_CHROMIUM_PATH` | Explicit path to a `chrome-headless-shell` binary; bypasses auto-detection. |
 | `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Bounds a wedged daemon operation — if the browser hangs, the command exits with a timeout error instead of blocking forever. |
+| `BOWSER_DAEMON_DEBUG` | `1` lets the session daemon's stdout and stderr through to the terminal, for debugging a daemon that fails to start. |
 
 ## Tests
 
 ```bash
 bun run typecheck                              # tsc
 bun test                                       # unit + command tests with a fake daemon
-BOWSER_E2E=1 bun test                          # + end-to-end on the resolved backend (WebKit on macOS, Chromium elsewhere)
+BOWSER_E2E=1 bun test                          # + end-to-end on WebKit
 BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub search)
 ```
 
 **End-to-end examples included:**
 - `tests/e2e.test.ts` — open/snapshot/click on a `data:` URL (no network)
 - `tests/e2e-todo.test.ts` — a local todo app served by `Bun.serve`: add three todos, toggle one, clear completed. Proves the daemon keeps state across commands.
-- `tests/e2e-webkit.test.ts` — every non-CDP command driven on WebKit, with page state read back via `eval` after each one.
+- `tests/e2e-webkit.test.ts` — every command driven on WebKit, with page state read back via `eval` after each one.
 - `tests/e2e-compat.test.ts` — diffs bowser against `playwright-cli` on the todo flow, asserting bowser's refs are a subset of playwright-cli's tree; skips without playwright-cli's WebKit installed.
 - `tests/e2e-search.test.ts` — live web: search GitHub for OpenClaw, find the repo link, type into the search box and press Enter.
 
@@ -263,12 +240,11 @@ bun build src/cli.ts --compile --outfile dist/bowser
 ./dist/bowser open https://example.com
 ```
 
-Cross-compile for other platforms:
+Build for a specific Mac:
 
 ```bash
 bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile dist/bowser-macos-arm64
-bun build src/cli.ts --compile --target=bun-linux-x64    --outfile dist/bowser-linux-x64
-bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.exe
+bun build src/cli.ts --compile --target=bun-darwin-x64   --outfile dist/bowser-macos-x64
 ```
 
 ## Roadmap
@@ -277,12 +253,11 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [x] playwright-cli command compatibility for the core agent loop
 - [x] Snapshot nesting honoring `--depth=N`
 - [x] Full aria tree in `playwright-cli`'s snapshot format
-- [ ] Storage commands (`cookie-*`, `localstorage-*`, `state-save`/`load`)
+- [x] Storage commands (`localstorage-*`, `sessionstorage-*`, `state-save`/`load`)
   - [x] `localstorage-{list,get,set,delete,clear}`
   - [x] `sessionstorage-{list,get,set,delete,clear}`
-  - [x] `cookie-{list,get,set,delete,clear}` — HttpOnly cookies are first-class; uses `Bun.WebView.cdp()` (chrome backend only; see [design](./docs/superpowers/specs/2026-05-14-cdp-cookies-design.md))
-  - [x] `state-save` / `state-load` — Playwright-compatible `storageState` JSON (cookies + per-origin localStorage; chrome backend only)
-- [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`) — deferred: `Bun.WebView` can't reach popups yet (`window.open` returns `null` on WebKit, and on Chromium the popup is not drivable), so tabs would leave out their main use; see the [refactor spec](./docs/superpowers/specs/2026-09-05-maintainability-refactor-design.md#open-questions)
+  - [x] `state-save` / `state-load` — Playwright-compatible `storageState` JSON (per-origin localStorage; no cookies, use `open --persistent`)
+- [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`) — deferred: `Bun.WebView` can't reach popups yet (`window.open` returns `null` on WebKit), so tabs would leave out their main use; see the [refactor spec](./docs/superpowers/specs/2026-09-05-maintainability-refactor-design.md#open-questions)
 - [ ] Network mocking (`route`, `unroute`)
 - [ ] Tracing / video / PDF output
 - [x] `eval`, `run-code`
