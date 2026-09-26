@@ -11,6 +11,10 @@ All notable changes to this project are documented here. This project follows
   `close --help` closed the session, `open --help` opened one, and `mcp --help` started the MCP
   server. `-h`/`--help` anywhere before `--` now prints the usage line, summary, arguments and flags
   from the registry, and exits 0. With no command it prints the general help, as before.
+- **`click` and `fill` reach an element below the fold.** They timed out after 30 s on an element
+  outside the viewport. Every ref action now scrolls its element into view first, as
+  `playwright-cli` does, in the same page script that resolves the ref, so it costs no extra round
+  trip.
 
 ## [0.6.0] — 2026-09-26
 

@@ -714,12 +714,19 @@ export function runCodeScript(code: string): string {
 
 /** The ref's element in the live page, as a CSS_PATH computed now, or null
  *  when it is gone: no ref store (a new document), a ref this document never
- *  handed out, an element collected or no longer connected. */
+ *  handed out, an element collected or no longer connected. It also scrolls
+ *  an element outside the viewport into view, as playwright-cli does before
+ *  acting: WebKit's native click waits for its target to be visible, so a
+ *  link below the fold timed out (spec F8). Here it costs no round trip. */
 export function resolveRefScript(ref: string): string {
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
   const el = store?.byRef?.get(${JSON.stringify(ref)})?.deref();
   if (!el || !el.isConnected) return null;
+  const r = el.getBoundingClientRect();
+  if (r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) {
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+  }
   ${CSS_PATH}
   return cssPath(el);
 })()`;
