@@ -269,9 +269,12 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
 
   /** `run`, with the page shim that answers dialogs. It must be in the page
    *  before an op acts there, and its log is read after. An eval carries
-   *  both in its own expression, so it costs no extra page call; a native
-   *  action costs one read after it, and one install before it only after a
-   *  navigation. */
+   *  both in its own expression, so it costs no extra page call. An op that
+   *  may leave the document (every ACTS and NAVIGATES op) costs one read
+   *  before it and one after: a dialog a timer opened since the last op is
+   *  in the log of the document the op may leave, and the log leaves with
+   *  it. The reads are page evaluates inside the daemon, not socket round
+   *  trips (~0.07 ms each on WebKit, measured). */
   async function runShimmed(req: DaemonRequest): Promise<DaemonResponse> {
     if (req.op === "evaluate") {
       const drop = !shimmed;
@@ -289,11 +292,14 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
       return r?.value === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result: r.value };
     }
     if (!ACTS.has(req.op) && !NAVIGATES.has(req.op)) return run(req);
+    // Before: an action installs the shim if the page lacks it; either op
+    // reads the log of a page that has it. A navigating op on a page with no
+    // shim has no log to read.
+    if (ACTS.has(req.op) || shimmed) await sync();
     // A navigating op leaves this document, so the sync after it drops the
     // page's answer: a document the back-forward cache restores still has
     // its shim and answer. Not left to the navigation callback alone.
     if (NAVIGATES.has(req.op)) shimmed = false;
-    if (ACTS.has(req.op) && !shimmed) await sync();
     const res = await run(req);
     await sync();
     return res;
