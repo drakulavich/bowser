@@ -31,11 +31,25 @@ export interface Parsed {
 
 const GLOBAL_NAMES = new Set(["session", "json", "help"]);
 
+/** Whether `-h`/`--help` appears before the first bare `--`. A raw scan, so
+ *  an unknown flag beside it cannot hide it: `mcp --bogus --help` must print
+ *  help, not start the server. */
+export function helpRequested(argv: string[]): boolean {
+  for (const a of argv) {
+    if (a === "--") return false;
+    if (a === "-h" || a === "--help") return true;
+  }
+  return false;
+}
+
 export function parse(schemas: Schemas, argv: string[]): Parsed {
+  // With help asked for, nothing runs, so an unknown flag or command is
+  // skipped rather than reported.
+  const help = helpRequested(argv);
   const out: Parsed = {
     session: "default",
     json: false,
-    help: false,
+    help,
     command: undefined,
     positional: [],
     flags: {},
@@ -66,6 +80,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       const eq = a.indexOf("=");
       const name = eq >= 0 ? a.slice(2, eq) : a.slice(2);
       const spec = findFlag(schemas, cmdSchema, name);
+      if (!spec && help) { i++; continue; }
       if (!spec) throw new Error(`unknown flag: --${name}`);
       const value =
         spec.kind === "boolean"
@@ -80,6 +95,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       const eq = a.indexOf("=");
       const short = eq >= 0 ? a.slice(1, eq) : a.slice(1);
       const spec = findShort(schemas, cmdSchema, short);
+      if (!spec && help) { i++; continue; }
       if (!spec) throw new Error(`unknown flag: -${short}`);
       const value =
         spec.kind === "boolean"

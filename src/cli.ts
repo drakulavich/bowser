@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { renderCommandHelp, renderHelp } from "./cli/help.ts";
-import { parse } from "./cli/parser.ts";
+import { helpRequested, parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { failedModalState, type CommandContext } from "./commands/context.ts";
 
@@ -29,17 +29,6 @@ export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
   return { stderr: `bowser: ${msg}${modal ? `\n${modal}` : ""}`, code: userError ? 1 : 2 };
 }
 
-/** Whether argv asks for help, so `bowser mcp --help` prints it rather than
- *  starting the server. An argv the parser rejects starts the server as
- *  before. */
-function wantsHelp(argv: string[]): boolean {
-  try {
-    return parse(SCHEMAS, argv).help;
-  } catch {
-    return false;
-  }
-}
-
 if (import.meta.main) {
   // Hidden entry point used when the compiled binary re-spawns itself as a
   // daemon (import.meta.url is virtual /$bunfs/... in a compiled binary, so
@@ -60,7 +49,7 @@ if (import.meta.main) {
     // made the compiled binary's "did not start in time"). The keepalive holds
     // the process open; the `else` keeps us out of the command dispatcher.
     await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);
-  } else if (process.argv[2] === "mcp" && !wantsHelp(process.argv.slice(2))) {
+  } else if (process.argv[2] === "mcp" && !helpRequested(process.argv.slice(2))) {
     // Long-lived stdio MCP server. Handled here at the entry layer (like
     // --daemon) because it never returns a string — keeping run()'s contract
     // string-returning. It is still listed in SCHEMAS/HELP for discoverability.

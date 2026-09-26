@@ -137,6 +137,16 @@ describe("per-command help", () => {
     expect(seen.connects).toBe(0);
   });
 
+  test("an unknown flag beside --help does not hide it; without --help it is still an error", async () => {
+    const { seen, base } = counting();
+    const close = COMMANDS.find((c) => c.name === "close")!;
+    expect((await run(["close", "--bogus", "--help"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
+    expect((await run(["close", "-x", "-h"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
+    expect(seen.connects).toBe(0);
+    await expect(run(["close", "--bogus"], base)).rejects.toThrow("unknown flag: --bogus");
+    await expect(run(["fill", "e1", "--", "--bogus", "--help"], base)).rejects.toThrow("no open page");
+  });
+
   test("close --help leaves the session in place", async () => {
     const { base } = counting();
     await saveState({ name: "keep", url: "https://x", title: "X", refs: [], updatedAt: 1 });
@@ -157,10 +167,19 @@ describe("per-command help", () => {
     await expect(run(["fill", "e1", "--", "--help"], base)).rejects.toThrow("no open page");
   });
 
-  test("the CLI entry exits 0 for close --help and for mcp --help, which starts no server", async () => {
-    for (const name of ["close", "mcp"]) {
+  // An unknown flag next to --help still gets the help: `mcp --bogus --help`
+  // once started the server, because the parse error hid the --help.
+  test.each([
+    [["close", "--help"]],
+    [["mcp", "--help"]],
+    [["close", "--bogus", "--help"]],
+    [["mcp", "--bogus", "--help"]],
+    [["mcp", "-x", "-h"]],
+  ])("the CLI entry prints help and exits 0 for %j, starting no server", async (argv) => {
+    const name = argv[0]!;
+    {
       const proc = Bun.spawn({
-        cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), name, "--help"],
+        cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), ...argv],
         env: { ...process.env, HOME: tmp },
         // A pipe held open: a started MCP server would wait on it forever.
         stdin: "pipe",
