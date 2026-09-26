@@ -314,7 +314,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     if (role !== 'presentation' && role !== 'none') {
       if (tag === 'INPUT' && ['button', 'submit', 'reset'].includes(el.type)) {
         o.visited.add(el);
-        if ((el.value || '').trim()) return el.value;
+        if (!isPassword(el) && (el.value || '').trim()) return el.value;
         if (el.type === 'submit') return 'Submit';
         if (el.type === 'reset') return 'Reset';
         return el.getAttribute('title') || '';

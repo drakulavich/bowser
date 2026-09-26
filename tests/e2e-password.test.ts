@@ -27,6 +27,8 @@ const runOrSkip = E2E ? describe : describe.skip;
 const SECRET = "hunter2-TOPSECRET";
 const PIN = "PIN-UPPERCASE-TYPE-4711";
 const CODE = "COMBO-ROLE-SECRET-99";
+// Set by the page on a password field whose `type` property claims "button".
+const ODD = "ODD-TYPE-GETTER-CANARY-555";
 const USER = "alice-visible";
 
 // Password fields with a lowercase type, an uppercase type and an explicit
@@ -40,6 +42,15 @@ const PAGE = `<!doctype html><html><head><title>Login</title></head><body>
 <button aria-labelledby="pw">Go</button>
 <button aria-labelledby="pin">Pin go</button>
 <button aria-labelledby="code">Code go</button>
+<input id="odd" type="password">
+<button aria-labelledby="odd">Odd go</button>
+<script>
+  // The type attribute says password, the overridden property says button:
+  // a check on el.type alone would treat the value as a button's name.
+  const odd = document.getElementById('odd');
+  Object.defineProperty(odd, 'type', { get: () => 'button' });
+  odd.value = ${JSON.stringify(ODD)};
+</script>
 </body></html>`;
 
 /** The tree text inside the ```yaml fence of `snapshot`'s output. */
@@ -49,7 +60,7 @@ function tree(out: string): string {
   return m[1]!;
 }
 
-const secrets = [SECRET, PIN, CODE];
+const secrets = [SECRET, PIN, CODE, ODD];
 
 runOrSkip("e2e: snapshot never reveals a password field's value (backend from resolveBackend)", () => {
   const ctx: CommandContext = { session: "password", json: false };
@@ -88,6 +99,7 @@ runOrSkip("e2e: snapshot never reveals a password field's value (backend from re
     try { await cmdClose(ctx); } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
+    else delete process.env.HOME;
     await rm(tmp, { recursive: true, force: true });
   });
 
@@ -117,7 +129,7 @@ runOrSkip("e2e: snapshot never reveals a password field's value (backend from re
 
   test("aria-labelledby a password field adds nothing to a button's name", () => {
     const lines = tree(plain).split("\n").map((l) => l.trim());
-    for (const name of ["Go", "Pin go", "Code go"]) {
+    for (const name of ["Go", "Pin go", "Code go", "Odd go"]) {
       expect(lines.some((l) => l.startsWith(`- button ${JSON.stringify(name)} [ref=e`))).toBe(true);
     }
   });
