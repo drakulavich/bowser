@@ -207,6 +207,9 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
 - The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
+- `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
+- Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
+- `notifications/cancelled` drops the call: one still queued behind its session never runs, and a running one finishes but its result is discarded. Either way no response is sent for it, per the MCP spec. A browser operation that has already started is **not** undone — a cancelled `click` may still have clicked, and the session's next call waits for it to finish.
 
 ## How it works
 

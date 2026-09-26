@@ -48,6 +48,13 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
   ref action now scrolls such an element to the centre first, as
   `playwright-cli` does, in the same page script that resolves the ref, so it costs no extra round
   trip.
+- **One slow MCP tool call no longer freezes `bowser mcp`.** The server handled one request at a
+  time, so while a call to one session ran, `ping` and calls to other sessions waited for it (35.6 s
+  in the repro). `initialize`, `ping`, `tools/list` and notifications are now answered at once;
+  tool calls for different sessions run at the same time, and calls for one session still run in
+  arrival order. Responses can therefore arrive out of order, which JSON-RPC allows.
+  `notifications/cancelled` is now honoured: a queued call never runs, a running call's result is
+  dropped, and neither gets a response. A browser operation that has started is not undone.
 
 ## [0.6.0] — 2026-09-26
 
