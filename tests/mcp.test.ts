@@ -289,7 +289,7 @@ describe("MCP positionals are data, never flags", () => {
           deps,
         );
         expect(res.result.isError).toBeFalsy();
-        expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, ref: "e1", text });
+        expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, ref: "e1" });
         expect(c.calls.filter(([op]) => op === "type")).toEqual([["type", [text]]]);
       } finally {
         process.env.HOME = prevHome;
@@ -342,4 +342,75 @@ describe("bowser mcp never reads its own stdin for a command", () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+});
+
+describe("MCP fill and type never echo the entered text", () => {
+  const SECRET = "hunter2-S3cr3t!";
+  for (const [tool, args] of [
+    ["fill", { ref: "e1", text: SECRET, session: "echo" }],
+    ["type", { text: SECRET, session: "echo" }],
+  ] as const) {
+    test(`the ${tool} tool result does not contain the text`, async () => {
+      const home = await mkdtemp(join(tmpdir(), "bowser-mcp-echo-"));
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        await saveState({ name: "echo", url: "https://x", title: "X", updatedAt: Date.now(),
+          refs: [{ id: "e1", selector: "input", role: "textbox", name: "Password", tag: "input" }] });
+        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript("e1") ? "input" : undefined) });
+        const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
+        const res: any = await handleMcpRequest(
+          { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } },
+          deps,
+        );
+        expect(res.result.isError).toBeFalsy();
+        expect(c.calls).toContainEqual(["type", [SECRET]]);
+        expect(JSON.stringify(res)).not.toContain(SECRET);
+      } finally {
+        process.env.HOME = prevHome;
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+describe("MCP fill and type errors never carry the entered text", () => {
+  const SECRET = "hunter2-S3cr3t!";
+  const cases = [
+    ["fill", { ref: "e1", text: SECRET, session: "echoerr" }],
+    ["type", { text: SECRET, session: "echoerr" }],
+  ] as const;
+  const call = async (tool: string, args: object, message: string) => {
+    const home = await mkdtemp(join(tmpdir(), "bowser-mcp-echoerr-"));
+    const prevHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      await saveState({ name: "echoerr", url: "https://x", title: "X", updatedAt: Date.now(),
+        refs: [{ id: "e1", selector: "input", role: "textbox", name: "Password", tag: "input" }] });
+      const c = fakeClient({
+        evaluate: (e) => (e === resolveRefScript("e1") ? "input" : undefined),
+        type: () => { throw new Error(message); },
+      });
+      const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
+      const res: any = await handleMcpRequest(
+        { jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: tool, arguments: args } },
+        deps,
+      );
+      expect(res.result.isError).toBe(true);
+      return res.result.content[0].text as string;
+    } finally {
+      process.env.HOME = prevHome;
+      await rm(home, { recursive: true, force: true });
+    }
+  };
+  for (const [tool, args] of cases) {
+    test(`the ${tool} tool's isError text withholds a browser error containing the text`, async () => {
+      expect(await call(tool, args, `failed: ${SECRET}`)).toBe(
+        `${tool}: the browser's error message was withheld because it contained the entered text`,
+      );
+    });
+    test(`the ${tool} tool's isError text passes an error without the text through`, async () => {
+      expect(await call(tool, args, "failed: boom")).toBe("failed: boom");
+    });
+  }
 });
