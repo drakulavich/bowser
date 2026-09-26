@@ -50,9 +50,9 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
-    name: "backend.ts, page-scripts.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
+    name: "page-scripts.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
     violates: (file, text) =>
-      ["src/backend.ts", "src/page-scripts.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
+      ["src/page-scripts.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
       valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
@@ -62,7 +62,7 @@ const RULES: Rule[] = [
       valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
   },
   {
-    name: "daemon/client.ts does not import browser.ts (backend checks come from backend.ts)",
+    name: "daemon/client.ts does not import browser.ts",
     violates: (file, text) =>
       file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
   },
@@ -85,6 +85,13 @@ const RULES: Rule[] = [
     // Like the rule above, this is a code-ownership lint, not a
     // security control — see its note for what actually guards injection.
     violates: (file, text) => file !== "src/page-scripts.ts" && /\.evaluate\(\s*[`'"]/.test(text),
+  },
+  {
+    name: "src never names the removed engine or its debugging protocol: bowser is WebKit only",
+    // The spec (docs/superpowers/specs/2026-09-26-webkit-only-design.md) removed
+    // the second engine for good; a mention, even in a comment, is how a code
+    // path "just in case" starts coming back.
+    violates: (_file, text) => /chrom|\bcdp\b/i.test(text),
   },
 ];
 
