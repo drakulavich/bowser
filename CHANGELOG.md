@@ -21,6 +21,15 @@ All notable changes to this project are documented here. This project follows
   profile in place; delete it with `rm -rf`. Opening a running session with a different store is a
   usage error (exit 1): close it first. One profile serves one running session at a time.
 
+### Changed
+
+- **`snapshot` never shows a password field's value.** A filled `<input type="password">` (any case
+  of `type`) prints as a leaf such as `textbox "Password" [ref=e3]`, `state.json` keeps no `value`
+  for its ref, and an `aria-labelledby` reference to it adds nothing to another element's name.
+  Before, a secret passed to `fill` showed up in the next `snapshot` (plain and `--json`) and on
+  disk. A deliberate difference from `playwright-cli`, which prints the value; `eval` can still
+  read it on purpose.
+
 ### Breaking
 
 - **`snapshot` prints the full aria tree in `playwright-cli`'s format.** It printed only

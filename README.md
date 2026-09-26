@@ -136,6 +136,8 @@ bowser -s=work open https://app.example.com --profile=./profiles/work   # a dire
 
 A ref stays the same across snapshots of one document while the element's role and name do not change; new elements get the next free number, so gaps are normal. After `fill e4 "buy milk"` and `click e5`, the list above becomes `listitem [ref=e11]` holding `checkbox "Toggle buy milk" [ref=e12]`, and `e5`, `e10` still name the same buttons. A navigation or reload starts again at `e1`.
 
+Password field values are never shown: a filled `<input type="password">` prints as `textbox "Password" [ref=e3]` with no value, `state.json` does not store it, and it adds nothing to another element's name. This is a deliberate difference from `playwright-cli`, which prints the value.
+
 An action on a ref whose element is gone (removed by a re-render, or from before a navigation or reload) fails at once with `ref 'eN' not found in the current page snapshot. Try capturing new snapshot.` and exit code 1, as in `playwright-cli`. Run `snapshot` again and use the new refs.
 
 `--depth=N` prints N levels below the first line: a node at the limit drops its children but keeps its inline text value and its prop lines (`/url`, `/placeholder`). `--depth=0` or no flag prints the whole tree. Iframe contents and shadow DOM are not walked: an iframe prints as a leaf with a ref.
