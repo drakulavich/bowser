@@ -262,6 +262,36 @@ test("a queued op that overruns its budget answers with a timeout error", async 
   ]);
 });
 
+test("an op that answers a dialog and then overruns its budget: the timeout reply carries the report, and a later one waits for the next printing request", async () => {
+  let release!: () => void;
+  const hang = new Promise<void>((r) => { release = r; });
+  const b = dialogBrowser();
+  b.click = async () => { b.on().opened(confirmBox); await hang; b.on().opened(promptBox); };
+  const handle = createHandler(b);
+  const replies: DaemonResponse[] = [];
+  const lane = { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r: DaemonResponse) => { replies.push(r); }, timedOut: handle.timedOut };
+  dispatch({ id: 1, op: "click", args: ["#go"], report: true }, lane);
+  await Bun.sleep(80);
+  expect(replies).toEqual([{
+    id: 1, ok: false, error: "operation 'click' timed out after 20ms",
+    dialogs: [{ ...confirmBox, state: "dismissed", unanswered: true }],
+  }]);
+  release();
+  await Bun.sleep(20);
+  // The late op's report was not spent on a reply nobody reads.
+  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
+});
+
+test("a timed-out request that prints nothing leaves the queued reports alone", async () => {
+  const b = dialogBrowser();
+  b.click = async () => { b.on().opened(confirmBox); await new Promise(() => {}); };
+  const handle = createHandler(b);
+  const replies: DaemonResponse[] = [];
+  dispatch({ id: 1, op: "click", args: ["#go"] }, { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r) => { replies.push(r); }, timedOut: handle.timedOut });
+  await Bun.sleep(60);
+  expect(replies).toEqual([{ id: 1, ok: false, error: "operation 'click' timed out after 20ms" }]);
+});
+
 test("a non-urgent op waits its turn behind the one before it", async () => {
   // The other half: without the serializer two ops could touch the WebView
   // at once. Proves the urgent lane above is a real exception, not the norm.
@@ -400,10 +430,29 @@ describe("dialogs: answered the moment they open", () => {
     expect((await h(rep("evaluate", ["1"]))).dialogs?.map((d) => d.state)).toEqual(["accepted", "accepted"]);
   });
 
-  test("a failed answer does not fail the op that opened the dialog", async () => {
-    const b = dialogBrowser({ answerDialog: async () => { throw new Error("gone"); } });
+  test("an answer that fails is retried once as a dismiss, and reported as what happened", async () => {
+    let calls = 0;
+    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); if (calls++ === 0) throw new Error("gone"); } });
     b.click = async () => { b.on().opened(confirmBox); };
-    expect(await createHandler(b)(rep("click", ["#go"]))).toMatchObject({ ok: true });
+    const h = createHandler(b);
+    await h(req("dialog-answer", [true]));
+    expect(await h(rep("click", ["#go"]))).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "dismissed" }] });
+    expect(answers(b)).toEqual([["answerDialog", [true, undefined]], ["answerDialog", [false, undefined]]]);
+  });
+
+  test("an answer that fails twice is reported as not answered, with the error, and the op still replies", async () => {
+    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); throw new Error("gone"); } });
+    b.click = async () => { b.on().opened(confirmBox); };
+    expect(await createHandler(b)(rep("click", ["#go"]))).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "failed", error: "gone" }] });
+    expect(answers(b)).toHaveLength(2);
+  });
+
+  test("two dialogs whose answers settle out of order are reported in the order they opened", async () => {
+    let n = 0;
+    const b = dialogBrowser({ answerDialog: async () => { if (n++ === 0) await Bun.sleep(30); } });
+    b.click = async () => { b.on().opened(promptBox); b.on().opened({ type: "alert", message: "hi" }); };
+    const res = await createHandler(b)(rep("click", ["#go"]));
+    expect(res.dialogs?.map((d) => d.type)).toEqual(["prompt", "alert"]);
   });
 
   test("urgent replies carry no dialog reports, and do not consume them", async () => {

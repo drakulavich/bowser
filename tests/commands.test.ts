@@ -1521,6 +1521,16 @@ describe("dialogs", () => {
     ].join("\n"));
   });
 
+  test("a dialog that could not be answered says so, with the error and no hint", async () => {
+    const failed = { type: "confirm" as const, message: "sure?", state: "failed" as const, error: "gone" };
+    const c = fakeClient({ evaluate: () => "done" }, { dialogs: [failed] });
+    expect(await cmdEval({ ...ctx(), connect: async () => c }, "go()")).toBe(
+      'done\n### Modal state\n- ["confirm" dialog with message "sure?"]: could not be answered (gone)',
+    );
+    const json = JSON.parse(await cmdEval({ ...ctx({ json: true }), connect: async () => c }, "go()"));
+    expect(json.dialogs).toEqual([failed]);
+  });
+
   test("--json dialogs carry type, message, defaultValue, state and answer, and nothing else", async () => {
     const c = fakeClient({ evaluate: () => 1 }, {
       dialogs: [

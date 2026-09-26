@@ -59,6 +59,9 @@ export interface Lane {
   serialize: <T>(fn: () => Promise<T>) => Promise<T>;
   timeoutMs: number;
   reply: (res: DaemonResponse) => void;
+  /** Called when `req` overran its budget: gives up its late reply's reports
+   *  and returns those queued now, which the timeout reply carries. */
+  timedOut?: (req: DaemonRequest) => DialogReport[] | undefined;
 }
 
 /** Route one request onto the urgent or the queued lane.
@@ -85,7 +88,8 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     withTimeout(underlying, lane.timeoutMs, req.op).then(lane.reply, (err) => {
       // handle() catches its own errors; this path is for timeouts.
       const msg = err instanceof Error ? err.message : String(err);
-      lane.reply({ id: req.id, ok: false, error: msg });
+      const dialogs = lane.timedOut?.(req);
+      lane.reply({ id: req.id, ok: false, error: msg, ...(dialogs ? { dialogs } : {}) });
     });
     return underlying;
   }).catch(() => {
@@ -159,29 +163,58 @@ const handlers: Handlers = {
  *  `state` defaults to `{}` so the 13 existing call sites that pass only a
  *  browser keep compiling unchanged; only `state`, `dialog-answer` and the
  *  dialog listener use it. */
-export function createHandler(browser: Browser, state: DaemonState = {}): (req: DaemonRequest) => Promise<DaemonResponse> {
+/** What createHandler returns: the request handler, and the hook `dispatch`
+ *  calls when a request overruns its budget. */
+export type Handler = ((req: DaemonRequest) => Promise<DaemonResponse>) & {
+  timedOut: (req: DaemonRequest) => DialogReport[] | undefined;
+};
+
+export function createHandler(browser: Browser, state: DaemonState = {}): Handler {
   // Webkit: whether the page has the shim, as far as the daemon knows. False
   // after a navigation, which also means the page's answer must be dropped.
   let shimmed = false;
   // Listen now, before any op navigates, so a dialog during the first page
   // load is answered too rather than hanging `open`. False on webkit, which
   // has no dialog events: the page shim answers there.
+  // Chrome: each dialog is recorded once its answer has landed, in the order
+  // the dialogs opened, whatever order their answers settle in.
+  let answering: Promise<void> = Promise.resolve();
   const shim = !browser.watchDialogs({
-    opened: (d) => (state.dialogs ??= []).push(answerDialog(browser, state, d)),
+    opened: (d) => {
+      const report = answerDialog(browser, state, d);
+      answering = answering.then(async () => { (state.dialogs ??= []).push(await report); });
+    },
     navigation: () => { state.answer = undefined; shimmed = false; },
   });
-  return async (req) => {
+  // Requests that overran their budget: their late replies reach nobody, so
+  // they must not take reports.
+  const abandoned = new WeakSet<DaemonRequest>();
+  const claim = (req: DaemonRequest): DialogReport[] | undefined => {
+    // Only a command that prints dialogs takes the reports (never an urgent
+    // reply, such as the ping every connect sends); the rest leave them queued.
+    if (!req.report || IS_URGENT.has(req.op) || abandoned.has(req) || !state.dialogs) return undefined;
+    const dialogs = state.dialogs;
+    state.dialogs = undefined;
+    return dialogs;
+  };
+  const handle = async (req: DaemonRequest): Promise<DaemonResponse> => {
     // An op that navigates drops the answer before it starts, so the new
     // document cannot use an answer meant for this one.
     if (NAVIGATES.has(req.op)) state.answer = undefined;
     const res = shim ? await runShimmed(req) : await run(req);
-    // Only a command that prints dialogs takes the reports (never an urgent
-    // reply, such as the ping every connect sends); the rest leave them queued.
-    if (!req.report || IS_URGENT.has(req.op) || !state.dialogs) return res;
-    const dialogs = state.dialogs;
-    state.dialogs = undefined;
-    return { ...res, dialogs };
+    // The answers of dialogs this op opened land within a CDP round trip;
+    // bounded, so a browser that never answers cannot hold every reply.
+    if (req.report && !IS_URGENT.has(req.op)) await settled(answering, ANSWER_WAIT_MS);
+    const dialogs = claim(req);
+    return dialogs ? { ...res, dialogs } : res;
   };
+  return Object.assign(handle, {
+    timedOut: (req: DaemonRequest) => {
+      const dialogs = claim(req);
+      abandoned.add(req);
+      return dialogs;
+    },
+  });
 
   async function run(req: DaemonRequest): Promise<DaemonResponse> {
     // `state` and `dialog-answer` are answered by closures, not entries in
@@ -291,19 +324,39 @@ const NAVIGATES: ReadonlySet<Op> = new Set<Op>(["navigate", "reload", "back", "f
  *  answer is used and cleared; without one it is dismissed. beforeunload is
  *  always accepted so the navigation proceeds, and leaves the one-shot answer
  *  for the next dialog. A prompt accepted without text gets its default. */
-function answerDialog(browser: Browser, state: DaemonState, d: DialogState): DialogReport {
+function answerDialog(browser: Browser, state: DaemonState, d: DialogState): Promise<DialogReport> {
+  // The answer is chosen now, as the dialog opens, so the next dialog cannot
+  // take the same one-shot answer; the report waits for the browser.
   const given = d.type === "beforeunload" ? { accept: true } : state.answer;
   if (d.type !== "beforeunload") state.answer = undefined;
   const accept = given?.accept ?? false;
   const text = d.type === "prompt" && accept ? given?.text ?? d.defaultValue ?? "" : undefined;
-  // Nothing waits on this: the op the dialog blocked resumes once it lands.
-  browser.answerDialog(accept, text).catch(() => {});
-  return {
+  const first = browser.answerDialog(accept, text);
+  const answered = (ok: boolean, promptText?: string): DialogReport => ({
     ...d,
-    state: accept ? "accepted" : "dismissed",
-    ...(text !== undefined ? { answer: text } : {}),
+    state: ok ? "accepted" : "dismissed",
+    ...(promptText !== undefined ? { answer: promptText } : {}),
     ...(given ? {} : { unanswered: true as const }),
-  };
+  });
+  return first.then(
+    () => answered(accept, text),
+    // A dialog left open blocks the page, so a refused answer is tried once
+    // more as a dismiss; failing that, the report says so rather than lie.
+    () => browser.answerDialog(false).then(
+      () => answered(false),
+      (err: unknown): DialogReport => ({ ...d, state: "failed", error: err instanceof Error ? err.message : String(err) }),
+    ),
+  );
+}
+
+/** How long a reply waits for the answers of the dialogs its op opened. */
+const ANSWER_WAIT_MS = 2000;
+
+/** Wait for `p` to settle, or `ms`, whichever comes first. */
+async function settled(p: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([p.catch(() => {}), new Promise<void>((r) => { timer = setTimeout(r, ms); })]);
+  clearTimeout(timer);
 }
 
 export async function startDaemon(session: string, profile?: string): Promise<void> {
@@ -351,7 +404,7 @@ export async function startDaemon(session: string, profile?: string): Promise<vo
             );
             continue;
           }
-          dispatch(req, { handle, serialize, timeoutMs, reply: (res) => {
+          dispatch(req, { handle, serialize, timeoutMs, timedOut: handle.timedOut, reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
         }

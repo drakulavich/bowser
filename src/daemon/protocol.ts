@@ -20,9 +20,12 @@ export interface DialogState {
  *  the moment it opens, with the one-shot answer or else dismissed. The
  *  --json form is this minus `unanswered`. */
 export interface DialogReport extends DialogState {
-  state: "accepted" | "dismissed";
+  /** "failed": the browser refused both the answer and a dismiss. */
+  state: "accepted" | "dismissed" | "failed";
   /** The text an accepted prompt was answered with. */
   answer?: string;
+  /** Why a "failed" dialog could not be answered. */
+  error?: string;
   /** Dismissed because no one-shot answer was set; the plain output adds a
    *  hint. */
   unanswered?: true;
