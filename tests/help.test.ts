@@ -6,11 +6,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { COMMANDS, type Command } from "../src/cli/registry.ts";
+import { COMMANDS, SCHEMAS, type Command } from "../src/cli/registry.ts";
+import { helpRequested } from "../src/cli/parser.ts";
 import { renderHelp, usageOf } from "../src/cli/help.ts";
 import { run } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { saveState, sessionDir } from "../src/state.ts";
+import { fakeClient } from "./helpers/fake-client.ts";
 
 const findCommandSummary = (name: string) => COMMANDS.find((c) => c.name === name)!.summary;
 
@@ -145,6 +147,42 @@ describe("per-command help", () => {
     expect(seen.connects).toBe(0);
     await expect(run(["close", "--bogus"], base)).rejects.toThrow("unknown flag: --bogus");
     await expect(run(["fill", "e1", "--", "--bogus", "--help"], base)).rejects.toThrow("no open page");
+  });
+
+  // -h as a string flag's separate value is that value, as before per-command
+  // help existed: the scan for help must skip what the parser consumes.
+  test("snapshot --filename -h writes a file named -h", async () => {
+    const snap = {
+      url: "https://x", title: "X",
+      tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
+      refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+    };
+    const c = fakeClient({ evaluate: () => snap });
+    const cwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      expect(await run(["-s", "snap", "snapshot", "--filename", "-h"], { connect: async () => c })).toBe("wrote -h");
+      expect(await Bun.file(join(tmp, "-h")).text()).toContain('link "Home" [ref=e1]');
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  test("-s -h open takes -h as the session name", async () => {
+    const { base } = counting();
+    // open runs with session "-h", which session-name validation refuses, as
+    // it did before per-command help existed; help would have returned.
+    await expect(run(["-s", "-h", "open", "https://example.com/"], base)).rejects.toThrow('got "-h"');
+    expect(helpRequested(SCHEMAS, ["-s", "-h", "open"])).toBe(false);
+    expect(helpRequested(SCHEMAS, ["snapshot", "--filename", "-h"])).toBe(false);
+  });
+
+  test("an unknown flag consumes nothing: close --bogus -h is help", async () => {
+    const { seen, base } = counting();
+    const close = COMMANDS.find((c) => c.name === "close")!;
+    expect((await run(["close", "--bogus", "-h"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
+    expect(helpRequested(SCHEMAS, ["mcp", "--bogus", "-h"])).toBe(true);
+    expect(seen.connects).toBe(0);
   });
 
   test("close --help leaves the session in place", async () => {

@@ -49,7 +49,7 @@ if (import.meta.main) {
     // made the compiled binary's "did not start in time"). The keepalive holds
     // the process open; the `else` keeps us out of the command dispatcher.
     await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);
-  } else if (process.argv[2] === "mcp" && !helpRequested(process.argv.slice(2))) {
+  } else if (process.argv[2] === "mcp" && !helpRequested(SCHEMAS, process.argv.slice(2))) {
     // Long-lived stdio MCP server. Handled here at the entry layer (like
     // --daemon) because it never returns a string — keeping run()'s contract
     // string-returning. It is still listed in SCHEMAS/HELP for discoverability.

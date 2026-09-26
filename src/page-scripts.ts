@@ -727,8 +727,9 @@ export function resolveRefScript(ref: string): string {
   const r = el.getBoundingClientRect();
   const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
   // In view but under something else, like a fixed header: the point a
-  // click lands on belongs to another element.
-  const hit = outside ? null : document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  // click lands on belongs to another element. Asked of the element's own
+  // root, so a shadow root does not answer with its host.
+  const hit = outside ? null : el.getRootNode().elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
   if (outside || (hit && hit !== el && !el.contains(hit))) {
     el.scrollIntoView({ block: 'center', inline: 'center' });
   }
