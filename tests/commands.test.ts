@@ -11,11 +11,12 @@ import { reportFailure, run } from "../src/cli.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath } from "../src/daemon/client.ts";
+import { looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "../src/commands/interaction.ts";
 import {
-  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, looksLikeOurDaemon,
+  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen,
   type ProcessOps,
 } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";

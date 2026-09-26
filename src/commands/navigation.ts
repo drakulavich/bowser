@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import type { Command } from "../cli/registry.ts";
 import { pidPath, socketPath } from "../daemon/client.ts";
+import { isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
@@ -138,55 +139,8 @@ export interface ProcessOps {
   graceMs: number;
 }
 
-/** True when `pid` is one of our daemons for `session`. Nothing here signals a
- *  pid without asking this first: pids are reused, and killing a stranger's
- *  process because a stale file named it would be far worse than leaking one of
- *  ours. The session must be a whole argument, not a substring, so the daemon
- *  for 'abc' cannot answer for 'ab'; the daemon runs either as
- *  `bun .../daemon/main.ts <session>` or, compiled, as `bowser --daemon
- *  <session>`, so one of those two markers must be present too. */
-export function looksLikeOurDaemon(command: string, session: string): boolean {
-  const line = command.trim();
-  // The session is the daemon's last argument and the marker comes right
-  // before it. `sessionDir` keeps whitespace out of session names, so the
-  // display line `ps` prints splits cleanly into words.
-  const words = line.split(/\s+/);
-  if (words.at(-1) !== session) return false;
-  const marker = words.at(-2) ?? "";
-  // Match the executable by name, not by path: the path changes across
-  // upgrades (a Homebrew Cellar path carries the version), and `close` must
-  // still recognise a daemon the previous binary started. Release assets are
-  // named `bowser-macos-arm64` and the like, so a `bowser-` or `bowser.`
-  // prefix counts too; `not-bowser-helper` does not.
-  const exe = words[0]?.split("/").pop() ?? "";
-  if (/^bowser([-.]|$)/.test(exe)) return marker === "--daemon";
-  return exe === "bun" && marker.endsWith("/src/daemon/main.ts");
-}
-
-async function isOurDaemon(pid: number, session: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["ps", "-o", "command=", "-p", String(pid)], {
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    // A pid that no longer exists prints nothing, which no session name matches.
-    return looksLikeOurDaemon(await new Response(proc.stdout).text(), session);
-  } catch {
-    return false;
-  }
-}
-
 const realProcess: ProcessOps = {
-  alive(pid) {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (e) {
-      // EPERM means the process exists and is someone else's — alive, and the
-      // ownership check is what decides whether we may touch it.
-      return (e as { code?: string }).code === "EPERM";
-    }
-  },
+  alive: isAlive,
   ours: isOurDaemon,
   term(pid) {
     try {
