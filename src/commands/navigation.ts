@@ -124,9 +124,10 @@ export async function cmdHistory(
 export async function cmdClose(
   ctx: CommandContext,
   opts: { name?: string; all?: boolean } = {},
+  proc: ProcessOps = realProcess,
 ): Promise<string> {
-  if (opts.all) return closeAll(ctx);
-  return closeOne(ctx, opts.name ?? ctx.session);
+  if (opts.all) return closeAll(ctx, proc);
+  return closeOne(ctx, opts.name ?? ctx.session, proc);
 }
 
 /** The three process facts `close` needs, injectable so the paths that decide
@@ -262,7 +263,11 @@ async function closeLegacy(name: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
-async function closeAll(ctx: CommandContext): Promise<string> {
+/** Close every session, trying each whatever the others do. A session it
+ *  could not close fails the command with the reason a single `close` of it
+ *  gives, which is a runtime error (exit 2); the sessions it did close are
+ *  listed in the same message (F31). */
+async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> {
   let names: string[] = [];
   try {
     const entries = await readdir(sessionsRoot(), { withFileTypes: true });
@@ -274,21 +279,21 @@ async function closeAll(ctx: CommandContext): Promise<string> {
   const failed: string[] = [];
   for (const name of names) {
     try {
-      await (isValidSessionName(name) ? closeOne(ctx, name) : closeLegacy(name));
+      await (isValidSessionName(name) ? closeOne(ctx, name, proc) : closeLegacy(name));
       closed.push(name);
-    } catch {
-      failed.push(name); // best-effort: keep closing the rest
+    } catch (err) {
+      failed.push(`- ${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  if (ctx.json) return JSON.stringify({ ok: failed.length === 0, closed, failed });
-  if (closed.length === 0 && failed.length === 0) return "no sessions to close";
-  const parts: string[] = [];
-  if (closed.length > 0) {
-    const word = closed.length === 1 ? "session" : "sessions";
-    parts.push(`closed ${closed.length} ${word}: ${closed.join(", ")}`);
+  const done = closed.length > 0
+    ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}`
+    : "";
+  if (failed.length > 0) {
+    const word = failed.length === 1 ? "session" : "sessions";
+    throw new Error(`close --all: ${done ? `${done}; ` : ""}failed ${failed.length} ${word}:\n${failed.join("\n")}`);
   }
-  if (failed.length > 0) parts.push(`failed: ${failed.join(", ")}`);
-  return parts.join("; ");
+  if (ctx.json) return JSON.stringify({ ok: true, closed, failed: [] });
+  return done || "no sessions to close";
 }
 
 /** A session is live when its daemon answers. The socket file alone is not

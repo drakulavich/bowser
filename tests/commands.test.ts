@@ -561,8 +561,8 @@ describe("close", () => {
     await mkdir(legacy, { recursive: true });
     await Bun.write(join(legacy, "pid"), String(process.pid));
     try {
-      const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
-      expect(out).toContain("failed: team one");
+      const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+      await expect(call).rejects.toThrow(`- team one: close: pid ${process.pid} recorded for legacy session "team one" is running`);
       expect(existsSync(legacy)).toBe(true);
     } finally {
       await rm(legacy, { recursive: true, force: true }); // or every later --all sees it fail
@@ -574,11 +574,39 @@ describe("close", () => {
     await mkdir(legacy, { recursive: true });
     await Bun.write(join(legacy, "sock"), "");
     try {
-      const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
-      expect(out).toContain("failed: old session");
+      const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+      await expect(call).rejects.toThrow('- old session: close: legacy session "old session" has no pidfile but still has a socket');
       expect(existsSync(legacy)).toBe(true);
     } finally {
       await rm(legacy, { recursive: true, force: true });
+    }
+  });
+
+  // F31: a session --all could not close fails the command, exit 2, as a
+  // single `close` of it does; the rest are still tried and listed.
+  test("--all with a session that fails: tries every session, names the reason, exits 2", async () => {
+    await saveState({ name: "ok31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+    await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+    await ensureSessionDir("stale31");
+    await Bun.write(pidPath("stale31"), "4242");
+    const proc = procOps({ alive: (pid) => pid === 4242 });
+    try {
+      for (const json of [false, true]) {
+        if (!existsSync(sessionDir("zz31"))) await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+        const err = await cmdClose({ ...ctx({ json }), connect: async () => fakeClient({}) }, { all: true }, proc)
+          .then(() => undefined, (e: unknown) => e);
+        const msg = (err as Error).message;
+        // Under --json too: an error is plain text on stderr, like every other.
+        expect(msg).toContain("- stale31: close: pid 4242 recorded for session 'stale31' is running but does not look like a bowser daemon");
+        // Other tests' sessions share this HOME, so only ours are checked.
+        expect(msg).toMatch(/^close --all: closed \d+ sessions?: [^\n]*\bzz31\b/);
+        if (!json) expect(msg).toMatch(/^close --all: closed [^\n]*\bok31\b/);
+        expect(reportFailure(err).code).toBe(2);
+        expect(existsSync(sessionDir("zz31"))).toBe(false);
+        expect(existsSync(sessionDir("stale31"))).toBe(true);
+      }
+    } finally {
+      await rm(sessionDir("stale31"), { recursive: true, force: true }); // or every later --all fails
     }
   });
 
