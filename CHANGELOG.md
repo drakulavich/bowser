@@ -16,7 +16,8 @@ All notable changes to this project are documented here. This project follows
   run the command *before* the action that opens the dialog. Run after it, it prepares the next
   dialog and does not answer the one already reported. On WebKit, which has no dialog events, a page
   shim answers dialogs. A dialog raised during page load, before bowser's first command on that
-  document, is dismissed by the engine and not reported there.
+  document, is dismissed by the engine and not reported there. A dialog whose handler then
+  navigates the page is answered but not reported on WebKit.
 
 - **`fill <ref> --stdin`** takes the text from standard input, so a secret never reaches the
   `bowser` process's arguments, where `ps` shows it to any local user:

@@ -127,7 +127,7 @@ The answer covers one dialog and is dropped when the page navigates. The action 
 
 `dismissed (run dialog-accept before the action to accept it)` means no answer was set. To accept it, run `dialog-accept` and repeat the action. This is where bowser differs from `playwright-cli`: running `dialog-accept` *after* the action does not answer the dialog that action opened. It prepares the next one.
 
-On WebKit, a dialog the page opens while it loads, before bowser has acted on it, is dismissed and not reported.
+On WebKit, a dialog the page opens while it loads, before bowser has acted on it, is dismissed and not reported. A dialog whose handler then leaves the page (`if (confirm(…)) location = …`) is answered but not reported. Check where the page went instead.
 
 ## Rules for the Agent
 

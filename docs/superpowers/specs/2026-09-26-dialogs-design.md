@@ -50,7 +50,8 @@ leaves one open, so none of that machinery exists.
    way, and keeps the log and the one-shot answer in the page. It is (re)installed before each
    page-acting command runs, without an extra round trip where the command already evaluates in the
    page; dialogs raised before bowser first acts on a new document are answered by the engine
-   (dismissed) and not reported. Reading the log costs at most one extra round trip per command, on
+   (dismissed) and not reported. A dialog whose handler then navigates the page (`if (confirm(…))
+   location = …`) is answered, but not reported: the log leaves with the old document. Reading the log costs at most one extra round trip per command, on
    WebKit only.
 6. **Difference from `playwright-cli`** (documented in README, SKILL.md, CHANGELOG): the answer is set
    *before* the action. `dialog-accept` after an action does not answer the dialog that action
