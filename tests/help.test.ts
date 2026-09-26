@@ -146,7 +146,7 @@ describe("per-command help", () => {
     expect((await run(["close", "-x", "-h"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
     expect(seen.connects).toBe(0);
     await expect(run(["close", "--bogus"], base)).rejects.toThrow("unknown flag: --bogus");
-    await expect(run(["fill", "e1", "--", "--bogus", "--help"], base)).rejects.toThrow("no open page");
+    await expect(run(["fill", "e1", "--", "--bogus"], base)).rejects.toThrow("no open page");
   });
 
   // -h as a string flag's separate value is that value, as before per-command

@@ -15,6 +15,14 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   // -h/--help anywhere before `--` prints the help and runs nothing:
   // `close --help` once closed the session.
   if (args.help) return renderCommandHelp(command);
+  // A word past the declared positionals is refused, not dropped: `eval 1 + 1`
+  // once printed 1. Words after `--` count too.
+  const declared = command.positional.length;
+  if (args.positional.length > declared) {
+    throw new Error(
+      `usage: too many arguments for '${command.name}': expected ${declared}, received ${args.positional.length}`,
+    );
+  }
   const ctx: CommandContext = { ...base, session: args.session, json: args.json };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
@@ -27,6 +35,19 @@ export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
   const userError = /^(usage:|unknown command|unknown flag|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|bowser requires macOS)/i.test(msg);
   const modal = failedModalState(err);
   return { stderr: `bowser: ${msg}${modal ? `\n${modal}` : ""}`, code: userError ? 1 : 2 };
+}
+
+/** `bowser mcp` starts the server only when argv asks for nothing else.
+ *  `--help` prints the help, and an extra word falls through to run(), which
+ *  refuses it like any command's. */
+function startsMcpServer(argv: string[]): boolean {
+  if (argv[0] !== "mcp" || helpRequested(SCHEMAS, argv)) return false;
+  try {
+    return parse(SCHEMAS, argv).positional.length === 0;
+  } catch {
+    // An unknown flag: the server starts, as it did before this check.
+    return true;
+  }
 }
 
 if (import.meta.main) {
@@ -49,7 +70,7 @@ if (import.meta.main) {
     // made the compiled binary's "did not start in time"). The keepalive holds
     // the process open; the `else` keeps us out of the command dispatcher.
     await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);
-  } else if (process.argv[2] === "mcp" && !helpRequested(SCHEMAS, process.argv.slice(2))) {
+  } else if (startsMcpServer(process.argv.slice(2))) {
     // Long-lived stdio MCP server. Handled here at the entry layer (like
     // --daemon) because it never returns a string — keeping run()'s contract
     // string-returning. It is still listed in SCHEMAS/HELP for discoverability.

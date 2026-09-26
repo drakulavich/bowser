@@ -20,13 +20,47 @@ function assertNavigated(requested: string, finalUrl: string): void {
   }
 }
 
+/** Hosts that serve plain HTTP by default: a scheme-less URL for one of
+ *  them gets `http://`, every other host `https://`. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Add a scheme to a URL typed without one, as playwright-cli does:
+ *  `example.com` → `https://example.com`, `localhost:3000/x` →
+ *  `http://localhost:3000/x`. A URL has no scheme when `new URL()` rejects it,
+ *  or when it starts with `host:port`, which `new URL()` would read as a
+ *  scheme (WebKit then times out on `localhost:3000`). Any URL with a real
+ *  scheme passes through unchanged. Unlike playwright-cli, `127.0.0.1` gets
+ *  `http://`: its `https://` only fails. */
+export function normalizeUrl(url: string): string {
+  if (!url || (URL.canParse(url) && !startsWithHostPort(url))) return url;
+  let host = "";
+  try {
+    host = new URL(`http://${url}`).hostname;
+  } catch {
+    // Not a URL even with a scheme: https:// it is, and the navigation says why.
+  }
+  return `${LOCAL_HOSTS.has(host) ? "http" : "https"}://${url}`;
+}
+
+/** `localhost:3000`, `example.com:8080/x`, `[::1]:3000`: a host and a numeric
+ *  port, then the end, a path, a query or a fragment. The host must be
+ *  `localhost`, bracketed IPv6, or contain a dot, so a real scheme with a
+ *  number after it (`tel:5551234`) is left alone. */
+function startsWithHostPort(url: string): boolean {
+  const m = /^(\[[^\]]*\]|[^/:?#]+):\d+(?:[/?#]|$)/.exec(url);
+  if (!m) return false;
+  const host = m[1]!.toLowerCase();
+  return host === "localhost" || host.startsWith("[") || host.includes(".");
+}
+
 export interface OpenOptions {
   persistent?: boolean;
   /** Profile directory, relative to the cwd; implies `persistent` and wins over it. */
   profile?: string;
 }
 
-export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptions = {}): Promise<string> {
+export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOptions = {}): Promise<string> {
+  const url = typed === undefined ? undefined : normalizeUrl(typed);
   // The parser accepts `--profile=`; treating it as absent would quietly
   // start an ephemeral session the caller believes is persistent.
   if (opts.profile !== undefined && !opts.profile.trim()) {
@@ -59,8 +93,9 @@ export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptio
   }, { profile });
 }
 
-export async function cmdGoto(ctx: CommandContext, url: string): Promise<string> {
-  if (!url) throw new Error("usage: bowser goto <url>");
+export async function cmdGoto(ctx: CommandContext, typed: string): Promise<string> {
+  if (!typed) throw new Error("usage: bowser goto <url>");
+  const url = normalizeUrl(typed);
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withPageClient(ctx, async (c) => {
     await c.request("navigate", [url]);

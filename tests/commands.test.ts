@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import { findCommand } from "../src/cli/registry.ts";
+import { COMMANDS, findCommand } from "../src/cli/registry.ts";
 import { reportFailure, run } from "../src/cli.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
@@ -258,6 +258,103 @@ describe("goto", () => {
       cmdGoto({ ...ctx(), connect: async () => c }, "https://example.com/?q=1"),
     ).rejects.toThrow(/did not load/i);
   });
+});
+
+// F4 (docs/superpowers/specs/2026-09-27-p1-fixes-design.md): a word past a
+// command's declared positionals is an error, not silently dropped.
+describe("too many arguments", () => {
+  /** A context whose every daemon connection is counted, and refused. */
+  function counting() {
+    const seen = { connects: 0 };
+    const base: Partial<CommandContext> = {
+      connect: async () => {
+        seen.connects++;
+        throw new Error("an arity error must not connect to a daemon");
+      },
+      readStdin: async () => {
+        throw new Error("an arity error must not read stdin");
+      },
+    };
+    return { seen, base };
+  }
+
+  for (const c of COMMANDS) {
+    const n = c.positional.length;
+    test(`${c.name} with ${n + 1} positionals fails with usage:, connects to nothing, exits 1`, async () => {
+      const { seen, base } = counting();
+      const words = Array.from({ length: n + 1 }, (_, i) => `w${i}`);
+      const err = await run(["-s", session, c.name, ...words], base).then(
+        () => { throw new Error("expected a failure"); },
+        (e: unknown) => e,
+      );
+      expect((err as Error).message).toBe(
+        `usage: too many arguments for '${c.name}': expected ${n}, received ${n + 1}`,
+      );
+      expect(seen.connects).toBe(0);
+      expect(reportFailure(err).code).toBe(1);
+    });
+  }
+
+  test("words after -- still count: fill e1 -- a b is too many", async () => {
+    const { seen, base } = counting();
+    await expect(run(["-s", session, "fill", "e1", "--", "a", "b"], base)).rejects.toThrow(
+      "usage: too many arguments for 'fill': expected 2, received 3",
+    );
+    expect(seen.connects).toBe(0);
+  });
+
+  test("the declared count still runs: eval with one expression reaches the daemon", async () => {
+    const c = fakeClient({ evaluate: () => 2 });
+    expect(await run(["-s", session, "eval", "1 + 1"], { connect: async () => c })).toContain("2");
+  });
+
+  // The entry starts the MCP server before run() would see the word, so it
+  // is spawned as the CLI runs, like the F1 help test.
+  test("bowser mcp extra fails with usage: and exit 1, starting no server", async () => {
+    const proc = Bun.spawn({
+      cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp", "extra"],
+      env: { ...process.env, HOME: tmp },
+      // A pipe held open: a started MCP server would wait on it forever.
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const timer = setTimeout(() => proc.kill(), 5_000);
+    const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    clearTimeout(timer);
+    expect(stderr.trim()).toBe("bowser: usage: too many arguments for 'mcp': expected 0, received 1");
+    expect(code).toBe(1);
+  }, 15_000);
+});
+
+// F15: a URL without a scheme gets one before the daemon sees it.
+describe("URL normalization in open and goto", () => {
+  const table: Array<[string, string]> = [
+    ["example.com", "https://example.com"],
+    ["example.com/path?q=1", "https://example.com/path?q=1"],
+    ["example.com:8080", "https://example.com:8080"],
+    ["localhost:3000/x", "http://localhost:3000/x"],
+    ["localhost", "http://localhost"],
+    ["127.0.0.1:3000", "http://127.0.0.1:3000"],
+    ["[::1]:3000/a", "http://[::1]:3000/a"],
+    ["http://example.com/", "http://example.com/"],
+    ["https://localhost:3000/", "https://localhost:3000/"],
+    ["about:blank", "about:blank"],
+    ["data:text/html,<p>hi</p>", "data:text/html,<p>hi</p>"],
+    ["file:///tmp/x.html", "file:///tmp/x.html"],
+    ["mailto:someone@example.com", "mailto:someone@example.com"],
+    ["tel:5551234", "tel:5551234"],
+  ];
+  for (const cmd of ["open", "goto"] as const) {
+    for (const [typed, sent] of table) {
+      test(`${cmd} ${typed} navigates to ${sent} and replies with it`, async () => {
+        const c = fakeClient({});
+        const out = await run(["-s", session, cmd, typed], { connect: async () => c });
+        expect(c.calls.filter(([op]) => op === "navigate")).toEqual([["navigate", [sent]]]);
+        expect(out).toContain(sent);
+      });
+    }
+  }
 });
 
 describe("open (assertNavigated guard)", () => {

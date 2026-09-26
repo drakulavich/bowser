@@ -15,6 +15,7 @@ import {
   handleMcpLine,
   type McpDeps,
 } from "../src/mcp.ts";
+import { parse } from "../src/cli/parser.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
 import { run } from "../src/cli.ts";
@@ -102,6 +103,17 @@ describe("toArgv", () => {
 
   test("no-positional, no-flag command", () => {
     expect(toArgv(schema("list"), {})).toEqual(["--json", "list"]);
+  });
+
+  // F4: the CLI refuses a word past a command's declared positionals. A tool
+  // call cannot trip that: toArgv takes positionals from the schema only.
+  test("never passes more positionals than a command declares, whatever the call sends", () => {
+    for (const s of SCHEMAS.commands) {
+      const args: Record<string, unknown> = { extra: "x", _0: "y" };
+      for (const p of s.positional) args[p.name] = "v";
+      const argv = toArgv(s, args);
+      expect(parse(SCHEMAS, argv).positional.length).toBe(s.positional.length);
+    }
   });
 
   test("a positional that looks like a flag goes after --", () => {
