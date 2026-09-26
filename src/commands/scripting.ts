@@ -3,7 +3,7 @@
 
 import type { Command } from "../cli/registry.ts";
 import { runCodeScript } from "../page-scripts.ts";
-import { replyPage, withClient, type CommandContext } from "./context.ts";
+import { replyPage, withPageClient, type CommandContext } from "./context.ts";
 
 function formatEvalResult(result: unknown): string {
   if (result === undefined || result === null) return "";
@@ -13,7 +13,7 @@ function formatEvalResult(result: unknown): string {
 
 export async function cmdEval(ctx: CommandContext, expression: string): Promise<string> {
   if (!expression) throw new Error("usage: bowser eval <expression>");
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     const result = await c.request("evaluate", [expression]);
     return replyPage(ctx, c, { ok: true, result }, formatEvalResult(result));
   });
@@ -21,7 +21,7 @@ export async function cmdEval(ctx: CommandContext, expression: string): Promise<
 
 export async function cmdRunCode(ctx: CommandContext, code: string): Promise<string> {
   if (!code) throw new Error("usage: bowser run-code <code>");
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     const result = await c.request("evaluate", [runCodeScript(code)]);
     return replyPage(ctx, c, { ok: true, result }, formatEvalResult(result));
   });

@@ -160,12 +160,16 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
   // load is answered too rather than hanging `open`.
   browser.watchDialogs({
     opened: (d) => (state.dialogs ??= []).push(answerDialog(browser, state, d)),
-    navigated: () => { state.answer = undefined; },
+    navigation: () => { state.answer = undefined; },
   });
   return async (req) => {
+    // An op that navigates drops the answer before it starts, so the new
+    // document cannot use an answer meant for this one.
+    if (NAVIGATES.has(req.op)) state.answer = undefined;
     const res = await run(req);
-    // Urgent replies (ping from every connect) must not swallow a report.
-    if (IS_URGENT.has(req.op) || !state.dialogs) return res;
+    // Only a command that prints dialogs takes the reports (never an urgent
+    // reply, such as the ping every connect sends); the rest leave them queued.
+    if (!req.report || IS_URGENT.has(req.op) || !state.dialogs) return res;
     const dialogs = state.dialogs;
     state.dialogs = undefined;
     return { ...res, dialogs };
@@ -204,6 +208,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
     }
   }
 }
+
+/** The ops that navigate the page themselves. */
+const NAVIGATES: ReadonlySet<Op> = new Set<Op>(["navigate", "reload", "back", "forward"]);
 
 /** Answer a dialog that just opened, at once, and say how. The one-shot
  *  answer is used and cleared; without one it is dismissed. beforeunload is

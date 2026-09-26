@@ -303,6 +303,8 @@ const confirmBox: DialogState = { type: "confirm", message: "sure?" };
 const promptBox: DialogState = { type: "prompt", message: "name?", defaultValue: "def" };
 const answers = (b: { calls: Array<[string, unknown[]]> }) => b.calls.filter(([n]) => n === "answerDialog");
 
+const rep = (op: DaemonRequest["op"], args?: unknown[]): DaemonRequest => ({ ...req(op, args), report: true });
+
 describe("dialogs: answered the moment they open", () => {
   test("the handler listens for dialogs as soon as it exists, before any op navigates", () => {
     const b = dialogBrowser();
@@ -313,7 +315,7 @@ describe("dialogs: answered the moment they open", () => {
   test("with no one-shot answer a dialog is dismissed at once, and the op that opened it replies normally with it", async () => {
     const b = dialogBrowser();
     b.click = async () => { b.on().opened(confirmBox); };
-    const res = await createHandler(b)(req("click", ["#go"]));
+    const res = await createHandler(b)(rep("click", ["#go"]));
     expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
     expect(res).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "dismissed", unanswered: true }] });
   });
@@ -322,14 +324,14 @@ describe("dialogs: answered the moment they open", () => {
     const b = dialogBrowser();
     b.click = async () => { b.on().opened(confirmBox); };
     const h = createHandler(b);
-    await h(req("click", ["#go"]));
-    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
+    await h(rep("click", ["#go"]));
+    expect(await h(rep("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
   });
 
   test("two dialogs from one op are both answered and reported, in order", async () => {
     const b = dialogBrowser();
     b.click = async () => { b.on().opened(promptBox); b.on().opened({ type: "alert", message: "hi" }); };
-    const res = await createHandler(b)(req("click", ["#go"]));
+    const res = await createHandler(b)(rep("click", ["#go"]));
     expect(res.dialogs?.map((d) => d.type)).toEqual(["prompt", "alert"]);
     expect(answers(b)).toHaveLength(2);
   });
@@ -346,8 +348,8 @@ describe("dialogs: answered the moment they open", () => {
     b.click = async () => { b.on().opened(promptBox); };
     const h = createHandler(b);
     await h(req("dialog-answer", [true, "typed"]));
-    expect((await h(req("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "accepted", answer: "typed" }]);
-    expect((await h(req("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "accepted", answer: "typed" }]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
     expect(answers(b)).toEqual([["answerDialog", [true, "typed"]], ["answerDialog", [false, undefined]]]);
   });
 
@@ -366,7 +368,7 @@ describe("dialogs: answered the moment they open", () => {
     b.click = async () => { b.on().opened(promptBox); };
     const h = createHandler(b);
     await h(req("dialog-answer", [false]));
-    expect((await h(req("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed" }]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed" }]);
   });
 
   test("setting a one-shot answer replaces the previous one", async () => {
@@ -378,11 +380,11 @@ describe("dialogs: answered the moment they open", () => {
     expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
   });
 
-  test("a navigation drops the one-shot answer", async () => {
+  test("a navigation starting or landing drops the one-shot answer", async () => {
     const b = dialogBrowser();
     const h = createHandler(b);
     await h(req("dialog-answer", [true]));
-    b.on().navigated();
+    b.on().navigation();
     b.on().opened(confirmBox);
     expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
   });
@@ -394,20 +396,41 @@ describe("dialogs: answered the moment they open", () => {
     b.on().opened({ type: "beforeunload", message: "" });
     b.on().opened(confirmBox);
     expect(answers(b)).toEqual([["answerDialog", [true, undefined]], ["answerDialog", [true, undefined]]]);
-    expect((await h(req("evaluate", ["1"]))).dialogs?.map((d) => d.state)).toEqual(["accepted", "accepted"]);
+    expect((await h(rep("evaluate", ["1"]))).dialogs?.map((d) => d.state)).toEqual(["accepted", "accepted"]);
   });
 
   test("a failed answer does not fail the op that opened the dialog", async () => {
     const b = dialogBrowser({ answerDialog: async () => { throw new Error("gone"); } });
     b.click = async () => { b.on().opened(confirmBox); };
-    expect(await createHandler(b)(req("click", ["#go"]))).toMatchObject({ ok: true });
+    expect(await createHandler(b)(rep("click", ["#go"]))).toMatchObject({ ok: true });
   });
 
   test("urgent replies carry no dialog reports, and do not consume them", async () => {
     const b = dialogBrowser();
     const h = createHandler(b);
     b.on().opened(confirmBox);
-    expect(await h(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
-    expect((await h(req("evaluate", ["1"]))).dialogs).toHaveLength(1);
+    expect(await h(rep("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toHaveLength(1);
   });
+test("a request that prints no dialogs leaves the queued reports for the next one that does", async () => {
+    const b = dialogBrowser();
+    const h = createHandler(b);
+    b.on().opened(confirmBox); // a page timer, between commands
+    expect(await h(req("cookie-get-all"))).toEqual({ id: 7, ok: true, result: [cookie] });
+    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ ...confirmBox, state: "dismissed", unanswered: true }]);
+  });
+
+  for (const op of ["navigate", "reload", "back", "forward"] as const) {
+    test(`${op} drops the one-shot answer before it navigates, so the new page's load-time dialog is dismissed`, async () => {
+      const b = dialogBrowser();
+      // The new document's inline script opens a dialog before any navigation event arrives.
+      const opens = async () => { b.on().opened(confirmBox); };
+      Object.assign(b, { [op]: opens });
+      const h = createHandler(b);
+      await h(req("dialog-answer", [true]));
+      const res = await h(rep(op, op === "navigate" ? ["https://x/load"] : []));
+      expect(res.dialogs).toEqual([{ ...confirmBox, state: "dismissed", unanswered: true }]);
+    });
+  }
 });

@@ -18,6 +18,7 @@ import {
   closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, looksLikeOurDaemon,
   type ProcessOps,
 } from "../src/commands/navigation.ts";
+import { cmdCookieList } from "../src/commands/cookies.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import {
@@ -1501,12 +1502,12 @@ describe("dialogs", () => {
     expect("dialogs" in json).toBe(false);
   });
 
-  test("answered dialogs print their answer; only a dismissal for lack of an answer carries the hint", async () => {
+  test("answered dialogs print their answer; only a dismissal for lack of an answer carries the hint, and never an alert's", async () => {
     const c = fakeClient({ evaluate: () => "done" }, {
       dialogs: [
         { type: "confirm", message: "sure?", state: "accepted" },
         { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
-        { type: "alert", message: "hi", state: "dismissed" },
+        { type: "alert", message: "hi", state: "dismissed", unanswered: true },
       ],
     });
     const out = await cmdEval({ ...ctx(), connect: async () => c }, "go()");
@@ -1577,5 +1578,32 @@ describe("dialogs", () => {
     await findCommand("dialog-accept")!.run({ ...ctx(), connect: async () => c }, { positional: ["typed"], flags: {} });
     await findCommand("dialog-dismiss")!.run({ ...ctx(), connect: async () => c }, { positional: [], flags: {} });
     expect(c.calls).toEqual([["dialog-answer", [true, "typed"]], ["dialog-answer", [false]]]);
+  });
+
+  test("snapshot prints the queued dialogs after the page lines and still renders the tree", async () => {
+    const snap = { url: "https://x/", title: "X", tree: [{ role: "button", name: "go", ref: "e1", children: [] }], refs: [] };
+    const c = fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] });
+    const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, {});
+    expect(out.startsWith(`### Page\n- Page URL: https://x/\n- Page Title: X\n${DISMISSED_OUT}\n### Snapshot\n`)).toBe(true);
+    expect(out).toContain('button "go" [ref=e1]');
+    const json = JSON.parse(await cmdSnapshot({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] }) }, {}));
+    expect(json.dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed" }]);
+    expect(typeof json.snapshot).toBe("string");
+  });
+
+  test("snapshot with no dialogs has no modal state and no dialogs key", async () => {
+    const snap = { url: "https://x/", title: "X", tree: [], refs: [] };
+    expect(await cmdSnapshot({ ...ctx(), connect: async () => fakeClient({ evaluate: () => snap }) }, {})).not.toContain("Modal state");
+    const json = JSON.parse(await cmdSnapshot({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }) }, {}));
+    expect("dialogs" in json).toBe(false);
+  });
+
+  test("commands that print no dialogs do not take the daemon's queued reports", async () => {
+    const shot = fakeClient({}, { dialogs: [dismissed] });
+    await cmdScreenshot({ ...ctx(), connect: async () => shot }, { filename: join(tmpdir(), `bowser-shot-${Date.now()}.png`) });
+    expect(shot.reporting).toBe(false);
+    const cookies = fakeClient({}, { dialogs: [dismissed] });
+    await cmdCookieList({ ...ctx(), connect: async () => cookies });
+    expect(cookies.reporting).toBe(false);
   });
 });

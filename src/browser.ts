@@ -10,11 +10,12 @@ import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
 import type { Backend } from "./backend.ts";
 import type { DialogState } from "./daemon/protocol.ts";
 
-/** What the daemon hears about dialogs. `navigated` fires on both backends
- *  (a one-shot answer is lost on navigation); `opened` on chrome only. */
+/** What the daemon hears about dialogs. `navigation` fires when a
+ *  navigation starts and again when it lands (a one-shot answer is lost on
+ *  navigation); `opened` on chrome only. */
 export interface DialogListener {
   opened(dialog: DialogState): void;
-  navigated(): void;
+  navigation(): void;
 }
 
 export interface BrowserOptions {
@@ -124,7 +125,7 @@ export interface Browser {
    *  ever delivered — check the result rather than assuming it fired. */
   subscribe(event: string, handler: (data: unknown) => void): boolean;
   /** Report dialogs and navigations to `on`. Returns false on webkit, where
-   *  only `navigated` is ever called. Call once, before the first navigate,
+   *  only `navigation` is ever called. Call once, before the first navigate,
    *  so a dialog during the first page load is seen too: the listener needs
    *  no CDP session (measured, Bun 1.4.2: Bun enables the Page domain itself
    *  and delivers the event during the first navigate). */
@@ -185,7 +186,7 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  watch counts navigation events and lets an action wait for the one it
  *  started: a navigation that begins within graceMs is awaited up to
  *  settleMs; an action that navigates nowhere costs the full grace window. */
-function navigationWatch(view: ViewLike, timing: NavTiming, onLanded: () => void = () => {}) {
+function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => void = () => {}) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
   // A failed navigation ends the wait but does not fail the action: WebKit
@@ -193,7 +194,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onLanded: () => void
   // navigating right after a click), and `state` reads the real URL anyway.
   // Surfacing the last navigation error is future DaemonState work.
   let landed = 0;
-  view.onNavigated = () => { landed++; onLanded(); };
+  view.onNavigated = () => { landed++; onNavigation(); };
   view.onNavigationFailed = () => { landed++; };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   return {
@@ -208,7 +209,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onLanded: () => void
       const start = Date.now();
       while (Date.now() - start < timing.graceMs) {
         if (landed !== before) return;
-        if (view.loading && !wasLoading) { started = true; break; }
+        if (view.loading && !wasLoading) { started = true; onNavigation(); break; }
         await sleep(10);
       }
       if (!started) return;
@@ -233,7 +234,7 @@ export interface PersistentStore {
 export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING, store?: PersistentStore): Browser {
   const profile = store?.profile;
   let dialogs: DialogListener | undefined;
-  const nav = navigationWatch(view, timing, () => dialogs?.navigated());
+  const nav = navigationWatch(view, timing, () => dialogs?.navigation());
   const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     // view.cdp() exists on the chrome backend only. On webkit Bun throws
     // 'WebView.cdp() requires backend: "chrome"'; we raise the friendlier
@@ -324,7 +325,7 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     subscribe,
     watchDialogs(on) {
       dialogs = on;
-      return subscribe("Page.javascriptDialogOpening", (data) => {
+      const watching = subscribe("Page.javascriptDialogOpening", (data) => {
         const d = data as { type: DialogState["type"]; message: string; defaultPrompt?: string };
         on.opened({
           type: d.type,
@@ -332,6 +333,10 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
           ...(d.type === "prompt" ? { defaultValue: d.defaultPrompt ?? "" } : {}),
         });
       });
+      // Chrome says when any navigation starts, the page's own included,
+      // before the new document can open a dialog.
+      subscribe("Page.frameStartedNavigating", () => on.navigation());
+      return watching;
     },
     answerDialog: async (accept, promptText) => {
       await cdp("Page.handleJavaScriptDialog", promptText === undefined ? { accept } : { accept, promptText });

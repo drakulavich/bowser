@@ -22,7 +22,7 @@ import { cmdDialog } from "../src/commands/dialog.ts";
 import { cmdClick } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
-import { cmdSnapshot } from "../src/commands/snapshot.ts";
+import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -38,6 +38,8 @@ const PAGE = `<!doctype html><title>Dialogs</title>
 <button onclick="out.textContent = 'prompt:' + prompt('name?', 'def')">Prompt</button>
 <button onclick="alert('hi'); out.textContent = 'alert:done'">Alert</button>
 <button onclick="confirm('one'); alert('two'); out.textContent = 'two:done'">Two</button>
+<button onclick="setTimeout(() => { out.textContent = 'later:' + confirm('later') }, 500)">Later</button>
+<a href="/?load=1">Load</a>
 <p id="out"></p>`;
 
 // A confirm() in an inline script, during the page's very first load.
@@ -119,7 +121,7 @@ run("e2e: dialogs", () => {
 
   both("an alert is reported and the page continues", async () => {
     await fresh();
-    expect(await click("Alert")).toContain(line("alert", "hi", ""));
+    expect(await click("Alert")).toEndWith(line("alert", "hi", "dismissed"));
     expect(await out()).toBe("alert:done");
   }, 60_000);
 
@@ -143,7 +145,7 @@ run("e2e: dialogs", () => {
   both("two dialogs from one click are both reported, in order", async () => {
     await fresh();
     const text = await click("Two");
-    expect(text).toEndWith(`### Modal state\n${line("confirm", "one", HINT)}\n${line("alert", "two", HINT)}`);
+    expect(text).toEndWith(`### Modal state\n${line("confirm", "one", HINT)}\n${line("alert", "two", "dismissed")}`);
     expect(await out()).toBe("two:done");
   }, 60_000);
 
@@ -157,5 +159,31 @@ run("e2e: dialogs", () => {
     const t1 = performance.now();
     expect(await cmdGoto(ctx, `${url}?load=1`)).toEndWith(line("confirm", "onload?", HINT));
     expect(performance.now() - t1).toBeLessThan(2000);
+  }, 60_000);
+
+  both("a dialog a timer opens between commands waits for a command that prints it", async () => {
+    await fresh();
+    expect(await click("Later")).not.toContain("Modal state");
+    await Bun.sleep(1000);
+    // screenshot prints no dialogs, so it must not take the report.
+    expect(await cmdScreenshot(ctx, { filename: join(tmp, "later.png") })).not.toContain("Modal state");
+    const snap = await cmdSnapshot(ctx);
+    expect(snap).toContain(`### Modal state\n${line("confirm", "later", HINT)}\n### Snapshot`);
+    expect(snap).toContain('button "Later"');
+    expect(await out()).toBe("later:false");
+  }, 60_000);
+
+  chromeOnly("a one-shot answer set on one page does not answer the next page's load-time dialog (goto)", async () => {
+    await fresh();
+    await cmdDialog(ctx, true);
+    expect(await cmdGoto(ctx, `${url}?load=1`)).toEndWith(line("confirm", "onload?", HINT));
+    expect(await cmdEval(ctx, "document.title")).toBe("load:false");
+  }, 60_000);
+
+  chromeOnly("a one-shot answer set on one page does not answer the next page's load-time dialog (click)", async () => {
+    await fresh();
+    await cmdDialog(ctx, true);
+    expect(await click("Load")).toEndWith(line("confirm", "onload?", HINT));
+    expect(await cmdEval(ctx, "document.title")).toBe("load:false");
   }, 60_000);
 });

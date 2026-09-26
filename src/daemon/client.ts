@@ -31,6 +31,7 @@ export class DaemonClient implements DaemonConnection {
   private buf = "";
   private closed = false;
   private reported: DialogReport[] = [];
+  private report = false;
 
   constructor(
     private readonly path: string,
@@ -96,12 +97,16 @@ export class DaemonClient implements DaemonConnection {
     return [...this.reported];
   }
 
+  reportDialogs(): void {
+    this.report = true;
+  }
+
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>> {
     const [op, args = []] = params;
     if (!this.sock) throw new Error("client not connected");
     if (this.closed) return Promise.reject(new Error(this.closedMessage));
     const id = this.nextId++;
-    const line = JSON.stringify({ id, op, args }) + "\n";
+    const line = JSON.stringify(this.report ? { id, op, args, report: true } : { id, op, args }) + "\n";
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: (result) => resolve(result as ResultOf<O>), reject });
       socketWriteAll(this.sock! as unknown as WritableSocket, line);

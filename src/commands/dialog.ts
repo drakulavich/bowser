@@ -4,10 +4,10 @@
 // playwright-cli).
 
 import type { Command } from "../cli/registry.ts";
-import { replyPage, withClient, type CommandContext } from "./context.ts";
+import { replyPage, withPageClient, type CommandContext } from "./context.ts";
 
 export async function cmdDialog(ctx: CommandContext, accept: boolean, text?: string): Promise<string> {
-  return withClient(ctx, async (c) => {
+  return withPageClient(ctx, async (c) => {
     await c.request("dialog-answer", text === undefined ? [accept] : [accept, text]);
     const verb = accept ? "accepted" : "dismissed";
     return replyPage(ctx, c, { ok: true, next: verb }, `next dialog will be ${verb}`);

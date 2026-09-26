@@ -300,30 +300,36 @@ describe("wrapView dialogs", () => {
     return { v, emit };
   }
 
-  test("on chrome, CDP dialog events reach the listener as DialogState, and navigations too", () => {
+  test("on chrome, CDP dialog events reach the listener as DialogState, and navigations starting and landing too", () => {
     const { v, emit } = listening();
     const seen: unknown[] = [];
     const b = wrapView(v, chrome);
     expect(b.watchDialogs({
       opened: (d) => seen.push(["opened", d]),
-      navigated: () => seen.push(["navigated"]),
+      navigation: () => seen.push(["navigation"]),
     })).toBe(true);
     emit("Page.javascriptDialogOpening", { url: "u", frameId: "f", message: "name?", type: "prompt", hasBrowserHandler: false, defaultPrompt: "def" });
     emit("Page.javascriptDialogOpening", { url: "u", frameId: "f", message: "sure?", type: "confirm", hasBrowserHandler: false, defaultPrompt: "" });
+    emit("Page.frameStartedNavigating", { frameId: "f", url: "https://x/next", loaderId: "l", navigationType: "differentDocument" });
     v.land("https://x/next");
     expect(seen).toEqual([
       ["opened", { type: "prompt", message: "name?", defaultValue: "def" }],
       ["opened", { type: "confirm", message: "sure?" }],
-      ["navigated"],
+      ["navigation"],
+      ["navigation"],
     ]);
   });
 
   test("on chrome watching needs no CDP call, so it works before the first navigation (Bun enables the Page domain)", async () => {
     const v = fakeView();
     const b = wrapView(v, chrome);
-    b.watchDialogs({ opened() {}, navigated() {} });
+    b.watchDialogs({ opened() {}, navigation() {} });
     await b.navigate("https://x/1");
-    expect(v.calls).toEqual([["addEventListener", ["Page.javascriptDialogOpening"]], ["navigate", ["https://x/1"]]]);
+    expect(v.calls).toEqual([
+      ["addEventListener", ["Page.javascriptDialogOpening"]],
+      ["addEventListener", ["Page.frameStartedNavigating"]],
+      ["navigate", ["https://x/1"]],
+    ]);
   });
 
   test("answerDialog sends Page.handleJavaScriptDialog, with prompt text only when given", async () => {
@@ -341,10 +347,20 @@ describe("wrapView dialogs", () => {
     const v = fakeView();
     const b = wrapView(v, webkit);
     let navigated = 0;
-    expect(b.watchDialogs({ opened() {}, navigated: () => { navigated++; } })).toBe(false);
+    expect(b.watchDialogs({ opened() {}, navigation: () => { navigated++; } })).toBe(false);
     await b.navigate("https://x/1");
     v.land("https://x/1");
     expect(navigated).toBe(1);
     expect(v.calls).toEqual([["navigate", ["https://x/1"]]]);
+  });
+
+  test("an action whose navigation starts reports it before the navigation lands", async () => {
+    const v = fakeView();
+    const seen: string[] = [];
+    v.click = async () => { v.loading = true; setTimeout(() => { seen.push("landed"); v.land("https://x/2"); }, 60); };
+    const b = wrapView(v, webkit, { graceMs: 40, settleMs: 300 });
+    b.watchDialogs({ opened() {}, navigation: () => seen.push("navigation") });
+    await b.click("a");
+    expect(seen).toEqual(["navigation", "landed", "navigation"]);
   });
 });

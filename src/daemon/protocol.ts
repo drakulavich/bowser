@@ -106,6 +106,9 @@ export interface DaemonRequest {
   args?: unknown[];
   /** Reserved for tab support. Ignored by the server today; never set by the client. */
   page?: string;
+  /** The sender prints dialog reports: the reply hands over the queued ones.
+   *  Without it they stay queued for a command that prints them. */
+  report?: true;
 }
 
 export interface DaemonResponse {
@@ -122,7 +125,10 @@ export interface DaemonResponse {
  *  DaemonClient implements it; tests implement it with a fake. */
 export interface DaemonConnection {
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>>;
-  /** Every dialog this connection's replies reported, in order. */
+  /** Every dialog this connection's replies reported, in order. Empty unless
+   *  reportDialogs() was called. */
   dialogs(): DialogReport[];
+  /** This command prints dialog reports: ask the daemon for them. */
+  reportDialogs(): void;
   close(): void;
 }
