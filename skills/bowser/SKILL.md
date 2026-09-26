@@ -68,6 +68,9 @@ Do **not** use for static HTTP fetches.
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 
+`bowser <command> --help` prints that command's usage and flags without running it, so it is safe on
+`close` or `open`. After `--`, `--help` is plain text: `bowser fill e1 -- --help` types it.
+
 ## Snapshot Format
 
 ````

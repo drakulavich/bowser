@@ -1,8 +1,16 @@
 // --help is generated from the registry. These pin the parts an agent reads:
 // every command appears exactly once, with its argument shape and summary.
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { COMMANDS, type Command } from "../src/cli/registry.ts";
-import { renderHelp } from "../src/cli/help.ts";
+import { renderHelp, usageOf } from "../src/cli/help.ts";
+import { run } from "../src/cli.ts";
+import type { CommandContext } from "../src/commands/context.ts";
+import { saveState, sessionDir } from "../src/state.ts";
 
 const findCommandSummary = (name: string) => COMMANDS.find((c) => c.name === name)!.summary;
 
@@ -73,4 +81,98 @@ describe("generated help", () => {
     expect(HELP).toContain("--json               machine-readable output");
     expect(HELP).toContain("-h, --help               show this help");
   });
+});
+
+// `<cmd> --help` prints that command's help and runs nothing (spec F1,
+// docs/superpowers/specs/2026-09-26-p0-hangs-design.md). `close --help` used
+// to close the session and `open --help` to open one.
+describe("per-command help", () => {
+  let tmp: string;
+  let origHome: string | undefined;
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-help-"));
+    process.env.HOME = tmp;
+  });
+  afterAll(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  /** A context whose every daemon connection is counted, and refused. */
+  function counting() {
+    const seen = { connects: 0 };
+    const base: Partial<CommandContext> = {
+      connect: async () => {
+        seen.connects++;
+        throw new Error("help must not connect to a daemon");
+      },
+      readStdin: async () => {
+        throw new Error("help must not read stdin");
+      },
+    };
+    return { seen, base };
+  }
+
+  for (const c of COMMANDS) {
+    test(`${c.name} --help prints its usage, summary and flags, and connects to nothing`, async () => {
+      const { seen, base } = counting();
+      const out = await run([c.name, "--help"], base);
+      expect(out.split("\n")[0]).toBe(`bowser ${usageOf(c)}`);
+      expect(out).toContain(c.summary);
+      for (const p of c.positional) expect(out).toContain(p.required ? `<${p.name}>` : `[${p.name}]`);
+      for (const f of c.flags) expect(out).toContain(`--${f.name}`);
+      expect(out).not.toContain("Commands:");
+      expect(seen.connects).toBe(0);
+    });
+  }
+
+  test("-h before the command, and --help after its arguments, both print its help", async () => {
+    const { seen, base } = counting();
+    const close = COMMANDS.find((c) => c.name === "close")!;
+    expect((await run(["-h", "close"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
+    expect((await run(["-s", "t1", "close", "-h"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
+    const fill = COMMANDS.find((c) => c.name === "fill")!;
+    expect((await run(["fill", "e1", "hello", "--help"], base)).split("\n")[0]).toBe(`bowser ${usageOf(fill)}`);
+    expect(seen.connects).toBe(0);
+  });
+
+  test("close --help leaves the session in place", async () => {
+    const { base } = counting();
+    await saveState({ name: "keep", url: "https://x", title: "X", refs: [], updatedAt: 1 });
+    await run(["-s", "keep", "close", "--help"], base);
+    expect(existsSync(sessionDir("keep"))).toBe(true);
+  });
+
+  test("with no command, --help prints the general help", async () => {
+    const { seen, base } = counting();
+    expect(await run(["--help"], base)).toBe(HELP);
+    expect(await run(["-h"], base)).toBe(HELP);
+    expect(seen.connects).toBe(0);
+  });
+
+  test("after --, --help is data: the command runs", async () => {
+    const { base } = counting();
+    // No session state, so fill gets as far as loading its ref and fails there.
+    await expect(run(["fill", "e1", "--", "--help"], base)).rejects.toThrow("no open page");
+  });
+
+  test("the CLI entry exits 0 for close --help and for mcp --help, which starts no server", async () => {
+    for (const name of ["close", "mcp"]) {
+      const proc = Bun.spawn({
+        cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), name, "--help"],
+        env: { ...process.env, HOME: tmp },
+        // A pipe held open: a started MCP server would wait on it forever.
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const timer = setTimeout(() => proc.kill(), 5_000);
+      const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+      clearTimeout(timer);
+      const cmd = COMMANDS.find((c) => c.name === name)!;
+      expect(stdout.split("\n")[0]).toBe(`bowser ${usageOf(cmd)}`);
+      expect(code).toBe(0);
+    }
+  }, 15_000);
 });

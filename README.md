@@ -186,6 +186,10 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 
+`bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
+flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text
+like any other argument.
+
 ## MCP bridge
 
 `bowser mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing every browser command as an MCP tool — so MCP clients (Claude Desktop, etc.) can drive the browser without shelling out. Each tool maps 1:1 to a CLI command and takes an optional `session` argument; outputs are the same JSON as `--json` mode.

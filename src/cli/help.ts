@@ -1,5 +1,5 @@
-// `bowser --help`, generated from the registry so a command cannot be
-// missing from it. Layout: two-space indent, the usage (name plus its
+// `bowser --help` and `bowser <cmd> --help`, generated from the registry so
+// a command cannot be missing from either. Layout: two-space indent, the usage (name plus its
 // positionals and flags), then the summary in a column. A usage longer than
 // the column wraps onto its own line with the summary on the next.
 
@@ -47,6 +47,26 @@ export function renderHelp(commands: readonly Command[]): string {
     const usage = " ".repeat(INDENT) + usageOf(c);
     if (usage.length < col) lines.push(usage.padEnd(col) + c.summary);
     else lines.push(usage, " ".repeat(col) + c.summary);
+  }
+  lines.push("", GLOBAL);
+  return lines.join("\n");
+}
+
+/** `bowser <cmd> --help`: the usage line, the summary, then the positionals
+ *  and flags, playwright-cli's per-command layout. The registry carries no
+ *  per-argument text, so each is listed by name. */
+export function renderCommandHelp(c: Command): string {
+  const lines = [`bowser ${usageOf(c)}`, "", c.summary];
+  if (c.positional.length) {
+    lines.push("", "Arguments:");
+    for (const p of c.positional) lines.push(`  ${p.required ? `<${p.name}>` : `[${p.name}]`}`);
+  }
+  if (c.flags.length) {
+    lines.push("", "Options:");
+    for (const f of c.flags) {
+      const long = f.kind === "boolean" ? `--${f.name}` : `--${f.name}=<${f.name}>`;
+      lines.push(`  ${f.short ? `-${f.short}, ` : ""}${long}`);
+    }
   }
   lines.push("", GLOBAL);
   return lines.join("\n");

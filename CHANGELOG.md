@@ -5,6 +5,13 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`<command> --help` prints that command's help and runs nothing.** It used to run the command:
+  `close --help` closed the session, `open --help` opened one, and `mcp --help` started the MCP
+  server. `-h`/`--help` anywhere before `--` now prints the usage line, summary, arguments and flags
+  from the registry, and exits 0. With no command it prints the general help, as before.
+
 ## [0.6.0] — 2026-09-26
 
 ### BREAKING: WebKit only, macOS only
