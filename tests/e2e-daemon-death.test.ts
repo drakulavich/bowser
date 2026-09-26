@@ -14,7 +14,7 @@ import { pidPath } from "../src/daemon/client.ts";
 
 // Copied from the user-error check in src/cli.ts (the `import.meta.main`
 // block); a match there means exit code 1 instead of 2.
-const USER_ERROR = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|no open page|bowser requires macOS)/i;
+const USER_ERROR = /^(usage:|unknown command|unknown flag|expected a ref|ref '.*' not found|no open page|bowser requires macOS)/i;
 
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
