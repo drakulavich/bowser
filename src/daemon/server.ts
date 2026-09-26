@@ -202,9 +202,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
     // document cannot use an answer meant for this one.
     if (NAVIGATES.has(req.op)) state.answer = undefined;
     const res = shim ? await runShimmed(req) : await run(req);
-    // The answers of dialogs this op opened land within a CDP round trip;
-    // bounded, so a browser that never answers cannot hold every reply.
-    if (req.report && !IS_URGENT.has(req.op)) await settled(answering, ANSWER_WAIT_MS);
+    // Wait for the answers of the dialogs this op opened. Each answer
+    // attempt is bounded (ANSWER_TIMEOUT_MS), so the chain always settles.
+    if (req.report && !IS_URGENT.has(req.op)) await answering;
     const dialogs = claim(req);
     return dialogs ? { ...res, dialogs } : res;
   };
@@ -331,7 +331,7 @@ function answerDialog(browser: Browser, state: DaemonState, d: DialogState): Pro
   if (d.type !== "beforeunload") state.answer = undefined;
   const accept = given?.accept ?? false;
   const text = d.type === "prompt" && accept ? given?.text ?? d.defaultValue ?? "" : undefined;
-  const first = browser.answerDialog(accept, text);
+  const first = bounded(browser.answerDialog(accept, text));
   const answered = (ok: boolean, promptText?: string): DialogReport => ({
     ...d,
     state: ok ? "accepted" : "dismissed",
@@ -342,21 +342,24 @@ function answerDialog(browser: Browser, state: DaemonState, d: DialogState): Pro
     () => answered(accept, text),
     // A dialog left open blocks the page, so a refused answer is tried once
     // more as a dismiss; failing that, the report says so rather than lie.
-    () => browser.answerDialog(false).then(
+    () => bounded(browser.answerDialog(false)).then(
       () => answered(false),
       (err: unknown): DialogReport => ({ ...d, state: "failed", error: err instanceof Error ? err.message : String(err) }),
     ),
   );
 }
 
-/** How long a reply waits for the answers of the dialogs its op opened. */
-const ANSWER_WAIT_MS = 2000;
+/** How long one answer attempt may take before it counts as refused. */
+const ANSWER_TIMEOUT_MS = 2000;
 
-/** Wait for `p` to settle, or `ms`, whichever comes first. */
-async function settled(p: Promise<unknown>, ms: number): Promise<void> {
+/** `p`, or a rejection with "answer timed out" after ANSWER_TIMEOUT_MS: a
+ *  browser that never answers must not stall the report chain. */
+function bounded(p: Promise<void>): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([p.catch(() => {}), new Promise<void>((r) => { timer = setTimeout(r, ms); })]);
-  clearTimeout(timer);
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("answer timed out")), ANSWER_TIMEOUT_MS);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
 export async function startDaemon(session: string, profile?: string): Promise<void> {
