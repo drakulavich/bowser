@@ -3,7 +3,7 @@
 // uses it to decide whether it may signal; a starting daemon uses it to decide
 // whether the session is already claimed.
 
-import { mkdirSync, readFileSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 
 /** True when `pid` names a running process, ours or anyone's. */
 export function isAlive(pid: number): boolean {
@@ -55,61 +55,74 @@ export async function isOurDaemon(pid: number, session: string): Promise<boolean
   }
 }
 
-/** How long a pidfile may stay empty before it counts as stale: a claimant
- *  creates it and writes its pid in two steps, and a reader can land between. */
-const EMPTY_GRACE_MS = 1000;
-
 /** How old the removal lock may get before it counts as abandoned. It is held
  *  for one read and one unlink, so only a process killed inside that window
  *  leaves it behind. */
 const LOCK_STALE_MS = 5000;
 
-/** Claim `session` for this process: create its pidfile exclusively (O_EXCL)
- *  with our pid. Returns false, having touched nothing, when the pidfile names
- *  a live daemon of ours: that daemon holds the session, and a racing client
- *  connects to it as it already polls. A pidfile naming a dead or foreign pid
- *  is stale: it is removed, and the claim is tried once more.
+/** The steps of a claim a test can pause at, to order two newcomers exactly:
+ *  `stale-read`, after reading a stale pid and before removing it;
+ *  `rechecked`, holding the removal lock, after re-reading that pid and
+ *  before unlinking. */
+export type ClaimStep = "stale-read" | "rechecked";
+
+/** Claim `session` for this process: make the pidfile with our pid, only if
+ *  there is none. Returns false, having touched nothing, when the pidfile
+ *  names a live daemon of ours: that daemon holds the session, and a racing
+ *  client connects to it as it already polls. A pidfile naming a dead or
+ *  foreign pid is stale: it is removed, and the claim is tried once more.
  *
  *  F29: without the claim, concurrent first commands each spawned a daemon,
- *  and each unlinked the other's socket and overwrote its pidfile. */
-export async function claimSession(pidFile: string, session: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+ *  and each unlinked the other's socket and overwrote its pidfile.
+ *
+ *  `pause` is for tests only (see ClaimStep). */
+export async function claimSession(
+  pidFile: string,
+  session: string,
+  pause: (step: ClaimStep) => Promise<void> = async () => {},
+): Promise<boolean> {
+  // Bounded: each pass either claims, finds a holder, or sees the pidfile
+  // change under it (a holder exited, or another newcomer removed a stale
+  // one and is claiming).
+  for (let attempt = 0; attempt < 3; attempt++) {
     if (tryClaim(pidFile)) return true;
-    const holder = await readHolder(pidFile);
-    if (holder === null) continue; // its daemon exited just now: claim again
+    let holder: string;
+    try {
+      holder = readFileSync(pidFile, "utf8").trim();
+    } catch {
+      continue; // gone since: claim again
+    }
     const pid = Number(holder);
-    if (Number.isInteger(pid) && pid > 0 && isAlive(pid) && (await isOurDaemon(pid, session))) return false;
-    removeStale(pidFile, holder);
+    // A claim is never written empty or partial (tryClaim links a complete
+    // file), so such a pidfile is corruption, not a claim in progress. It is
+    // left for `close`, which removes the session directory, rather than
+    // guessed to be stale.
+    if (!/^\d+$/.test(holder) || pid <= 0) return false;
+    if (isAlive(pid) && (await isOurDaemon(pid, session))) return false;
+    await pause("stale-read");
+    // The newcomer that removed the stale pidfile claims now, so a removal
+    // never leaves the session with no claimant.
+    if (await removeStale(pidFile, holder, pause)) return tryClaim(pidFile);
   }
-  // The newcomer that removed a stale pidfile on the last pass claims here;
-  // ending on a removal would leave the session with no claimant at all.
-  return tryClaim(pidFile);
+  return false;
 }
 
-/** Create the pidfile with our pid, only if there is none (O_EXCL). */
+/** Make the pidfile hold our pid, only if there is none. The pid is written
+ *  to a file of our own first and then hard-linked into place: the link fails
+ *  with EEXIST when the pidfile exists, as an O_EXCL create does, and the
+ *  pidfile appears with its content. An O_EXCL create followed by a write
+ *  left an empty pidfile that another newcomer could take for stale. */
 function tryClaim(pidFile: string): boolean {
+  const mine = `${pidFile}.${process.pid}.tmp`;
+  writeFileSync(mine, String(process.pid));
   try {
-    writeFileSync(pidFile, String(process.pid), { flag: "wx" });
+    linkSync(mine, pidFile);
     return true;
   } catch (e) {
     if ((e as { code?: string }).code !== "EEXIST") throw e;
     return false;
-  }
-}
-
-/** The pidfile's content, or null when it is gone. An empty file is a claim
- *  still being written, so it is read again until the grace runs out. */
-async function readHolder(pidFile: string): Promise<string | null> {
-  const deadline = Date.now() + EMPTY_GRACE_MS;
-  for (;;) {
-    let text: string;
-    try {
-      text = readFileSync(pidFile, "utf8").trim();
-    } catch {
-      return null;
-    }
-    if (text || Date.now() >= deadline) return text;
-    await Bun.sleep(20);
+  } finally {
+    try { unlinkSync(mine); } catch {}
   }
 }
 
@@ -118,24 +131,28 @@ async function readHolder(pidFile: string): Promise<string | null> {
  *  delete the claim the first just made. Only a lock holder removes a
  *  pidfile, and it re-reads the content first: the claim that replaces the
  *  stale one has other content. A newcomer that finds the lock taken leaves
- *  the removal to its holder; its next claim attempt sees the outcome. */
-function removeStale(pidFile: string, stale: string): void {
+ *  the removal to its holder; its next claim attempt sees the outcome.
+ *  Returns whether it removed the pidfile. */
+async function removeStale(pidFile: string, stale: string, pause: (step: ClaimStep) => Promise<void>): Promise<boolean> {
   const lock = `${pidFile}.lock`;
   try {
     mkdirSync(lock);
   } catch {
     try {
-      if (Date.now() - statSync(lock).mtimeMs < LOCK_STALE_MS) return;
+      if (Date.now() - statSync(lock).mtimeMs < LOCK_STALE_MS) return false;
       rmdirSync(lock);
       mkdirSync(lock);
     } catch {
-      return;
+      return false;
     }
   }
   try {
-    if (readFileSync(pidFile, "utf8").trim() === stale) unlinkSync(pidFile);
+    if (readFileSync(pidFile, "utf8").trim() !== stale) return false;
+    await pause("rechecked");
+    unlinkSync(pidFile);
+    return true;
   } catch {
-    // Already gone.
+    return false; // already gone
   } finally {
     try { rmdirSync(lock); } catch {}
   }

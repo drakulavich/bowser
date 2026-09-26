@@ -2,7 +2,7 @@
 // daemon that goes away mid-request.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import { ensureSessionDir, saveState } from "../src/state.ts";
 import { reportFailure } from "../src/cli.ts";
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
+import { claimSession } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 
 describe("socketPath", () => {
@@ -298,124 +299,106 @@ describe("daemon goes away mid-request", () => {
   });
 });
 
-// F29: the daemon claims its session through the pidfile before it touches
-// anything else, so racing first commands leave one daemon. These spawn the
-// real daemon entry (src/daemon/main.ts); a daemon that wins opens a WebKit
-// view, so they run where WebKit does.
-const onMac = process.platform === "darwin" ? describe : describe.skip;
-onMac("daemon session claim (F29)", () => {
-  const MAIN = join(import.meta.dir, "..", "src", "daemon", "main.ts");
-  let tmp: string;
-  let origHome: string | undefined;
-  const sessions: string[] = [];
+// F29: the claim a starting daemon makes on its session's pidfile, driven
+// through claimSession by helper processes, with no browser. Each helper
+// shows in `ps` as one of our daemons, so a winner that stays alive holds
+// the session for the others.
+describe("session claim (F29)", () => {
+  const HELPER = join(import.meta.dir, "helpers", "claim-session.ts");
+  let dir: string;
   const spawned: Array<ReturnType<typeof Bun.spawn>> = [];
+  let n = 0;
 
   beforeAll(async () => {
-    origHome = process.env.HOME;
-    tmp = await mkdtemp(join(tmpdir(), "bowser-claim-"));
-    process.env.HOME = tmp;
+    dir = await mkdtemp(join(tmpdir(), "bowser-claim-"));
   });
 
   afterAll(async () => {
     for (const p of spawned) p.kill("SIGKILL");
-    for (const s of sessions) await killDaemons(s);
-    if (origHome !== undefined) process.env.HOME = origHome;
-    await rm(tmp, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
   });
 
-  const fresh = async (name: string): Promise<string> => {
-    const s = `${name}-${process.pid}`;
-    sessions.push(s);
-    await ensureSessionDir(s);
-    return s;
+  const fresh = (content?: string): { pidFile: string; session: string } => {
+    const session = `claim${n++}-${process.pid}`;
+    const pidFile = join(dir, `${session}.pid`);
+    if (content !== undefined) writeFileSync(pidFile, content);
+    return { pidFile, session };
   };
-  const startDaemonProc = (session: string) => {
-    const p = Bun.spawn([process.execPath, MAIN, session], {
-      env: { ...process.env }, stdin: "ignore", stdout: "ignore", stderr: "ignore",
+
+  /** A newcomer, paused at `pauseAt` until released. */
+  const newcomer = (pidFile: string, session: string, pauseAt = "-") => {
+    const p = Bun.spawn([process.execPath, HELPER, pidFile, pauseAt, "/x/src/daemon/main.ts", session], {
+      stdin: "ignore", stdout: "pipe", stderr: "inherit",
     });
     spawned.push(p);
+    const said = (async () => {
+      const { value } = await p.stdout.getReader().read();
+      return new TextDecoder().decode(value).trim();
+    })();
+    return {
+      proc: p,
+      said,
+      paused: () => waitFor(() => existsSync(`${pidFile}.paused-${p.pid}`), 5000),
+      release: () => writeFileSync(`${pidFile}.release-${p.pid}`, ""),
+    };
+  };
+
+  /** A process `ps` shows as our daemon for `session`: a live holder. */
+  const liveHolder = async (session: string) => {
+    const p = Bun.spawn([process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session], {
+      stdin: "ignore", stdout: "ignore", stderr: "ignore",
+    });
+    spawned.push(p);
+    await waitFor(async () => (await daemonPids(session)).includes(p.pid));
     return p;
   };
-  const exitedWithin = (p: ReturnType<typeof Bun.spawn>, ms: number) =>
-    Promise.race([p.exited, Bun.sleep(ms).then(() => "running" as const)]);
 
-  test("a daemon starting on a session a live daemon of ours holds exits, leaving its socket and pidfile", async () => {
-    const session = await fresh("held");
-    // Stands in for the running daemon: `ps` shows it exactly as it shows ours.
-    const holder = Bun.spawn(
-      [process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session],
-      { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
-    );
-    spawned.push(holder);
-    await waitFor(async () => (await daemonPids(session)).includes(holder.pid));
-    await Bun.write(pidPath(session), String(holder.pid));
-    const listener = Bun.listen({ unix: socketPath(session), socket: { data() {} } });
-    try {
-      const newcomer = startDaemonProc(session);
-      expect(await exitedWithin(newcomer, 5000)).toBe(0);
-      expect((await Bun.file(pidPath(session)).text()).trim()).toBe(String(holder.pid));
-      expect(existsSync(socketPath(session))).toBe(true);
-    } finally {
-      listener.stop(true);
-      holder.kill("SIGKILL");
-    }
-  }, 15_000);
+  test("a pidfile that is empty is never removed: no claim is ever written empty", async () => {
+    const { pidFile, session } = fresh("");
+    expect(await claimSession(pidFile, session)).toBe(false);
+    expect(existsSync(pidFile)).toBe(true);
+    expect(await Bun.file(pidFile).text()).toBe("");
+  });
 
-  // The stale-claim path must itself be race-safe: two newcomers that both read
-  // the same stale pid must not both end up holding the session (the second
-  // deleting the claim the first just made). The race is narrow, so it is run
-  // many times at once; without the removal lock about one round in four has
-  // two winners (measured), so twelve rounds catch it ~97% of the time.
-  test("newcomers racing over a stale pidfile leave exactly one claimant", async () => {
-    const HELPER = join(import.meta.dir, "helpers", "claim-session.ts");
-    const dir = await mkdtemp(join(tmpdir(), "bowser-claim-race-"));
-    try {
-      for (let round = 0; round < 12; round++) {
-        const s = `stalerace${round}-${process.pid}`;
-        const pidFile = join(dir, `pid${round}`);
-        await Bun.write(pidFile, "99999");
-        const procs = Array.from({ length: 30 }, () => {
-          const p = Bun.spawn([process.execPath, HELPER, pidFile, "/x/src/daemon/main.ts", s], {
-            stdin: "ignore", stdout: "pipe", stderr: "ignore",
-          });
-          spawned.push(p);
-          return p;
-        });
-        await Bun.sleep(300);
-        await Bun.write(`${pidFile}.go`, "");
-        const said = await Promise.all(procs.map(async (p) => {
-          const { value } = await p.stdout.getReader().read();
-          return new TextDecoder().decode(value).trim();
-        }));
-        const winners = procs.filter((_, i) => said[i] === "won");
-        for (const p of procs) p.kill("SIGKILL");
-        expect(winners.length).toBe(1);
-        expect((await Bun.file(pidFile).text()).trim()).toBe(String(winners[0]!.pid));
-      }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  }, 60_000);
+  test("a pidfile naming a live daemon of ours is never removed", async () => {
+    const { pidFile, session } = fresh();
+    const holder = await liveHolder(session);
+    writeFileSync(pidFile, String(holder.pid));
+    expect(await claimSession(pidFile, session)).toBe(false);
+    expect(await Bun.file(pidFile).text()).toBe(String(holder.pid));
+  });
 
-  for (const stale of [false, true]) {
-    test(`five daemons starting on one session${stale ? " with a stale pidfile" : ""} leave one listening daemon and its pidfile`, async () => {
-      const session = await fresh(stale ? "stale5" : "race5u");
-      // A pid that is no process (the largest pid macOS hands out is 99998).
-      if (stale) await Bun.write(pidPath(session), "99999");
-      const procs = [1, 2, 3, 4, 5].map(() => startDaemonProc(session));
-      // Every loser exits on its own; the winner stays.
-      expect(await waitFor(() => procs.filter((p) => p.exitCode === null).length <= 1, 10_000)).toBe(true);
-      await Bun.sleep(500);
-      const pids = await daemonPids(session);
-      expect(pids.length).toBe(1);
-      expect(Number((await Bun.file(pidPath(session)).text()).trim())).toBe(pids[0]!);
-      const c = await connectOrSpawn(session, { spawn: false });
-      try {
-        await c.request("shutdown");
-      } finally {
-        c.close();
-      }
-      expect(await waitFor(async () => (await daemonPids(session)).length === 0)).toBe(true);
-    }, 30_000);
-  }
+  test("a stale pidfile (dead pid) is removed and claimed", async () => {
+    const { pidFile, session } = fresh("99999");
+    const a = newcomer(pidFile, session);
+    expect(await a.said).toBe("won");
+    expect(await Bun.file(pidFile).text()).toBe(String(a.proc.pid));
+  });
+
+  // Two newcomers read the same stale pid; A removes it and claims before B
+  // removes. B must re-read under the lock and leave A's claim alone.
+  test("a newcomer that read a stale pid leaves the claim made since then alone", async () => {
+    const { pidFile, session } = fresh("99999");
+    const b = newcomer(pidFile, session, "stale-read");
+    expect(await b.paused()).toBe(true);
+    const a = newcomer(pidFile, session);
+    expect(await a.said).toBe("won");
+    b.release();
+    expect(await b.said).toBe("lost");
+    expect(await Bun.file(pidFile).text()).toBe(String(a.proc.pid));
+  });
+
+  // B holds the removal lock, has re-read the stale pid and is about to
+  // remove it. A, reading the same stale pid, must not remove and claim in
+  // the meantime: B's removal would then take A's claim.
+  test("a newcomer does not remove a stale pidfile while another is removing it", async () => {
+    const { pidFile, session } = fresh("99999");
+    const b = newcomer(pidFile, session, "rechecked");
+    expect(await b.paused()).toBe(true);
+    const a = newcomer(pidFile, session);
+    expect(await a.said).toBe("lost");
+    b.release();
+    expect(await b.said).toBe("won");
+    expect(await Bun.file(pidFile).text()).toBe(String(b.proc.pid));
+  });
 });
