@@ -33,6 +33,13 @@ const PAGE = `<!doctype html><title>Dialogs</title>
 <button onclick="out.textContent = 'prompt:' + prompt('name?', 'def')">Prompt</button>
 <button onclick="alert('hi'); out.textContent = 'alert:done'">Alert</button>
 <button onclick="out.textContent = 'plain'">Plain</button>
+<a href="/?q=1">Next</a>
+<p id="out"></p>`;
+
+// Reached by a query-string navigation, where chrome's view.url getter says
+// about:blank; it opens a confirm as soon as it has loaded.
+const Q_PAGE = `<!doctype html><title>Arrived</title>
+<script>addEventListener("load", () => setTimeout(() => confirm("arrived"), 50));</script>
 <p id="out"></p>`;
 
 const pending = (type: string, message: string) =>
@@ -54,7 +61,9 @@ onChrome("e2e: dialogs on Chromium", () => {
     if (!detectChromium()) throw new Error("BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found.");
     server = Bun.serve({
       port: 0,
-      fetch: () => new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }),
+      fetch: (req) => new Response(new URL(req.url).search === "?q=1" ? Q_PAGE : PAGE, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
     });
     url = server.url.toString();
   });
@@ -199,6 +208,32 @@ onChrome("e2e: dialogs on Chromium", () => {
     const deadline = Date.now() + 3000;
     while (browsers.some(alive) && Date.now() < deadline) await Bun.sleep(50);
     expect(browsers.filter(alive)).toEqual([]);
+  }, 60_000);
+
+  test("a click that navigates to ?q=1 whose page opens a dialog: state and snapshot report the new url", async () => {
+    await fresh();
+    const next = `${url}?q=1`;
+    await timedClick("Next");
+    // The click's reply read state after its navigation landed.
+    expect((await loadState(ctx.session))!.url).toBe(next);
+    // The dialog opens 50 ms after load, possibly after the click returned.
+    await Bun.sleep(300);
+    const page = await cmdSnapshot(ctx);
+    expect(page).toContain(`- Page URL: ${next}`);
+    expect(page).toContain("- Page Title: Arrived");
+    expect(page).toEndWith(pending("confirm", "arrived"));
+    await cmdDialog(ctx, true);
+  }, 60_000);
+
+  test("goto a ?q=1 page that opens a dialog on load: every state read reports the new url", async () => {
+    await fresh();
+    const next = `${url}?q=1`;
+    await cmdGoto(ctx, next);
+    await Bun.sleep(300);
+    const page = await cmdSnapshot(ctx);
+    expect(page).toContain(`- Page URL: ${next}`);
+    expect(page).toEndWith(pending("confirm", "arrived"));
+    await cmdDialog(ctx, false);
   }, 60_000);
 
   test("one-shot: a navigation drops it", async () => {

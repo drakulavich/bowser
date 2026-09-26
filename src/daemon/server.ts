@@ -195,10 +195,6 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
   // The browser call a dialog blocked, after its op already replied. It still
   // owns the page until it settles; its own `finally` clears this.
   let blocked: { op: Op; done: Promise<unknown> } | undefined;
-  // The page as `state` last read it live. While a dialog or a blocked call
-  // holds the page it cannot be asked, and chrome's view.url getter may say
-  // about:blank (see realUrl), so `state` answers from this instead.
-  let lastPage = { url: "", title: "" };
   browser.watchDialogs({
     opened: (d) => {
       const a = state.answer;
@@ -217,12 +213,15 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
   });
 
   const stateful: { [O in Stateful]: (b: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>> } = {
-    // While a dialog is open the page cannot evaluate, so url and title come
-    // from the view's own getters instead of realUrl()/realTitle().
+    // While a dialog is open or a blocked call is settling (chrome only) the
+    // page cannot evaluate, so url and title come from the browser's own view
+    // of the target (pageInfo) instead of realUrl()/realTitle().
     state: async (b) => {
-      if (!state.dialog && !blocked) lastPage = { url: await b.realUrl(), title: await b.realTitle() };
+      const page = state.dialog || blocked
+        ? await b.pageInfo()
+        : { url: await b.realUrl(), title: await b.realTitle() };
       return {
-        ...lastPage,
+        ...page,
         ...(state.dialog ? { dialog: state.dialog } : {}),
         ...(state.profile ? { profile: state.profile } : {}),
       };

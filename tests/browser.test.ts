@@ -342,6 +342,12 @@ describe("wrapView dialogs", () => {
     ]);
   });
 
+  test("on chrome pageInfo asks the browser for our target's url and title (no evaluate)", async () => {
+    const v = fakeView({ cdp: async (m, p) => { v.calls.push(["cdp", [m, p]]); return { targetInfo: { url: "https://x/?q=1", title: "Q", type: "page" } }; } });
+    expect(await wrapView(v, chrome).pageInfo()).toEqual({ url: "https://x/?q=1", title: "Q" });
+    expect(v.calls).toEqual([["cdp", ["Target.getTargetInfo", {}]]]);
+  });
+
   test("on webkit no dialog events exist: watchDialogs says so, subscribes to nothing, still reports navigations", async () => {
     const v = fakeView();
     const b = wrapView(v, webkit);

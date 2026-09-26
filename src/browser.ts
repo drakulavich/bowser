@@ -131,6 +131,12 @@ export interface Browser {
   watchDialogs(on: DialogListener): boolean;
   /** Answer the open dialog (chrome: Page.handleJavaScriptDialog). */
   answerDialog(accept: boolean, promptText?: string): Promise<void>;
+  /** The page's url and title without evaluating in it, so it answers while
+   *  a dialog blocks the page. Chrome: CDP Target.getTargetInfo for our own
+   *  target (measured: answers at once with a confirm() open, and reports the
+   *  real url after a query-string navigation, unlike view.url). Webkit never
+   *  has a blocked page, so it reads the page as realUrl/realTitle do. */
+  pageInfo(): Promise<{ url: string; title: string }>;
   // --- Cookies: CDP-backed, so chrome only. Each rejects with CDP_UNAVAILABLE on webkit. ---
   getCookies(urls?: string[]): Promise<Cookie[]>;
   setCookie(param: CookieParam): Promise<{ success: boolean }>;
@@ -350,6 +356,16 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     },
     answerDialog: async (accept, promptText) => {
       await cdp("Page.handleJavaScriptDialog", promptText === undefined ? { accept } : { accept, promptText });
+    },
+    pageInfo: async () => {
+      if (spec.kind !== "chrome") {
+        return {
+          url: await resolveUrl(view.url, () => view.evaluate(READ_URL)),
+          title: await resolveTitle(view.title, () => view.evaluate(READ_TITLE)),
+        };
+      }
+      const { targetInfo } = (await cdp("Target.getTargetInfo", {})) as { targetInfo: { url: string; title: string } };
+      return { url: targetInfo.url, title: targetInfo.title };
     },
     getCookies: async (urls) => {
       // `!= null`: the wire delivers JSON null for an omitted url list.
