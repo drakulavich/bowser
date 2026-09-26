@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import { findCommand } from "../src/cli/registry.ts";
+import { reportFailure, run } from "../src/cli.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath } from "../src/daemon/client.ts";
@@ -1605,5 +1606,35 @@ describe("dialogs", () => {
     const cookies = fakeClient({}, { dialogs: [dismissed] });
     await cmdCookieList({ ...ctx(), connect: async () => cookies });
     expect(cookies.reporting).toBe(false);
+  });
+});
+
+describe("a failed page command still reports its dialogs", () => {
+  const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
+  const MODAL = '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
+
+  test("eval that throws after a confirm: the error unchanged, then the report, exit code 2", async () => {
+    const c = fakeClient({ evaluate: () => { throw new Error("Error: boom"); } }, { dialogs: [dismissed] });
+    const err = await run([`--session=${session}`, "eval", "confirm('sure?'); throw new Error('boom')"], { connect: async () => c }).catch((e) => e);
+    expect(reportFailure(err)).toEqual({ stderr: `bowser: Error: boom\n${MODAL}`, code: 2 });
+  });
+
+  test("a user error keeps exit code 1 and its message first, so the CLI still classifies it", async () => {
+    await saveState({
+      name: session, url: "https://x", title: "X", updatedAt: Date.now(),
+      refs: [{ id: "e1", selector: "button", role: "button", name: "go", tag: "button" }],
+    });
+    const c = fakeClient({ evaluate: () => null }, { dialogs: [dismissed] });
+    const err = await run([`--session=${session}`, "click", "e1"], { connect: async () => c }).catch((e) => e);
+    const { stderr, code } = reportFailure(err);
+    expect(stderr).toStartWith("bowser: ref 'e1' not found in the current page snapshot.");
+    expect(stderr).toEndWith(`\n${MODAL}`);
+    expect(code).toBe(1);
+  });
+
+  test("a failure with no dialogs prints only the error", async () => {
+    const c = fakeClient({ evaluate: () => { throw new Error("Error: boom"); } });
+    const err = await run([`--session=${session}`, "eval", "x"], { connect: async () => c }).catch((e) => e);
+    expect(reportFailure(err)).toEqual({ stderr: "bowser: Error: boom", code: 2 });
   });
 });

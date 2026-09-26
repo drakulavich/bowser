@@ -42,7 +42,9 @@ leaves one open, so none of that machinery exists.
    - ["prompt" dialog with message "name?"]: dismissed (run dialog-accept before the action to accept it)
    ```
    (the hint only when dismissed for lack of a one-shot answer). `--json`: the command's object gains
-   `"dialogs": [...]`, absent when none.
+   `"dialogs": [...]`, absent when none. A command that fails reports its dialogs too, then forgets
+   them: the error message unchanged, then `### Modal state` on stderr (in an MCP tool error, in its
+   text); the exit code does not change.
 4. **Chromium.** The daemon subscribes to `Page.javascriptDialogOpening` **before the first
    navigation**, so a dialog during the very first page load is answered too, and handles each one
    at once with `Page.handleJavaScriptDialog`. The log lives in the daemon.

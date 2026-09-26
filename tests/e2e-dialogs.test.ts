@@ -244,4 +244,20 @@ run("e2e: dialogs", () => {
     expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
     expect(await out()).toBe("confirm:true");
   }, 60_000);
+
+  test("a command that fails after a dialog prints its error, then the report on stderr, exit 2; the next command does not replay it", async () => {
+    await fresh();
+    // Through the real CLI, so stderr and the exit code are the ones a user sees.
+    // An expression: eval does not take statements.
+    const p = Bun.spawnSync(
+      ["bun", join(import.meta.dir, "../src/cli.ts"), `--session=${ctx.session}`, "eval", "(confirm('sure?'), (() => { throw new Error('boom') })())"],
+      { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
+    );
+    const stderr = p.stderr.toString();
+    expect(stderr).toStartWith("bowser: ");
+    expect(stderr).toContain("boom");
+    expect(stderr).toContain(`### Modal state\n${line("confirm", "sure?", HINT)}`);
+    expect(p.exitCode).toBe(2);
+    expect(await cmdSnapshot(ctx)).not.toContain("Modal state");
+  }, 60_000);
 });

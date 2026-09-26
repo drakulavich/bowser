@@ -93,8 +93,18 @@ export function replyPage(ctx: CommandContext, c: DaemonConnection, json: Record
 
 /** The `### Modal state` section for the dialogs `c` reported, or "". */
 export function modalState(c: DaemonConnection): string {
-  const dialogs = c.dialogs();
+  return modalLines(c.dialogs());
+}
+
+function modalLines(dialogs: DialogReport[]): string {
   return dialogs.length ? ["### Modal state", ...dialogs.map((d) => `- ${dialogLine(d)}`)].join("\n") : "";
+}
+
+/** The `### Modal state` section of a failed page command: the dialogs
+ *  answered while it ran, which `withPageClient` hangs on its error; or "". */
+export function failedModalState(err: unknown): string {
+  const dialogs = err instanceof Error ? (err as Error & { dialogs?: DialogReport[] }).dialogs : undefined;
+  return Array.isArray(dialogs) ? modalLines(dialogs) : "";
 }
 
 /** The reported dialogs as --json gives them: without `unanswered`. */
@@ -110,7 +120,19 @@ export function withPageClient<T>(
   fn: (c: DaemonConnection) => Promise<T>,
   opts: ConnectOptions = {},
 ): Promise<T> {
-  return withClient(ctx, (c) => { c.reportDialogs(); return fn(c); }, opts);
+  return withClient(ctx, async (c) => {
+    c.reportDialogs();
+    try {
+      return await fn(c);
+    } catch (err) {
+      // The daemon handed this command its reports, so they are printed with
+      // the error or never: the message stays as it was (the exit code is
+      // read from it), and the dialogs ride along on the error.
+      const dialogs = c.dialogs();
+      if (dialogs.length === 0) throw err;
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { dialogs });
+    }
+  }, opts);
 }
 
 /** After an action that may have navigated, persist the page the daemon

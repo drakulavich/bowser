@@ -174,6 +174,20 @@ describe("handleMcpRequest — tools/call", () => {
     expect(res.result.content[0].text).toContain("no open page");
   });
 
+  test("a failed tool call's error text carries the dialogs the command answered", async () => {
+    const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
+    const connect = async () => fakeClient({ evaluate: () => { throw new Error("Error: boom"); } }, { dialogs: [dismissed] });
+    const deps: McpDeps = { run: (argv) => run(argv, { connect }), version: "9.9.9" };
+    const res: any = await handleMcpRequest(
+      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "eval", arguments: { expression: "confirm('sure?'); throw 1" } } },
+      deps,
+    );
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toBe(
+      'Error: boom\n### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)',
+    );
+  });
+
   test("unknown tool → tool error result", async () => {
     const res: any = await handleMcpRequest(
       { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nonexistent", arguments: {} } },

@@ -225,8 +225,13 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
     if (req.op === "evaluate") {
       const drop = !shimmed;
       const res = await run({ ...req, args: [withDialogShim(String(req.args?.[0]), drop)] });
-      // A throwing expression may have run nothing: install again next time.
-      if (!res.ok) return res;
+      // A throwing expression never returned its log: read it now, so the
+      // error reports the dialogs too. It may have run nothing, so the read
+      // also installs the shim when the page lacks it.
+      if (!res.ok) {
+        await sync();
+        return res;
+      }
       shimmed = true;
       const r = res.result as { value?: unknown; dialogs?: unknown } | undefined;
       take(r?.dialogs);

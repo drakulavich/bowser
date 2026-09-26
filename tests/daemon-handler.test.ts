@@ -593,11 +593,22 @@ describe("dialogs on webkit: the page shim answers them", () => {
     expect(b.calls.map(([n]) => n)).toEqual(["evaluate", "click", "evaluate"]);
   });
 
-  test("an eval that throws keeps its error, and the dialog it opened is reported by the next op", async () => {
+  test("an eval that throws after a dialog keeps its error and reports the dialog with it, and the next op does not replay it", async () => {
     const b = webkitBrowser();
     const h = createHandler(b);
-    expect(await h(rep("evaluate", ["(window.confirm('x'), null.boom)"]))).toMatchObject({ ok: false, error: expect.stringContaining("null") });
-    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "confirm", message: "x", state: "dismissed", unanswered: true }]);
+    expect(await h(rep("evaluate", ["(window.confirm('x'), null.boom)"]))).toMatchObject({
+      ok: false, error: expect.stringContaining("null"), dialogs: [{ type: "confirm", message: "x", state: "dismissed", unanswered: true }],
+    });
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toBeUndefined();
+  });
+
+  test("a native action that fails after a dialog reports it with the error", async () => {
+    const b = webkitBrowser();
+    b.click = async () => { b.page("alert", "hi"); throw new Error("click: gone"); };
+    const h = createHandler(b);
+    expect(await h(rep("click", ["#go"]))).toMatchObject({
+      ok: false, error: "click: gone", dialogs: [{ type: "alert", message: "hi", state: "dismissed", unanswered: true }],
+    });
   });
 
   test("a dialog a timer opened is read by the next op but waits for one that prints it", async () => {

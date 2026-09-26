@@ -11,7 +11,8 @@ All notable changes to this project are documented here. This project follows
   `prompt` on the current page. A prompt gets `text`, or its own default value when no text is given.
   Every dialog is answered the moment it opens: with that one-shot answer if one is set, otherwise
   it is dismissed. The command that caused a dialog reports it under `### Modal state`, for example
-  `- ["confirm" dialog with message "sure?"]: accepted`, and `--json` gives a `dialogs` array. The
+  `- ["confirm" dialog with message "sure?"]: accepted`, and `--json` gives a `dialogs` array. A command that fails prints them on stderr after its error,
+  with the same exit code. The
   answer is used once and dropped when the page navigates. **Difference from `playwright-cli`:**
   run the command *before* the action that opens the dialog. Run after it, it prepares the next
   dialog and does not answer the one already reported. On WebKit, which has no dialog events, a page
