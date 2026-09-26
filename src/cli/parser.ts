@@ -31,7 +31,23 @@ export interface Parsed {
 
 const GLOBAL_NAMES = new Set(["session", "json", "help"]);
 
+/** Whether argv asks for help: a `-h`/`--help` the parser reads as the flag,
+ *  not as a string flag's value (`snapshot --filename -h` names a file) or
+ *  a word after `--`. An unknown flag beside it cannot hide it: `mcp --bogus
+ *  --help` must print help, not start the server. */
+export function helpRequested(schemas: Schemas, argv: string[]): boolean {
+  try {
+    return parse(schemas, argv).help;
+  } catch {
+    return false;
+  }
+}
+
+/** An unknown flag or command throws, unless the same argv asks for help:
+ *  then nothing runs, so the first such error is dropped. An unknown flag
+ *  consumes no value, so `close --bogus -h` is help. */
 export function parse(schemas: Schemas, argv: string[]): Parsed {
+  let error: Error | undefined;
   const out: Parsed = {
     session: "default",
     json: false,
@@ -66,7 +82,11 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       const eq = a.indexOf("=");
       const name = eq >= 0 ? a.slice(2, eq) : a.slice(2);
       const spec = findFlag(schemas, cmdSchema, name);
-      if (!spec) throw new Error(`unknown flag: --${name}`);
+      if (!spec) {
+        error ??= new Error(`unknown flag: --${name}`);
+        i++;
+        continue;
+      }
       const value =
         spec.kind === "boolean"
           ? (eq >= 0 ? a.slice(eq + 1) === "true" : true)
@@ -80,7 +100,11 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       const eq = a.indexOf("=");
       const short = eq >= 0 ? a.slice(1, eq) : a.slice(1);
       const spec = findShort(schemas, cmdSchema, short);
-      if (!spec) throw new Error(`unknown flag: -${short}`);
+      if (!spec) {
+        error ??= new Error(`unknown flag: -${short}`);
+        i++;
+        continue;
+      }
       const value =
         spec.kind === "boolean"
           ? (eq >= 0 ? a.slice(eq + 1) === "true" : true)
@@ -93,7 +117,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
     if (!out.command) {
       out.command = a;
       cmdSchema = schemas.commands.find((c) => c.name === a);
-      if (!cmdSchema && !out.help) throw new Error(`unknown command: ${a}`);
+      if (!cmdSchema) error ??= new Error(`unknown command: ${a}`);
       i++;
       continue;
     }
@@ -101,6 +125,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
     i++;
   }
 
+  if (error && !out.help) throw error;
   return out;
 }
 

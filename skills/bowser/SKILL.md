@@ -68,6 +68,9 @@ Do **not** use for static HTTP fetches.
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
 
+`bowser <command> --help` prints that command's usage and flags without running it, so it is safe on
+`close` or `open`. After `--`, `--help` is plain text: `bowser fill e1 -- --help` types it.
+
 ## Snapshot Format
 
 ````
@@ -157,7 +160,7 @@ bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only t
 ## Troubleshooting
 
 - **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
-- **`BOWSER_OP_TIMEOUT_MS`** — per-operation timeout in ms (default `30000`; `0` disables). Set higher if a slow page causes timeout errors.
+- **`BOWSER_OP_TIMEOUT_MS`** — per-command timeout in ms (default `30000`; `0` disables), counted from when the daemon receives the command, including time spent waiting behind a timed-out one. Set it higher if a slow page causes timeout errors. If a timed-out command is still running 2 s later (or after the budget, if that is under 2 s), the daemon reloads the page once to free the browser; if a command still fails with `waiting for '<op>', which timed out and is still running`, run `bowser close` and reopen.
 - **"ref 'eN' not found in the current page snapshot"** — the element behind the ref is gone: the page re-rendered, navigated or reloaded since that snapshot. Run `bowser snapshot` and use the new refs.
 - **"ref 'eN' not found in last snapshot"** — the ref was never in the last snapshot. Run `bowser snapshot`.
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
