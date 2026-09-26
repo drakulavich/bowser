@@ -30,12 +30,6 @@ backend is removed. If you need Chromium, use Microsoft's
   `BOWSER_CHROME_ARGS`. Nothing reads them any more.
 - **`BOWSER_CHROME_DEBUG` is renamed `BOWSER_DAEMON_DEBUG`.** It still lets the daemon's output
   through to the terminal.
-- **Dialogs** are answered only by the page shim; the `could not be answered` state was
-  Chromium's and is gone.
-
-Several entries below were written before the pivot and mention Chromium, CDP, the cookie commands
-or enum flags (`FlagSpec.values`, removed along with the cookie flags). In 0.6.0 only their WebKit
-behaviour ships.
 
 ### Added
 
@@ -47,13 +41,12 @@ behaviour ships.
   with the same exit code. The
   answer is used once and dropped when the page navigates. **Difference from `playwright-cli`:**
   run the command *before* the action that opens the dialog. Run after it, it prepares the next
-  dialog and does not answer the one already reported. On WebKit, which has no dialog events, a page
-  shim answers dialogs. A dialog raised during page load, before bowser's first command on that
-  document, is dismissed by the engine and not reported there. A dialog whose handler then
-  navigates the page is answered but not reported on WebKit. So is a dialog opened through a
-  reference the page saved at load time, which the engine dismisses; a prepared answer then stays
-  set until the next dialog bowser sees or a navigation. If the browser refuses to close a dialog,
-  it is reported as `could not be answered (<error>)`.
+  dialog and does not answer the one already reported. WebKit has no dialog events, so a page shim
+  answers dialogs. A dialog raised during page load, before bowser's first command on that
+  document, is dismissed by the engine and not reported. A dialog whose handler then navigates the
+  page is answered but not reported. So is a dialog opened through a reference the page saved at
+  load time, which the engine dismisses; a prepared answer then stays set until the next dialog
+  bowser sees or a navigation.
 
 - **`fill <ref> --stdin`** takes the text from standard input, so a secret never reaches the
   `bowser` process's arguments, where `ps` shows it to any local user:
@@ -65,7 +58,7 @@ behaviour ships.
   field's value (see Changed below); other fields' values still print.
 - **`open --persistent` and `open --profile=<dir>`**, as in `playwright-cli` 0.1.13. A session's
   browser keeps cookies, `localStorage` and IndexedDB on disk, in `~/.bowser/profiles/<session>/` or
-  in `<dir>`, so a login survives `close` and daemon restarts on both backends. `close` leaves the
+  in `<dir>`, so a login survives `close` and daemon restarts. `close` leaves the
   profile in place; delete it with `rm -rf`. Opening a running session with a different store is a
   usage error (exit 1): close it first. One profile serves one running session at a time.
 
@@ -87,7 +80,7 @@ behaviour ships.
   `- Page Title:` / `### Snapshot` header and a fenced tree with headings, text, state attributes
   (`[checked]`, `[disabled]`, `[expanded]`, `[active]`, `[level=N]`, `[pressed]`,
   `[selected]`) and `/url` / `/placeholder` props. Goldens captured from `playwright-cli` 0.1.13
-  pin it byte-for-byte on both backends. What breaks:
+  pin it byte-for-byte. What breaks:
   - **Line syntax.** `button "Add": [ref=e2]` is now `button "Add" [ref=e5] [cursor=pointer]`.
   - **Refs.** Any visible element can have one, not only interactive ones. They are numbered in
     document order across the whole tree, so the printed numbers have gaps, and they are sticky:
@@ -102,15 +95,12 @@ behaviour ships.
     a listitem clicked it and reported success.
 
   Not covered: iframe contents (an iframe prints as a leaf with a ref), shadow DOM, `aria-owns`,
-  the `- Console:` line and the global `--raw` flag. Known gap: on Chromium, `check` does not
-  move focus the way `playwright-cli`'s does, so `[active]` can sit on a different node after it.
+  the `- Console:` line and the global `--raw` flag.
 
 ### Fixed
 
-- **A dialog wedged the session on Chromium.** A `click` that opened a `confirm()` hung until the op
-  timeout (exit 2), and later commands hung too. Dialogs are now answered as they open (see
-  `dialog-accept` under Added). On WebKit the engine used to answer them silently, so the agent
-  never learned of them. They are now reported on WebKit too.
+- **Dialogs went unreported.** WebKit answered them silently, so the agent never learned of them.
+  They are now answered as they open and reported (see `dialog-accept` under Added).
 
 - **An action on a stale ref waited 30 s or hit the wrong element.** A ref was acted on through
   the CSS path saved at snapshot time. When its element was gone (a todo removed by "Clear
@@ -149,22 +139,15 @@ behaviour ships.
   signalled until the pid's command line is confirmed to name this session and a bowser daemon,
   so a stale pidfile whose number has been reused cannot cost an unrelated process.
 
-- **`cookie-set` accepted an invalid `--same-site` and silently dropped it.** CDP answers
-  `Network.setCookie` with `success: true` for a `sameSite` it does not understand and stores the
-  cookie without the attribute, so nothing downstream could notice: `cookie-set` printed
-  `set <name>` and the cookie came back with no `sameSite`. The value is now rejected before the
-  request is sent, as `playwright-cli` does. `cookie-set` also reports a failure when CDP returns
-  `success: false`, which it previously discarded.
-
 - **WebKit: `open` printed an empty title.** `Bun.WebView`'s `title` getter is still empty when
-  `navigate()` resolves on the webkit backend; the daemon now reads `document.title` from the page
+  `navigate()` resolves; the daemon now reads `document.title` from the page
   when the getter is empty, the same fallback `realUrl()` uses for the URL.
 - **WebKit: `goto` right after `reload` failed with `NSURLErrorDomain -999`.** `reload` now waits for
   its navigation to land before answering (native `Bun.WebView.reload()` is used where the runtime
   has it, but like `goBack()` it resolves before the reload commits).
 - **`click`, `press`, `go-back`, `go-forward` and `reload` reported the URL of the page they were
   leaving.** The browser now waits for a navigation the action started (begins within 100 ms, lands
-  within 10 s) before answering, on both backends.
+  within 10 s) before answering.
 
 ### Changed
 
@@ -176,12 +159,6 @@ behaviour ships.
 - **`close` removes the session directory** instead of rewriting its state file empty. Nothing
   reads a closed session's state, and keeping the directory is what let closed sessions accumulate.
 
-- **An enum flag declares its accepted values.** `FlagSpec.values` drives both parser validation
-  and the `--help` placeholder, so the two cannot drift. `bowser --help` now shows
-  `[--same-site=Strict|Lax|None]`, previously `[--same-site=Lax|Strict|None]`, and an MCP client
-  sees the same list as a JSON-Schema `enum`. A bare `--same-site` or `--same-site=` is now an
-  error; both were previously ignored.
-
 - **A command reads its string flags through `str()`** instead of asserting them with
   `as string | undefined`. Flags arrive as `string | boolean` in one bag, so the cast also accepted a
   boolean: a flag declared `kind: "boolean"` could be read as a string and the command handed `true`.
@@ -189,7 +166,7 @@ behaviour ships.
 - **Type checking is a gate.** `bun run typecheck` (tsc) runs in CI; `bun test` strips types and
   never checked them. Three latent type errors fixed.
 - **WebKit is tested end-to-end.** A macOS CI job runs the e2e suites on WebKit, including a
-  new agent-loop scenario covering every non-CDP command, and a differential test against
+  new agent-loop scenario covering every command, and a differential test against
   `playwright-cli` (skipped when it is not installed).
 - **Known WebKit limitations, now pinned as `test.todo`:** `press` fires no bubbling `keydown`. See
   the 2026-09-05 refactor spec, "Findings".
@@ -197,13 +174,7 @@ behaviour ships.
   `DaemonOps` declares every op's arguments and result; the client's `request`, the server's handler
   table and the tests' fake client derive from it, so a new op without a handler fails `bun run
   typecheck`. No wire, CLI or `--json` change.
-- **`src/backend.ts`.** Backend selection and Chromium detection moved out of `src/browser.ts`;
-  `browser.ts` is now only the `Browser` over one `Bun.WebView`, built by `wrapView()`.
-- **Cookie ops are `Browser` methods; CDP-only ops are refused on webkit before dispatch.** The four
-  `cookie-*` ops carry `requires: "cdp"` in `DaemonOps`; the daemon answers with the same error text
-  as before without calling the handler.
-
-- **`src/commands.ts` is now `src/commands/{context,navigation,interaction,snapshot,web-storage,cookies,storage-state,scripting,install}.ts`**,
+- **`src/commands.ts` is now `src/commands/{context,navigation,interaction,snapshot,dialog,web-storage,storage-state,scripting}.ts`**,
   and every script injected into the page lives in `src/page-scripts.ts`. `reply()` and `syncState()` in
   `context.ts` replace the two lines every command repeated. No output, `--json` or wire change.
 - **Each command carries its own one-line summary, now the single source for `--help` and the MCP
@@ -219,17 +190,15 @@ behaviour ships.
   and `screenshot` before the interaction commands, where the old hand-written order interleaved
   them. The MCP `tools/list` order follows the same grouping. No command was added or removed.
 - **`bowser --help`'s column alignment changed.** The summary column now starts two spaces past the
-  widest usage that still ends by column 40 (column 38), instead of a fixed width. The `snapshot`
-  usage and the four `cookie-*` usages exceed that and now wrap onto their own line with the summary
-  beneath. Every command's summary text is otherwise the same string used for its MCP tool
+  widest usage that still ends by column 40 (column 38), instead of a fixed width. Usages past it
+  (`open`'s and `snapshot`'s) wrap onto their own line with the summary beneath. Every command's summary text is otherwise the same string used for its MCP tool
   description (see above).
 - **The daemon's urgent lane is declared.** `ping` and `shutdown` carry `urgent: true` in
   `DaemonOps` and the server routes on that marker instead of testing for the string
   `"shutdown"`, so an op that must answer while another is wedged is one marker rather than a
   new branch. The routing itself moved out of `Bun.listen`'s `data` callback into an exported
   `dispatch(req, lane)` function in `src/daemon/server.ts`, so the lane choice can be
-  unit-tested without a socket. `DaemonState` gives the daemon a slot for a dialog the page
-  opened, and `Browser.subscribe()` exposes the backend event stream it will be filled from. No
+  unit-tested without a socket. No
   visible change: no command's output differs.
 
 ## [0.5.0] — 2026-06-15

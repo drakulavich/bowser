@@ -52,7 +52,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: E2E on WebKit
         # e2e-compat skips here: the runner has no playwright-cli.
-        run: bun test tests/e2e.test.ts tests/e2e-todo.test.ts tests/e2e-snapshot.test.ts tests/e2e-stale-ref.test.ts tests/e2e-password.test.ts tests/e2e-webkit.test.ts tests/e2e-webkit-sessions.test.ts tests/e2e-daemon-death.test.ts tests/e2e-persistent.test.ts tests/e2e-fill-stdin.test.ts tests/e2e-dialogs.test.ts tests/e2e-compat.test.ts
+        run: bun test tests/e2e.test.ts tests/e2e-todo.test.ts tests/e2e-snapshot.test.ts tests/e2e-stale-ref.test.ts tests/e2e-password.test.ts tests/e2e-webkit.test.ts tests/e2e-webkit-sessions.test.ts tests/e2e-daemon-death.test.ts tests/e2e-orphan.test.ts tests/e2e-persistent.test.ts tests/e2e-fill-stdin.test.ts tests/e2e-dialogs.test.ts tests/e2e-compat.test.ts
       - name: E2E - compiled binary daemon + screenshot
         # The suites above run in-process via `bun test` and never exercise the
         # COMPILED binary's daemon-spawn path (it re-invokes itself with a hidden
