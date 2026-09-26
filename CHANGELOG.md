@@ -5,6 +5,21 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed: `fill` and `type` never echo the text they entered
+
+Through MCP, `fill` and `type` returned the text they entered, passwords included, so a secret
+landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
+
+- **`fill --json`** gives `{"ok":true,"ref":"<ref>"}` in every mode, the shape `--stdin` already
+  had. The `text` key is gone. The plain output, `filled <ref> (<role> "<name>")`, is unchanged.
+- **`type`** prints `typed N characters` (`typed 1 character` when N is 1), where N counts code
+  points, instead of `typed "<text>"`. `type --json` gives `{"ok":true,"length":N}` instead of
+  `{"ok":true,"text":"<text>"}`.
+- The MCP `fill` and `type` tools follow, since they return the `--json` answer.
+- A browser error from either command that contains the entered text is replaced by
+  `<command>: the browser's error message was withheld because it contained the entered text`
+  (exit 2, dialogs still reported). Dialog messages are page content and are printed as is.
+
 ### Fixed
 
 - **`<command> --help` prints that command's help and runs nothing.** It used to run the command:
