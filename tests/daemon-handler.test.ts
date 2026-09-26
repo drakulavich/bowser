@@ -1,33 +1,13 @@
 // createHandler() against a fake Browser: every op reaches the right Browser
-// method with the right arguments, errors come back as { ok: false }, and
-// the cookie ops forward straight to the Browser's cookie methods (the CDP
-// method selection they used to do inline now lives in Browser; see
-// tests/browser.test.ts for that).
+// method with the right arguments, and errors come back as { ok: false }.
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser, DialogListener } from "../src/browser.ts";
-import { CDP_UNAVAILABLE } from "../src/browser.ts";
 import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
 import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogState } from "../src/daemon/protocol.ts";
 import { createSerializer } from "../src/serialize.ts";
-import type { Cookie } from "../src/cdp/types.ts";
-
-// A fully-populated CDP cookie (Cookie has more required fields than the
-// name/value pair these tests care about; mirrors tests/state-storage.test.ts's
-// cdpCookie helper).
-const cookie: Cookie = {
-  name: "a",
-  value: "1",
-  domain: "x",
-  path: "/",
-  expires: -1,
-  size: 1,
-  httpOnly: false,
-  secure: false,
-  session: true,
-};
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
   const calls: Array<[string, unknown[]]> = [];
@@ -57,10 +37,6 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     // Chrome-like: dialogs arrive as events. webkitBrowser() below has the page shim.
     watchDialogs: () => true,
     answerDialog: rec("answerDialog", undefined),
-    getCookies: rec("getCookies", [cookie]),
-    setCookie: rec("setCookie", { success: true }),
-    deleteCookies: rec("deleteCookies", undefined),
-    clearCookies: rec("clearCookies", undefined),
     ...over,
   };
   return b;
@@ -152,21 +128,6 @@ describe("createHandler", () => {
     }
   });
 
-  test("cookie ops forward to the Browser's cookie methods", async () => {
-    const b = fakeBrowser();
-    const h = createHandler(b);
-    expect(await h(req("cookie-get-all", [["https://x/"]]))).toEqual({ id: 7, ok: true, result: [cookie] });
-    await h(req("cookie-set", [{ name: "a", value: "1" }]));
-    await h(req("cookie-delete", ["sid", { domain: "x" }]));
-    await h(req("cookie-clear"));
-    expect(b.calls).toEqual([
-      ["getCookies", [["https://x/"]]],
-      ["setCookie", [{ name: "a", value: "1" }]],
-      ["deleteCookies", ["sid", { domain: "x" }]],
-      ["clearCookies", []],
-    ]);
-  });
-
   test("a throwing browser method becomes { ok: false, error }", async () => {
     const b = fakeBrowser({ click: async () => { throw new Error("click: element not found"); } });
     expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({ id: 7, ok: false, error: "click: element not found" });
@@ -197,17 +158,6 @@ describe("createHandler", () => {
   test("a prototype key is an unknown op, not a lookup hit", async () => {
     const res = await createHandler(fakeBrowser())({ id: 7, op: "toString" as DaemonRequest["op"], args: [] });
     expect(res).toEqual({ id: 7, ok: false, error: "unknown op: toString" });
-  });
-
-  test("a cdp op on webkit is refused with the shared message before the handler runs", async () => {
-    const b = fakeBrowser({ cdpAvailable: () => false });
-    expect(await createHandler(b)(req("cookie-clear"))).toEqual({ id: 7, ok: false, error: CDP_UNAVAILABLE });
-    expect(b.calls).toEqual([]);
-  });
-
-  test("a non-cdp op still runs when cdp is unavailable", async () => {
-    const b = fakeBrowser({ cdpAvailable: () => false });
-    expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
   });
 });
 
@@ -495,7 +445,6 @@ test("a request that prints no dialogs leaves the queued reports for the next on
     const b = dialogBrowser();
     const h = createHandler(b);
     b.on().opened(confirmBox); // a page timer, between commands
-    expect(await h(req("cookie-get-all"))).toEqual({ id: 7, ok: true, result: [cookie] });
     expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
     expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ ...confirmBox, state: "dismissed", unanswered: true }]);
   });

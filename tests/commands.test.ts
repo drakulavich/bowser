@@ -1,4 +1,4 @@
-// Command-layer tests with a fake daemon client. No real Chromium needed.
+// Command-layer tests with a fake daemon client. No real browser needed.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -11,7 +11,6 @@ import { reportFailure, run } from "../src/cli.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath } from "../src/daemon/client.ts";
-import { cmdInstall } from "../src/commands/install.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "../src/commands/interaction.ts";
@@ -19,7 +18,6 @@ import {
   closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, looksLikeOurDaemon,
   type ProcessOps,
 } from "../src/commands/navigation.ts";
-import { cmdCookieList } from "../src/commands/cookies.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import {
@@ -561,19 +559,6 @@ describe("list", () => {
     await seedSessions();
     const out = await cmdList({ ...ctx(), json: true, connect: only(["live-a"]) });
     expect(JSON.parse(out)).toEqual(["live-a"]);
-  });
-});
-
-describe("install", () => {
-  test("skips when chromium already detected", async () => {
-    let spawned = false;
-    const out = await cmdInstall(ctx(), {
-      force: false,
-      detect: () => "/fake/chromium",
-      spawn: async () => { spawned = true; return 0; },
-    });
-    expect(out).toContain("already available");
-    expect(spawned).toBe(false);
   });
 });
 
@@ -1613,9 +1598,9 @@ describe("dialogs", () => {
     const shot = fakeClient({}, { dialogs: [dismissed] });
     await cmdScreenshot({ ...ctx(), connect: async () => shot }, { filename: join(tmpdir(), `bowser-shot-${Date.now()}.png`) });
     expect(shot.reporting).toBe(false);
-    const cookies = fakeClient({}, { dialogs: [dismissed] });
-    await cmdCookieList({ ...ctx(), connect: async () => cookies });
-    expect(cookies.reporting).toBe(false);
+    const storage = fakeClient({ evaluate: () => ({}) }, { dialogs: [dismissed] });
+    await cmdLocalStorageList({ ...ctx(), connect: async () => storage });
+    expect(storage.reporting).toBe(false);
   });
 });
 

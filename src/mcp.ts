@@ -11,10 +11,9 @@
 //
 // STDOUT PURITY: only JSON-RPC messages may be written to stdout. Diagnostics go
 // to stderr. We never console.log here, and we call run() (which RETURNS a
-// string) rather than letting a command print — that is also why `install`
-// (which inherits child stdio) is excluded from the tool set.
+// string) rather than letting a command print.
 
-import { COMMANDS, findCommand } from "./cli/registry.ts";
+import { COMMANDS, findCommand, type Command } from "./cli/registry.ts";
 import { failedModalState } from "./commands/context.ts";
 import type { CommandSchema } from "./cli/parser.ts";
 import pkg from "../package.json";
@@ -52,10 +51,11 @@ export interface McpTool {
 /** Reflect over COMMANDS to generate one MCP tool per command not opted out
  *  via `mcp: false`. Positionals → string props (required ones into
  *  `required`); flags → boolean|string props (never required); plus an
- *  optional `session` string. A command's `summary` is its tool description. */
-export function buildTools(): McpTool[] {
+ *  optional `session` string. A command's `summary` is its tool description.
+ *  `commands` is the registry; tests pass their own. */
+export function buildTools(commands: readonly Command[] = COMMANDS): McpTool[] {
   const tools: McpTool[] = [];
-  for (const cmd of COMMANDS) {
+  for (const cmd of commands) {
     if (cmd.mcp === false) continue;
     const properties: Record<string, JsonSchemaProp> = {};
     const required: string[] = [];

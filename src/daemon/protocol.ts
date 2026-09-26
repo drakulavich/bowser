@@ -6,8 +6,6 @@
 // Wire format is unchanged from before this file existed: newline-delimited
 // JSON, requests `{ id, op, args }`, responses `{ id, ok, result | error }`.
 
-import type { Cookie, CookieParam, DeleteCookieOptions } from "../cdp/types.ts";
-
 /** A dialog the page opened. `defaultValue` carries CDP's `defaultPrompt`,
  *  renamed here to match the other fields' style; only a prompt has one. */
 export interface DialogState {
@@ -62,35 +60,17 @@ export interface DaemonOps {
   back:             { args: [];                                          result: void };
   forward:          { args: [];                                          result: void };
   reload:           { args: [];                                          result: void };
-  "cookie-get-all": { args: [urls?: string[]];                           result: Cookie[];             requires: "cdp" };
-  "cookie-set":     { args: [param: CookieParam];                        result: { success: boolean }; requires: "cdp" };
-  "cookie-delete":  { args: [name: string, opts?: DeleteCookieOptions];  result: void;                 requires: "cdp" };
-  "cookie-clear":   { args: [];                                          result: void;                 requires: "cdp" };
 }
 
 export type Op = keyof DaemonOps;
 export type ArgsOf<O extends Op> = DaemonOps[O]["args"];
 export type ResultOf<O extends Op> = DaemonOps[O]["result"];
 
-/** Ops whose handler needs Bun.WebView.cdp(), i.e. the chrome backend. */
-export type CdpOp = { [O in Op]: DaemonOps[O] extends { requires: "cdp" } ? O : never }[Op];
-
-// The runtime mirror of the `requires: "cdp"` markers. `satisfies` makes a
-// marker without a row here, or a row without a marker, fail typecheck.
-const CDP_OPS = {
-  "cookie-get-all": true,
-  "cookie-set": true,
-  "cookie-delete": true,
-  "cookie-clear": true,
-} satisfies Record<CdpOp, true>;
-
-export const REQUIRES_CDP: ReadonlySet<Op> = new Set<Op>(Object.keys(CDP_OPS) as CdpOp[]);
-
 /** Ops that must not queue behind a wedged operation. */
 export type UrgentOp = { [O in Op]: DaemonOps[O] extends { urgent: true } ? O : never }[Op];
 
-// The runtime mirror of the `urgent: true` markers, same trick as CDP_OPS:
-// `satisfies` makes a missing entry a compile error, so an op cannot be
+// The runtime mirror of the `urgent: true` markers. `satisfies` makes a
+// missing entry a compile error, so an op cannot be
 // declared urgent in the type and stay queued at runtime.
 const URGENT_OPS = { ping: true, shutdown: true } satisfies Record<UrgentOp, true>;
 

@@ -6,7 +6,6 @@ import {
   HISTORY_BACK, HISTORY_FORWARD, READ_TITLE, READ_URL, RELOAD,
   hoverScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
-import type { Cookie, CookieParam, DeleteCookieOptions } from "./cdp/types.ts";
 import type { Backend } from "./backend.ts";
 import type { DialogState } from "./daemon/protocol.ts";
 
@@ -132,11 +131,6 @@ export interface Browser {
   watchDialogs(on: DialogListener): boolean;
   /** Answer the open dialog (chrome: Page.handleJavaScriptDialog). */
   answerDialog(accept: boolean, promptText?: string): Promise<void>;
-  // --- Cookies: CDP-backed, so chrome only. Each rejects with CDP_UNAVAILABLE on webkit. ---
-  getCookies(urls?: string[]): Promise<Cookie[]>;
-  setCookie(param: CookieParam): Promise<{ success: boolean }>;
-  deleteCookies(name: string, opts?: DeleteCookieOptions): Promise<void>;
-  clearCookies(): Promise<void>;
 }
 
 /** Open a Bun.WebView. Backend precedence (highest first):
@@ -370,32 +364,6 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
     },
     answerDialog: async (accept, promptText) => {
       await cdp("Page.handleJavaScriptDialog", promptText === undefined ? { accept } : { accept, promptText });
-    },
-    getCookies: async (urls) => {
-      // `!= null`: the wire delivers JSON null for an omitted url list.
-      const scoped = urls != null && urls.length > 0;
-      const res = (await cdp(
-        scoped ? "Network.getCookies" : "Network.getAllCookies",
-        scoped ? { urls } : undefined,
-      )) as { cookies: Cookie[] };
-      return res.cookies;
-    },
-    setCookie: async (param) => {
-      const res = (await cdp("Network.setCookie", param as unknown as Record<string, unknown>)) as { success: boolean };
-      return { success: res.success };
-    },
-    deleteCookies: async (name, opts) => {
-      // `opts ?? {}`, not a default parameter: a request carrying null must
-      // behave like one carrying nothing (wire compatibility, PR 2 review).
-      const o = opts ?? {};
-      const params: Record<string, unknown> = { name };
-      if (o.url) params.url = o.url;
-      if (o.domain) params.domain = o.domain;
-      if (o.path) params.path = o.path;
-      await cdp("Network.deleteCookies", params);
-    },
-    clearCookies: async () => {
-      await cdp("Network.clearBrowserCookies");
     },
   };
 }

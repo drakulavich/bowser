@@ -50,7 +50,6 @@ Do **not** use for static HTTP fetches.
 | `bowser list` | Enumerate sessions whose daemon is running |
 | `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides) |
 | `bowser close --all` | Close every open session |
-| `bowser install [--force]` | Download headless Chromium |
 | `bowser localstorage-list` | List `localStorage` entries (`key=value` lines, or JSON) |
 | `bowser localstorage-get <key>` | Read a `localStorage` value |
 | `bowser localstorage-set <key> <value>` | Write a `localStorage` entry |
@@ -63,11 +62,6 @@ Do **not** use for static HTTP fetches.
 | `bowser sessionstorage-clear` | Clear all `sessionStorage` entries |
 | `bowser eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `bowser run-code <code>` | Run multi-statement JS; wrap in IIFE, use `return` to produce a value |
-| `bowser cookie-list [--domain=<d>] [--url=<u>]` | List cookies; HttpOnly cookies are **first-class** (chrome backend only) |
-| `bowser cookie-get <name> [--domain=<d>] [--url=<u>]` | Print cookie value; HttpOnly cookies are visible (chrome backend only) |
-| `bowser cookie-set <name> <value> [--domain=<d>] [--url=<u>] [--path=<p>] [--http-only] [--secure] [--same-site=Lax\|Strict\|None] [--expires=<unix-s>]` | Set a cookie; `--http-only` sets the HttpOnly flag (chrome backend only) |
-| `bowser cookie-delete <name> [--domain=<d>] [--url=<u>] [--path=<p>]` | Delete a cookie (chrome backend only) |
-| `bowser cookie-clear` | Wipe all browser cookies in this session (chrome backend only) |
 | `bowser state-save <file>` | Dump cookies + localStorage to a Playwright `storageState` JSON file (chrome backend only) |
 | `bowser state-load <file>` | Restore cookies + localStorage from a `storageState` file (chrome backend only) |
 | `bowser mcp` | Run a Model Context Protocol stdio server exposing every command as an MCP tool |
@@ -156,12 +150,11 @@ bowser -s=app close
 
 ```bash
 npm install -g @drakulavich/bowser-cli   # requires Bun ≥ 1.3.12
-bowser install                            # one-time Chromium download
 ```
 
 ## Troubleshooting
 
-- **Backend**: macOS defaults to native WebKit; `bowser install` or
+- **Backend**: macOS defaults to native WebKit;
   `BOWSER_CHROMIUM_PATH` switches to Chromium. Force with
   `BOWSER_BACKEND=webkit|chrome`.
 - **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
@@ -171,7 +164,6 @@ bowser install                            # one-time Chromium download
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.
-- **No Chromium found** — run `bowser install` or set `BOWSER_CHROMIUM_PATH`.
-- **cookie-* and state-* commands require the chrome backend** — `cookie-list`, `cookie-get`, `cookie-set`, `cookie-delete`, `cookie-clear`, `state-save`, and `state-load` all call `Bun.WebView.cdp()` which is chrome-only. On WebKit they exit with a clear error. Use `bowser install` and set `BOWSER_BACKEND=chrome` (or `BOWSER_CHROMIUM_PATH`) to enable them.
+- **No Chromium found** — set `BOWSER_CHROMIUM_PATH`.
 - **`state-save` / `state-load` round-trip a Playwright `storageState`** — `state-save <file>` dumps the cookie jar + current-origin localStorage; `state-load <file>` restores them. The JSON is interchangeable with Playwright's `storageState`. Because the daemon holds one page, load only restores localStorage for origins matching the current page (others are reported skipped) — navigate to an origin first, then `state-load`, to restore its localStorage. sessionStorage is not persisted (matching Playwright).
 - **HttpOnly cookies** — `cookie-list` and `cookie-get` see HttpOnly cookies; `cookie-set --http-only` creates them. These are the session/auth cookies that `document.cookie` cannot access. Without the chrome backend you would miss them silently.

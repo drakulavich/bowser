@@ -20,11 +20,11 @@
 
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
-import { CDP_UNAVAILABLE, openBrowser, type Browser } from "../browser.ts";
+import { openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, withTimeout } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
-  IS_URGENT, REQUIRES_CDP,
+  IS_URGENT,
   type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type DialogState, type Op, type PageState, type ResultOf,
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
@@ -150,11 +150,6 @@ const handlers: Handlers = {
   back: (browser) => browser.back(),
   forward: (browser) => browser.forward(),
   reload: (browser) => browser.reload(),
-  // --- Cookie ops (chrome only; the Browser rejects them on webkit) ---
-  "cookie-get-all": (browser, urls) => browser.getCookies(urls),
-  "cookie-set": (browser, param) => browser.setCookie(param),
-  "cookie-delete": (browser, name, opts) => browser.deleteCookies(name, opts),
-  "cookie-clear": (browser) => browser.clearCookies(),
 };
 
 /** Dispatch one parsed request to its handler. Never rejects: every failure,
@@ -233,11 +228,6 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
         }
       : Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
-    // Capability gate: a CDP-only op on webkit fails here with the shared
-    // message, so the handler never touches a view that cannot answer.
-    if (REQUIRES_CDP.has(req.op) && !browser.cdpAvailable()) {
-      return { id: req.id, ok: false, error: CDP_UNAVAILABLE };
-    }
     try {
       // The one cast at the wire boundary: args arrived as JSON, the handler
       // is typed for this op. Everything below this line is typed.

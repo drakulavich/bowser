@@ -2,8 +2,7 @@
 // Ops without a handler get the same defaults the three old hand-written
 // fakes had: ping → "pong", state → the last navigated url with a "Fake …"
 // title, screenshot → mirror the daemon (write the file when given a path),
-// cookie-set → { success: true }, cookie-get-all → [], everything else →
-// undefined. Every request is recorded in `calls` as [op, args].
+// everything else → undefined. Every request is recorded in `calls` as [op, args].
 //
 // screenshot is not a plain overridable handler: the real daemon's contract
 // is "write the file when given a path", regardless of where the bytes came
@@ -33,8 +32,6 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
   const defaults: FakeHandlers = {
     ping: () => "pong",
     state: () => ({ url: currentUrl, title: currentTitle }),
-    "cookie-get-all": () => [],
-    "cookie-set": () => ({ success: true }),
   };
 
   const c: FakeClient = {

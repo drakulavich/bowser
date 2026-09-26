@@ -28,13 +28,6 @@ bun install
 bun link                     # exposes `bowser` on $PATH
 ```
 
-Then fetch a headless Chromium into Bowser's own cache (skipped if a system
-Chromium is already available):
-
-```bash
-bowser install
-```
-
 Prebuilt single-file binaries for Linux (x64/arm64) and macOS (arm64/x64)
 are also attached to every GitHub Release — see
 [Releases](https://github.com/drakulavich/bowser/releases).
@@ -44,8 +37,7 @@ Requires Bun ≥ 1.3.12 for the npm/source install.
 ### Browser backend
 
 On macOS, bowser uses the native `WKWebView` engine by default — nothing to install.
-It switches to Chrome/Chromium automatically if you opted in by running
-`bowser install` (which caches a headless Chromium under `~/.bowser/chromium`) or by
+It switches to Chrome/Chromium automatically if you opted in by
 setting `BOWSER_CHROMIUM_PATH`. On Linux and Windows it always uses Chrome/Chromium.
 
 Override the choice with `BOWSER_BACKEND`:
@@ -66,10 +58,8 @@ not supported yet).
 Bowser looks for a Chromium/Chrome binary in this order and uses the first one found:
 
 1. `$BOWSER_CHROMIUM_PATH` (explicit override)
-2. `~/.bowser/chromium/...` (populated by `bowser install`)
+2. `~/.bowser/chromium/...`
 3. System-wide installs: `/usr/bin/chromium-headless-shell`, `/usr/bin/chromium`, `/usr/bin/chromium-browser`, `/usr/bin/google-chrome`, `/Applications/Google Chrome.app/...`, `/Applications/Chromium.app/...`
-
-If none of those exist, run `bowser install`. It uses Playwright's downloader under the hood but writes into Bowser's own cache — it won't touch your Playwright setup. Use `bowser install --force` to re-download even when a system Chrome is already present.
 
 ## Quickstart
 
@@ -233,7 +223,6 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 ```
 
 Notes:
-- Run `bowser install` once first (it is intentionally **not** exposed as a tool — it shells out and downloads Chromium).
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
 - The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
 

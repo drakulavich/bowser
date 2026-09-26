@@ -1,36 +1,26 @@
 // ---------------------------------------------------------------------------
 // Storage state (state-save / state-load).
 //
-// Dump/restore a Playwright-compatible `storageState` JSON: the full cookie jar
-// plus per-origin localStorage. The file shape matches Playwright's storageState
+// Dump/restore a Playwright-compatible `storageState` JSON: `cookies` plus
+// per-origin localStorage. The file shape matches Playwright's storageState
 // so it is interchangeable with a Playwright context. sessionStorage is
 // intentionally excluded (Playwright omits it too — it is ephemeral/per-tab).
 //
-// Cookies require the chrome backend (cookie-get-all surfaces a friendly error
-// on webkit). localStorage is captured/restored via `evaluate`, so the daemon
-// needs an open page. Because the daemon holds a single page, save captures the
+// bowser has no cookie access on WebKit (Bun.WebView exposes none), so save
+// writes `"cookies": []` and load ignores the file's cookies, saying so on
+// stderr. A persistent profile (`open --persistent`) is what keeps cookies.
+//
+// localStorage is captured/restored via `evaluate`, so the daemon needs an
+// open page. Because the daemon holds a single page, save captures the
 // current page's origin only, and load restores localStorage solely for origins
 // matching the current page — other origins are reported as skipped (navigate to
 // each, then load again, to restore theirs).
 // ---------------------------------------------------------------------------
 
 import { resolve } from "node:path";
-import type { Cookie, CookieParam } from "../cdp/types.ts";
 import type { Command } from "../cli/registry.ts";
 import { storageListScript, storageRestoreScript } from "../page-scripts.ts";
 import { reply, withClient, type CommandContext } from "./context.ts";
-
-interface StorageStateCookie {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-  /** Expiry as Unix seconds; -1 for a session cookie. */
-  expires: number;
-  httpOnly: boolean;
-  secure: boolean;
-  sameSite: "Strict" | "Lax" | "None";
-}
 
 interface StorageStateOrigin {
   origin: string;
@@ -38,15 +28,9 @@ interface StorageStateOrigin {
 }
 
 interface StorageState {
-  cookies: StorageStateCookie[];
+  /** Always written empty; a loaded file's entries are counted and skipped. */
+  cookies: unknown[];
   origins: StorageStateOrigin[];
-}
-
-/** CDP exposes sameSite values ("Unspecified"/"Extended") that Playwright's
- *  storageState does not. Collapse anything that isn't Strict/None to Lax,
- *  matching Playwright's default. */
-function normalizeSameSite(s: Cookie["sameSite"]): "Strict" | "Lax" | "None" {
-  return s === "Strict" || s === "None" ? s : "Lax";
 }
 
 function pageOrigin(url: string): string | null {
@@ -61,19 +45,6 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
   if (!file) throw new Error("usage: bowser state-save <file>");
   const target = resolve(file);
   return withClient(ctx, async (c) => {
-    // Whole cookie jar (no url scope). chrome backend only.
-    const cookies = await c.request("cookie-get-all", [undefined]);
-    const stateCookies: StorageStateCookie[] = cookies.map((ck) => ({
-      name: ck.name,
-      value: ck.value,
-      domain: ck.domain,
-      path: ck.path,
-      expires: ck.expires,
-      httpOnly: ck.httpOnly,
-      secure: ck.secure,
-      sameSite: normalizeSameSite(ck.sameSite),
-    }));
-
     const state = await c.request("state");
     const origin = pageOrigin(state.url);
     const entries = (await c.request("evaluate", [
@@ -88,9 +59,9 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
       });
     }
 
-    const storageState: StorageState = { cookies: stateCookies, origins };
+    const storageState: StorageState = { cookies: [], origins };
     await Bun.write(target, JSON.stringify(storageState, null, 2) + "\n");
-    return reply(ctx, { ok: true, file: target, cookies: stateCookies.length, origins: origins.length }, `saved ${target}`);
+    return reply(ctx, { ok: true, file: target, origins: origins.length }, `saved ${target}`);
   });
 }
 
@@ -105,25 +76,10 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
   } catch {
     throw new Error(`state-load: invalid JSON in ${target}`);
   }
-  const cookies = parsed.cookies ?? [];
+  const cookiesSkipped = Array.isArray(parsed.cookies) ? parsed.cookies.length : 0;
   const origins = parsed.origins ?? [];
 
   return withClient(ctx, async (c) => {
-    for (const ck of cookies) {
-      const param: CookieParam = {
-        name: ck.name,
-        value: ck.value,
-        domain: ck.domain,
-        path: ck.path,
-        httpOnly: ck.httpOnly,
-        secure: ck.secure,
-        sameSite: ck.sameSite,
-      };
-      // Omit expiry for session cookies (-1) so they restore as session cookies.
-      if (ck.expires !== undefined && ck.expires >= 0) param.expires = ck.expires;
-      await c.request("cookie-set", [param]);
-    }
-
     const state = await c.request("state");
     const current = pageOrigin(state.url);
     let originsRestored = 0;
@@ -139,15 +95,20 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
       }
     }
 
+    // A note, not an error: the localStorage above was restored. stderr, so
+    // the answer on stdout (and --json) keeps its shape.
+    if (cookiesSkipped > 0) {
+      console.error(`${cookiesSkipped} cookies skipped (bowser has no cookie access on WebKit; use open --persistent)`);
+    }
     const text =
-      `loaded ${target} (${cookies.length} cookie(s), ${originsRestored} origin(s)` +
+      `loaded ${target} (${originsRestored} origin(s)` +
       (originsSkipped
         ? `, ${originsSkipped} skipped — navigate to each origin then load again to restore its localStorage`
         : "") +
       ")";
     return reply(
       ctx,
-      { ok: true, file: target, cookies: cookies.length, originsRestored, originsSkipped },
+      { ok: true, file: target, cookiesSkipped, originsRestored, originsSkipped },
       text,
     );
   });
@@ -156,14 +117,14 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
 export const COMMANDS: Command[] = [
   {
     name: "state-save",
-    summary: "Save cookies + localStorage to a Playwright storageState file (chrome backend only)",
+    summary: "Save localStorage to a Playwright storageState file",
     positional: [{ name: "file", required: true }],
     flags: [],
     run: (ctx, a) => cmdStateSave(ctx, a.positional[0] ?? ""),
   },
   {
     name: "state-load",
-    summary: "Restore cookies + localStorage from a storageState file (chrome backend only)",
+    summary: "Restore localStorage from a storageState file",
     positional: [{ name: "file", required: true }],
     flags: [],
     run: (ctx, a) => cmdStateLoad(ctx, a.positional[0] ?? ""),
