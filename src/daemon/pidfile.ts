@@ -74,19 +74,27 @@ const LOCK_STALE_MS = 5000;
  *  and each unlinked the other's socket and overwrote its pidfile. */
 export async function claimSession(pidFile: string, session: string): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      writeFileSync(pidFile, String(process.pid), { flag: "wx" });
-      return true;
-    } catch (e) {
-      if ((e as { code?: string }).code !== "EEXIST") throw e;
-    }
+    if (tryClaim(pidFile)) return true;
     const holder = await readHolder(pidFile);
     if (holder === null) continue; // its daemon exited just now: claim again
     const pid = Number(holder);
     if (Number.isInteger(pid) && pid > 0 && isAlive(pid) && (await isOurDaemon(pid, session))) return false;
     removeStale(pidFile, holder);
   }
-  return false;
+  // The newcomer that removed a stale pidfile on the last pass claims here;
+  // ending on a removal would leave the session with no claimant at all.
+  return tryClaim(pidFile);
+}
+
+/** Create the pidfile with our pid, only if there is none (O_EXCL). */
+function tryClaim(pidFile: string): boolean {
+  try {
+    writeFileSync(pidFile, String(process.pid), { flag: "wx" });
+    return true;
+  } catch (e) {
+    if ((e as { code?: string }).code !== "EEXIST") throw e;
+    return false;
+  }
 }
 
 /** The pidfile's content, or null when it is gone. An empty file is a claim

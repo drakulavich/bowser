@@ -361,6 +361,42 @@ onMac("daemon session claim (F29)", () => {
     }
   }, 15_000);
 
+  // The stale-claim path must itself be race-safe: two newcomers that both read
+  // the same stale pid must not both end up holding the session (the second
+  // deleting the claim the first just made). The race is narrow, so it is run
+  // many times at once; without the removal lock about one round in four has
+  // two winners (measured), so twelve rounds catch it ~97% of the time.
+  test("newcomers racing over a stale pidfile leave exactly one claimant", async () => {
+    const HELPER = join(import.meta.dir, "helpers", "claim-session.ts");
+    const dir = await mkdtemp(join(tmpdir(), "bowser-claim-race-"));
+    try {
+      for (let round = 0; round < 12; round++) {
+        const s = `stalerace${round}-${process.pid}`;
+        const pidFile = join(dir, `pid${round}`);
+        await Bun.write(pidFile, "99999");
+        const procs = Array.from({ length: 30 }, () => {
+          const p = Bun.spawn([process.execPath, HELPER, pidFile, "/x/src/daemon/main.ts", s], {
+            stdin: "ignore", stdout: "pipe", stderr: "ignore",
+          });
+          spawned.push(p);
+          return p;
+        });
+        await Bun.sleep(300);
+        await Bun.write(`${pidFile}.go`, "");
+        const said = await Promise.all(procs.map(async (p) => {
+          const { value } = await p.stdout.getReader().read();
+          return new TextDecoder().decode(value).trim();
+        }));
+        const winners = procs.filter((_, i) => said[i] === "won");
+        for (const p of procs) p.kill("SIGKILL");
+        expect(winners.length).toBe(1);
+        expect((await Bun.file(pidFile).text()).trim()).toBe(String(winners[0]!.pid));
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   for (const stale of [false, true]) {
     test(`five daemons starting on one session${stale ? " with a stale pidfile" : ""} leave one listening daemon and its pidfile`, async () => {
       const session = await fresh(stale ? "stale5" : "race5u");
