@@ -334,8 +334,17 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
         });
       });
       // Chrome says when any navigation starts, the page's own included,
-      // before the new document can open a dialog.
-      subscribe("Page.frameStartedNavigating", () => on.navigation());
+      // before the new document can open a dialog. Only the main frame's
+      // count: an iframe navigating leaves the page's one-shot answer alone.
+      // The event carries no parent id, and Bun delivers no frameNavigated
+      // (measured, Bun 1.4.2), so the main frame is the first one seen: no
+      // iframe can start navigating before the page's first navigation.
+      let mainFrame: string | undefined;
+      subscribe("Page.frameStartedNavigating", (data) => {
+        const { frameId } = data as { frameId: string };
+        mainFrame ??= frameId;
+        if (frameId === mainFrame) on.navigation();
+      });
       return watching;
     },
     answerDialog: async (accept, promptText) => {

@@ -320,6 +320,19 @@ describe("wrapView dialogs", () => {
     ]);
   });
 
+  test("on chrome an iframe starting a navigation is not a navigation of the page: only the main frame's count", () => {
+    const { v, emit } = listening();
+    let navigations = 0;
+    wrapView(v, chrome).watchDialogs({ opened() {}, navigation: () => { navigations++; } });
+    const started = (frameId: string) =>
+      emit("Page.frameStartedNavigating", { frameId, url: "https://x/", loaderId: "l", navigationType: "differentDocument" });
+    started("MAIN"); // the page's first navigation is always the main frame's
+    started("CHILD");
+    started("CHILD");
+    started("MAIN");
+    expect(navigations).toBe(2);
+  });
+
   test("on chrome watching needs no CDP call, so it works before the first navigation (Bun enables the Page domain)", async () => {
     const v = fakeView();
     const b = wrapView(v, chrome);
