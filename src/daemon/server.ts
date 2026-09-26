@@ -195,6 +195,10 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
   // The browser call a dialog blocked, after its op already replied. It still
   // owns the page until it settles; its own `finally` clears this.
   let blocked: { op: Op; done: Promise<unknown> } | undefined;
+  // The page as `state` last read it live. While a dialog or a blocked call
+  // holds the page it cannot be asked, and chrome's view.url getter may say
+  // about:blank (see realUrl), so `state` answers from this instead.
+  let lastPage = { url: "", title: "" };
   browser.watchDialogs({
     opened: (d) => {
       const a = state.answer;
@@ -215,12 +219,14 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
   const stateful: { [O in Stateful]: (b: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>> } = {
     // While a dialog is open the page cannot evaluate, so url and title come
     // from the view's own getters instead of realUrl()/realTitle().
-    state: async (b) => ({
-      url: state.dialog || blocked ? b.url : await b.realUrl(),
-      title: state.dialog || blocked ? b.title : await b.realTitle(),
-      ...(state.dialog ? { dialog: state.dialog } : {}),
-      ...(state.profile ? { profile: state.profile } : {}),
-    }),
+    state: async (b) => {
+      if (!state.dialog && !blocked) lastPage = { url: await b.realUrl(), title: await b.realTitle() };
+      return {
+        ...lastPage,
+        ...(state.dialog ? { dialog: state.dialog } : {}),
+        ...(state.profile ? { profile: state.profile } : {}),
+      };
+    },
     "dialog-answer": async (b, accept, text) => {
       const d = state.dialog;
       if (!d) {
@@ -229,10 +235,11 @@ export function createHandler(browser: Browser, state: DaemonState = {}, settleM
       }
       const answer = promptText(d, accept, text);
       await b.answerDialog(accept, answer);
-      state.dialog = undefined;
+      // Only this dialog: the page may already have opened the next one.
+      if (state.dialog === d) state.dialog = undefined;
       // Give the blocked call a moment to finish, so the next command finds
       // the page free. Stop early if it opens another dialog instead.
-      if (blocked) {
+      if (blocked && !state.dialog) {
         let wake!: () => void;
         const next = new Promise<void>((r) => { wake = r; });
         waiters.add(wake);

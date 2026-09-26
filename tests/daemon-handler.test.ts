@@ -328,9 +328,14 @@ describe("dialogs", () => {
     expect(b.calls).toEqual([]);
   });
 
-  test("while a dialog is pending, state answers from the view without evaluating in the page", async () => {
+  test("while a dialog is pending, state answers with the last page it read, without evaluating in the page", async () => {
     const b = dialogBrowser();
-    const res = await createHandler(b, { dialog: confirmBox })(req("state"));
+    const state: DaemonState = {};
+    const h = createHandler(b, state);
+    await h(req("state"));
+    state.dialog = confirmBox;
+    b.calls.length = 0;
+    const res = await h(req("state"));
     expect(res).toMatchObject({ ok: true, result: { url: "https://x/", title: "X", dialog: confirmBox } });
     expect(b.calls).toEqual([]);
   });
@@ -428,9 +433,11 @@ describe("dialogs: the call a dialog blocked still owns the page", () => {
     expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
   });
 
-  test("while busy, state reads the view's getters instead of evaluating in the page", async () => {
+  test("while busy, state answers without evaluating in the page", async () => {
     const b = blockingClick();
     const h = createHandler(b, {}, 20);
+    await h(req("state"));
+    b.calls.length = 0;
     await h(req("click", ["#go"]));
     await h(req("dialog-answer", [true]));
     expect(await h(req("state"))).toMatchObject({ ok: true, result: { url: "https://x/", title: "X" } });
@@ -489,5 +496,37 @@ describe("dialogs: the call a dialog blocked still owns the page", () => {
     expect(await h(req("state"))).toMatchObject({ ok: true, result: { dialog: confirmBox } });
     expect(await h(req("evaluate", ["1"]))).toMatchObject({ ok: false, error: OPEN_ERROR });
     expect(performance.now() - t0).toBeLessThan(100);
+  });
+});
+
+describe("dialogs: state stays true across answers", () => {
+  test("a dialog the answered call opens before dialog-answer resumes stays pending and can be answered", async () => {
+    const next: DialogState = { type: "alert", message: "next" };
+    const b = dialogBrowser();
+    b.answerDialog = async (...a) => { b.calls.push(["answerDialog", a]); if (b.calls.length === 1) b.on().opened(next); };
+    const state: DaemonState = { dialog: confirmBox };
+    const h = createHandler(b, state, 20);
+    expect(await h(req("dialog-answer", [true]))).toMatchObject({ ok: true, result: { answered: { type: "confirm" } } });
+    expect(state.dialog).toEqual(next);
+    expect(await h(req("evaluate", ["1"]))).toMatchObject({
+      ok: false, error: 'an alert dialog is open ("next"); run dialog-accept or dialog-dismiss',
+    });
+    expect(await h(req("dialog-answer", [true]))).toMatchObject({ ok: true, result: { answered: { type: "alert", message: "next" } } });
+    expect(state.dialog).toBeUndefined();
+  });
+
+  test("while busy, state reports the last real url, not the chrome getter's about:blank", async () => {
+    // Chrome's view.url says about:blank after a query-string navigation;
+    // realUrl() reads location.href. While busy the page cannot be asked.
+    const b = dialogBrowser({ url: "about:blank", realUrl: async () => "https://x/?q=1", realTitle: async () => "Q" });
+    let settle!: () => void;
+    b.click = () => { b.on().opened(confirmBox); return new Promise<void>((r) => { settle = r; }); };
+    const h = createHandler(b, {}, 20);
+    expect(await h(req("state"))).toMatchObject({ result: { url: "https://x/?q=1" } });
+    await h(req("click", ["#go"]));
+    expect(await h(req("state"))).toMatchObject({ result: { url: "https://x/?q=1", title: "Q", dialog: confirmBox } });
+    await h(req("dialog-answer", [true]));
+    expect(await h(req("state"))).toMatchObject({ result: { url: "https://x/?q=1", title: "Q" } });
+    settle();
   });
 });
