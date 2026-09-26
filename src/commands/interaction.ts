@@ -5,7 +5,7 @@
 import type { Command } from "../cli/registry.ts";
 import { clearForFillScript } from "../page-scripts.ts";
 import type { Ref } from "../state.ts";
-import { liveSelector, loadRef, reply, syncState, withClient, type CommandContext } from "./context.ts";
+import { liveSelector, loadRef, readStdin, reply, syncState, withClient, type CommandContext } from "./context.ts";
 
 // Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so
 // check/uncheck/select/fill refuse a ref that cannot take the action, from the
@@ -39,20 +39,36 @@ export async function cmdClick(
   });
 }
 
+const FILL_USAGE = "usage: bowser fill <ref> <text> or bowser fill <ref> --stdin";
+
+/** `op read` and `echo` end their output with one line ending; nothing else
+ *  in piped text is ours to change. */
+function withoutFinalNewline(s: string): string {
+  if (s.endsWith("\r\n")) return s.slice(0, -2);
+  if (s.endsWith("\n")) return s.slice(0, -1);
+  return s;
+}
+
+/** With `stdin`, the text comes from standard input so a secret never
+ *  reaches argv, and it is never echoed back. */
 export async function cmdFill(
   ctx: CommandContext,
   ref: string,
-  text: string,
+  text: string | undefined,
+  opts: { stdin?: boolean } = {},
 ): Promise<string> {
-  if (text === undefined) throw new Error("usage: bowser fill <ref> <text>");
+  if (opts.stdin && text !== undefined) throw new Error(`${FILL_USAGE} (not both)`);
+  if (!opts.stdin && text === undefined) throw new Error(FILL_USAGE);
+  const value = opts.stdin ? withoutFinalNewline(await (ctx.readStdin ?? readStdin)()) : text!;
   const { target } = await loadRef(ctx.session, ref);
   requireKind("fill", ref, target);
   return withClient(ctx, async (c) => {
     const selector = await liveSelector(c, ref);
     await c.request("click", [selector]);
     await c.request("evaluate", [clearForFillScript(selector)]);
-    await c.request("type", [text]);
-    return reply(ctx, { ok: true, ref, text }, `filled ${ref} (${target.role} "${target.name}")`);
+    await c.request("type", [value]);
+    const json = opts.stdin ? { ok: true, ref } : { ok: true, ref, text };
+    return reply(ctx, json, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
 
@@ -137,10 +153,12 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "fill",
-    summary: "Fill the element with the given ref with text",
-    positional: [{ name: "ref", required: true }, { name: "text", required: true }],
-    flags: [],
-    run: (ctx, a) => cmdFill(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
+    summary: "Fill the element with the given ref with text, or with piped stdin under --stdin",
+    positional: [{ name: "ref", required: true }, { name: "text", required: false }],
+    // Not over MCP: the text is already a JSON string there, and the server's
+    // own stdin is the JSON-RPC stream.
+    flags: [{ name: "stdin", kind: "boolean", mcp: false }],
+    run: (ctx, a) => cmdFill(ctx, a.positional[0] ?? "", a.positional[1], { stdin: a.flags.stdin === true }),
   },
   {
     name: "type",

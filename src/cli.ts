@@ -4,13 +4,15 @@ import { parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import type { CommandContext } from "./commands/context.ts";
 
-export async function run(argv: string[]): Promise<string> {
+/** `base` seeds the command context: `bowser mcp` passes a stdin reader
+ *  that refuses. */
+export async function run(argv: string[], base: Partial<CommandContext> = {}): Promise<string> {
   const args = parse(SCHEMAS, argv);
   if (!args.command) return renderHelp(COMMANDS);
   const command = findCommand(args.command);
   // parse() already rejects an unknown command; this is the type narrowing.
   if (!command) throw new Error(`unknown command: ${args.command}`);
-  const ctx: CommandContext = { session: args.session, json: args.json };
+  const ctx: CommandContext = { ...base, session: args.session, json: args.json };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 
@@ -42,7 +44,12 @@ if (import.meta.main) {
     // Pass our own `run` so the MCP server never re-imports this module — cli.ts
     // is still mid-evaluation here (top-level await below), and a dynamic
     // import("./cli.ts") would deadlock in the compiled binary.
-    await runMcpServer({ run });
+    // A text of "--stdin" parses as the flag, so the refusal belongs in the
+    // context, not only in the tool schema.
+    const noStdin = async (): Promise<string> => {
+      throw new Error("usage: --stdin is not available over MCP; pass the text");
+    };
+    await runMcpServer({ run: (argv) => run(argv, { readStdin: noStdin }) });
   } else {
     try {
       const out = await run(process.argv.slice(2));

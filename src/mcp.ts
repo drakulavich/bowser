@@ -63,6 +63,7 @@ export function buildTools(): McpTool[] {
       if (p.required) required.push(p.name);
     }
     for (const f of cmd.flags) {
+      if (f.mcp === false) continue;
       properties[f.name] = {
         type: f.kind === "boolean" ? "boolean" : "string",
         description: `--${f.name}`,
@@ -96,6 +97,7 @@ export function toArgv(schema: CommandSchema, args: Record<string, unknown>): st
   for (const f of schema.flags) {
     const v = args[f.name];
     if (v === undefined || v === null) continue;
+    if (f.mcp === false) throw new Error(`usage: --${f.name} is not available over MCP`);
     if (f.kind === "boolean") {
       if (v === true || v === "true") argv.push(`--${f.name}`);
     } else {

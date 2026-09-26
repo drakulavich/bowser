@@ -7,6 +7,14 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- **`fill <ref> --stdin`** takes the text from standard input, so a secret never reaches the
+  `bowser` process's arguments, where `ps` shows it to any local user:
+  `op read op://vault/site/password | bowser fill e4 --stdin`. One trailing `\n` or `\r\n` is
+  dropped and everything else is kept as is. The text is not echoed: the plain answer is unchanged
+  and `--json` answers `{"ok":true,"ref":"e4"}` with no `text`. `--stdin` together with a `<text>`,
+  or with a terminal as input, is a usage error (exit 1). The MCP `fill` tool does not offer it.
+  This is a bowser-only extension; `fill <ref> <text>` is unchanged. `snapshot` still prints a
+  filled field's value, a password included, as `playwright-cli` does.
 - **`open --persistent` and `open --profile=<dir>`**, as in `playwright-cli` 0.1.13. A session's
   browser keeps cookies, `localStorage` and IndexedDB on disk, in `~/.bowser/profiles/<session>/` or
   in `<dir>`, so a login survives `close` and daemon restarts on both backends. `close` leaves the

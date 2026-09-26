@@ -4,6 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { COMMANDS } from "../src/cli/registry.ts";
 import { renderHelp } from "../src/cli/help.ts";
 
+const findCommandSummary = (name: string) => COMMANDS.find((c) => c.name === name)!.summary;
+
 const HELP = renderHelp(COMMANDS);
 
 describe("generated help", () => {
@@ -17,7 +19,14 @@ describe("generated help", () => {
   test("shows required positionals in <> and optional in []", () => {
     expect(HELP).toContain("goto <url>");
     expect(HELP).toContain("open [url]");
-    expect(HELP).toContain("fill <ref> <text>");
+    expect(HELP).toContain("select <ref> <value>");
+  });
+
+  test("fill shows both forms: <text> or --stdin", () => {
+    const line = HELP.split("\n").find((l) => l.startsWith("  fill "))!;
+    expect(line).toContain("fill <ref> [text] [--stdin]");
+    expect(HELP).toContain(findCommandSummary("fill"));
+    expect(findCommandSummary("fill")).toContain("--stdin");
   });
 
   test("shows flags, with a value placeholder for string flags", () => {

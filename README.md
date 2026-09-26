@@ -90,7 +90,7 @@ Each session runs one persistent browser process (spawned lazily on first comman
 ```bash
 bowser -s=login open https://app.example.com/login
 bowser -s=login fill  e1 "me@example.com"
-bowser -s=login fill  e2 "$PASSWORD"
+op read op://vault/app/password | bowser -s=login fill e2 --stdin
 bowser -s=login click e3
 ```
 
@@ -157,7 +157,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `goto <url>` | Navigate within current session |
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `click <ref>` | Click an element |
-| `fill <ref> <text>` | Focus, clear, type |
+| `fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type. `--stdin` reads the text from piped input and drops one trailing newline, so a secret never appears in the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The value is not echoed (`--json` answers `{"ok":true,"ref":"e4"}`). Not offered over MCP. |
 | `type <text>` | Type into focused element |
 | `press <key>` | Press a keyboard key |
 | `hover <ref>` | Hover an element |

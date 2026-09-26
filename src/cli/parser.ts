@@ -16,6 +16,9 @@ export interface FlagSpec {
    *  `--help` derives the placeholder from this same list, so what is shown
    *  and what is accepted cannot drift. */
   values?: string[];
+  /** Omit this flag from `bowser mcp`'s tool schema; a tool call passing it
+   *  is a usage error. Like the per-command `mcp: false`. */
+  mcp?: false;
 }
 
 export interface CommandSchema {

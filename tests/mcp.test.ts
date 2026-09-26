@@ -4,6 +4,9 @@
 // exercise the full request/response surface with NO real stdio or daemon.
 
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   buildTools,
@@ -172,6 +175,20 @@ describe("handleMcpRequest — tools/call", () => {
     expect(res.result.content[0].text).toContain("nonexistent");
   });
 
+  for (const stdin of [true, false, "true"]) {
+    test(`fill with stdin: ${JSON.stringify(stdin)} is a usage error and never runs the command`, async () => {
+      let ran = false;
+      const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
+      const res: any = await handleMcpRequest(
+        { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", stdin } } },
+        deps,
+      );
+      expect(res.result.isError).toBe(true);
+      expect(res.result.content[0].text).toMatch(/^usage: .*--stdin/);
+      expect(ran).toBe(false);
+    });
+  }
+
   test("an excluded command is not callable as a tool", async () => {
     const res: any = await handleMcpRequest(
       { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "install", arguments: {} } },
@@ -220,9 +237,60 @@ describe("descriptions drift-guard", () => {
     expect(setCookie.inputSchema.properties.domain).not.toHaveProperty("enum");
   });
 
+  test("fill offers text but not stdin", () => {
+    const fill = buildTools().find((t) => t.name === "fill")!;
+    expect(fill.inputSchema.properties).toHaveProperty("text");
+    expect(fill.inputSchema.properties).not.toHaveProperty("stdin");
+  });
+
   test("mcp and install are not exposed as tools", () => {
     const names = buildTools().map((t) => t.name);
     expect(names).not.toContain("mcp");
     expect(names).not.toContain("install");
+  });
+});
+
+describe("bowser mcp never reads its own stdin for a command", () => {
+  test("fill with text \"--stdin\" is a usage error, and the server keeps answering", async () => {
+    // toArgv passes positionals through as argv, so the text "--stdin" parses
+    // as the flag. The server's stdin is the JSON-RPC stream: reading it would
+    // swallow later requests and hang this one.
+    const home = await mkdtemp(join(tmpdir(), "bowser-mcp-stdin-"));
+    const proc = Bun.spawn(
+      [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "mcp"],
+      {
+        env: { ...process.env, HOME: home, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    try {
+      const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", text: "--stdin" } } };
+      proc.stdin.write(JSON.stringify(call) + "\n");
+      proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n");
+      proc.stdin.flush();
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      const deadline = Date.now() + 5000;
+      while (buf.split("\n").filter(Boolean).length < 2 && Date.now() < deadline) {
+        const next = await Promise.race([
+          reader.read(),
+          Bun.sleep(deadline - Date.now()).then(() => ({ done: true, value: undefined })),
+        ]);
+        if (next.done) break;
+        buf += decoder.decode(next.value);
+      }
+      const [first, second] = buf.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      expect(first?.id).toBe(1);
+      expect(first?.result.isError).toBe(true);
+      expect(first?.result.content[0].text).toMatch(/^usage: .*--stdin/);
+      expect(second).toEqual({ jsonrpc: "2.0", id: 2, result: {} });
+    } finally {
+      proc.kill();
+      await proc.exited;
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
