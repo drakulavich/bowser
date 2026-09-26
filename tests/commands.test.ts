@@ -2,7 +2,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -414,6 +414,19 @@ describe("snapshot", () => {
     const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { filename: file });
     expect(out).toBe(`wrote ${file}`);
     expect(await Bun.file(file).text()).toBe(yaml + "\n");
+  });
+  test("--filename with a relative path writes under the cwd and reports the absolute path (F37)", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const c = fakeClient({ evaluate: () => snap });
+      const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { filename: "snap-rel.md" });
+      const abs = join(realpathSync(tmp), "snap-rel.md");
+      expect(out).toBe(`wrote ${abs}`);
+      expect(await Bun.file(abs).text()).toBe(yaml + "\n");
+    } finally {
+      process.chdir(origCwd);
+    }
   });
   test("--json prints { snapshot: <tree> } only", async () => {
     const c = fakeClient({ evaluate: () => snap });
@@ -1191,8 +1204,22 @@ describe("screenshot", () => {
       const session = "shotdefault";
       const c = fakeClient({ screenshot: () => PNG_B64 });
       const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
-      expect(out).toBe("wrote screenshot-shotdefault.png");
+      // The absolute path it wrote (F37): a relative one says nothing to a
+      // caller that does not know this process's cwd.
+      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotdefault.png")}`);
       expect(await Bun.file(join(tmp, "screenshot-shotdefault.png")).exists()).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  test("--json reports the absolute path, for a relative --filename too (F37)", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      const out = await cmdScreenshot({ ...ctx({ json: true }), connect: async () => c }, { filename: "rel-shot.png" });
+      expect(JSON.parse(out)).toEqual({ ok: true, filename: join(realpathSync(tmp), "rel-shot.png") });
     } finally {
       process.chdir(origCwd);
     }
@@ -1206,7 +1233,7 @@ describe("screenshot", () => {
       await Bun.write(join(tmp, "screenshot-shotinc.png"), "existing");
       const c = fakeClient({ screenshot: () => PNG_B64 });
       const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
-      expect(out).toBe("wrote screenshot-shotinc-1.png");
+      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotinc-1.png")}`);
       expect(await Bun.file(join(tmp, "screenshot-shotinc-1.png")).exists()).toBe(true);
     } finally {
       process.chdir(origCwd);

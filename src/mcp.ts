@@ -13,6 +13,9 @@
 // to stderr. We never console.log here, and we call run() (which RETURNS a
 // string) rather than letting a command print.
 
+import { accessSync, constants, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { parse } from "./cli/parser.ts";
 import { failedModalState } from "./commands/context.ts";
@@ -301,6 +304,26 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void): M
   return { accept, idle };
 }
 
+/** Make the cwd a directory the server can write to (F37). Tool calls resolve
+ *  relative paths against it, and an MCP client often starts the server from
+ *  `/` (read-only on macOS), where every file output failed with EROFS. A
+ *  writable cwd is kept; otherwise it becomes `<os.tmpdir()>/bowser-mcp`, as
+ *  Playwright MCP does with its output directory. */
+function useWritableCwd(): void {
+  try {
+    const cwd = process.cwd();
+    if (cwd !== "/") {
+      accessSync(cwd, constants.W_OK);
+      return;
+    }
+  } catch {
+    // Not writable, or gone: fall through.
+  }
+  const dir = join(tmpdir(), "bowser-mcp");
+  mkdirSync(dir, { recursive: true });
+  process.chdir(dir);
+}
+
 /** The long-lived stdio loop. Reads newline-delimited JSON-RPC from stdin and
  *  writes responses to stdout. Holds the process open until stdin closes and
  *  every accepted call has finished.
@@ -310,6 +333,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void): M
  *  invokes this (blocked on its top-level `await runMcpServer()`), so a dynamic
  *  import of it deadlocks in the compiled binary. */
 export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string }): Promise<void> {
+  useWritableCwd();
   const d: McpDeps = { run: deps.run, version: deps.version ?? VERSION };
   const server = createMcpServer(d, (line) => {
     process.stdout.write(line);

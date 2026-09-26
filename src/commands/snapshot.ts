@@ -29,9 +29,12 @@ export async function cmdSnapshot(
       ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...(dialogs.length ? { dialogs } : {}) }, null, 2)
       : renderPage(snap, depth, modalState(c));
     if (opts.filename) {
-      // The file holds exactly what stdout would: the text plus the CLI's newline.
-      await Bun.write(opts.filename, out + "\n");
-      return `wrote ${opts.filename}`;
+      // The file holds exactly what stdout would: the text plus the CLI's
+      // newline. Reported by its absolute path: a caller that does not know
+      // this process's cwd (an MCP client) could not find it otherwise.
+      const abs = resolve(opts.filename);
+      await Bun.write(abs, out + "\n");
+      return `wrote ${abs}`;
     }
     return out;
   });
@@ -74,7 +77,8 @@ export async function cmdScreenshot(
   const abs = resolve(process.cwd(), filename);
   return withClient(ctx, async (c) => {
     await c.request("screenshot", [abs]);
-    return reply(ctx, { ok: true, filename }, `wrote ${filename}`);
+    // The absolute path, for the same reason as snapshot --filename.
+    return reply(ctx, { ok: true, filename: abs }, `wrote ${abs}`);
   });
 }
 
