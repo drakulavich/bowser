@@ -179,6 +179,26 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/second");
   });
 
+  test("a reread that never answers still leaves the wait at settleMs", async () => {
+    // Codex's repro: the NAV_COUNT reread after a failure stays pending, and
+    // an unbounded await never looked at the deadline again.
+    let reads = 0;
+    const { v, page } = pageNavView({
+      evaluate: async (expr) => {
+        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_COUNT && ++reads > 1) return new Promise(() => {});
+        return page.navs;
+      },
+    });
+    v.click = async () => { page.navs++; setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 40); };
+    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+    const t0 = Date.now();
+    await Promise.race([b.click("#x"), Bun.sleep(400)]);
+    const elapsed = Date.now() - t0;
+    expect(reads).toBe(2);
+    expect(elapsed).toBeLessThan(20 + 60 + 60);
+  });
+
   test("a failure with no navigation after it still ends the wait", async () => {
     // A 204 answer: the page's navigate event, then only a failure.
     const { v, page } = pageNavView();

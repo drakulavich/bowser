@@ -296,20 +296,21 @@ describe("the queue-time budget", () => {
         return { id: req.id, ok: true as const };
       },
       serialize: createSerializer(),
-      timeoutMs: 300,
+      timeoutMs: 400,
       reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
-    await Bun.sleep(150);
+    await Bun.sleep(50);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
-    await Bun.sleep(500);
+    await Bun.sleep(900);
     expect(replies.map(([, r]) => r)).toEqual([
-      { id: 1, ok: false, error: "operation 'click' timed out after 300ms" },
-      { id: 2, ok: false, error: QUEUED("evaluate", 300, "click") },
+      { id: 1, ok: false, error: "operation 'click' timed out after 400ms" },
+      { id: 2, ok: false, error: QUEUED("evaluate", 400, "click") },
     ]);
-    // Its deadline counts from receipt (150 ms), so it answers near 450 ms;
-    // timed from when the first op timed out, it would answer near 600.
-    expect(replies[1]![0]).toBeLessThan(560);
+    // Its deadline counts from receipt (50 ms), so it answers near 450 ms;
+    // timed from when the first op timed out (400 ms), it would answer near
+    // 800. The threshold sits between them.
+    expect(replies[1]![0]).toBeLessThan(625);
     release();
     await Bun.sleep(20);
     // Its client was already told it failed, so it is dropped, not run late.

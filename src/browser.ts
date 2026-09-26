@@ -157,14 +157,29 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   view.onNavigated = () => { landed++; arrived++; onNavigation(); };
   view.onNavigationFailed = () => { landed++; };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-  /** Evaluate a watch script; a page that cannot answer reads as "no". */
-  const ask = async (expr: string): Promise<unknown> => {
-    try { return await view.evaluate(expr); } catch { return undefined; }
+  /** Evaluate a watch script, waiting at most `ms`: a page that cannot
+   *  answer in time, or at all, reads as "no". Every page read in `act` goes
+   *  through here, so none can hold it past its deadline. An evaluate given
+   *  up on stays pending in WebKit until the page answers, and until then a
+   *  new one throws ERR_INVALID_STATE: the next op fails, it does not hang. */
+  const ask = async (expr: string, ms: number): Promise<unknown> => {
+    if (!(ms > 0)) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        view.evaluate(expr),
+        new Promise<undefined>((r) => { timer = setTimeout(() => r(undefined), ms); }),
+      ]);
+    } catch {
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
   };
   /** How many cross-document navigations the page started since NAV_ARM;
-   *  0 when it cannot say. */
-  const count = async (): Promise<number> => {
-    const n = await ask(NAV_COUNT);
+   *  0 when it cannot say within `ms`. */
+  const count = async (ms: number): Promise<number> => {
+    const n = await ask(NAV_COUNT, ms);
     return typeof n === "number" ? n : 0;
   };
   /** Wait for a landing after `before`, while `still()` holds, up to settleMs. */
@@ -179,7 +194,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       // of `loading` counts, or one stuck navigation would cost every later
       // action the full settleMs. The page flag is cleared for the same reason.
       const wasLoading = view.loading;
-      await ask(NAV_ARM);
+      await ask(NAV_ARM, timing.graceMs);
       await action();
       const start = Date.now();
       while (Date.now() - start < timing.graceMs) {
@@ -193,7 +208,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       // One read at the end of the window, not a poll: each read is an
       // evaluate, and fewer of them means fewer chances to race the commit.
       if (landed !== before) return;
-      let seen = await count();
+      let seen = await count(timing.graceMs);
       if (seen < 1) return;
       onNavigation();
       // A failure ends the wait unless the page started another navigation
@@ -205,7 +220,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       while (Date.now() - began < timing.settleMs) {
         if (arrived !== baseArrived) return;
         if (landed !== base) {
-          const now = await count();
+          const now = await count(began + timing.settleMs - Date.now());
           if (now <= seen) return;
           seen = now;
           base = landed;
