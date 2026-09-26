@@ -26,7 +26,8 @@ on macOS, with zero browser downloads. Chromium users already have the reference
    - the `goBack`/`goForward` native-method probing, if only Chrome had them (measure on WebKit first).
 2. **Non-macOS.** Any command that would start a daemon fails fast on a non-macOS platform with
    `bowser requires macOS (WebKit)` and exit 1 (a user error; add it to the exit-code regex in
-   `src/cli.ts`). `--help`, `--version` and the MCP tool listing still work everywhere.
+   `src/cli.ts`). `--help` and the MCP tool listing still work everywhere. (bowser has no `--version` flag; an
+   earlier draft of this spec named one by mistake.)
 3. **Removed commands:** `install` (downloaded Chromium), and `cookie-list`, `cookie-get`, `cookie-set`,
    `cookie-delete`, `cookie-clear`. Running one gives the ordinary `unknown command` (exit 1).
 4. **`state-save` / `state-load` keep only localStorage.** The file format stays Playwright's
