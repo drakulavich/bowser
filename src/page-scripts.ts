@@ -668,13 +668,21 @@ export function hoverScript(selector: string): string {
       })()`;
 }
 
+/** Selects the first option, in document order, whose value or label is the
+ *  text: playwright's selectOption rule. Answers false, touching nothing and
+ *  firing no event, when no option matches: assigning an unknown value would
+ *  deselect every option. */
 export function selectScript(selector: string, value: string): string {
   return `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('select: element not found');
-        el.value = ${JSON.stringify(value)};
+        const want = ${JSON.stringify(value)};
+        const opt = Array.from(el.options).find((o) => o.value === want || o.label === want);
+        if (!opt) return false;
+        el.selectedIndex = opt.index;
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
       })()`;
 }
 
@@ -686,15 +694,45 @@ export function setCheckedScript(selector: string, checked: boolean): string {
       })()`;
 }
 
-/** Empties the element `fill` is about to type into, like playwright's fill:
- *  an input/textarea's value, or a contenteditable element's content, with the
- *  caret put back inside it (the text node the click placed it in is gone). */
-export function clearForFillScript(selector: string): string {
-  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return;
+/** The inputs whose value `fill` sets in the page, as playwright does: the
+ *  native type enters nothing into them. */
+export const FILL_SET_TYPES = ["date", "time", "datetime-local", "month", "week", "color"];
+
+/** What `fillScript` found: `type` means the caller types the text now;
+ *  `set` means the page took it; the rest are refusals, value untouched. */
+export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "rejected";
+
+/** Readies the element `fill` has just clicked, and answers
+ *  `{ outcome: FillOutcome, type }` with the input's type (or ""):
+ *  - a disabled (fieldset included) or read-only element is refused;
+ *  - on type=number, text Number() reads as NaN is refused, as playwright does;
+ *  - a date-like input (FILL_SET_TYPES) gets the trimmed text as its value,
+ *    and `input` and `change`; a value the input does not keep is put back
+ *    and refused;
+ *  - anything else is emptied, like playwright's fill: an input/textarea's
+ *    value, or a contenteditable element's content, with the caret put back
+ *    inside it (the text node the click placed it in is gone).
+ *  The only value read is a date-like input's, never a password field's. */
+export function fillScript(selector: string, value: string): string {
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
+    const type = el instanceof HTMLInputElement ? el.type : '';
+    if (el.matches(':disabled')) return { outcome: 'disabled', type };
+    if (el.readOnly === true) return { outcome: 'readonly', type };
+    const text = ${JSON.stringify(value)};
+    if (type === 'number' && Number.isNaN(Number(text.trim()))) return { outcome: 'nan', type };
+    if (${JSON.stringify(FILL_SET_TYPES)}.includes(type)) {
+      const v = text.trim(), prev = el.value;
+      el.value = v;
+      if (el.value !== v) { el.value = prev; return { outcome: 'rejected', type }; }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { outcome: 'set', type };
+    }
     if ('value' in el) el.value = '';
     else if (el.isContentEditable) { el.textContent = ''; el.focus(); getSelection().collapse(el, 0); }
-    else return;
-    el.dispatchEvent(new Event('input', { bubbles: true })); })()`;
+    else return { outcome: 'type', type };
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return { outcome: 'type', type }; })()`;
 }
 
 export type StorageArea = "localStorage" | "sessionStorage";

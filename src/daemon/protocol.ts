@@ -46,7 +46,7 @@ export interface DaemonOps {
   type:             { args: [text: string];                              result: void };
   press:            { args: [key: string];                               result: void };
   hover:            { args: [selector: string];                          result: void };
-  select:           { args: [selector: string, value: string];           result: void };
+  select:           { args: [selector: string, value: string];           result: boolean };
   check:            { args: [selector: string];                          result: void };
   uncheck:          { args: [selector: string];                          result: void };
   /** With a path the daemon writes the PNG and returns `{ path }`; without

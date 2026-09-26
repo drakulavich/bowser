@@ -27,7 +27,7 @@ import {
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
-import { clearForFillScript, resolveRefScript } from "../src/page-scripts.ts";
+import { fillScript, resolveRefScript } from "../src/page-scripts.ts";
 
 /** An evaluate handler that answers the ref-resolve script the way the page
  *  would: the element's fresh selector, or null when it is gone. Any other
@@ -767,6 +767,79 @@ describe("fill", () => {
     const ops = c.calls.map((cl) => cl[0]);
     expect(ops).toEqual(["evaluate", "click", "evaluate", "type"]);
   });
+
+  // F13, F14: the page script fill already sends reports what it found; the
+  // command refuses or skips the typing from that answer alone.
+  const SECRET = "tomorrow-S3cr3t";
+  const answering = (answer: unknown) => {
+    const resolve = resolving({ e2: "input" });
+    return (expr: string): unknown => expr === resolveRefScript("e2") ? resolve(expr) : answer;
+  };
+  const fillWith = async (answer: unknown, text = SECRET) => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({ evaluate: answering(answer) });
+    const result = await cmdFill({ ...ctx(), connect: async () => c }, "e2", text).then(
+      (out) => ({ out, err: undefined }),
+      (err: Error) => ({ out: undefined, err }),
+    );
+    return { ...result, ops: c.calls.map((cl) => cl[0]) };
+  };
+
+  for (const why of ["disabled", "readonly"] as const) {
+    test(`a ${why} element is refused before typing, exit 1`, async () => {
+      const { err, ops } = await fillWith({ outcome: why, type: "text" });
+      expect(err?.message).toBe(`ref 'e2' is not an editable element (${why})`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(ops).toEqual(["evaluate", "click", "evaluate"]);
+    });
+  }
+
+  test("text that is not a number is refused on type=number, exit 1, without the text", async () => {
+    const { err, ops } = await fillWith({ outcome: "nan", type: "number" });
+    expect(err?.message).toBe("ref 'e2' needs a number (input[type=number])");
+    expect(reportFailure(err).code).toBe(1);
+    expect(ops).not.toContain("type");
+  });
+
+  test("a value a date-like input does not keep is refused, exit 1, without the text", async () => {
+    const { err, ops } = await fillWith({ outcome: "rejected", type: "date" });
+    expect(err?.message).toBe("ref 'e2' did not accept the value for input[type=date]");
+    expect(err?.message).not.toContain(SECRET);
+    expect(reportFailure(err).code).toBe(1);
+    expect(ops).not.toContain("type");
+  });
+
+  test("a value the page set itself is not typed again", async () => {
+    const { out, ops } = await fillWith({ outcome: "set", type: "date" }, "2024-01-02");
+    expect(out).toBe('filled e2 (textbox "Email")');
+    expect(ops).toEqual(["evaluate", "click", "evaluate"]);
+  });
+
+  test("the page script carries the text, and its failure does not echo it", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      updatedAt: Date.now(),
+    });
+    const resolve = resolving({ e2: "input" });
+    const c = fakeClient({
+      evaluate: (expr) => {
+        if (expr === resolveRefScript("e2")) return resolve(expr);
+        throw new Error(`evaluate failed: ${expr}`);
+      },
+    });
+    const err = await cmdFill({ ...ctx(), connect: async () => c }, "e2", SECRET).catch((e: Error) => e);
+    expect(c.calls).toContainEqual(["evaluate", [fillScript("input", SECRET)]]);
+    expect((err as Error).message).not.toContain(SECRET);
+  });
 });
 
 describe("type", () => {
@@ -844,6 +917,21 @@ describe("select", () => {
     const c = fakeClient({ evaluate: resolving({ e3: "select" }) });
     await cmdSelect({ ...ctx(), connect: async () => c }, "e3", "red");
     expect(c.calls).toContainEqual(["select", ["select", "red"]]);
+  });
+
+  // F12: the page answers false when no option's value or label is the text.
+  test("no matching option fails at once with exit 1", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({ evaluate: resolving({ e3: "select" }), select: () => false });
+    const err = await cmdSelect({ ...ctx(), connect: async () => c }, "e3", "nosuch").catch((e: Error) => e);
+    expect((err as Error).message).toBe(`ref 'e3' has no option "nosuch"`);
+    expect(reportFailure(err).code).toBe(1);
   });
 });
 
@@ -1025,7 +1113,7 @@ describe("ref commands resolve the ref in the live page first", () => {
   test("fill clears the fresh selector", async () => {
     const c = fakeClient({ evaluate: resolving({ e2: "fresh-e2" }) });
     await cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi");
-    expect(c.calls).toContainEqual(["evaluate", [clearForFillScript("fresh-e2")]]);
+    expect(c.calls).toContainEqual(["evaluate", [fillScript("fresh-e2", "hi")]]);
   });
 
   test("the resolve script embeds the ref with JSON.stringify", () => {

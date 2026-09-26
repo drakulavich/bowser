@@ -23,7 +23,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     type: rec("type", undefined),
     press: rec("press", undefined),
     hover: rec("hover", undefined),
-    select: rec("select", undefined),
+    select: rec("select", true),
     setChecked: rec("setChecked", undefined),
     screenshot: rec("screenshot", Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64")),
     resize: rec("resize", undefined),
