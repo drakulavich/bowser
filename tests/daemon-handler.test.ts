@@ -402,3 +402,42 @@ describe("dialogs", () => {
     expect(await createHandler(b, { dialog: confirmBox })(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
   });
 });
+
+describe("dialogs: the call a dialog blocked still owns the page", () => {
+  test("after the answer, the next page op does not reach the browser until the blocked click settles", async () => {
+    let settle!: () => void;
+    const b = dialogBrowser();
+    b.click = () => { b.on().opened(confirmBox); return new Promise<void>((r) => { settle = r; }); };
+    const h = createHandler(b, {}, 5_000);
+    expect(await h(req("click", ["#go"]))).toMatchObject({ ok: true, dialogs: [{ state: "pending" }] });
+    await h(req("dialog-answer", [true]));
+    const next = h(req("evaluate", ["1"]));
+    await Bun.sleep(30);
+    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
+    settle();
+    expect(await next).toEqual({ id: 7, ok: true, result: 42 });
+    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([["evaluate", ["1"]]]);
+  });
+
+  test("a blocked call that never settles holds the page only for the op timeout", async () => {
+    const b = dialogBrowser();
+    b.click = () => { b.on().opened(confirmBox); return new Promise<void>(() => {}); };
+    const h = createHandler(b, {}, 40);
+    await h(req("click", ["#go"]));
+    await h(req("dialog-answer", [true]));
+    const t0 = performance.now();
+    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  test("while the dialog is pending, state and the fail-fast error do not wait for the blocked click", async () => {
+    const b = dialogBrowser();
+    b.click = () => { b.on().opened(confirmBox); return new Promise<void>(() => {}); };
+    const h = createHandler(b, {}, 5_000);
+    await h(req("click", ["#go"]));
+    const t0 = performance.now();
+    expect(await h(req("state"))).toMatchObject({ ok: true, result: { dialog: confirmBox } });
+    expect(await h(req("evaluate", ["1"]))).toMatchObject({ ok: false, error: OPEN_ERROR });
+    expect(performance.now() - t0).toBeLessThan(100);
+  });
+});

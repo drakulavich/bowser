@@ -15,7 +15,9 @@
 // with the dialog pending, instead of waiting for the page it blocks; the op
 // itself settles in the background once `dialog-answer` (urgent lane) has
 // answered it. While one is pending every other queued op fails at once, so
-// nothing can queue behind it.
+// nothing can queue behind it. After the answer, the next page op waits for
+// that blocked call to settle (bounded by the op timeout) before it touches
+// the page: one browser operation at a time still holds.
 
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
@@ -175,10 +177,14 @@ const handlers: Handlers = {
  *
  *  `state` defaults to `{}` so the call sites that pass only a browser keep
  *  compiling unchanged; only `state`, `dialog-answer` and the dialog
- *  listener read it. */
-export function createHandler(browser: Browser, state: DaemonState = {}): (req: DaemonRequest) => Promise<DaemonResponse> {
+ *  listener read it. `settleMs` bounds how long a later op waits for a call
+ *  a dialog blocked (the op timeout; 0 waits without bound). */
+export function createHandler(browser: Browser, state: DaemonState = {}, settleMs = opTimeoutMs()): (req: DaemonRequest) => Promise<DaemonResponse> {
   // Wakes the op in flight when its dialog opens.
   const waiters = new Set<() => void>();
+  // The browser call a dialog blocked, after its op already replied. It still
+  // owns the page until it settles.
+  let blocked: Promise<unknown> | undefined;
   browser.watchDialogs({
     opened: (d) => {
       const a = state.answer;
@@ -226,6 +232,14 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
     if (state.dialog && !PASS_A_DIALOG.has(req.op)) {
       return { id: req.id, ok: false, error: dialogOpenError(state.dialog) };
     }
+    // Once the dialog is answered, wait for the call it blocked before
+    // touching the page. While it is pending there is nothing to wait for:
+    // only `state` gets here, and it reads the view's getters.
+    if (blocked && !state.dialog && !IS_URGENT.has(req.op)) {
+      await withTimeout(blocked, settleMs, "blocked").catch(() => {});
+      blocked = undefined;
+      return run(req);
+    }
     // Capability gate: a CDP-only op on webkit fails here with the shared
     // message, so the handler never touches a view that cannot answer.
     if (REQUIRES_CDP.has(req.op) && !browser.cdpAvailable()) {
@@ -248,7 +262,10 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
     try {
       return await Promise.race([
         work,
-        opened.then(() => req.op === "state" ? run(req) : { id: req.id, ok: true }),
+        opened.then(() => {
+          blocked = work;
+          return req.op === "state" ? run(req) : { id: req.id, ok: true };
+        }),
       ]);
     } finally {
       waiters.delete(wake);
@@ -283,9 +300,9 @@ export async function startDaemon(session: string, profile?: string): Promise<vo
 
   const browser: Browser = await openBrowser({ profile });
   const state: DaemonState = profile ? { profile } : {};
-  const handle = createHandler(browser, state);
-  const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();
+  const handle = createHandler(browser, state, timeoutMs);
+  const serialize = createSerializer();
 
   Bun.listen({
     unix: sock,

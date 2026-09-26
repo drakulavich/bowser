@@ -21,6 +21,7 @@ import { cmdClick } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
+import { pidPath } from "../src/daemon/client.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -177,6 +178,27 @@ onChrome("e2e: dialogs on Chromium", () => {
     // Used once: the next dialog is pending again.
     expect(await timedClick("Confirm")).toContain(pending("confirm", "sure?"));
     await cmdDialog(ctx, true);
+  }, 60_000);
+
+  test("close while a dialog is open returns promptly and leaves no daemon or browser running", async () => {
+    await fresh();
+    await timedClick("Confirm");
+    const daemon = Number(await Bun.file(pidPath(ctx.session)).text());
+    const children = async (): Promise<number[]> => {
+      const ps = await new Response(Bun.spawn(["ps", "-axo", "pid=,ppid="], { stdout: "pipe" }).stdout).text();
+      return ps.split("\n").map((l) => l.trim().split(/\s+/).map(Number)).filter(([, ppid]) => ppid === daemon).map(([pid]) => pid!);
+    };
+    const browsers = await children();
+    expect(browsers.length).toBeGreaterThan(0);
+    const t0 = performance.now();
+    expect(await cmdClose(ctx)).toBe(`closed session '${ctx.session}'`);
+    expect(performance.now() - t0).toBeLessThan(3000);
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    expect(alive(daemon)).toBe(false);
+    // The browser goes with its daemon; give the OS a moment to reap it.
+    const deadline = Date.now() + 3000;
+    while (browsers.some(alive) && Date.now() < deadline) await Bun.sleep(50);
+    expect(browsers.filter(alive)).toEqual([]);
   }, 60_000);
 
   test("one-shot: a navigation drops it", async () => {
