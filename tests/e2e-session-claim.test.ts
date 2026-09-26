@@ -79,4 +79,39 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
     await cmdClose({ session: s, json: true });
     expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
   }, 60_000);
+  test("F28: after kill -9, a persistent session refuses every command but open and close", async () => {
+    const s = session("crash28");
+    const ctx: CommandContext = { session: s, json: false };
+    await cmdOpen(ctx, url, { persistent: true });
+    await cmdEval(ctx, "(localStorage.setItem('pre', '1'), 1)");
+    const pid = Number((await Bun.file(pidPath(s)).text()).trim());
+    process.kill(pid, "SIGKILL");
+    expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
+
+    // The next command fails, a user error, and starts no browser.
+    for (const attempt of [() => cmdGoto(ctx, `${url}two`), () => cmdEval(ctx, "localStorage.getItem('pre')")]) {
+      const err = await attempt().then(() => undefined, (e: unknown) => e);
+      expect((err as Error)?.message).toBe(`session '${s}' is not open (its browser exited); run 'bowser open'`);
+      expect(reportFailure(err).code).toBe(1);
+    }
+    expect(await daemonPids(s)).toEqual([]);
+
+    // open starts it again, on the same profile: what the session stored before the crash is there.
+    await cmdOpen(ctx, url, { persistent: true });
+    expect(await cmdEval(ctx, "localStorage.getItem('pre')")).toBe("1");
+    expect((await daemonPids(s)).length).toBe(1);
+  }, 60_000);
+
+  test("F28: close after a crash clears the session; the next first command starts a browser", async () => {
+    const s = session("crash28c");
+    const ctx: CommandContext = { session: s, json: false };
+    await cmdOpen(ctx, url);
+    process.kill(Number((await Bun.file(pidPath(s)).text()).trim()), "SIGKILL");
+    expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
+
+    expect(await cmdClose(ctx)).toBe(`closed session '${s}'`);
+    expect(existsSync(sessionDir(s))).toBe(false);
+    expect(await cmdGoto(ctx, url)).toBe(`navigated to ${url}`);
+    expect((await daemonPids(s)).length).toBe(1);
+  }, 60_000);
 });

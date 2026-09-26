@@ -10,7 +10,7 @@ import { COMMANDS, findCommand } from "../src/cli/registry.ts";
 import { reportFailure, run } from "../src/cli.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
-import { pidPath } from "../src/daemon/client.ts";
+import { pidPath, type ConnectOptions } from "../src/daemon/client.ts";
 import { looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
@@ -90,6 +90,27 @@ describe("open", () => {
     const out = await cmdOpen({ ...ctx({ json: true }), connect: async () => c }, "https://x");
     expect(JSON.parse(out)).toEqual({ ok: true, url: "https://x", title: "Fake https://x" });
   });
+});
+
+// F28: only `open` may start a daemon on a session whose browser exited;
+// connectOrSpawn refuses the rest. `close` never spawns at all.
+describe("which commands may replace a browser that exited", () => {
+  for (const [argv, reopen] of [
+    [["open", "https://x"], true],
+    [["open"], true],
+    [["goto", "https://x"], false],
+    [["eval", "1"], false],
+    [["reload"], false],
+  ] as const) {
+    test(`${argv.join(" ")}: reopen ${reopen}`, async () => {
+      const seen: Array<ConnectOptions | undefined> = [];
+      await run([...argv], {
+        connect: async (_s, opts) => { seen.push(opts); return fakeClient({}); },
+      });
+      expect(seen.length).toBeGreaterThan(0);
+      expect(Boolean(seen[0]?.reopen)).toBe(reopen);
+    });
+  }
 });
 
 describe("open --persistent / --profile", () => {

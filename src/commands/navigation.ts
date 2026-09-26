@@ -91,7 +91,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
     return replyPage(ctx, c, { ok: true, url: state.url, title: state.title }, text);
-  }, { profile });
+  }, { profile, reopen: true });
 }
 
 export async function cmdGoto(ctx: CommandContext, typed: string): Promise<string> {

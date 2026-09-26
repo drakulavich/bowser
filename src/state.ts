@@ -75,7 +75,9 @@ export async function ensureSessionDir(name: string): Promise<string> {
   return dir;
 }
 
-function statePath(name: string): string {
+/** The session's saved page and refs. Its presence also says a daemon ran
+ *  for the session (connectOrSpawn reads it that way). */
+export function statePath(name: string): string {
   return join(sessionDir(name), "state.json");
 }
 

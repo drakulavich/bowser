@@ -7,7 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ensureSessionDir } from "../src/state.ts";
+import { ensureSessionDir, saveState } from "../src/state.ts";
 
 import { reportFailure } from "../src/cli.ts";
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
@@ -114,6 +114,57 @@ describe("connectOrSpawn on a platform without WebKit", () => {
       expect(Date.now() - started).toBeLessThan(2000);
     });
   }
+});
+
+// F28: a session whose browser exited refuses every command but `open` and
+// `close`, instead of quietly starting a new, empty browser. A session that
+// never ran a daemon still starts one on its first command.
+describe("connectOrSpawn after the session's browser exited (F28)", () => {
+  let tmp: string;
+  let origHome: string | undefined;
+
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-crashed-"));
+    process.env.HOME = tmp;
+  });
+
+  afterAll(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const crashed = async (session: string): Promise<void> => {
+    // What a dead daemon leaves: state.json, a pidfile naming no process, a socket file.
+    await saveState({ name: session, url: "http://x/", title: "", refs: [], updatedAt: Date.now() });
+    await Bun.write(pidPath(session), "99999");
+    await Bun.write(socketPath(session), "");
+  };
+
+  test("refuses, as a user error, and starts nothing", async () => {
+    const session = "crashed";
+    await crashed(session);
+    const started = Date.now();
+    // platform: a spawn attempt would fail with its own message, not this one.
+    const err = await connectOrSpawn(session, { platform: "linux" }).then(() => undefined, (e: unknown) => e);
+    expect((err as Error).message).toBe("session 'crashed' is not open (its browser exited); run 'bowser open'");
+    expect(reportFailure(err).code).toBe(1);
+    expect((await Bun.file(pidPath(session)).text()).trim()).toBe("99999");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test("open (reopen) still starts a daemon there", async () => {
+    const session = "crashed-open";
+    await crashed(session);
+    // Past the refusal, the spawn path's own platform check answers.
+    await expect(connectOrSpawn(session, { platform: "linux", reopen: true })).rejects.toThrow("bowser requires macOS (WebKit)");
+  });
+
+  test("a session that never ran a daemon still starts one", async () => {
+    const session = "never-ran";
+    await ensureSessionDir(session);
+    await expect(connectOrSpawn(session, { platform: "linux" })).rejects.toThrow("bowser requires macOS (WebKit)");
+  });
 });
 
 // A daemon can hold a connectable socket and never answer — stopped, or blocked
