@@ -1,11 +1,12 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
 import { readFile, readdir, rm, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { str } from "../cli/parser.ts";
 import type { Command } from "../cli/registry.ts";
 import { pidPath, socketPath } from "../daemon/client.ts";
 import {
-  ensureSessionDir, isValidSessionName, loadState, saveState, sessionDir, sessionsRoot, type SessionState,
+  ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
 import { connector, emptyState, reply, syncState, withClient, type CommandContext } from "./context.ts";
 
@@ -20,9 +21,33 @@ function assertNavigated(requested: string, finalUrl: string): void {
   }
 }
 
-export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string> {
+export interface OpenOptions {
+  persistent?: boolean;
+  /** Profile directory, relative to the cwd; implies `persistent` and wins over it. */
+  profile?: string;
+}
+
+export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptions = {}): Promise<string> {
+  // The parser accepts `--profile=`; treating it as absent would quietly
+  // start an ephemeral session the caller believes is persistent.
+  if (opts.profile !== undefined && !opts.profile.trim()) {
+    throw new Error("usage: --profile needs a directory, e.g. --profile=./profile");
+  }
   await ensureSessionDir(ctx.session);
+  const profile = opts.profile !== undefined
+    ? resolve(opts.profile)
+    : opts.persistent ? profileDir(ctx.session) : undefined;
+  // The directory is created only when a new daemon is spawned for it
+  // (spawnDaemon), so a refused open (below) leaves nothing behind.
   return withClient(ctx, async (c) => {
+    // The store is fixed when the daemon starts. A daemon that was already
+    // running may have another one, and navigating it would silently lose
+    // the persistence asked for, so refuse before touching the page.
+    if (profile && (await c.request("state")).profile !== profile) {
+      throw new Error(
+        `usage: session '${ctx.session}' is already open with a different profile; run 'bowser close' first`,
+      );
+    }
     if (url) await c.request("navigate", [url]);
     const state = await c.request("state");
     if (url) assertNavigated(url, state.url);
@@ -32,7 +57,7 @@ export async function cmdOpen(ctx: CommandContext, url?: string): Promise<string
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
     return reply(ctx, { ok: true, url: state.url, title: state.title }, text);
-  });
+  }, { profile });
 }
 
 export async function cmdGoto(ctx: CommandContext, url: string): Promise<string> {
@@ -325,8 +350,14 @@ export const COMMANDS: Command[] = [
     name: "open",
     summary: "Start or attach to a session; navigate if a URL is given",
     positional: [{ name: "url", required: false }],
-    flags: [],
-    run: (ctx, a) => cmdOpen(ctx, a.positional[0]),
+    flags: [
+      { name: "persistent", kind: "boolean" },
+      { name: "profile", kind: "string" },
+    ],
+    run: (ctx, a) => cmdOpen(ctx, a.positional[0], {
+      persistent: Boolean(a.flags.persistent),
+      profile: str(a.flags, "profile"),
+    }),
   },
   {
     name: "goto",

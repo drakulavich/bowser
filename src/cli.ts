@@ -27,12 +27,13 @@ if (import.meta.main) {
       process.exit(1);
     }
     const { startDaemon } = await import("./daemon/server.ts");
+    const { DAEMON_PROFILE_ENV } = await import("./daemon/client.ts");
     // Mirror daemon/main.ts: startDaemon sets up the socket listener and a
     // keepalive interval, then resolves. Do NOT process.exit() here — that
     // would tear the daemon down the instant its socket is ready (the bug that
     // made the compiled binary's "did not start in time"). The keepalive holds
     // the process open; the `else` keeps us out of the command dispatcher.
-    await startDaemon(session);
+    await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);
   } else if (process.argv[2] === "mcp") {
     // Long-lived stdio MCP server. Handled here at the entry layer (like
     // --daemon) because it never returns a string — keeping run()'s contract

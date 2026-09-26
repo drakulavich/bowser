@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **`open --persistent` and `open --profile=<dir>`**, as in `playwright-cli` 0.1.13. A session's
+  browser keeps cookies, `localStorage` and IndexedDB on disk, in `~/.bowser/profiles/<session>/` or
+  in `<dir>`, so a login survives `close` and daemon restarts on both backends. `close` leaves the
+  profile in place; delete it with `rm -rf`. Opening a running session with a different store is a
+  usage error (exit 1): close it first. One profile serves one running session at a time.
+
 ### Breaking
 
 - **`snapshot` prints the full aria tree in `playwright-cli`'s format.** It printed only

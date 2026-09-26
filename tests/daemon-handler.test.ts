@@ -120,6 +120,13 @@ describe("createHandler", () => {
     expect(res).toMatchObject({ ok: true, result: { dialog: { type: "confirm", message: "sure?" } } });
   });
 
+  test("state reports the daemon's persistent profile, and none when ephemeral", async () => {
+    const persistent = await createHandler(fakeBrowser(), { profile: "/p/dir" })(req("state"));
+    expect(persistent).toMatchObject({ ok: true, result: { profile: "/p/dir" } });
+    const ephemeral = await createHandler(fakeBrowser(), {})(req("state"));
+    expect(ephemeral.ok && "profile" in (ephemeral.result as object)).toBe(false);
+  });
+
   test("navigate, select and resize forward their arguments", async () => {
     const b = fakeBrowser();
     const h = createHandler(b);
