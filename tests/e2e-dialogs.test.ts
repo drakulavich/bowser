@@ -23,8 +23,8 @@ import { join } from "node:path";
 import { resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
-import { cmdClick } from "../src/commands/interaction.ts";
-import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdClick, cmdPress } from "../src/commands/interaction.ts";
+import { cmdClose, cmdGoto, cmdHistory, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
@@ -41,8 +41,16 @@ const PAGE = `<!doctype html><title>Dialogs</title>
 <button onclick="alert('hi'); out.textContent = 'alert:done'">Alert</button>
 <button onclick="confirm('one'); alert('two'); out.textContent = 'two:done'">Two</button>
 <button onclick="setTimeout(() => { out.textContent = 'later:' + confirm('later') }, 500)">Later</button>
+<button onclick="if (confirm('Leave?')) location = '/?left=1'">Leave</button>
+<button onclick="setTimeout(() => { location = '/?keys=1' }, 300)">Self</button>
 <a href="/?load=1">Load</a>
 <p id="out"></p>`;
+
+// A page whose key handler opens a confirm(), for an action with no eval before it.
+const KEYS_PAGE = `<!doctype html><title>Keys</title>
+<script>addEventListener('keydown', () => { document.title = 'key:' + confirm('key?') })</script>`;
+
+const OTHER_PAGE = `<!doctype html><title>Other</title><p>other</p>`;
 
 // A confirm() in an inline script, during the page's very first load.
 const LOAD_PAGE = `<!doctype html><title>Load</title>
@@ -64,7 +72,7 @@ run("e2e: dialogs", () => {
     process.env.HOME = tmp;
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response(new URL(req.url).search === "?load=1" ? LOAD_PAGE : PAGE, {
+      fetch: (req) => new Response(({ "?load=1": LOAD_PAGE, "?keys=1": KEYS_PAGE, "?other=1": OTHER_PAGE } as Record<string, string>)[new URL(req.url).search] ?? PAGE, {
         headers: { "content-type": "text/html; charset=utf-8" },
       }),
     });
@@ -187,5 +195,53 @@ run("e2e: dialogs", () => {
     await cmdDialog(ctx, true);
     expect(await click("Load")).toEndWith(line("confirm", "onload?", HINT));
     expect(await cmdEval(ctx, "document.title")).toBe("load:false");
+  }, 60_000);
+
+  test("a confirm whose handler navigates is answered; on WebKit its report is lost with the old document (documented limitation)", async () => {
+    await fresh();
+    await cmdDialog(ctx, true);
+    const text = await click("Leave");
+    // The navigation happened, so the confirm returned true: the answer was applied.
+    expect(await cmdEval(ctx, "location.search")).toBe("?left=1");
+    if (CHROME) {
+      expect(text).toEndWith(line("confirm", "Leave?", "accepted"));
+    } else {
+      // Documented WebKit limitation (spec item 5, README "Dialogs"): the page
+      // shim's log lived in the document the handler navigated away from.
+      expect(text).not.toContain("Modal state");
+    }
+  }, 60_000);
+
+  test("an answer set on a page is gone when back restores that page from the back-forward cache", async () => {
+    await fresh();
+    await cmdEval(ctx, "(window.kept = 'yes', 1)");
+    await cmdDialog(ctx, true);
+    await cmdGoto(ctx, `${url}?other=1`);
+    await cmdHistory(ctx, "back");
+    // WebKit restores the document itself, shim and answer included (measured);
+    // headless Chromium may load it anew. Either way the answer must be gone.
+    if (!CHROME) expect(await cmdEval(ctx, "window.kept")).toBe("yes");
+    await cmdSnapshot(ctx);
+    expect(await click("Confirm")).toEndWith(line("confirm", "sure?", HINT));
+    expect(await out()).toBe("confirm:false");
+  }, 60_000);
+
+  test("after the page navigates itself, the next action's dialog is answered and reported, with no eval before it", async () => {
+    await fresh();
+    await click("Self");
+    await Bun.sleep(1000);
+    expect(await cmdPress(ctx, "a")).toEndWith(line("confirm", "key?", HINT));
+    expect(await cmdEval(ctx, "document.title")).toBe("key:false");
+  }, 60_000);
+
+  test("an iframe navigating does not drop the page's one-shot answer", async () => {
+    await fresh();
+    await cmdDialog(ctx, true);
+    await cmdEval(ctx, "(document.body.append(Object.assign(document.createElement('iframe'), { src: '/?other=1' })), 1)");
+    await Bun.sleep(500);
+    await cmdEval(ctx, "(document.querySelector('iframe').src = '/?other=2', 1)");
+    await Bun.sleep(500);
+    expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
+    expect(await out()).toBe("confirm:true");
   }, 60_000);
 });

@@ -186,7 +186,12 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  watch counts navigation events and lets an action wait for the one it
  *  started: a navigation that begins within graceMs is awaited up to
  *  settleMs; an action that navigates nowhere costs the full grace window. */
-function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => void = () => {}) {
+function navigationWatch(
+  view: ViewLike,
+  timing: NavTiming,
+  onNavigation: () => void = () => {},
+  onLanded: () => void = onNavigation,
+) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
   // A failed navigation ends the wait but does not fail the action: WebKit
@@ -194,7 +199,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   // navigating right after a click), and `state` reads the real URL anyway.
   // Surfacing the last navigation error is future DaemonState work.
   let landed = 0;
-  view.onNavigated = () => { landed++; onNavigation(); };
+  view.onNavigated = () => { landed++; onLanded(); };
   view.onNavigationFailed = () => { landed++; };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   return {
@@ -234,7 +239,12 @@ export interface PersistentStore {
 export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_TIMING, store?: PersistentStore): Browser {
   const profile = store?.profile;
   let dialogs: DialogListener | undefined;
-  const nav = navigationWatch(view, timing, () => dialogs?.navigation());
+  // On chrome Bun fires onNavigated for an iframe landing too, with no frame
+  // to tell it apart (measured, Bun 1.4.2), so a landing is not a navigation
+  // there: the main frame's Page.frameStartedNavigating (watchDialogs) comes
+  // first anyway. On webkit a landing is the only signal the page gives.
+  const navigated = () => dialogs?.navigation();
+  const nav = navigationWatch(view, timing, navigated, spec.kind === "chrome" ? () => {} : navigated);
   const cdp = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     // view.cdp() exists on the chrome backend only. On webkit Bun throws
     // 'WebView.cdp() requires backend: "chrome"'; we raise the friendlier
@@ -337,13 +347,16 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
       // before the new document can open a dialog. Only the main frame's
       // count: an iframe navigating leaves the page's one-shot answer alone.
       // The event carries no parent id, so the main frame's id is asked for
-      // once, as the root of Page.getFrameTree (it needs the CDP session,
-      // which exists by the first event; measured, Bun 1.4.2). Unknown, the
-      // event counts: dropping an answer is the safe side.
+      // once: a page target's id is its main frame's id. Target.getTargetInfo,
+      // not Page.getFrameTree: the browser process answers it, while
+      // getFrameTree needs the renderer, which a load-time dialog blocks, and
+      // `open` then hung (measured, Bun 1.4.2, 2 runs in 3). It needs the CDP
+      // session, which exists by the first event. Unknown, the event counts:
+      // dropping an answer is the safe side.
       let mainFrame: string | undefined;
       let asking: Promise<string | undefined> | undefined;
-      const main = () => (asking ??= cdp("Page.getFrameTree")
-        .then((r) => (mainFrame = (r as { frameTree: { frame: { id: string } } }).frameTree.frame.id))
+      const main = () => (asking ??= cdp("Target.getTargetInfo")
+        .then((r) => (mainFrame = (r as { targetInfo: { targetId: string } }).targetInfo.targetId))
         .catch(() => { asking = undefined; return undefined; }));
       subscribe("Page.frameStartedNavigating", (data) => {
         const { frameId } = data as { frameId: string };

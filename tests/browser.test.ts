@@ -299,14 +299,14 @@ describe("wrapView dialogs", () => {
       addEventListener: (n, h) => { listeners.set(n, h); },
       cdp: async (m, p) => {
         v.calls.push(["cdp", [m, p]]);
-        return m === "Page.getFrameTree" ? { frameTree: { frame: { id: mainFrame }, childFrames: [] } } : {};
+        return m === "Target.getTargetInfo" ? { targetInfo: { targetId: mainFrame, type: "page" } } : {};
       },
     });
     const emit = (type: string, data: unknown) => listeners.get(type)?.({ type, data });
     return { v, emit };
   }
 
-  test("on chrome, CDP dialog events reach the listener as DialogState, and navigations starting and landing too", async () => {
+  test("on chrome, CDP dialog events reach the listener as DialogState, and a navigation when it starts, not when it lands", async () => {
     const { v, emit } = listening();
     const seen: unknown[] = [];
     const b = wrapView(v, chrome);
@@ -318,11 +318,11 @@ describe("wrapView dialogs", () => {
     emit("Page.javascriptDialogOpening", { url: "u", frameId: "f", message: "sure?", type: "confirm", hasBrowserHandler: false, defaultPrompt: "" });
     emit("Page.frameStartedNavigating", { frameId: "f", url: "https://x/next", loaderId: "l", navigationType: "differentDocument" });
     await Bun.sleep(0); // the main frame's id is asked for once
-    v.land("https://x/next");
+    // Bun fires onNavigated for an iframe landing too, so a landing says nothing on chrome.
+    v.land("https://x/frame");
     expect(seen).toEqual([
       ["opened", { type: "prompt", message: "name?", defaultValue: "def" }],
       ["opened", { type: "confirm", message: "sure?" }],
-      ["navigation"],
       ["navigation"],
     ]);
   });
@@ -342,7 +342,7 @@ describe("wrapView dialogs", () => {
     await started("MAIN");
     expect(navigations).toBe(2);
     // The main frame's id is asked for once, then remembered.
-    expect(v.calls.filter(([n, a]) => n === "cdp" && a[0] === "Page.getFrameTree")).toHaveLength(1);
+    expect(v.calls.filter(([n, a]) => n === "cdp" && a[0] === "Target.getTargetInfo")).toHaveLength(1);
   });
 
   test("on chrome, when the main frame cannot be asked for, a navigation still counts: the answer is dropped", async () => {
