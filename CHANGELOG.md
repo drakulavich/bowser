@@ -15,7 +15,7 @@ backend is removed. If you need Chromium, use Microsoft's
 
 - **macOS only.** `Bun.WebView`'s WebKit backend exists only on macOS. On another platform, any
   command that would start a session fails with `bowser requires macOS (WebKit)` (exit 1);
-  `--help`, `--version` and the MCP tool listing still work. `package.json` declares
+  `--help` and the MCP tool listing still work. `package.json` declares
   `"os": ["darwin"]`.
 - **No Linux binaries.** Releases ship `bowser-macos-arm64` and `bowser-macos-x64` only.
 - **Removed commands:** `install` (it downloaded Chromium), and `cookie-list`, `cookie-get`,
