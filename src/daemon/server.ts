@@ -77,13 +77,19 @@ export interface Lane {
  *
  *  The budget is one timer per request, started here, on receipt, so it
  *  counts queue time. At the deadline:
- *  - a request that is running gets the timeout reply, and `recover` runs
- *    once, for it;
+ *  - a request that is running gets the timeout reply. If it is still
+ *    running after a grace of RECOVERY_GRACE_MS (or the budget, if
+ *    smaller), `recover` runs once, for it. An op that was only slow and
+ *    settles within the grace is left alone, so its page survives;
  *  - a request still queued behind an op that timed out gets its own error
  *    naming that op, and is dropped when its turn comes, since its client
  *    has already been told it failed.
  *  Every request ahead of a queued one arrived earlier with the same budget,
  *  so the op it waits for has always timed out first. */
+/** How long a timed-out op may still settle on its own before `recover`
+ *  reloads the page under it (capped by the budget). */
+export const RECOVERY_GRACE_MS = 2000;
+
 export function dispatch(req: DaemonRequest, lane: Lane): void {
   if (IS_URGENT.has(req.op)) {
     lane.handle(req).then(lane.reply).catch(() => {
@@ -93,6 +99,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   }
   let answered = false;
   let running = false;
+  let grace: ReturnType<typeof setTimeout> | undefined;
   let recovery: Promise<void> | undefined;
   const answer = (res: DaemonResponse): void => {
     if (answered) return;
@@ -111,12 +118,17 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     answer({ id: req.id, ok: false, error: `operation '${req.op}' timed out after ${ms}ms`, ...(dialogs ? { dialogs } : {}) });
     // Runs while this op still holds the serializer, so no later queued op
     // can overlap it; see Browser.interrupt for what it may overlap.
-    recovery = lane.recover?.().catch(() => {});
+    grace = setTimeout(() => {
+      recovery = lane.recover?.().catch(() => {});
+    }, Math.min(RECOVERY_GRACE_MS, ms));
   }, ms) : undefined;
   lane.serialize(async () => {
     if (answered) return;
     running = true;
-    answer(await lane.handle(req));
+    const res = await lane.handle(req);
+    // Settled within the grace: no reload, and the next op starts now.
+    clearTimeout(grace);
+    answer(res);
     // Hold the lane until the recovery's reload has landed, so the next op
     // sees the page it left rather than racing it.
     await recovery;

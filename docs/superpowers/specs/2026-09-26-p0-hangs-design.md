@@ -22,7 +22,8 @@ restated below so this spec stands alone.
    still queued at its deadline fails with
    `operation '<op>' timed out after <ms>ms (waiting for '<prev op>', which timed out and is still running; run 'bowser close' if the session stays stuck)`.
    It exits 2 like any timeout.
-2. After an op times out, the daemon tries once to free the WebView:
+2. After an op times out, the daemon tries once to free the WebView, after a short grace period, and
+   only if the op is still running:
    - First measure on WebKit what actually interrupts a stuck `evaluate` and a navigation that never
      settles (for example `view.stop`, a navigate to `about:blank`, or a reload), and use what works.
    - If recovery succeeds, the session keeps working: the next command runs normally on whatever page

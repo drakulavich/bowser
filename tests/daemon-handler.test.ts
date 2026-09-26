@@ -296,20 +296,20 @@ describe("the queue-time budget", () => {
         return { id: req.id, ok: true as const };
       },
       serialize: createSerializer(),
-      timeoutMs: 40,
+      timeoutMs: 300,
       reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
-    await Bun.sleep(20);
+    await Bun.sleep(150);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
-    await Bun.sleep(100);
+    await Bun.sleep(500);
     expect(replies.map(([, r]) => r)).toEqual([
-      { id: 1, ok: false, error: "operation 'click' timed out after 40ms" },
-      { id: 2, ok: false, error: QUEUED("evaluate", 40, "click") },
+      { id: 1, ok: false, error: "operation 'click' timed out after 300ms" },
+      { id: 2, ok: false, error: QUEUED("evaluate", 300, "click") },
     ]);
-    // Its deadline counts from receipt (20 ms), not from when the first op
-    // timed out (40 ms): it answers near 60 ms, well before 80.
-    expect(replies[1]![0]).toBeLessThan(78);
+    // Its deadline counts from receipt (150 ms), so it answers near 450 ms;
+    // timed from when the first op timed out, it would answer near 600.
+    expect(replies[1]![0]).toBeLessThan(560);
     release();
     await Bun.sleep(20);
     // Its client was already told it failed, so it is dropped, not run late.
@@ -376,7 +376,9 @@ describe("the queue-time budget", () => {
       },
     };
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane);
-    await Bun.sleep(30);
+    // Timed out at 20 ms, still stuck when the grace (the 20 ms budget,
+    // under RECOVERY_GRACE_MS) ends at 40: the recovery runs.
+    await Bun.sleep(60);
     // The interrupt frees the stuck op, as reload() does a stuck evaluate.
     release();
     await Bun.sleep(5);
@@ -388,6 +390,49 @@ describe("the queue-time budget", () => {
     recovered();
     await Bun.sleep(5);
     expect(events).toEqual(["run evaluate", "reply 1 false", "recover", "recovered", "run evaluate", "reply 2 true"]);
+  });
+
+  test("an op that settles within the grace after its timeout is not recovered, and the next op does not wait out the grace", async () => {
+    let recoveries = 0;
+    const replies: Array<[number, DaemonResponse]> = [];
+    const t0 = Date.now();
+    const lane = {
+      handle: async (req: DaemonRequest) => {
+        // Slow, not stuck: overruns its 100 ms budget by 20 ms.
+        if (req.id === 1) await Bun.sleep(120);
+        return { id: req.id, ok: true as const };
+      },
+      serialize: createSerializer(),
+      timeoutMs: 100,
+      reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+      recover: async () => { recoveries++; },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    await Bun.sleep(110); // after the first op timed out, with a budget to spare
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
+    await Bun.sleep(200);
+    expect(recoveries).toBe(0);
+    expect(replies.map(([, r]) => r.ok)).toEqual([false, true]);
+    // Answered once the first op settled (~120 ms), not after the grace (200).
+    expect(replies[1]![0]).toBeLessThan(190);
+  });
+
+  test("an op still stuck when the grace ends is recovered once", async () => {
+    let recoveries = 0;
+    const lane = {
+      handle: () => new Promise<DaemonResponse>(() => {}),
+      serialize: createSerializer(),
+      timeoutMs: 30,
+      reply: () => {},
+      recover: async () => { recoveries++; },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    await Bun.sleep(45);
+    expect(recoveries).toBe(0); // timed out at 30, grace until 60
+    await Bun.sleep(60);
+    expect(recoveries).toBe(1);
+    await Bun.sleep(60);
+    expect(recoveries).toBe(1);
   });
 
   test("a request that fails in the queue triggers no recovery: only the running op is interrupted", async () => {

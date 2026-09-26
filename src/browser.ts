@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  HISTORY_BACK, HISTORY_FORWARD, NAV_ARM, NAV_STARTED, READ_TITLE, READ_URL, RELOAD,
+  HISTORY_BACK, HISTORY_FORWARD, NAV_ARM, NAV_COUNT, READ_TITLE, READ_URL, RELOAD,
   hoverScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 
@@ -137,7 +137,7 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  `onNavigation` hears a navigation an action started, and every landing.
  *
  *  "Begins" is seen three ways: a landing inside the window, `view.loading`
- *  turning true, or the page's own navigate event (NAV_ARM/NAV_STARTED).
+ *  turning true, or the page's own navigate event (NAV_ARM/NAV_COUNT).
  *  The page's event is the one that shows a navigation the page starts to a
  *  slow server: on WebKit `view.loading` stays false for those and
  *  onNavigated waits for the response (measured, Bun 1.4.2: a link to a
@@ -150,13 +150,22 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   // reports NSURLErrorDomain -999 for routine cancellations (a page script
   // navigating right after a click), and `state` reads the real URL anyway.
   // Surfacing the last navigation error is future DaemonState work.
+  // `landed` counts both outcomes; `arrived` only the successes, so a wait
+  // can tell a failure that another navigation replaced (below).
   let landed = 0;
-  view.onNavigated = () => { landed++; onNavigation(); };
+  let arrived = 0;
+  view.onNavigated = () => { landed++; arrived++; onNavigation(); };
   view.onNavigationFailed = () => { landed++; };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   /** Evaluate a watch script; a page that cannot answer reads as "no". */
   const ask = async (expr: string): Promise<unknown> => {
     try { return await view.evaluate(expr); } catch { return undefined; }
+  };
+  /** How many cross-document navigations the page started since NAV_ARM;
+   *  0 when it cannot say. */
+  const count = async (): Promise<number> => {
+    const n = await ask(NAV_COUNT);
+    return typeof n === "number" ? n : 0;
   };
   /** Wait for a landing after `before`, while `still()` holds, up to settleMs. */
   const settle = async (before: number, still: () => boolean): Promise<void> => {
@@ -183,9 +192,26 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       }
       // One read at the end of the window, not a poll: each read is an
       // evaluate, and fewer of them means fewer chances to race the commit.
-      if (landed !== before || (await ask(NAV_STARTED)) !== true) return;
+      if (landed !== before) return;
+      let seen = await count();
+      if (seen < 1) return;
       onNavigation();
-      await settle(before, () => true);
+      // A failure ends the wait unless the page started another navigation
+      // since: a script navigating again cancels the first with -999 while
+      // the second still loads, and that second one is what the action led to.
+      const began = Date.now();
+      let base = landed;
+      const baseArrived = arrived;
+      while (Date.now() - began < timing.settleMs) {
+        if (arrived !== baseArrived) return;
+        if (landed !== base) {
+          const now = await count();
+          if (now <= seen) return;
+          seen = now;
+          base = landed;
+        }
+        await sleep(10);
+      }
     },
     /** Reload the committed page to free a stuck call; see Browser.interrupt. */
     async interrupt(): Promise<void> {

@@ -634,21 +634,28 @@ export const RELOAD = "location.reload()";
 // location) shows neither in view.loading nor in onNavigated until the
 // server answers; the Navigation API's navigate event fires within ~6 ms
 // (measured, Bun 1.4.2). NAV_ARM listens for it once per document and
-// clears the flag before each action; NAV_STARTED reads it after. A
-// same-document navigation (a hash link) never lands, so it is not counted.
+// zeroes the count before each action; NAV_COUNT reads how many
+// cross-document navigations the page has started since. A same-document
+// navigation (a hash link) never lands, so it is not counted.
+// The API is reached only as `window.navigation`: a page's own global
+// `let navigation` shadows the bare name in any script run there. A missing
+// or broken API leaves the count at 0, which reads as "no navigation".
 export const NAV_ARM = String.raw`(() => {
   const KEY = Symbol.for('bowser.nav');
   let s = window[KEY];
   if (!s) {
-    s = { started: false };
+    s = { count: 0 };
     Object.defineProperty(window, KEY, { value: s });
-    if (window.navigation) {
-      navigation.addEventListener('navigate', (e) => { if (!e.destination.sameDocument) s.started = true; });
-    }
+    try {
+      const api = window.navigation;
+      if (api && typeof api.addEventListener === 'function') {
+        api.addEventListener('navigate', (e) => { if (!e.destination.sameDocument) s.count++; });
+      }
+    } catch {}
   }
-  s.started = false;
+  s.count = 0;
 })()`;
-export const NAV_STARTED = "window[Symbol.for('bowser.nav')]?.started === true";
+export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
 
 export function hoverScript(selector: string): string {
   return `(() => {

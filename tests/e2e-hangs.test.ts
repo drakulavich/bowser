@@ -4,9 +4,10 @@
 // - F10: a click on a link to a page the server answers after 3 s waits for
 //   that page; on WebKit only the page's navigate event shows the navigation
 //   before the response arrives.
-// - F9: an op that never settles fails at its budget, the daemon reloads the
-//   page to free the WebView, and every later request is bounded by its own
-//   budget, queue time included. `close` always works.
+// - F9: an op that never settles fails at its budget; if it is still running
+//   after a grace, the daemon reloads the page to free the WebView. Every
+//   later request is bounded by its own budget, queue time included. `close`
+//   always works.
 //
 // The daemon reads BOWSER_OP_TIMEOUT_MS when it spawns, so each session is
 // opened with the budget its test needs.
@@ -32,6 +33,16 @@ const HOME_PAGE = `<!doctype html><title>Home</title>
 <a href="/slow">Slow</a>
 <button onclick="document.body.dataset.clicked = 'yes'">Stay</button>`;
 const SLOW_PAGE = `<!doctype html><title>Slow</title><h1>Arrived</h1>`;
+const SLOW_TWO_PAGE = `<!doctype html><title>Slow two</title><h1>Arrived twice</h1>`;
+/** A page whose own global lexical `navigation` shadows the Navigation API
+ *  for unqualified references in any script evaluated there. */
+const SHADOWED_PAGE = `<!doctype html><title>Shadowed</title>
+<script>let navigation = {};</script>
+<a href="/slow">Slow</a>`;
+/** A click that starts one slow navigation and, 200 ms later, replaces it
+ *  with another: WebKit cancels the first (-999) while the second loads. */
+const DOUBLE_PAGE = `<!doctype html><title>Double</title>
+<button onclick="location.href = '/slow'; setTimeout(() => { location.href = '/slow2'; }, 200)">Twice</button>`;
 const SLOW_MS = 3000;
 
 runOrSkip("e2e: a session never hangs, never reports a page it has not reached", () => {
@@ -73,8 +84,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
         const path = new URL(req.url).pathname;
         // A server that never answers: the navigation never settles.
         if (path === "/never") return new Promise<Response>(() => {});
-        if (path === "/slow") await Bun.sleep(SLOW_MS);
-        return new Response(path === "/slow" ? SLOW_PAGE : HOME_PAGE, {
+        if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
+        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE }[path] ?? HOME_PAGE;
+        return new Response(page, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
       },
@@ -115,6 +127,32 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(snap).toContain('heading "Arrived"');
   }, 30_000);
 
+  test("F10: a page whose own `navigation` shadows the Navigation API still has its slow click awaited", async () => {
+    const ctx = await openWith("shadowed", 8000);
+    await cmdGoto(ctx, `${base}/shadowed`);
+    await cmdSnapshot(ctx);
+    const link = (await loadState(ctx.session))!.refs.find((r) => r.name === "Slow")!.id;
+    const click = await timed(() => cmdClick(ctx, link));
+    expect(click.error).toBeUndefined();
+    const snap = await cmdSnapshot(ctx);
+    expect(snap).toContain(`- Page URL: ${base}/slow`);
+    expect(snap).toContain("- Page Title: Slow");
+  }, 30_000);
+
+  test("F10: a navigation that replaces the one the click started is awaited too", async () => {
+    const ctx = await openWith("double", 12000);
+    await cmdGoto(ctx, `${base}/double`);
+    await cmdSnapshot(ctx);
+    const button = (await loadState(ctx.session))!.refs.find((r) => r.name === "Twice")!.id;
+    const click = await timed(() => cmdClick(ctx, button));
+    expect(click.error).toBeUndefined();
+    // The second page is requested at ~200 ms and served 3 s later.
+    expect(click.ms).toBeGreaterThanOrEqual(SLOW_MS);
+    const snap = await cmdSnapshot(ctx);
+    expect(snap).toContain(`- Page URL: ${base}/slow2`);
+    expect(snap).toContain("- Page Title: Slow two");
+  }, 30_000);
+
   test("F9: after an eval that never settles, the next eval works or fails within its budget, recovery frees the session, and close works", async () => {
     const budget = 1000;
     const ctx = await openWith("hangeval", budget);
@@ -126,7 +164,8 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(stuck.error).toBe(`operation 'evaluate' timed out after ${budget}ms`);
     expect(stuck.ms).toBeLessThan(budget + 1000);
 
-    // Sent at once: WebKit frees the stuck evaluate ~2.4 s after the reload,
+    // Sent at once: the reload comes after a grace (the 1 s budget here) and
+    // WebKit frees the stuck evaluate ~2.4-3 s after it,
     // so this one may time out in the queue, but never past its own budget.
     const next = await timed(() => cmdEval(ctx, "1"));
     if (next.error) {
@@ -156,12 +195,20 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const stuck = await timed(() => cmdGoto(ctx, `${base}/never`));
     expect(stuck.error).toBe(`operation 'navigate' timed out after ${budget}ms`);
 
-    // The reload cancels the stuck navigation at once, so this runs, on the
-    // page the session was on.
+    // Sent at once: the daemon reloads only after a grace (the 1 s budget
+    // here), so this may time out in the queue, but never past its budget.
     const next = await timed(() => cmdEval(ctx, "location.href"));
     expect(next.ms).toBeLessThan(budget + 1000);
-    expect(next.error).toBeUndefined();
-    expect(await cmdEval(ctx, "location.href")).toBe(`${base}/`);
+    if (next.error) expect(next.error).toContain("(waiting for 'navigate', which timed out and is still running");
+
+    // The reload cancels the stuck navigation at once: the session works
+    // again, on the page it was on.
+    let href: string | undefined;
+    const deadline = performance.now() + 5000;
+    while (href === undefined && performance.now() < deadline) {
+      try { href = await cmdEval(ctx, "location.href"); } catch { await Bun.sleep(200); }
+    }
+    expect(href).toBe(`${base}/`);
 
     const close = await timed(() => cmdClose(ctx));
     expect(close.error).toBeUndefined();

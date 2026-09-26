@@ -1,7 +1,7 @@
 // wrapView() against a fake view.
 import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
-import { NAV_ARM, NAV_STARTED } from "../src/page-scripts.ts";
+import { NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -48,19 +48,19 @@ describe("wrapView close", () => {
 const fast = { graceMs: 40, settleMs: 300 };
 
 /** The calls an action made, without the watch's own page reads. */
-const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_STARTED)));
+const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
 
 /** A view whose page reports, as WebKit's Navigation API does, that a
- *  cross-document navigation began: `pageNav` is what NAV_STARTED reads.
+ *  cross-document navigation began: `page.navs` is what NAV_COUNT reads.
  *  view.loading stays false, as it does on WebKit for a navigation the page
  *  starts (measured: a link click, a form submit, a script's location change). */
 function pageNavView(over: Partial<ViewLike> = {}) {
-  const page = { nav: false };
+  const page = { navs: 0 };
   const v = fakeView({
     evaluate: async (expr) => {
       v.calls.push(["evaluate", [expr]]);
-      if (expr === NAV_ARM) { page.nav = false; return undefined; }
-      if (expr === NAV_STARTED) return page.nav;
+      if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+      if (expr === NAV_COUNT) return page.navs;
       return undefined;
     },
     ...over,
@@ -139,7 +139,7 @@ describe("wrapView navigation watch", () => {
     // F10: on WebKit neither view.loading nor onNavigated shows a
     // provisional navigation; only the page's navigate event does.
     const { v, page } = pageNavView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); page.nav = true; setTimeout(() => v.land("https://x/slow"), 150); };
+    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; setTimeout(() => v.land("https://x/slow"), 150); };
     const b = wrapView(v, fast);
     await b.click("#slow");
     expect(b.url).toBe("https://x/slow");
@@ -147,23 +147,46 @@ describe("wrapView navigation watch", () => {
 
   test("the page's signal is armed before the action, so an earlier navigation does not count", async () => {
     const { v, page } = pageNavView();
-    page.nav = true; // left over from a navigation that never landed
+    page.navs = 1; // left over from a navigation that never landed
     const b = wrapView(v, fast);
     const t0 = Date.now();
     await b.click("#btn");
     expect(Date.now() - t0).toBeLessThan(fast.graceMs + 40);
-    expect(v.calls.map(([n, a]) => n === "evaluate" ? String(a[0]) : n)).toEqual([NAV_ARM, "click", NAV_STARTED]);
+    expect(v.calls.map(([n, a]) => n === "evaluate" ? String(a[0]) : n)).toEqual([NAV_ARM, "click", NAV_COUNT]);
   });
 
   test("a page-started navigation that never lands is given up after settleMs", async () => {
     const { v, page } = pageNavView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); page.nav = true; };
+    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; };
     const b = wrapView(v, { graceMs: 20, settleMs: 60 });
     const t0 = Date.now();
     await b.click("#never");
     const elapsed = Date.now() - t0;
     expect(elapsed).toBeGreaterThanOrEqual(75);
     expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("a navigation that replaces the one the action started is awaited, not ended by the first one's -999", async () => {
+    const { v, page } = pageNavView();
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      page.navs++;
+      setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 80);
+      setTimeout(() => v.land("https://x/second"), 160);
+    };
+    const b = wrapView(v, fast);
+    await b.click("#twice");
+    expect(b.url).toBe("https://x/second");
+  });
+
+  test("a failure with no navigation after it still ends the wait", async () => {
+    // A 204 answer: the page's navigate event, then only a failure.
+    const { v, page } = pageNavView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; setTimeout(() => v.onNavigationFailed?.(new Error("interrupted")), 60); };
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    await b.click("#nocontent");
+    expect(Date.now() - t0).toBeLessThan(fast.settleMs);
   });
 
   test("a page that cannot answer the read costs the grace window, not a failure", async () => {
