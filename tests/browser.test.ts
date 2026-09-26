@@ -1,6 +1,7 @@
 // wrapView() against a fake view.
 import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
+import { NAV_ARM, NAV_STARTED } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -45,6 +46,27 @@ describe("wrapView close", () => {
 });
 
 const fast = { graceMs: 40, settleMs: 300 };
+
+/** The calls an action made, without the watch's own page reads. */
+const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_STARTED)));
+
+/** A view whose page reports, as WebKit's Navigation API does, that a
+ *  cross-document navigation began: `pageNav` is what NAV_STARTED reads.
+ *  view.loading stays false, as it does on WebKit for a navigation the page
+ *  starts (measured: a link click, a form submit, a script's location change). */
+function pageNavView(over: Partial<ViewLike> = {}) {
+  const page = { nav: false };
+  const v = fakeView({
+    evaluate: async (expr) => {
+      v.calls.push(["evaluate", [expr]]);
+      if (expr === NAV_ARM) { page.nav = false; return undefined; }
+      if (expr === NAV_STARTED) return page.nav;
+      return undefined;
+    },
+    ...over,
+  });
+  return { v, page };
+}
 
 describe("wrapView navigation watch", () => {
   test("press goes through the watch like click", async () => {
@@ -113,6 +135,44 @@ describe("wrapView navigation watch", () => {
     expect(v.loading).toBe(true);
   });
 
+  test("a navigation the page starts and the server is slow to answer is awaited until it lands", async () => {
+    // F10: on WebKit neither view.loading nor onNavigated shows a
+    // provisional navigation; only the page's navigate event does.
+    const { v, page } = pageNavView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); page.nav = true; setTimeout(() => v.land("https://x/slow"), 150); };
+    const b = wrapView(v, fast);
+    await b.click("#slow");
+    expect(b.url).toBe("https://x/slow");
+  });
+
+  test("the page's signal is armed before the action, so an earlier navigation does not count", async () => {
+    const { v, page } = pageNavView();
+    page.nav = true; // left over from a navigation that never landed
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    await b.click("#btn");
+    expect(Date.now() - t0).toBeLessThan(fast.graceMs + 40);
+    expect(v.calls.map(([n, a]) => n === "evaluate" ? String(a[0]) : n)).toEqual([NAV_ARM, "click", NAV_STARTED]);
+  });
+
+  test("a page-started navigation that never lands is given up after settleMs", async () => {
+    const { v, page } = pageNavView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); page.nav = true; };
+    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+    const t0 = Date.now();
+    await b.click("#never");
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(75);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  test("a page that cannot answer the read costs the grace window, not a failure", async () => {
+    const v = fakeView({ evaluate: async () => { throw new Error("no longer reachable"); } });
+    const b = wrapView(v, fast);
+    await b.click("#btn");
+    expect(b.url).toBe("https://x/");
+  });
+
   test("back and forward use goBack/goForward when the runtime has them", async () => {
     const v = fakeView({
       goBack: async () => { v.calls.push(["goBack", []]); },
@@ -121,7 +181,7 @@ describe("wrapView navigation watch", () => {
     const b = wrapView(v, fast);
     await b.back();
     await b.forward();
-    expect(v.calls).toEqual([["goBack", []], ["goForward", []]]);
+    expect(own(v.calls)).toEqual([["goBack", []], ["goForward", []]]);
   });
 
   test("back, forward and reload fall back to history/location when the runtime lacks them", async () => {
@@ -130,7 +190,7 @@ describe("wrapView navigation watch", () => {
     await b.back();
     await b.forward();
     await b.reload();
-    expect(v.calls).toEqual([
+    expect(own(v.calls)).toEqual([
       ["evaluate", ["history.back()"]],
       ["evaluate", ["history.forward()"]],
       ["evaluate", ["location.reload()"]],
@@ -146,8 +206,43 @@ describe("wrapView navigation watch", () => {
     } });
     const b = wrapView(v, fast);
     await b.reload();
-    expect(v.calls).toEqual([["reload", []]]);
+    expect(own(v.calls)).toEqual([["reload", []]]);
     expect(b.url).toBe("https://x/re");
+  });
+});
+
+describe("wrapView interrupt", () => {
+  test("reloads the page with the native call alone, and waits for it to land", async () => {
+    // Measured on WebKit: a pending evaluate() makes a second one throw
+    // ERR_INVALID_STATE, so the interrupt must not evaluate anything.
+    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); setTimeout(() => v.land("https://x/"), 30); } });
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    await b.interrupt();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(25);
+    expect(v.calls).toEqual([["reload", []]]);
+  });
+
+  test("a stuck navigation the reload cancels ends the wait", async () => {
+    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); v.onNavigationFailed?.(new Error("-999")); } });
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    await b.interrupt();
+    expect(Date.now() - t0).toBeLessThan(30);
+  });
+
+  test("gives up after settleMs when nothing lands, as on a page stuck in a script", async () => {
+    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); } });
+    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+    const t0 = Date.now();
+    await b.interrupt();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(55);
+  });
+
+  test("without a native reload it does nothing", async () => {
+    const v = fakeView();
+    await wrapView(v, fast).interrupt();
+    expect(v.calls).toEqual([]);
   });
 });
 

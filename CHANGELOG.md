@@ -26,6 +26,20 @@ landed in the agent's context twice. MCP has no `--stdin` path to avoid it.
   `close --help` closed the session, `open --help` opened one, and `mcp --help` started the MCP
   server. `-h`/`--help` anywhere before `--` now prints the usage line, summary, arguments and flags
   from the registry, and exits 0. With no command it prints the general help, as before.
+- **A command that times out no longer wedges the session.** `BOWSER_OP_TIMEOUT_MS` only bounded
+  the running operation, and the next one waited for it to finish: after an `eval` that never
+  settled, or a `goto` whose server never answered, every later command hung until `close`. The
+  budget now counts the time a command waits behind another one. A command still waiting at its
+  deadline fails (exit 2) with `operation '<op>' timed out after <ms>ms (waiting for '<prev op>',
+  which timed out and is still running; run 'bowser close' if the session stays stuck)`. After a
+  timeout the daemon also reloads the page once to free the browser. That cancels a navigation
+  that never settles and ends an evaluation waiting on a promise that never settles, and the
+  session then keeps working on the reloaded page. A page stuck in a synchronous loop cannot be
+  interrupted: later commands fail fast until it ends, or until `bowser close`, which always works.
+- **`click` and `press` wait for a navigation to a slow server.** A click on a link whose server
+  answered after 3 s returned at once, and the next `snapshot` showed the old page and its old
+  refs. The start of a navigation is now read from the page, so the command waits for the new page
+  to land, up to 10 s. A click that navigates nowhere still returns after 100 ms.
 - **`click` and `fill` reach an element below the fold or under a fixed header.** They timed out
   after 30 s on an element outside the viewport, or one whose centre another element covered. Every
   ref action now scrolls such an element to the centre first, as

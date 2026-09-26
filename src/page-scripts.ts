@@ -629,6 +629,27 @@ export const HISTORY_BACK = "history.back()";
 export const HISTORY_FORWARD = "history.forward()";
 export const RELOAD = "location.reload()";
 
+// The navigation watch's page side (browser.ts, nav.act). On WebKit a
+// navigation the page starts (a link, a form submit, a script setting
+// location) shows neither in view.loading nor in onNavigated until the
+// server answers; the Navigation API's navigate event fires within ~6 ms
+// (measured, Bun 1.4.2). NAV_ARM listens for it once per document and
+// clears the flag before each action; NAV_STARTED reads it after. A
+// same-document navigation (a hash link) never lands, so it is not counted.
+export const NAV_ARM = String.raw`(() => {
+  const KEY = Symbol.for('bowser.nav');
+  let s = window[KEY];
+  if (!s) {
+    s = { started: false };
+    Object.defineProperty(window, KEY, { value: s });
+    if (window.navigation) {
+      navigation.addEventListener('navigate', (e) => { if (!e.destination.sameDocument) s.started = true; });
+    }
+  }
+  s.started = false;
+})()`;
+export const NAV_STARTED = "window[Symbol.for('bowser.nav')]?.started === true";
+
 export function hoverScript(selector: string): string {
   return `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});

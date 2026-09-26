@@ -218,7 +218,7 @@ Notes:
 
 | Variable | Effect |
 | --- | --- |
-| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Bounds a wedged daemon operation — if the browser hangs, the command exits with a timeout error instead of blocking forever. |
+| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. After a timeout the daemon reloads the page once to free the browser. |
 | `BOWSER_DAEMON_DEBUG` | `1` lets the session daemon's stdout and stderr through to the terminal, for debugging a daemon that fails to start. |
 
 ## Tests

@@ -30,6 +30,19 @@ describe("createSerializer", () => {
     expect(await serialize(() => Promise.resolve(42))).toBe(42);
   });
 
+  test("running names the task in progress, and nothing once the queue is idle", async () => {
+    const serialize = createSerializer();
+    let release!: () => void;
+    const a = serialize(() => new Promise<void>((r) => { release = r; }), "click");
+    const b = serialize(async () => serialize.running, "evaluate");
+    await Bun.sleep(0);
+    expect(serialize.running).toBe("click");
+    release();
+    expect(await b).toBe("evaluate");
+    await a;
+    expect(serialize.running).toBeUndefined();
+  });
+
   test("separate serializers are independent (concurrent across, serial within)", async () => {
     const s1 = createSerializer();
     const s2 = createSerializer();

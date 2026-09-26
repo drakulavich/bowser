@@ -31,6 +31,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     forward: rec("forward", undefined),
     reload: rec("reload", undefined),
     close: rec("close", undefined),
+    interrupt: rec("interrupt", undefined),
     watchNavigation: () => {},
     ...over,
   };
@@ -273,6 +274,137 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
   release();
   await Bun.sleep(20);
   expect(replies).toEqual(["click", "type"]);
+});
+
+// F9: a request's budget runs from the moment the daemon receives it, queue
+// time included, so one op that never settles cannot hold the requests behind
+// it past their own budgets.
+describe("the queue-time budget", () => {
+  const QUEUED = (op: string, ms: number, prev: string) =>
+    `operation '${op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
+
+  test("a request still queued behind a timed-out op fails at its own deadline, and never runs", async () => {
+    const replies: Array<[number, DaemonResponse]> = [];
+    const ran: number[] = [];
+    let release!: () => void;
+    const stuck = new Promise<void>((r) => { release = r; });
+    const t0 = Date.now();
+    const lane = {
+      handle: async (req: DaemonRequest) => {
+        ran.push(req.id);
+        if (req.id === 1) await stuck;
+        return { id: req.id, ok: true as const };
+      },
+      serialize: createSerializer(),
+      timeoutMs: 40,
+      reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    await Bun.sleep(20);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
+    await Bun.sleep(100);
+    expect(replies.map(([, r]) => r)).toEqual([
+      { id: 1, ok: false, error: "operation 'click' timed out after 40ms" },
+      { id: 2, ok: false, error: QUEUED("evaluate", 40, "click") },
+    ]);
+    // Its deadline counts from receipt (20 ms), not from when the first op
+    // timed out (40 ms): it answers near 60 ms, well before 80.
+    expect(replies[1]![0]).toBeLessThan(78);
+    release();
+    await Bun.sleep(20);
+    // Its client was already told it failed, so it is dropped, not run late.
+    expect(ran).toEqual([1]);
+  });
+
+  test("a request that reaches the head of the queue in time runs, on its remaining budget", async () => {
+    const replies: DaemonResponse[] = [];
+    const lane = {
+      handle: async (req: DaemonRequest) => {
+        await Bun.sleep(req.id === 1 ? 30 : 0);
+        return { id: req.id, ok: true as const, result: req.op };
+      },
+      serialize: createSerializer(),
+      timeoutMs: 200,
+      reply: (res: DaemonResponse) => { replies.push(res); },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
+    await Bun.sleep(80);
+    expect(replies).toEqual([
+      { id: 1, ok: true, result: "click" },
+      { id: 2, ok: true, result: "evaluate" },
+    ]);
+  });
+
+  test("ping still answers at once while the queue is wedged past every budget", async () => {
+    const replies: DaemonResponse[] = [];
+    const lane = {
+      handle: async (req: DaemonRequest) => {
+        if (req.op !== "ping") await new Promise(() => {});
+        return { id: req.id, ok: true as const, result: req.op };
+      },
+      serialize: createSerializer(),
+      timeoutMs: 10,
+      reply: (res: DaemonResponse) => { replies.push(res); },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
+    await Bun.sleep(40);
+    dispatch({ id: 3, op: "ping", args: [] }, lane);
+    await Bun.sleep(5);
+    expect(replies.map((r) => r.id)).toEqual([1, 2, 3]);
+    expect(replies[2]).toEqual({ id: 3, ok: true, result: "ping" });
+  });
+
+  test("an op that times out while running tries recovery once, and the queue waits for it", async () => {
+    const events: string[] = [];
+    let release!: () => void;
+    const stuck = new Promise<void>((r) => { release = r; });
+    let recovered!: () => void;
+    const lane = {
+      handle: async (req: DaemonRequest) => {
+        events.push(`run ${req.op}`);
+        if (req.id === 1) await stuck;
+        return { id: req.id, ok: true as const };
+      },
+      serialize: createSerializer(),
+      timeoutMs: 20,
+      reply: (res: DaemonResponse) => { events.push(`reply ${res.id} ${res.ok}`); },
+      recover: () => {
+        events.push("recover");
+        return new Promise<void>((r) => { recovered = () => { events.push("recovered"); r(); }; });
+      },
+    };
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane);
+    await Bun.sleep(30);
+    // The interrupt frees the stuck op, as reload() does a stuck evaluate.
+    release();
+    await Bun.sleep(5);
+    // Queued now, with a fresh budget: it waits for the recovery to finish,
+    // so it never overlaps the reload's navigation.
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
+    await Bun.sleep(5);
+    expect(events).toEqual(["run evaluate", "reply 1 false", "recover"]);
+    recovered();
+    await Bun.sleep(5);
+    expect(events).toEqual(["run evaluate", "reply 1 false", "recover", "recovered", "run evaluate", "reply 2 true"]);
+  });
+
+  test("a request that fails in the queue triggers no recovery: only the running op is interrupted", async () => {
+    let recoveries = 0;
+    const lane = {
+      handle: () => new Promise<DaemonResponse>(() => {}),
+      serialize: createSerializer(),
+      timeoutMs: 10,
+      reply: () => {},
+      recover: async () => { recoveries++; },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    dispatch({ id: 2, op: "click", args: ["#y"] }, lane);
+    dispatch({ id: 3, op: "click", args: ["#z"] }, lane);
+    await Bun.sleep(40);
+    expect(recoveries).toBe(1);
+  });
 });
 
 // A WebKit browser: no dialog events, and a page that is a plain object the

@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  HISTORY_BACK, HISTORY_FORWARD, READ_TITLE, READ_URL, RELOAD,
+  HISTORY_BACK, HISTORY_FORWARD, NAV_ARM, NAV_STARTED, READ_TITLE, READ_URL, RELOAD,
   hoverScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 
@@ -89,6 +89,9 @@ export interface Browser {
   forward(): Promise<void>;
   reload(): Promise<void>;
   close(): Promise<void>;
+  /** Try to free the view from a call that overran its budget: reload the
+   *  committed page. Resolves when the reload lands, or after settleMs. */
+  interrupt(): Promise<void>;
   /** Call `on` when a navigation starts and again when it lands. The daemon
    *  uses it to drop the page's one-shot dialog answer. One listener; a
    *  second call replaces the first. */
@@ -131,7 +134,15 @@ export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  watch counts navigation events and lets an action wait for the one it
  *  started: a navigation that begins within graceMs is awaited up to
  *  settleMs; an action that navigates nowhere costs the full grace window.
- *  `onNavigation` hears a navigation an action started, and every landing. */
+ *  `onNavigation` hears a navigation an action started, and every landing.
+ *
+ *  "Begins" is seen three ways: a landing inside the window, `view.loading`
+ *  turning true, or the page's own navigate event (NAV_ARM/NAV_STARTED).
+ *  The page's event is the one that shows a navigation the page starts to a
+ *  slow server: on WebKit `view.loading` stays false for those and
+ *  onNavigated waits for the response (measured, Bun 1.4.2: a link to a
+ *  page served after 3 s showed nothing for 3 s; the navigate event fired
+ *  6 ms after click() resolved). */
 function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => void) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
@@ -143,24 +154,49 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   view.onNavigated = () => { landed++; onNavigation(); };
   view.onNavigationFailed = () => { landed++; };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  /** Evaluate a watch script; a page that cannot answer reads as "no". */
+  const ask = async (expr: string): Promise<unknown> => {
+    try { return await view.evaluate(expr); } catch { return undefined; }
+  };
+  /** Wait for a landing after `before`, while `still()` holds, up to settleMs. */
+  const settle = async (before: number, still: () => boolean): Promise<void> => {
+    const began = Date.now();
+    while (landed === before && still() && Date.now() - began < timing.settleMs) await sleep(10);
+  };
   return {
     async act(action: () => Promise<void>): Promise<void> {
       const before = landed;
       // A navigation already in flight is not ours: only a false→true transition
       // of `loading` counts, or one stuck navigation would cost every later
-      // action the full settleMs.
+      // action the full settleMs. The page flag is cleared for the same reason.
       const wasLoading = view.loading;
+      await ask(NAV_ARM);
       await action();
-      let started = false;
       const start = Date.now();
       while (Date.now() - start < timing.graceMs) {
         if (landed !== before) return;
-        if (view.loading && !wasLoading) { started = true; onNavigation(); break; }
+        if (view.loading && !wasLoading) {
+          onNavigation();
+          return settle(before, () => view.loading);
+        }
         await sleep(10);
       }
-      if (!started) return;
-      const began = Date.now();
-      while (view.loading && landed === before && Date.now() - began < timing.settleMs) await sleep(10);
+      // One read at the end of the window, not a poll: each read is an
+      // evaluate, and fewer of them means fewer chances to race the commit.
+      if (landed !== before || (await ask(NAV_STARTED)) !== true) return;
+      onNavigation();
+      await settle(before, () => true);
+    },
+    /** Reload the committed page to free a stuck call; see Browser.interrupt. */
+    async interrupt(): Promise<void> {
+      if (typeof view.reload !== "function") return;
+      const before = landed;
+      try {
+        await view.reload();
+      } catch {
+        return;
+      }
+      await settle(before, () => true);
     },
   };
 }
@@ -227,6 +263,18 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
       // explicit form.
       view.close?.();
     },
+    // Measured on WebKit (Bun 1.4.2): a native reload() frees an evaluate
+    // stuck on a promise that never settles (it rejects "no longer
+    // reachable" ~2.4 s later; cookies kept, same URL) and cancels a
+    // navigation whose server never answers (-999 at once). A page stuck in
+    // a synchronous loop is freed by nothing short of closing the view.
+    // This is called while the stuck call is still pending, so it overlaps
+    // that call by design, and nothing else that touches the view: the
+    // daemon's serializer holds every other queued op until the stuck one
+    // settles and this has landed. That is why it uses the native reload()
+    // alone and never evaluate(): with one evaluate pending, a second
+    // throws ERR_INVALID_STATE (and RELOAD's evaluate fallback would).
+    interrupt: () => nav.interrupt(),
     watchNavigation(on) {
       navigated = on;
     },
