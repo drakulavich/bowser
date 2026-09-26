@@ -50,7 +50,7 @@ Every `test.yml` job runs on `macos-latest`: `unit` (typecheck + `bun test`), `b
 2. Commit and merge to `main`.
 3. `git tag -a vX.Y.Z -m "vX.Y.Z — …" && git push origin vX.Y.Z`.
 
-The workflow then compiles 2 macOS binaries, creates the GitHub Release, and publishes `@drakulavich/bowser-cli` to npm. npm publish **requires repo secret `NPM_TOKEN`** (Granular Access Token, read+write on the package); without it that job alone fails. Fall back to `npm publish --access public` locally only if the workflow is broken.
+The workflow then compiles 2 macOS binaries, creates the GitHub Release, and publishes `@drakulavich/bowser-cli` to npm. npm publish uses **trusted publishing (OIDC)**: npmjs.com trusts repo `drakulavich/bowser` and workflow file `release.yml`, so no npm token exists. Renaming `release.yml` breaks publishing until the Trusted Publisher on npmjs.com is updated to match. The job needs npm ≥ 11.5.1 (Node 24 bundles it) and `id-token: write`, and it skips a version already on npm, so a rerun is safe. A manual run (`gh workflow run release.yml -f tag=vX.Y.Z`) checks out that tag in every job. Fall back to `npm publish` locally only if the workflow is broken.
 
 ## Conventions
 
