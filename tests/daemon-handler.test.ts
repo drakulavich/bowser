@@ -54,7 +54,8 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     cdpAvailable: () => true,
     cdp: rec("cdp", { cookies: [{ name: "a", value: "1" }], success: true }),
     subscribe: (event) => { calls.push(["subscribe", [event]]); return true; },
-    watchDialogs: () => false,
+    // Chrome-like: dialogs arrive as events. webkitBrowser() below has the page shim.
+    watchDialogs: () => true,
     answerDialog: rec("answerDialog", undefined),
     getCookies: rec("getCookies", [cookie]),
     setCookie: rec("setCookie", { success: true }),
@@ -433,4 +434,143 @@ test("a request that prints no dialogs leaves the queued reports for the next on
       expect(res.dialogs).toEqual([{ ...confirmBox, state: "dismissed", unanswered: true }]);
     });
   }
+});
+
+// A webkit browser: no dialog events (watchDialogs is false), and a page that
+// is a plain object the page scripts really run against. Its engine answers a
+// dialog no shim catches the way WebKit's does: dismissed, and nobody told.
+// `load()` is a new document, as the page navigating itself; `navigate` is one too.
+function webkitBrowser() {
+  let on: DialogListener | undefined;
+  const engine = () => ({ alert: () => undefined, confirm: () => false, prompt: () => null }) as Record<string | symbol, unknown>;
+  let win = engine();
+  const b = fakeBrowser({
+    watchDialogs: (l) => { on = l; return false; },
+    // Like Bun.WebView: the expression is awaited and comes back through JSON.
+    evaluate: async (expr) => {
+      b.calls.push(["evaluate", [expr]]);
+      const v = await new Function("window", `return (\n${expr}\n);`)(win);
+      const json = JSON.stringify(v);
+      return json === undefined ? undefined : JSON.parse(json);
+    },
+    navigate: async (url) => { b.calls.push(["navigate", [url]]); load(); },
+  });
+  const load = () => { win = engine(); on!.navigation(); };
+  /** The page's own call, as a click handler makes it. */
+  const page = <T>(name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (win[name] as (...a: unknown[]) => T)(...a);
+  /** The current document, and bringing an earlier one back, as history does. */
+  const window = () => win;
+  const restore = (w: typeof win) => { win = w; on!.navigation(); };
+  return Object.assign(b, { load, page, window, restore });
+}
+
+describe("dialogs on webkit: the page shim answers them", () => {
+  test("a dialog an eval opens is answered in the page and reported by that eval, whose value is unchanged", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    expect(await h(rep("evaluate", ["window.confirm('sure?')"]))).toEqual({
+      id: 7, ok: true, result: false, dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
+    });
+    expect(await h(rep("evaluate", ["({ a: [1, 'x'] })"]))).toEqual({ id: 7, ok: true, result: { a: [1, "x"] } });
+    expect(await h(rep("evaluate", ["undefined"]))).toEqual({ id: 7, ok: true });
+    expect(await h(rep("evaluate", ["Promise.resolve(3)"]))).toEqual({ id: 7, ok: true, result: 3 });
+  });
+
+  test("dialog-answer reaches the page before the action: a click's prompt gets the text, once", async () => {
+    const b = webkitBrowser();
+    const got: unknown[] = [];
+    b.click = async () => { got.push(b.page("prompt", "name?", "def")); };
+    const h = createHandler(b);
+    await h(rep("dialog-answer", [true, "typed"]));
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
+      { type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" },
+    ]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
+      { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
+    ]);
+    expect(got).toEqual(["typed", null]);
+  });
+
+  test("an accept with no text gives a prompt its default and a confirm true; a dismiss has no hint; the last answer set wins", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    await h(rep("dialog-answer", [true]));
+    expect(await h(rep("evaluate", ["window.prompt('name?', 'def')"]))).toMatchObject({ result: "def" });
+    await h(rep("dialog-answer", [false]));
+    await h(rep("dialog-answer", [true]));
+    expect(await h(rep("evaluate", ["window.confirm('sure?')"]))).toMatchObject({ result: true });
+    await h(rep("dialog-answer", [true]));
+    await h(rep("dialog-answer", [false]));
+    expect(await h(rep("evaluate", ["[window.prompt('p'), window.alert('a')]"]))).toMatchObject({
+      result: [null, null],
+      dialogs: [
+        { type: "prompt", message: "p", defaultValue: "", state: "dismissed" },
+        { type: "alert", message: "a", state: "dismissed", unanswered: true },
+      ],
+    });
+  });
+
+  test("a new document has no shim and so no answer: dialog-answer, then goto, then the confirm is dismissed", async () => {
+    const b = webkitBrowser();
+    const got: unknown[] = [];
+    b.click = async () => { got.push(b.page("confirm", "sure?")); };
+    const h = createHandler(b);
+    await h(rep("dialog-answer", [true]));
+    await h(rep("navigate", ["https://x/next"]));
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
+    expect(got).toEqual([false]);
+  });
+
+  test("a document restored by back keeps its shim but not its answer: the navigation dropped it", async () => {
+    const b = webkitBrowser();
+    const got: unknown[] = [];
+    b.click = async () => { got.push(b.page("confirm", "sure?")); };
+    const h = createHandler(b);
+    await h(rep("dialog-answer", [true]));
+    const first = b.window();
+    await h(rep("navigate", ["https://x/next"]));
+    b.back = async () => { b.restore(first); }; // the back-forward cache
+    await h(rep("back"));
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
+    expect(got).toEqual([false]);
+  });
+
+  test("after the page navigates itself, the shim is installed again before a native action, so its dialog is reported", async () => {
+    const b = webkitBrowser();
+    b.press = async () => { b.page("alert", "hi"); };
+    const h = createHandler(b);
+    await h(rep("evaluate", ["1"]));
+    b.load(); // a page script navigated, between commands
+    expect((await h(rep("press", ["Enter"]))).dialogs).toEqual([{ type: "alert", message: "hi", state: "dismissed", unanswered: true }]);
+  });
+
+  test("no extra page call where the op already evaluates: an eval is one call, a click after it is the click and one read", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    await h(rep("evaluate", ["1"]));
+    await h(rep("click", ["#go"]));
+    expect(b.calls.map(([n]) => n)).toEqual(["evaluate", "click", "evaluate"]);
+  });
+
+  test("an eval that throws keeps its error, and the dialog it opened is reported by the next op", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    expect(await h(rep("evaluate", ["(window.confirm('x'), null.boom)"]))).toMatchObject({ ok: false, error: expect.stringContaining("null") });
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "confirm", message: "x", state: "dismissed", unanswered: true }]);
+  });
+
+  test("a dialog a timer opened is read by the next op but waits for one that prints it", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    await h(rep("evaluate", ["1"]));
+    b.page("confirm", "later");
+    expect(await h(req("evaluate", ["2"]))).toEqual({ id: 7, ok: true, result: 2 });
+    expect((await h(rep("evaluate", ["3"]))).dialogs).toEqual([{ type: "confirm", message: "later", state: "dismissed", unanswered: true }]);
+  });
+
+  test("on chrome nothing is shimmed: an eval reaches the page as given", async () => {
+    const b = fakeBrowser();
+    await createHandler(b)(rep("evaluate", ["1 + 1"]));
+    expect(b.calls).toEqual([["evaluate", ["1 + 1"]]]);
+  });
 });

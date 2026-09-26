@@ -14,6 +14,9 @@
 // Dialogs: none ever stays open. The daemon answers each the moment it opens
 // (the one-shot answer if set, else dismiss; beforeunload is accepted), so
 // the op that opened it finishes normally, and the op's reply reports it.
+// On chrome the daemon answers CDP's dialog events; on webkit, which has none,
+// a page shim (page-scripts.ts dialogShim) answers them in the page, holds
+// the one-shot answer there, and the daemon reads its log (createHandler).
 
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
@@ -25,6 +28,7 @@ import {
   type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type DialogState, type Op, type PageState, type ResultOf,
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
+import { dialogAnswerScript, dialogSyncScript, withDialogShim } from "../page-scripts.ts";
 
 /** What the daemon knows that the page cannot be asked for. `url` and `title`
  *  are deliberately NOT here: they are read live from the page on every
@@ -156,17 +160,21 @@ const handlers: Handlers = {
  *  browser keep compiling unchanged; only `state`, `dialog-answer` and the
  *  dialog listener use it. */
 export function createHandler(browser: Browser, state: DaemonState = {}): (req: DaemonRequest) => Promise<DaemonResponse> {
+  // Webkit: whether the page has the shim, as far as the daemon knows. False
+  // after a navigation, which also means the page's answer must be dropped.
+  let shimmed = false;
   // Listen now, before any op navigates, so a dialog during the first page
-  // load is answered too rather than hanging `open`.
-  browser.watchDialogs({
+  // load is answered too rather than hanging `open`. False on webkit, which
+  // has no dialog events: the page shim answers there.
+  const shim = !browser.watchDialogs({
     opened: (d) => (state.dialogs ??= []).push(answerDialog(browser, state, d)),
-    navigation: () => { state.answer = undefined; },
+    navigation: () => { state.answer = undefined; shimmed = false; },
   });
   return async (req) => {
     // An op that navigates drops the answer before it starts, so the new
     // document cannot use an answer meant for this one.
     if (NAVIGATES.has(req.op)) state.answer = undefined;
-    const res = await run(req);
+    const res = shim ? await runShimmed(req) : await run(req);
     // Only a command that prints dialogs takes the reports (never an urgent
     // reply, such as the ping every connect sends); the rest leave them queued.
     if (!req.report || IS_URGENT.has(req.op) || !state.dialogs) return res;
@@ -207,7 +215,65 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
       return { id: req.id, ok: false, error: msg };
     }
   }
+
+  /** `run` on webkit, where the page shim answers dialogs. It must be in
+   *  the page before an op acts there, and its log is read after. An eval
+   *  carries both in its own expression, so it costs no extra page call; a
+   *  native action costs one read after it, and one install before it only
+   *  after a navigation. */
+  async function runShimmed(req: DaemonRequest): Promise<DaemonResponse> {
+    if (req.op === "evaluate") {
+      const drop = !shimmed;
+      const res = await run({ ...req, args: [withDialogShim(String(req.args?.[0]), drop)] });
+      // A throwing expression may have run nothing: install again next time.
+      if (!res.ok) return res;
+      shimmed = true;
+      const r = res.result as { value?: unknown; dialogs?: unknown } | undefined;
+      take(r?.dialogs);
+      return r?.value === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result: r.value };
+    }
+    if (req.op === "dialog-answer") {
+      const [accept, text] = (req.args ?? []) as [boolean, string?];
+      try {
+        take(await browser.evaluate(dialogAnswerScript(text === undefined ? { accept } : { accept, text })));
+        shimmed = true;
+        return { id: req.id, ok: true };
+      } catch (err) {
+        return { id: req.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    if (!ACTS.has(req.op) && !NAVIGATES.has(req.op)) return run(req);
+    if (ACTS.has(req.op) && !shimmed) await sync();
+    const res = await run(req);
+    await sync();
+    return res;
+  }
+
+  /** Install the shim if the page lacks it, and take its log. */
+  async function sync(): Promise<void> {
+    try {
+      take(await browser.evaluate(dialogSyncScript(!shimmed)));
+      shimmed = true;
+    } catch {
+      // A page that cannot evaluate right now opened no dialog we can read.
+    }
+  }
+
+  /** Queue the dialogs the page shim logged. The page wrote them, so only
+   *  entries shaped like a report are kept. */
+  function take(log: unknown): void {
+    if (!Array.isArray(log)) return;
+    for (const d of log) {
+      if (typeof d?.type === "string" && typeof d.message === "string" && (d.state === "accepted" || d.state === "dismissed")) {
+        (state.dialogs ??= []).push(d as DialogReport);
+      }
+    }
+  }
 }
+
+/** The ops that act on the current document by native input or a page
+ *  script of their own: on webkit the shim must be there first. */
+const ACTS: ReadonlySet<Op> = new Set<Op>(["click", "type", "press", "hover", "select", "check", "uncheck"]);
 
 /** The ops that navigate the page themselves. */
 const NAVIGATES: ReadonlySet<Op> = new Set<Op>(["navigate", "reload", "back", "forward"]);

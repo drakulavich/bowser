@@ -4,8 +4,12 @@
 // Every dialog is answered the moment it opens (the one-shot answer if set,
 // else dismissed) and reported by the command that caused it. Before this, a
 // click that opened confirm() on Chromium hung until the op timeout and
-// wedged the session. The expectations are the same on both backends; on
-// WebKit they are todo until the page shim lands (Task 4).
+// wedged the session. The expectations are the same on both backends: on
+// WebKit a page shim answers dialogs (page-scripts.ts dialogShim), and a
+// dialog raised before bowser first acts on a new document is answered by
+// the engine and not reported, which is why Acceptance 3 is Chromium only.
+//
+//   BOWSER_E2E=1 BOWSER_BACKEND=webkit bun test tests/e2e-dialogs.test.ts
 //
 //   BOWSER_E2E=1 BOWSER_BACKEND=chrome \
 //     BOWSER_CHROMIUM_PATH=$(find ~/.bowser/chromium -type f -name chrome-headless-shell | head -1) \
@@ -28,8 +32,6 @@ import { loadState } from "../src/state.ts";
 const E2E = process.env.BOWSER_E2E === "1";
 const CHROME = E2E && resolveBackend().kind === "chrome";
 const run = E2E ? describe : describe.skip;
-/** Both backends, same expectations. WebKit needs the page shim (Task 4). */
-const both = CHROME ? test : test.todo;
 /** Chromium only: a dialog during page load (WebKit's engine answers those). */
 const chromeOnly = CHROME ? test : test.skip;
 
@@ -91,41 +93,41 @@ run("e2e: dialogs", () => {
   };
   const out = () => cmdEval(ctx, "document.getElementById('out').textContent");
 
-  both("confirm with no answer set: dismissed at once with the hint, and the session keeps working", async () => {
+  test("confirm with no answer set: dismissed at once with the hint, and the session keeps working", async () => {
     await fresh();
     expect(await click("Confirm")).toEndWith(`### Modal state\n${line("confirm", "sure?", HINT)}`);
     expect(await out()).toBe("confirm:false");
     expect(await cmdEval(ctx, "1 + 1")).toBe("2");
   }, 60_000);
 
-  both("dialog-accept, then a confirm is accepted", async () => {
+  test("dialog-accept, then a confirm is accepted", async () => {
     await fresh();
     expect(await cmdDialog(ctx, true)).toBe("next dialog will be accepted");
     expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
     expect(await out()).toBe("confirm:true");
   }, 60_000);
 
-  both("dialog-accept <text>, then a prompt gets the text", async () => {
+  test("dialog-accept <text>, then a prompt gets the text", async () => {
     await fresh();
     await cmdDialog(ctx, true, "typed");
     expect(await click("Prompt")).toEndWith(line("prompt", "name?", "accepted"));
     expect(await out()).toBe("prompt:typed");
   }, 60_000);
 
-  both("dialog-dismiss, then a prompt is dismissed without the hint", async () => {
+  test("dialog-dismiss, then a prompt is dismissed without the hint", async () => {
     await fresh();
     expect(await cmdDialog(ctx, false)).toBe("next dialog will be dismissed");
     expect(await click("Prompt")).toEndWith(line("prompt", "name?", "dismissed"));
     expect(await out()).toBe("prompt:null");
   }, 60_000);
 
-  both("an alert is reported and the page continues", async () => {
+  test("an alert is reported and the page continues", async () => {
     await fresh();
     expect(await click("Alert")).toEndWith(line("alert", "hi", "dismissed"));
     expect(await out()).toBe("alert:done");
   }, 60_000);
 
-  both("the one-shot answer is used once: a second confirm is dismissed", async () => {
+  test("the one-shot answer is used once: a second confirm is dismissed", async () => {
     await fresh();
     await cmdDialog(ctx, true);
     expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
@@ -133,7 +135,7 @@ run("e2e: dialogs", () => {
     expect(await out()).toBe("confirm:false");
   }, 60_000);
 
-  both("a one-shot answer does not survive goto", async () => {
+  test("a one-shot answer does not survive goto", async () => {
     await fresh();
     await cmdDialog(ctx, true);
     await cmdGoto(ctx, url);
@@ -142,7 +144,7 @@ run("e2e: dialogs", () => {
     expect(await out()).toBe("confirm:false");
   }, 60_000);
 
-  both("two dialogs from one click are both reported, in order", async () => {
+  test("two dialogs from one click are both reported, in order", async () => {
     await fresh();
     const text = await click("Two");
     expect(text).toEndWith(`### Modal state\n${line("confirm", "one", HINT)}\n${line("alert", "two", "dismissed")}`);
@@ -161,7 +163,7 @@ run("e2e: dialogs", () => {
     expect(performance.now() - t1).toBeLessThan(2000);
   }, 60_000);
 
-  both("a dialog a timer opens between commands waits for a command that prints it", async () => {
+  test("a dialog a timer opens between commands waits for a command that prints it", async () => {
     await fresh();
     expect(await click("Later")).not.toContain("Modal state");
     await Bun.sleep(1000);
