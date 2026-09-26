@@ -154,7 +154,8 @@ export const COMMANDS: Command[] = [
   {
     name: "fill",
     summary: "Fill the element with the given ref with text, or with piped stdin under --stdin",
-    positional: [{ name: "ref", required: true }, { name: "text", required: false }],
+    mcpSummary: "Fill the element with the given ref with text",
+    positional: [{ name: "ref", required: true }, { name: "text", required: false, mcpRequired: true }],
     // Not over MCP: the text is already a JSON string there, and the server's
     // own stdin is the JSON-RPC stream.
     flags: [{ name: "stdin", kind: "boolean", mcp: false }],

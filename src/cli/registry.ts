@@ -22,7 +22,13 @@ import { COMMANDS as STORAGE_STATE } from "../commands/storage-state.ts";
 import { COMMANDS as WEB_STORAGE } from "../commands/web-storage.ts";
 import type { FlagSpec, Schemas } from "./parser.ts";
 
-export interface Positional { name: string; required: boolean }
+export interface Positional {
+  name: string;
+  required: boolean;
+  /** Required in the MCP tool schema even though optional on the CLI: fill's
+   *  <text>, which the CLI can replace with --stdin and MCP cannot. */
+  mcpRequired?: true;
+}
 export interface CommandArgs { positional: string[]; flags: Record<string, string | boolean> }
 
 export interface Command {
@@ -31,6 +37,9 @@ export interface Command {
   summary: string;
   positional: Positional[];
   flags: FlagSpec[];
+  /** The MCP tool description, when `summary` names something MCP does not
+   *  offer (a flag marked `mcp: false`). Same rules as `summary`. */
+  mcpSummary?: string;
   /** Omit from `bowser mcp`. Replaces MCP_EXCLUDED. */
   mcp?: false;
   run(ctx: CommandContext, args: CommandArgs): Promise<string>;

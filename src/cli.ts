@@ -4,8 +4,7 @@ import { parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import type { CommandContext } from "./commands/context.ts";
 
-/** `base` seeds the command context: `bowser mcp` passes a stdin reader
- *  that refuses. */
+/** `base` seeds the command context; tests inject `connect` through it. */
 export async function run(argv: string[], base: Partial<CommandContext> = {}): Promise<string> {
   const args = parse(SCHEMAS, argv);
   if (!args.command) return renderHelp(COMMANDS);
@@ -44,12 +43,7 @@ if (import.meta.main) {
     // Pass our own `run` so the MCP server never re-imports this module — cli.ts
     // is still mid-evaluation here (top-level await below), and a dynamic
     // import("./cli.ts") would deadlock in the compiled binary.
-    // A text of "--stdin" parses as the flag, so the refusal belongs in the
-    // context, not only in the tool schema.
-    const noStdin = async (): Promise<string> => {
-      throw new Error("usage: --stdin is not available over MCP; pass the text");
-    };
-    await runMcpServer({ run: (argv) => run(argv, { readStdin: noStdin }) });
+    await runMcpServer({ run });
   } else {
     try {
       const out = await run(process.argv.slice(2));

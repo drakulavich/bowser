@@ -12,8 +12,8 @@ export interface CommandContext {
   // Injected in tests.
   connect?: (session: string, opts?: ConnectOptions) => Promise<DaemonConnection>;
   /** All of standard input, for `fill --stdin`. Defaults to `readStdin`;
-   *  tests inject a fake, and `bowser mcp` one that refuses, since its own
-   *  stdin is the JSON-RPC stream. */
+   *  tests inject a fake. `bowser mcp` never reaches it: the flag is not in
+   *  its schema and toArgv puts every client value after `--`. */
   readStdin?: () => Promise<string>;
 }
 

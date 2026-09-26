@@ -17,6 +17,10 @@ import {
 } from "../src/mcp.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
+import { run } from "../src/cli.ts";
+import { resolveRefScript } from "../src/page-scripts.ts";
+import { saveState } from "../src/state.ts";
+import { fakeClient } from "./helpers/fake-client.ts";
 
 /** Number of commands opted out of the MCP tool set via `mcp: false`. */
 const MCP_EXCLUDED_COUNT = SCHEMAS.commands.filter((c) => findCommand(c.name)!.mcp === false).length;
@@ -68,7 +72,7 @@ describe("buildTools", () => {
 });
 
 describe("toArgv", () => {
-  test("reconstructs session, --json, positionals (schema order), typed flags", () => {
+  test("reconstructs session, --json, typed flags, then -- and positionals (schema order)", () => {
     const argv = toArgv(schema("cookie-set"), {
       name: "sid",
       value: "abc",
@@ -80,9 +84,9 @@ describe("toArgv", () => {
       "--session", "s1",
       "--json",
       "cookie-set",
-      "sid", "abc",
       "--domain=x.com",
       "--http-only",
+      "--", "sid", "abc",
     ]);
   });
 
@@ -93,11 +97,15 @@ describe("toArgv", () => {
       "http-only": false,
       secure: true,
     });
-    expect(argv).toEqual(["--json", "cookie-set", "sid", "abc", "--secure"]);
+    expect(argv).toEqual(["--json", "cookie-set", "--secure", "--", "sid", "abc"]);
   });
 
   test("no-positional, no-flag command", () => {
     expect(toArgv(schema("list"), {})).toEqual(["--json", "list"]);
+  });
+
+  test("a positional that looks like a flag goes after --", () => {
+    expect(toArgv(schema("fill"), { ref: "e1", text: "--json" })).toEqual(["--json", "fill", "--", "e1", "--json"]);
   });
 });
 
@@ -150,7 +158,7 @@ describe("handleMcpRequest — tools/call", () => {
       { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "goto", arguments: { url: "https://e.com" } } },
       deps,
     );
-    expect(captured).toEqual(["--json", "goto", "https://e.com"]);
+    expect(captured).toEqual(["--json", "goto", "--", "https://e.com"]);
     expect(res.result.content).toEqual([{ type: "text", text: '{"ok":true,"url":"u"}' }]);
     expect(res.result.isError).toBeFalsy();
   });
@@ -218,7 +226,8 @@ describe("descriptions drift-guard", () => {
   test("every exposed tool has a non-empty summary as its description", () => {
     for (const t of buildTools()) {
       expect(t.description.length).toBeGreaterThan(0);
-      expect(t.description).toBe(findCommand(t.name)!.summary);
+      const cmd = findCommand(t.name)!;
+      expect(t.description).toBe(cmd.mcpSummary ?? cmd.summary);
     }
   });
 
@@ -243,6 +252,19 @@ describe("descriptions drift-guard", () => {
     expect(fill.inputSchema.properties).not.toHaveProperty("stdin");
   });
 
+  test("fill requires ref and text over MCP, though the CLI can take --stdin instead of text", () => {
+    const fill = buildTools().find((t) => t.name === "fill")!;
+    expect(fill.inputSchema.required).toEqual(["ref", "text"]);
+    expect(findCommand("fill")!.positional.find((p) => p.name === "text")!.required).toBe(false);
+  });
+
+  test("fill's MCP description does not mention --stdin, which MCP does not offer", () => {
+    const fill = buildTools().find((t) => t.name === "fill")!;
+    expect(fill.description).toBe("Fill the element with the given ref with text");
+    expect(fill.description).not.toContain("stdin");
+    expect(findCommand("fill")!.summary).toContain("--stdin");
+  });
+
   test("mcp and install are not exposed as tools", () => {
     const names = buildTools().map((t) => t.name);
     expect(names).not.toContain("mcp");
@@ -250,11 +272,40 @@ describe("descriptions drift-guard", () => {
   });
 });
 
+describe("MCP positionals are data, never flags", () => {
+  for (const text of ["--json", "--stdin", "-5", "--"]) {
+    test(`fill with text ${JSON.stringify(text)} types exactly that`, async () => {
+      const home = await mkdtemp(join(tmpdir(), "bowser-mcp-dash-"));
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        await saveState({ name: "dash", url: "https://x", title: "X", updatedAt: Date.now(),
+          refs: [{ id: "e1", selector: "input", role: "textbox", name: "Email", tag: "input" }] });
+        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript("e1") ? "input" : undefined) });
+        const deps: McpDeps = {
+          run: (argv) => run(argv, { connect: async () => c, readStdin: async () => { throw new Error("read stdin"); } }),
+          version: "9.9.9",
+        };
+        const res: any = await handleMcpRequest(
+          { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", text, session: "dash" } } },
+          deps,
+        );
+        expect(res.result.isError).toBeFalsy();
+        expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, ref: "e1", text });
+        expect(c.calls.filter(([op]) => op === "type")).toEqual([["type", [text]]]);
+      } finally {
+        process.env.HOME = prevHome;
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe("bowser mcp never reads its own stdin for a command", () => {
-  test("fill with text \"--stdin\" is a usage error, and the server keeps answering", async () => {
-    // toArgv passes positionals through as argv, so the text "--stdin" parses
-    // as the flag. The server's stdin is the JSON-RPC stream: reading it would
-    // swallow later requests and hang this one.
+  test("fill with text \"--stdin\" is text, not the flag, and the server keeps answering", async () => {
+    // The server's stdin is the JSON-RPC stream: parsing the text as the flag
+    // would read it, swallowing later requests and hanging this one. toArgv's
+    // `--` keeps it a positional, so the call fails on the empty HOME instead.
     const home = await mkdtemp(join(tmpdir(), "bowser-mcp-stdin-"));
     const proc = Bun.spawn(
       [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "mcp"],
@@ -285,7 +336,7 @@ describe("bowser mcp never reads its own stdin for a command", () => {
       const [first, second] = buf.split("\n").filter(Boolean).map((l) => JSON.parse(l));
       expect(first?.id).toBe(1);
       expect(first?.result.isError).toBe(true);
-      expect(first?.result.content[0].text).toMatch(/^usage: .*--stdin/);
+      expect(first?.result.content[0].text).toContain("no open page");
       expect(second).toEqual({ jsonrpc: "2.0", id: 2, result: {} });
     } finally {
       proc.kill();
