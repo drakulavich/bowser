@@ -452,7 +452,10 @@ Section 4 where it guessed.
   checking, in `commands/cookies.ts`), and whether `normalizeSameSite` should
   distinguish "absent" from "not one of ours" rather than folding both to
   `Lax`. Both change user-visible output, which is why neither is in this
-  series.
+  series. (Both decided in #30. The CLI now rejects an unknown `--same-site`.
+  `normalizeSameSite` stays as written, because `playwright-cli` also writes
+  `"sameSite": "Lax"` for a cookie set without one. See
+  `2026-09-06-cookie-set-reports-failure-design.md`.)
 - **A request whose daemon exits never settles.** Raised by PR 6's final
   review: `DaemonClient` registers no `close` handler, so if the daemon goes
   away mid-request the promise neither resolves nor rejects and the client
