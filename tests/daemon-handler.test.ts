@@ -440,9 +440,20 @@ test("a request that prints no dialogs leaves the queued reports for the next on
 // is a plain object the page scripts really run against. Its engine answers a
 // dialog no shim catches the way WebKit's does: dismissed, and nobody told.
 // `load()` is a new document, as the page navigating itself; `navigate` is one too.
-function webkitBrowser() {
+// Leaving a document fires its pagehide listeners. Real WebKit also calls the
+// navigation callback (onNavigated, measured on back to a cached page too);
+// `callback: false` and `pagehide: false` take those away, to show what
+// holds without them.
+function webkitBrowser({ callback = true, pagehide = true } = {}) {
   let on: DialogListener | undefined;
-  const engine = () => ({ alert: () => undefined, confirm: () => false, prompt: () => null }) as Record<string | symbol, unknown>;
+  const engine = () => {
+    const hide: Array<() => void> = [];
+    return {
+      alert: () => undefined, confirm: () => false, prompt: () => null,
+      addEventListener: (type: string, fn: () => void) => { if (type === "pagehide") hide.push(fn); },
+      leave: () => { if (pagehide) hide.forEach((fn) => fn()); },
+    } as Record<string | symbol, unknown>;
+  };
   let win = engine();
   const b = fakeBrowser({
     watchDialogs: (l) => { on = l; return false; },
@@ -455,12 +466,13 @@ function webkitBrowser() {
     },
     navigate: async (url) => { b.calls.push(["navigate", [url]]); load(); },
   });
-  const load = () => { win = engine(); on!.navigation(); };
+  const go = (next: typeof win) => { (win.leave as () => void)(); win = next; if (callback) on!.navigation(); };
+  const load = () => go(engine());
   /** The page's own call, as a click handler makes it. */
   const page = <T>(name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (win[name] as (...a: unknown[]) => T)(...a);
   /** The current document, and bringing an earlier one back, as history does. */
   const window = () => win;
-  const restore = (w: typeof win) => { win = w; on!.navigation(); };
+  const restore = (w: typeof win) => go(w);
   return Object.assign(b, { load, page, window, restore });
 }
 
@@ -531,6 +543,35 @@ describe("dialogs on webkit: the page shim answers them", () => {
     await h(rep("navigate", ["https://x/next"]));
     b.back = async () => { b.restore(first); }; // the back-forward cache
     await h(rep("back"));
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
+    expect(got).toEqual([false]);
+  });
+
+  test("with no navigation callback at all, back to a cached document still has no answer: the navigating op drops it", async () => {
+    const b = webkitBrowser({ callback: false, pagehide: false });
+    const got: unknown[] = [];
+    b.click = async () => { got.push(b.page("confirm", "sure?")); };
+    const h = createHandler(b);
+    await h(rep("dialog-answer", [true]));
+    const first = b.window();
+    await h(rep("navigate", ["https://x/next"]));
+    b.back = async () => { b.restore(first); };
+    await h(rep("back"));
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
+    expect(got).toEqual([false]);
+  });
+
+  test("with no navigation callback, a click that leaves the page takes the answer with it (pagehide), even if a later click brings it back", async () => {
+    const b = webkitBrowser({ callback: false });
+    const h = createHandler(b);
+    await h(rep("dialog-answer", [true]));
+    const first = b.window();
+    b.click = async () => { b.load(); }; // a link
+    await h(rep("click", ["a"]));
+    b.click = async () => { b.restore(first); }; // history.back() in a handler, from the cache
+    await h(rep("click", ["#back"]));
+    const got: unknown[] = [];
+    b.click = async () => { got.push(b.page("confirm", "sure?")); };
     expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
   });

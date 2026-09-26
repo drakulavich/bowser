@@ -554,8 +554,9 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
 // set, then cleared, else dismissed; an accepted prompt with no text gets its
 // default. Each answer is logged as a DialogReport for the daemon to read.
 // The shim, its answer and its log live on window, so a new document has
-// none; `drop` clears the answer when the daemon saw a navigation, for a
-// document restored from the back-forward cache. The expression evaluates to
+// none. A document the back-forward cache restores keeps its shim, so the
+// answer is also dropped twice over: by the page on pagehide, and by `drop`
+// when the daemon saw a navigation or ran a navigating op. The expression evaluates to
 // the shim. No backticks or dollar-brace below, apart from the interpolation.
 function dialogShim(drop: boolean): string {
   return String.raw`(() => {
@@ -584,6 +585,9 @@ function dialogShim(drop: boolean): string {
     window.alert = function alert(message) { answer('alert', message); };
     window.confirm = function confirm(message) { return answer('confirm', message); };
     window.prompt = function prompt(message, defaultValue) { return answer('prompt', message, defaultValue); };
+    // Leaving the document (a link, a form, history.back() in a handler)
+    // drops the answer, so a cached copy of it comes back without one.
+    window.addEventListener('pagehide', () => { shim.answer = null; });
   }
   if (${JSON.stringify(drop)}) shim.answer = null;
   return shim;

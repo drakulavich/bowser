@@ -243,6 +243,10 @@ export function createHandler(browser: Browser, state: DaemonState = {}): (req: 
       }
     }
     if (!ACTS.has(req.op) && !NAVIGATES.has(req.op)) return run(req);
+    // A navigating op leaves this document, so the sync after it drops the
+    // page's answer: a document the back-forward cache restores still has
+    // its shim and answer. Not left to the navigation callback alone.
+    if (NAVIGATES.has(req.op)) shimmed = false;
     if (ACTS.has(req.op) && !shimmed) await sync();
     const res = await run(req);
     await sync();
