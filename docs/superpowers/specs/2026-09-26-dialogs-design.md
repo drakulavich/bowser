@@ -1,87 +1,82 @@
 # Spec: `dialog-accept` / `dialog-dismiss`
 
-**Status:** approved (backlog item 6; owner decision 2026-09-26 on the WebKit model).
+**Status:** approved (backlog item 6). Revised 2026-09-26: the owner chose design A below after four
+review rounds of the first design kept finding races.
 **Origin:** README roadmap `- [ ] dialog-accept/dismiss`; the 2026-09-05 refactor spec names it the first
-task after the refactor and prepared `DaemonState.dialog`, `Browser.subscribe()` and the urgent lane
-for it, with a caveat that WebKit has no dialog events.
+task after the refactor, with a caveat that WebKit has no dialog events.
 
-## Measured today (2026-09-26, page with `confirm('sure?')`, `prompt('name?','def')`, `alert('hi')`)
+## Measured (2026-09-26, page with `confirm('sure?')`, `prompt('name?','def')`, `alert('hi')`)
 
 - `playwright-cli` 0.1.13: `click` returns in ~160 ms and prints
   `### Modal state` / `- ["confirm" dialog with message "sure?"]: can be handled by dialog-accept or dialog-dismiss`;
   `dialog-accept [text]` / `dialog-dismiss` then answer it (`prompt` gets the text).
-- bowser on **Chromium**: `click` hangs until the op timeout (exit 2) and the session stays wedged —
-  later commands hang, `eval` returns nothing. A bug.
-- bowser on **WebKit**: the engine answers silently — `confirm` → `false`, `prompt` → `null`, `alert`
-  closes. The agent never learns a dialog appeared and cannot accept one.
+- bowser on **Chromium** (main): `click` hangs until the op timeout (exit 2) and the session stays
+  wedged — later commands hang, `eval` returns nothing. A bug.
+- bowser on **WebKit** (main): the engine answers silently — `confirm` → `false`, `prompt` → `null`,
+  `alert` closes. The agent never learns a dialog appeared and cannot accept one.
+
+## Why design A
+
+The first design kept a dialog *pending* on Chromium, as `playwright-cli` does: the command that
+opened it returned early while its browser call stayed blocked. Every review round found a new race
+around that orphaned call (serializer overlap, "reported failed but still ran", a second dialog lost,
+a stale URL while blocked). All of them come from one thing: a dialog that stays open. Design A never
+leaves one open, so none of that machinery exists.
 
 ## Behaviour
 
-### Commands
-
-- `dialog-accept [text]`: accept; for a `prompt`, answer `text` (default: the prompt's default value).
-- `dialog-dismiss`: dismiss (`confirm` → false, `prompt` → null).
-- Each answers **the pending dialog** if one is open (Chromium only, see below); otherwise it sets a
-  **one-shot answer for the next dialog** on that page (both backends) and says so:
-  `next dialog will be accepted` / `… dismissed`. A one-shot answer is lost on navigation.
-
-### Chromium
-
-1. The daemon subscribes to `Page.javascriptDialogOpening`. When a dialog opens and a one-shot answer
-   is set, the daemon answers it at once (`Page.handleJavaScriptDialog`) and records it as handled.
-   Otherwise the dialog becomes **pending** (`DaemonState.dialog`).
-2. The command that caused it (any page-acting command: `click`, `press`, `fill`, `check`, `select`,
-   `hover`, `eval`, `run-code`, …) returns within ~1 s instead of waiting for the page, and its output
-   carries the modal state (below). Exit 0.
-3. While a dialog is pending, every page command except `dialog-*`, `close`, `list` fails at once with
-   exit 1: `a <type> dialog is open ("<message>"); run dialog-accept or dialog-dismiss`.
-4. `dialog-accept`/`dialog-dismiss` run on the urgent lane, answer it, clear it; the page continues.
-   The session is never wedged by a dialog.
-
-### WebKit
-
-5. A page-side shim replaces `window.alert/confirm/prompt`. It answers synchronously from the one-shot
-   answer if set (then clears it), else dismisses (today's result), and appends
-   `{type, message, defaultValue, answer}` to a per-document log. It is (re)installed before each
-   page-acting command runs, without an extra daemon round trip where the command already evaluates
-   in the page; dialogs raised by page code before bowser first acts on a new document are not seen.
-6. After a page-acting command, the log is read and cleared, and every recorded dialog is reported
-   (below). Reading it costs at most one extra round trip per command, only on WebKit.
-
-### Output
-
-- Pending (Chromium), appended to the command's plain answer:
-  ```
-  ### Modal state
-  - ["confirm" dialog with message "sure?"]: can be handled by dialog-accept or dialog-dismiss
-  ```
-- Handled already (one-shot answer, or WebKit's shim):
-  ```
-  ### Modal state
-  - ["confirm" dialog with message "sure?"]: accepted
-  - ["prompt" dialog with message "name?"]: dismissed (run dialog-accept before the action to accept it)
-  ```
-  (the hint only when it was dismissed for lack of a one-shot answer).
-- `--json`: the command's object gains `"dialogs": [{ "type", "message", "defaultValue"?, "state":
-  "pending" | "accepted" | "dismissed", "answer"? }]`, absent when none.
-- `snapshot` while a dialog is pending (Chromium) prints the `### Modal state` section after
-  `### Page` and no tree, as `playwright-cli` does not render a tree under a modal.
+1. **No dialog ever stays open.** On both backends a dialog is answered the moment it opens:
+   with the one-shot answer if one is set (then cleared), otherwise dismissed (`confirm` → false,
+   `prompt` → null, `alert` closed). `beforeunload` is accepted, so navigation proceeds. The command
+   that caused it therefore finishes normally, and no page command is ever blocked by a dialog.
+2. **One-shot answer.** `dialog-accept [text]` (for a `prompt`: `text`, default the prompt's default
+   value) and `dialog-dismiss` set the answer for the next dialog on the current page and print
+   `next dialog will be accepted` / `next dialog will be dismissed`. They are ordinary queued ops,
+   not urgent. A one-shot answer is dropped on navigation. Setting one replaces the previous one.
+3. **Report.** Every dialog answered during a page command is recorded
+   `{type, message, defaultValue?, state: "accepted" | "dismissed", answer?}` and reported by that
+   command, then forgotten:
+   ```
+   ### Modal state
+   - ["confirm" dialog with message "sure?"]: accepted
+   - ["prompt" dialog with message "name?"]: dismissed (run dialog-accept before the action to accept it)
+   ```
+   (the hint only when dismissed for lack of a one-shot answer). `--json`: the command's object gains
+   `"dialogs": [...]`, absent when none.
+4. **Chromium.** The daemon subscribes to `Page.javascriptDialogOpening` **before the first
+   navigation**, so a dialog during the very first page load is answered too, and handles each one
+   at once with `Page.handleJavaScriptDialog`. The log lives in the daemon.
+5. **WebKit.** A page-side shim replaces `window.alert/confirm/prompt`, answers synchronously the same
+   way, and keeps the log and the one-shot answer in the page. It is (re)installed before each
+   page-acting command runs, without an extra round trip where the command already evaluates in the
+   page; dialogs raised before bowser first acts on a new document are answered by the engine
+   (dismissed) and not reported. Reading the log costs at most one extra round trip per command, on
+   WebKit only.
+6. **Difference from `playwright-cli`** (documented in README, SKILL.md, CHANGELOG): the answer is set
+   *before* the action. `dialog-accept` after an action does not answer the dialog that action
+   opened; it prepares the next one.
 
 ## Acceptance (public seams only)
 
-1. Unit (`fakeClient`): output format for pending and handled dialogs, plain and `--json`; the
-   "dialog is open" user error and exit-1 classification; `dialog-*` with and without a pending dialog.
-2. E2E on **Chromium**: for confirm, prompt (with text), alert — `click` returns < 2 s with the pending
-   modal state; `dialog-accept`/`dismiss` answers it and the page shows the result; a page command in
-   between fails with the user error; the regression "after a dialog the session still works" (the
-   bug above). One-shot answer before the click is applied without a pending state.
-3. E2E on **WebKit**: without a one-shot answer, the click reports `dismissed` with the hint and the page
-   shows `confirm:false`; with `dialog-accept typed` before a prompt click, the page shows
-   `prompt:typed` and the report says `accepted`; `dialog-dismiss` before a confirm; alert reported.
-4. Docs: README (roadmap box ticked, command rows, the WebKit order difference), SKILL.md (both flows),
-   CHANGELOG, CLAUDE.md (the pending/urgent-lane mechanism and the shim).
+1. Unit (`fakeClient`): the report format, plain and `--json`, with and without the hint; `dialog-*`
+   output; nothing appended when no dialog fired.
+2. E2E on **Chromium and WebKit**, the same test file and the same expectations on both:
+   - `click` on confirm without a one-shot answer returns in < 2 s, reports `dismissed` with the hint,
+     the page shows `confirm:false`, and the next command works (the Chromium wedge regression);
+   - `dialog-accept` then click confirm → `accepted`, page `confirm:true`;
+   - `dialog-accept typed` then click prompt → `accepted`, page `prompt:typed`;
+   - `dialog-dismiss` then click prompt → `dismissed` without the hint, page `prompt:null`;
+   - alert is reported and the page continues;
+   - the one-shot answer is used once (a second confirm click is dismissed);
+   - a one-shot answer does not survive `goto`;
+   - two dialogs from one click are both reported in order.
+3. E2E on **Chromium only**: a page whose inline script calls `confirm()` during load does not hang
+   `open`/`goto`, and the report or the next command shows it was dismissed.
+4. Docs: README (roadmap box ticked, command rows, the "answer before the action" difference),
+   SKILL.md (the flow), CHANGELOG, CLAUDE.md (a gotcha: dialogs are answered on open; never leave one
+   pending).
 
 ## Out of scope
 
-Dialogs raised during page load before bowser acts; `beforeunload` on WebKit; file choosers; a
-default policy other than dismiss.
+`playwright-cli`'s after-the-fact answering; file choosers; a default policy other than dismiss;
+`beforeunload` on WebKit.
