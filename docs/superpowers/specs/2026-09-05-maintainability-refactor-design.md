@@ -411,6 +411,11 @@ Both tools were run against `tests/fixtures/todo-app.html`, bowser on WebKit.
   machine (extraction stalls at 0 % CPU; disk 97 % full). The differential
   test therefore ran only its skip path locally; the parsers were verified by
   hand against captured output. Retry after freeing disk space.
+  (Retried 2026-09-26 with 15 GiB free: it hung the same way. The 77 MiB download finished, and
+  playwright's own extractor stopped after the first file. So disk space was not the cause. The
+  archive itself is fine: the system `unzip` unpacked it in seconds. The test was unblocked by hand:
+  unzip into `~/Library/Caches/ms-playwright/webkit-2287`, then `touch INSTALLATION_COMPLETE` there,
+  the marker playwright checks. `tests/e2e-compat.test.ts` then ran for real, 2 pass.)
 - **Native history does not fix stale URLs by itself (2026-09-06 probe, Bun 1.4.0).**
   `goBack()`/`goForward()` resolve immediately, like the `history.back()` emulation;
   `onNavigated` fires ~2 ms later and `url` updates within ~25 ms. `click()` resolves ~30 ms
