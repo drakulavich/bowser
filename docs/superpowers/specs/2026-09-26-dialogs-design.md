@@ -44,7 +44,8 @@ leaves one open, so none of that machinery exists.
    (the hint only when dismissed for lack of a one-shot answer). `--json`: the command's object gains
    `"dialogs": [...]`, absent when none. A command that fails reports its dialogs too, then forgets
    them: the error message unchanged, then `### Modal state` on stderr (in an MCP tool error, in its
-   text); the exit code does not change.
+   text); the exit code does not change. If the browser refuses both the answer and a dismiss, the
+   dialog is recorded with `state: "failed"` and its error, printed `: could not be answered (<error>)`.
 4. **Chromium.** The daemon subscribes to `Page.javascriptDialogOpening` **before the first
    navigation**, so a dialog during the very first page load is answered too, and handles each one
    at once with `Page.handleJavaScriptDialog`. The log lives in the daemon.
@@ -53,7 +54,7 @@ leaves one open, so none of that machinery exists.
    page-acting command runs, without an extra round trip where the command already evaluates in the
    page; dialogs raised before bowser first acts on a new document are answered by the engine
    (dismissed) and not reported. A dialog whose handler then navigates the page (`if (confirm(…))
-   location = …`) is answered, but not reported: the log leaves with the old document. Reading the log costs at most one extra round trip per command, on
+   location = …`) is answered, but not reported: the log leaves with the old document. A dialog opened through a reference the page saved at load time (`const c = window.confirm`) skips the shim: the engine dismisses it and it is not reported, and a prepared answer stays set until the next shimmed dialog or navigation. Reading the log costs at most one extra round trip per command, on
    WebKit only.
 6. **Difference from `playwright-cli`** (documented in README, SKILL.md, CHANGELOG): the answer is set
    *before* the action. `dialog-accept` after an action does not answer the dialog that action

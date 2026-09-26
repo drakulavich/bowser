@@ -18,7 +18,10 @@ All notable changes to this project are documented here. This project follows
   dialog and does not answer the one already reported. On WebKit, which has no dialog events, a page
   shim answers dialogs. A dialog raised during page load, before bowser's first command on that
   document, is dismissed by the engine and not reported there. A dialog whose handler then
-  navigates the page is answered but not reported on WebKit.
+  navigates the page is answered but not reported on WebKit. So is a dialog opened through a
+  reference the page saved at load time, which the engine dismisses; a prepared answer then stays
+  set until the next dialog bowser sees or a navigation. If the browser refuses to close a dialog,
+  it is reported as `could not be answered (<error>)`.
 
 - **`fill <ref> --stdin`** takes the text from standard input, so a secret never reaches the
   `bowser` process's arguments, where `ps` shows it to any local user:

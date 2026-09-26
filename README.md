@@ -131,7 +131,7 @@ The command that caused the dialog reports it under `### Modal state`. With `--j
 **Differences from `playwright-cli`:**
 
 - In `playwright-cli`, the dialog stays open and `dialog-accept` answers it *after* the action. In bowser, `dialog-accept` after the action prepares the *next* dialog. It does not answer the one already reported.
-- On WebKit, which has no dialog events, bowser replaces `window.alert`/`confirm`/`prompt` in the page before it acts there. A dialog the page opens while loading, before bowser's first command on that document, is dismissed by WebKit and not reported. A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page. Chromium reports both. `beforeunload` is accepted on Chromium and not handled on WebKit.
+- On WebKit, which has no dialog events, bowser replaces `window.alert`/`confirm`/`prompt` in the page before it acts there. A dialog the page opens while loading, before bowser's first command on that document, is dismissed by WebKit and not reported. A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page. A dialog opened through a reference the page saved at load time (`const c = window.confirm`) is dismissed by WebKit and not reported, and a prepared answer stays set until the next dialog bowser sees or a navigation. Chromium reports all of these. `beforeunload` is accepted on Chromium and not handled on WebKit.
 
 ### Snapshot output
 

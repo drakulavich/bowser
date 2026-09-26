@@ -36,6 +36,8 @@ const run = E2E ? describe : describe.skip;
 const chromeOnly = CHROME ? test : test.skip;
 
 const PAGE = `<!doctype html><title>Dialogs</title>
+<script>const savedConfirm = window.confirm</script>
+<button onclick="out.textContent = 'saved:' + savedConfirm('saved?')">Saved</button>
 <button onclick="out.textContent = 'confirm:' + confirm('sure?')">Confirm</button>
 <button onclick="out.textContent = 'prompt:' + prompt('name?', 'def')">Prompt</button>
 <button onclick="alert('hi'); out.textContent = 'alert:done'">Alert</button>
@@ -259,5 +261,22 @@ run("e2e: dialogs", () => {
     expect(stderr).toContain(`### Modal state\n${line("confirm", "sure?", HINT)}`);
     expect(p.exitCode).toBe(2);
     expect(await cmdSnapshot(ctx)).not.toContain("Modal state");
+  }, 60_000);
+
+  test("a confirm the page saved at load: Chromium answers it; WebKit's engine dismisses it unreported and the answer waits (documented)", async () => {
+    await fresh();
+    await cmdDialog(ctx, true);
+    const text = await click("Saved");
+    if (CHROME) {
+      expect(text).toEndWith(line("confirm", "saved?", "accepted"));
+      expect(await out()).toBe("saved:true");
+    } else {
+      // Documented WebKit limitation (spec item 5): a reference the page saved
+      // before bowser first acted skips the shim, so the engine dismisses it.
+      expect(text).not.toContain("Modal state");
+      expect(await out()).toBe("saved:false");
+      // The prepared answer is still set, for the next dialog the shim sees.
+      expect(await click("Confirm")).toEndWith(line("confirm", "sure?", "accepted"));
+    }
   }, 60_000);
 });
