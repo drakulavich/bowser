@@ -110,6 +110,29 @@ bowser -s=work open https://app.example.com --profile=./profiles/work   # a dire
 - One profile directory serves one running session at a time; sharing it between two is unsupported.
 - WebKit needs macOS 15.2 or later for a persistent store.
 
+### Dialogs
+
+bowser answers every `alert`, `confirm` and `prompt` the moment it opens, so no command ever waits on a dialog. Without an answer set, the dialog is dismissed: `confirm` returns `false` and `prompt` returns `null`. To accept one, set the answer **before** the action that opens it:
+
+```bash
+bowser dialog-accept            # the next dialog is accepted (confirm → true)
+bowser click e7                 # the click that opens it
+bowser dialog-accept "Ann"      # a prompt gets "Ann"; with no text, its own default value
+bowser click e8
+```
+
+```
+### Modal state
+- ["prompt" dialog with message "Your name?"]: accepted
+```
+
+The command that caused the dialog reports it under `### Modal state`. With `--json` it reports it as `"dialogs": [...]`. `dismissed (run dialog-accept before the action to accept it)` means no answer was set. An answer covers one dialog and is dropped when the page navigates.
+
+**Differences from `playwright-cli`:**
+
+- In `playwright-cli`, the dialog stays open and `dialog-accept` answers it *after* the action. In bowser, `dialog-accept` after the action prepares the *next* dialog. It does not answer the one already reported.
+- On WebKit, which has no dialog events, bowser replaces `window.alert`/`confirm`/`prompt` in the page before it acts there. A dialog the page opens while loading, before bowser's first command on that document, is dismissed by WebKit and not reported. Chromium reports those too. `beforeunload` is accepted on Chromium and not handled on WebKit.
+
 ### Snapshot output
 
 `snapshot` prints the page's full accessibility tree in `playwright-cli`'s format: headings, text, state such as `[checked]` or `[active]`, `/url` and `/placeholder` props, and an `eN` ref on every visible element, not only the interactive ones. This is the todo fixture in `tests/fixtures/`:
@@ -275,7 +298,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
 - [ ] Tracing / video / PDF output
 - [x] `eval`, `run-code`
 - [x] `resize`
-- [ ] `dialog-accept`/`dismiss`
+- [x] `dialog-accept`/`dismiss` — the answer is set before the action; see [Dialogs](#dialogs)
 - [x] MCP bridge subcommand for non-CLI clients (`bowser mcp`)
 - [ ] Agent skill published to [agentskills.io](https://agentskills.io)
 

@@ -10,7 +10,7 @@ A Bun-powered CLI that drives a real headless browser through concise shell comm
 
 ## Drop-in note
 
-If you already use a `playwright-cli`-based skill, replace `playwright` with `bowser` in your commands. Refs (`e1`, `e2`, …) and the snapshot tree use `playwright-cli`'s format. bowser prints no `- Console:` line, and it does not walk iframe contents or shadow DOM.
+If you already use a `playwright-cli`-based skill, replace `playwright` with `bowser` in your commands. Refs (`e1`, `e2`, …) and the snapshot tree use `playwright-cli`'s format. bowser prints no `- Console:` line, and it does not walk iframe contents or shadow DOM. `dialog-accept`/`dialog-dismiss` go *before* the action that opens the dialog, not after it (see [Dialogs](#dialogs)).
 
 ## When to Use
 
@@ -105,6 +105,29 @@ Do **not** use for static HTTP fetches.
 - `--depth=N` prints N levels below the first line: a node at the limit drops its children but keeps its inline text value and its prop lines (`/url`, `/placeholder`). `--depth=0` or no flag prints the whole tree. `--json` gives `{"snapshot": "<tree>"}` without the `### Page` header.
 
 Refs persist in `~/.bowser/sessions/<name>/state.json`. The CLI resolves refs for you.
+
+## Dialogs
+
+A dialog (`alert`, `confirm`, `prompt`) never stays open. bowser answers it the moment it opens and dismisses it unless you set an answer first. So pick the answer **before** the action that opens the dialog:
+
+```bash
+bowser dialog-accept          # the next confirm returns true
+bowser click e7               # the click that opens it
+bowser dialog-accept "Ann"    # the next prompt returns "Ann" (with no text: its default value)
+bowser click e8
+bowser dialog-dismiss         # the next confirm returns false, the prompt null
+```
+
+The answer covers one dialog and is dropped when the page navigates. The action that opened the dialog reports it:
+
+```
+### Modal state
+- ["confirm" dialog with message "Delete it?"]: accepted
+```
+
+`dismissed (run dialog-accept before the action to accept it)` means no answer was set. To accept it, run `dialog-accept` and repeat the action. This is where bowser differs from `playwright-cli`: running `dialog-accept` *after* the action does not answer the dialog that action opened. It prepares the next one.
+
+On WebKit, a dialog the page opens while it loads, before bowser has acted on it, is dismissed and not reported.
 
 ## Rules for the Agent
 
