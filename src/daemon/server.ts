@@ -343,12 +343,15 @@ function answerDialog(browser: Browser, state: DaemonState, d: DialogState): Pro
     () => answered(accept, text),
     // A dialog left open blocks the page, so a refused answer is tried once
     // more as a dismiss; failing that, the report says so rather than lie.
-    // A timed-out answer is not retried: it may still land, and a dismiss
-    // sent meanwhile would fail with "no dialog" after it did, so the
-    // outcome is unknown and the report says only that.
-    (err: unknown) => err instanceof AnswerTimeout
-      ? failed(err)
-      : bounded(browser.answerDialog(false)).then(() => answered(false), failed),
+    // A timed-out answer may still land, so its outcome is unknown and the
+    // report says only that, at once. A dismiss still goes out, not awaited,
+    // so a dialog that really is open gets closed; if the late answer landed
+    // first it fails with "no dialog", which changes nothing.
+    (err: unknown) => {
+      if (!(err instanceof AnswerTimeout)) return bounded(browser.answerDialog(false)).then(() => answered(false), failed);
+      bounded(browser.answerDialog(false)).catch(() => {});
+      return failed(err);
+    },
   );
 }
 

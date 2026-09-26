@@ -460,17 +460,20 @@ describe("dialogs: answered the moment they open", () => {
     expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
   }, 15_000);
 
-  test("a first answer that times out is not retried: its outcome is unknown, so the report says failed", async () => {
-    // A dismiss sent while a slow accept is still in flight could fail with
-    // "no dialog" after the accept lands, and the report would then lie.
-    const b = dialogBrowser({ answerDialog: (...a) => { b.calls.push(["answerDialog", a]); return new Promise<void>(() => {}); } });
+  test("a first answer that times out is followed by a dismiss, so a dialog still open closes; the report stays failed whatever the dismiss does", async () => {
+    // The outcome is unknown: a slow accept may still land, and then the
+    // dismiss fails with "no dialog". So the dismiss is for liveness only.
+    let n = 0;
+    const b = dialogBrowser({
+      answerDialog: (...a) => { b.calls.push(["answerDialog", a]); return n++ === 0 ? new Promise<void>(() => {}) : Promise.resolve(); },
+    });
     b.click = async () => { b.on().opened(confirmBox); };
     const h = createHandler(b);
     await h(req("dialog-answer", [true]));
     const t0 = performance.now();
     expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...confirmBox, state: "failed", error: "answer timed out" }]);
     expect(performance.now() - t0).toBeLessThan(2000 + 500);
-    expect(answers(b)).toEqual([["answerDialog", [true, undefined]]]);
+    expect(answers(b)).toEqual([["answerDialog", [true, undefined]], ["answerDialog", [false, undefined]]]);
   }, 15_000);
 
   test("two dialogs whose answers settle out of order are reported in the order they opened", async () => {
