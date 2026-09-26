@@ -293,7 +293,7 @@ bun build src/cli.ts --compile --target=bun-windows-x64  --outfile dist/bowser.e
   - [x] `sessionstorage-{list,get,set,delete,clear}`
   - [x] `cookie-{list,get,set,delete,clear}` — HttpOnly cookies are first-class; uses `Bun.WebView.cdp()` (chrome backend only; see [design](./docs/superpowers/specs/2026-05-14-cdp-cookies-design.md))
   - [x] `state-save` / `state-load` — Playwright-compatible `storageState` JSON (cookies + per-origin localStorage; chrome backend only)
-- [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`)
+- [ ] Tab management (`tab-list`/`tab-new`/`tab-select`/`tab-close`) — deferred: `Bun.WebView` can't reach popups yet (`window.open` returns `null` on WebKit, and on Chromium the popup is not drivable), so tabs would leave out their main use; see the [refactor spec](./docs/superpowers/specs/2026-09-05-maintainability-refactor-design.md#open-questions)
 - [ ] Network mocking (`route`, `unroute`)
 - [ ] Tracing / video / PDF output
 - [x] `eval`, `run-code`

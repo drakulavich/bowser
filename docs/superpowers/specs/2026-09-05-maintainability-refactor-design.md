@@ -452,7 +452,10 @@ Section 4 where it guessed.
   checking, in `commands/cookies.ts`), and whether `normalizeSameSite` should
   distinguish "absent" from "not one of ours" rather than folding both to
   `Lax`. Both change user-visible output, which is why neither is in this
-  series.
+  series. (Both decided in #30. The CLI now rejects an unknown `--same-site`.
+  `normalizeSameSite` stays as written, because `playwright-cli` also writes
+  `"sameSite": "Lax"` for a cookie set without one. See
+  `2026-09-06-cookie-set-reports-failure-design.md`.)
 - **A request whose daemon exits never settles.** Raised by PR 6's final
   review: `DaemonClient` registers no `close` handler, so if the daemon goes
   away mid-request the promise neither resolves nor rejects and the client
@@ -460,9 +463,18 @@ Section 4 where it guessed.
 
 ## Open questions
 
-- Whether `Bun.WebView` creates a new instance on `window.open` from the page,
-  or the popup is lost. Not needed for this refactor; decides how tabs are
-  designed later. Answer by experiment when tabs are scheduled.
+- (Answered 2026-09-26 by experiment, Bun 1.4.2.) Whether `Bun.WebView` creates a new instance on
+  `window.open` from the page, or the popup is lost. It creates none:
+  - On WebKit, `window.open` returns `null` and nothing opens.
+  - On Chromium, the popup becomes a CDP page target (`Target.getTargets` lists it with an
+    `openerId`, and `Target.targetCreated` fires), but Bun gives no `WebView` to drive it.
+  - Several `Bun.WebView` instances in one process do work on both engines. On Chromium they share
+    one browser context.
+
+  `playwright-cli` 0.1.13 lists a page's popup as a new, unselected tab. Explicit
+  `tab-new`/`tab-select` could be built on several views. Popups, which are the main reason for
+  tabs, could not, and the daemon would become multi-page. The owner deferred tabs until Bun can
+  reach popups.
 - (Answered in PR 3, see Findings.) Native `goBack()` resolves on the same event as the
   emulation; the fix was a navigation watch, not the native call.
 - How dialogs can be surfaced on WebKit at all (Section 4 caveat). Not
