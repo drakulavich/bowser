@@ -2,6 +2,7 @@
 // daemon that goes away mid-request.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import { ensureSessionDir } from "../src/state.ts";
 import { reportFailure } from "../src/cli.ts";
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
+import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 
 describe("socketPath", () => {
   test("resolves under process.env.HOME at call time", () => {
@@ -243,4 +245,90 @@ describe("daemon goes away mid-request", () => {
       server.stop(true);
     }
   });
+});
+
+// F29: the daemon claims its session through the pidfile before it touches
+// anything else, so racing first commands leave one daemon. These spawn the
+// real daemon entry (src/daemon/main.ts); a daemon that wins opens a WebKit
+// view, so they run where WebKit does.
+const onMac = process.platform === "darwin" ? describe : describe.skip;
+onMac("daemon session claim (F29)", () => {
+  const MAIN = join(import.meta.dir, "..", "src", "daemon", "main.ts");
+  let tmp: string;
+  let origHome: string | undefined;
+  const sessions: string[] = [];
+  const spawned: Array<ReturnType<typeof Bun.spawn>> = [];
+
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-claim-"));
+    process.env.HOME = tmp;
+  });
+
+  afterAll(async () => {
+    for (const p of spawned) p.kill("SIGKILL");
+    for (const s of sessions) await killDaemons(s);
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const fresh = async (name: string): Promise<string> => {
+    const s = `${name}-${process.pid}`;
+    sessions.push(s);
+    await ensureSessionDir(s);
+    return s;
+  };
+  const startDaemonProc = (session: string) => {
+    const p = Bun.spawn([process.execPath, MAIN, session], {
+      env: { ...process.env }, stdin: "ignore", stdout: "ignore", stderr: "ignore",
+    });
+    spawned.push(p);
+    return p;
+  };
+  const exitedWithin = (p: ReturnType<typeof Bun.spawn>, ms: number) =>
+    Promise.race([p.exited, Bun.sleep(ms).then(() => "running" as const)]);
+
+  test("a daemon starting on a session a live daemon of ours holds exits, leaving its socket and pidfile", async () => {
+    const session = await fresh("held");
+    // Stands in for the running daemon: `ps` shows it exactly as it shows ours.
+    const holder = Bun.spawn(
+      [process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session],
+      { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+    );
+    spawned.push(holder);
+    await waitFor(async () => (await daemonPids(session)).includes(holder.pid));
+    await Bun.write(pidPath(session), String(holder.pid));
+    const listener = Bun.listen({ unix: socketPath(session), socket: { data() {} } });
+    try {
+      const newcomer = startDaemonProc(session);
+      expect(await exitedWithin(newcomer, 5000)).toBe(0);
+      expect((await Bun.file(pidPath(session)).text()).trim()).toBe(String(holder.pid));
+      expect(existsSync(socketPath(session))).toBe(true);
+    } finally {
+      listener.stop(true);
+      holder.kill("SIGKILL");
+    }
+  }, 15_000);
+
+  for (const stale of [false, true]) {
+    test(`five daemons starting on one session${stale ? " with a stale pidfile" : ""} leave one listening daemon and its pidfile`, async () => {
+      const session = await fresh(stale ? "stale5" : "race5u");
+      // A pid that is no process (the largest pid macOS hands out is 99998).
+      if (stale) await Bun.write(pidPath(session), "99999");
+      const procs = [1, 2, 3, 4, 5].map(() => startDaemonProc(session));
+      // Every loser exits on its own; the winner stays.
+      expect(await waitFor(() => procs.filter((p) => p.exitCode === null).length <= 1, 10_000)).toBe(true);
+      await Bun.sleep(500);
+      const pids = await daemonPids(session);
+      expect(pids.length).toBe(1);
+      expect(Number((await Bun.file(pidPath(session)).text()).trim())).toBe(pids[0]!);
+      const c = await connectOrSpawn(session, { spawn: false });
+      try {
+        await c.request("shutdown");
+      } finally {
+        c.close();
+      }
+      expect(await waitFor(async () => (await daemonPids(session)).length === 0)).toBe(true);
+    }, 30_000);
+  }
 });

@@ -11,4 +11,5 @@ if (!session) {
   process.exit(1);
 }
 
-await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);
+// false: another daemon of ours holds the session; this one leaves it alone.
+if (!(await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined))) process.exit(0);

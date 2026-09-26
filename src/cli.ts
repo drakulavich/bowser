@@ -69,7 +69,9 @@ if (import.meta.main) {
     // would tear the daemon down the instant its socket is ready (the bug that
     // made the compiled binary's "did not start in time"). The keepalive holds
     // the process open; the `else` keeps us out of the command dispatcher.
-    await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined);
+    // It resolves false when another daemon of ours holds the session (F29);
+    // only then does this process exit, having touched nothing.
+    if (!(await startDaemon(session, process.env[DAEMON_PROFILE_ENV] || undefined))) process.exit(0);
   } else if (startsMcpServer(process.argv.slice(2))) {
     // Long-lived stdio MCP server. Handled here at the entry layer (like
     // --daemon) because it never returns a string — keeping run()'s contract
