@@ -552,6 +552,12 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
 // replaces window.alert/confirm/prompt with functions that answer at once:
 // the one-shot answer if set, then cleared, else dismissed; an accepted prompt with no text gets its
 // default. Each answer is logged as a DialogReport for the daemon to read.
+// Only the engine's own functions are replaced (their source says
+// [native code]): a page that defined its own keeps it (P1 F24). Every
+// same-origin child frame reachable through window.frames gets the shim too,
+// sharing the top window's answer and log (P1 F25); a cross-origin frame
+// throws on access and is skipped. A frame is walked on every evaluation, so
+// one that loaded since the last op gets the shim then.
 // The shim, its answer and its log live on window, so a new document has
 // none. A document the back-forward cache restores keeps its shim, so the
 // answer is also dropped twice over: by the page on pagehide, and by `drop`
@@ -561,33 +567,51 @@ function dialogShim(drop: boolean): string {
   return String.raw`(() => {
   const KEY = Symbol.for('bowser.dialogs');
   let shim = window[KEY];
-  if (!shim) {
+  const fresh = !shim;
+  if (fresh) {
     shim = { answer: null, log: [] };
     Object.defineProperty(window, KEY, { value: shim });
-    const str = (v) => v === undefined ? '' : String(v);
-    const answer = (type, message, defaultValue) => {
-      const given = shim.answer;
-      shim.answer = null;
-      const accept = given ? given.accept : false;
-      const d = { type, message: str(message) };
-      if (type === 'prompt') d.defaultValue = str(defaultValue);
-      d.state = accept ? 'accepted' : 'dismissed';
-      let reply = accept;
-      if (type === 'prompt') {
-        reply = accept ? (typeof given.text === 'string' ? given.text : d.defaultValue) : null;
-        if (accept) d.answer = reply;
-      }
-      if (!given) d.unanswered = true;
-      shim.log.push(d);
-      return reply;
-    };
-    window.alert = function alert(message) { answer('alert', message); };
-    window.confirm = function confirm(message) { return answer('confirm', message); };
-    window.prompt = function prompt(message, defaultValue) { return answer('prompt', message, defaultValue); };
     // Leaving the document (a link, a form, history.back() in a handler)
     // drops the answer, so a cached copy of it comes back without one.
     window.addEventListener('pagehide', () => { shim.answer = null; });
   }
+  const str = (v) => v === undefined ? '' : String(v);
+  const answer = (type, message, defaultValue) => {
+    const given = shim.answer;
+    shim.answer = null;
+    const accept = given ? given.accept : false;
+    const d = { type, message: str(message) };
+    if (type === 'prompt') d.defaultValue = str(defaultValue);
+    d.state = accept ? 'accepted' : 'dismissed';
+    let reply = accept;
+    if (type === 'prompt') {
+      reply = accept ? (typeof given.text === 'string' ? given.text : d.defaultValue) : null;
+      if (accept) d.answer = reply;
+    }
+    if (!given) d.unanswered = true;
+    shim.log.push(d);
+    return reply;
+  };
+  const native = (fn) => {
+    try { return /\[native code\]/.test(Function.prototype.toString.call(fn)); } catch (e) { return false; }
+  };
+  const install = (w) => {
+    if (w !== window) Object.defineProperty(w, KEY, { value: shim });
+    if (native(w.alert)) w.alert = function alert(message) { answer('alert', message); };
+    if (native(w.confirm)) w.confirm = function confirm(message) { return answer('confirm', message); };
+    if (native(w.prompt)) w.prompt = function prompt(message, defaultValue) { return answer('prompt', message, defaultValue); };
+  };
+  if (fresh) install(window);
+  const walk = (w) => {
+    for (let i = 0; i < w.length; i++) {
+      try {
+        const f = w[i];
+        if (!f[KEY]) install(f);
+        walk(f);
+      } catch (e) {}
+    }
+  };
+  walk(window);
   if (${JSON.stringify(drop)}) shim.answer = null;
   return shim;
 })()`;
