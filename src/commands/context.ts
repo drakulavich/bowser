@@ -11,6 +11,22 @@ export interface CommandContext {
   json: boolean;
   // Injected in tests.
   connect?: (session: string, opts?: ConnectOptions) => Promise<DaemonConnection>;
+  /** All of standard input, for `fill --stdin`. Defaults to `readStdin`;
+   *  tests inject a fake. `bowser mcp` never reaches it: the flag is not in
+   *  its schema and toArgv puts every client value after `--`. */
+  readStdin?: () => Promise<string>;
+}
+
+/** All of standard input as UTF-8. A terminal is refused rather than read:
+ *  reading it would block until the user typed an end-of-file. */
+export async function readStdin(
+  stdin: { isTTY?: boolean } = process.stdin,
+  read: () => Promise<string> = () => Bun.stdin.text(),
+): Promise<string> {
+  if (stdin.isTTY) {
+    throw new Error("usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin");
+  }
+  return read();
 }
 
 export function connector(ctx: CommandContext): (session: string, opts?: ConnectOptions) => Promise<DaemonConnection> {

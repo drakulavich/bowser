@@ -37,7 +37,7 @@ Do **not** use for static HTTP fetches.
 | `bowser goto <url>` | Navigate within current session |
 | `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `bowser click <ref>` | Click an element by ref |
-| `bowser fill <ref> <text>` | Focus, clear, type into a field |
+| `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The value is not echoed back, plain or `--json` |
 | `bowser type <text>` | Type into focused element |
 | `bowser press <key>` | Press a keyboard key |
 | `bowser hover <ref>` | Hover an element |
@@ -120,7 +120,7 @@ bowser -s=app open https://app.example.com/login
 bowser -s=app snapshot
 # Inspect output, find email/password/submit refs.
 bowser -s=app fill  e1 "me@example.com"
-bowser -s=app fill  e2 "$PASSWORD"
+op read op://vault/app/password | bowser -s=app fill e2 --stdin
 bowser -s=app click e3
 bowser -s=app snapshot
 bowser -s=app snapshot | grep -i 'balance'

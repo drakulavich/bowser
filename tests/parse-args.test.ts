@@ -4,6 +4,25 @@ import { run } from "../src/cli.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 
 describe("parse", () => {
+  test("-- ends options: later words are positionals even if they start with -", () => {
+    const r = parse(SCHEMAS, ["--json", "fill", "--", "e1", "--json"]);
+    expect(r.json).toBe(true);
+    expect(r.command).toBe("fill");
+    expect(r.positional).toEqual(["e1", "--json"]);
+    expect(r.flags).toEqual({});
+  });
+  test("after --, --stdin, -s and a second -- are positionals too", () => {
+    const r = parse(SCHEMAS, ["fill", "e1", "--", "--stdin"]);
+    expect(r.positional).toEqual(["e1", "--stdin"]);
+    expect(r.flags).toEqual({});
+    expect(parse(SCHEMAS, ["fill", "--", "-s", "--"]).positional).toEqual(["-s", "--"]);
+    expect(parse(SCHEMAS, ["fill", "--", "-s", "x"]).session).toBe("default");
+  });
+  test("-- before the command still finds the command", () => {
+    const r = parse(SCHEMAS, ["--", "fill", "e1"]);
+    expect(r.command).toBe("fill");
+    expect(r.positional).toEqual(["e1"]);
+  });
   test("global session via -s=name", () => {
     const r = parse(SCHEMAS, ["-s=app", "open", "https://x"]);
     expect(r.session).toBe("app");

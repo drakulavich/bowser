@@ -4,6 +4,9 @@
 // exercise the full request/response surface with NO real stdio or daemon.
 
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   buildTools,
@@ -14,6 +17,10 @@ import {
 } from "../src/mcp.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
+import { run } from "../src/cli.ts";
+import { resolveRefScript } from "../src/page-scripts.ts";
+import { saveState } from "../src/state.ts";
+import { fakeClient } from "./helpers/fake-client.ts";
 
 /** Number of commands opted out of the MCP tool set via `mcp: false`. */
 const MCP_EXCLUDED_COUNT = SCHEMAS.commands.filter((c) => findCommand(c.name)!.mcp === false).length;
@@ -65,7 +72,7 @@ describe("buildTools", () => {
 });
 
 describe("toArgv", () => {
-  test("reconstructs session, --json, positionals (schema order), typed flags", () => {
+  test("reconstructs session, --json, typed flags, then -- and positionals (schema order)", () => {
     const argv = toArgv(schema("cookie-set"), {
       name: "sid",
       value: "abc",
@@ -77,9 +84,9 @@ describe("toArgv", () => {
       "--session", "s1",
       "--json",
       "cookie-set",
-      "sid", "abc",
       "--domain=x.com",
       "--http-only",
+      "--", "sid", "abc",
     ]);
   });
 
@@ -90,11 +97,15 @@ describe("toArgv", () => {
       "http-only": false,
       secure: true,
     });
-    expect(argv).toEqual(["--json", "cookie-set", "sid", "abc", "--secure"]);
+    expect(argv).toEqual(["--json", "cookie-set", "--secure", "--", "sid", "abc"]);
   });
 
   test("no-positional, no-flag command", () => {
     expect(toArgv(schema("list"), {})).toEqual(["--json", "list"]);
+  });
+
+  test("a positional that looks like a flag goes after --", () => {
+    expect(toArgv(schema("fill"), { ref: "e1", text: "--json" })).toEqual(["--json", "fill", "--", "e1", "--json"]);
   });
 });
 
@@ -147,7 +158,7 @@ describe("handleMcpRequest — tools/call", () => {
       { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "goto", arguments: { url: "https://e.com" } } },
       deps,
     );
-    expect(captured).toEqual(["--json", "goto", "https://e.com"]);
+    expect(captured).toEqual(["--json", "goto", "--", "https://e.com"]);
     expect(res.result.content).toEqual([{ type: "text", text: '{"ok":true,"url":"u"}' }]);
     expect(res.result.isError).toBeFalsy();
   });
@@ -171,6 +182,20 @@ describe("handleMcpRequest — tools/call", () => {
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("nonexistent");
   });
+
+  for (const stdin of [true, false, "true"]) {
+    test(`fill with stdin: ${JSON.stringify(stdin)} is a usage error and never runs the command`, async () => {
+      let ran = false;
+      const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
+      const res: any = await handleMcpRequest(
+        { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", stdin } } },
+        deps,
+      );
+      expect(res.result.isError).toBe(true);
+      expect(res.result.content[0].text).toMatch(/^usage: .*--stdin/);
+      expect(ran).toBe(false);
+    });
+  }
 
   test("an excluded command is not callable as a tool", async () => {
     const res: any = await handleMcpRequest(
@@ -201,7 +226,8 @@ describe("descriptions drift-guard", () => {
   test("every exposed tool has a non-empty summary as its description", () => {
     for (const t of buildTools()) {
       expect(t.description.length).toBeGreaterThan(0);
-      expect(t.description).toBe(findCommand(t.name)!.summary);
+      const cmd = findCommand(t.name)!;
+      expect(t.description).toBe(cmd.mcpSummary ?? cmd.summary);
     }
   });
 
@@ -220,9 +246,102 @@ describe("descriptions drift-guard", () => {
     expect(setCookie.inputSchema.properties.domain).not.toHaveProperty("enum");
   });
 
+  test("fill offers text but not stdin", () => {
+    const fill = buildTools().find((t) => t.name === "fill")!;
+    expect(fill.inputSchema.properties).toHaveProperty("text");
+    expect(fill.inputSchema.properties).not.toHaveProperty("stdin");
+  });
+
+  test("fill requires ref and text over MCP, though the CLI can take --stdin instead of text", () => {
+    const fill = buildTools().find((t) => t.name === "fill")!;
+    expect(fill.inputSchema.required).toEqual(["ref", "text"]);
+    expect(findCommand("fill")!.positional.find((p) => p.name === "text")!.required).toBe(false);
+  });
+
+  test("fill's MCP description does not mention --stdin, which MCP does not offer", () => {
+    const fill = buildTools().find((t) => t.name === "fill")!;
+    expect(fill.description).toBe("Fill the element with the given ref with text");
+    expect(fill.description).not.toContain("stdin");
+    expect(findCommand("fill")!.summary).toContain("--stdin");
+  });
+
   test("mcp and install are not exposed as tools", () => {
     const names = buildTools().map((t) => t.name);
     expect(names).not.toContain("mcp");
     expect(names).not.toContain("install");
+  });
+});
+
+describe("MCP positionals are data, never flags", () => {
+  for (const text of ["--json", "--stdin", "-5", "--"]) {
+    test(`fill with text ${JSON.stringify(text)} types exactly that`, async () => {
+      const home = await mkdtemp(join(tmpdir(), "bowser-mcp-dash-"));
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        await saveState({ name: "dash", url: "https://x", title: "X", updatedAt: Date.now(),
+          refs: [{ id: "e1", selector: "input", role: "textbox", name: "Email", tag: "input" }] });
+        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript("e1") ? "input" : undefined) });
+        const deps: McpDeps = {
+          run: (argv) => run(argv, { connect: async () => c, readStdin: async () => { throw new Error("read stdin"); } }),
+          version: "9.9.9",
+        };
+        const res: any = await handleMcpRequest(
+          { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", text, session: "dash" } } },
+          deps,
+        );
+        expect(res.result.isError).toBeFalsy();
+        expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, ref: "e1", text });
+        expect(c.calls.filter(([op]) => op === "type")).toEqual([["type", [text]]]);
+      } finally {
+        process.env.HOME = prevHome;
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+describe("bowser mcp never reads its own stdin for a command", () => {
+  test("fill with text \"--stdin\" is text, not the flag, and the server keeps answering", async () => {
+    // The server's stdin is the JSON-RPC stream: parsing the text as the flag
+    // would read it, swallowing later requests and hanging this one. toArgv's
+    // `--` keeps it a positional, so the call fails on the empty HOME instead.
+    const home = await mkdtemp(join(tmpdir(), "bowser-mcp-stdin-"));
+    const proc = Bun.spawn(
+      [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "mcp"],
+      {
+        env: { ...process.env, HOME: home, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    try {
+      const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", text: "--stdin" } } };
+      proc.stdin.write(JSON.stringify(call) + "\n");
+      proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n");
+      proc.stdin.flush();
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      const deadline = Date.now() + 5000;
+      while (buf.split("\n").filter(Boolean).length < 2 && Date.now() < deadline) {
+        const next = await Promise.race([
+          reader.read(),
+          Bun.sleep(deadline - Date.now()).then(() => ({ done: true, value: undefined })),
+        ]);
+        if (next.done) break;
+        buf += decoder.decode(next.value);
+      }
+      const [first, second] = buf.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      expect(first?.id).toBe(1);
+      expect(first?.result.isError).toBe(true);
+      expect(first?.result.content[0].text).toContain("no open page");
+      expect(second).toEqual({ jsonrpc: "2.0", id: 2, result: {} });
+    } finally {
+      proc.kill();
+      await proc.exited;
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

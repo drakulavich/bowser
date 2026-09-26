@@ -16,6 +16,9 @@ export interface FlagSpec {
    *  `--help` derives the placeholder from this same list, so what is shown
    *  and what is accepted cannot drift. */
   values?: string[];
+  /** Omit this flag from `bowser mcp`'s tool schema; a tool call passing it
+   *  is a usage error. Like the per-command `mcp: false`. */
+  mcp?: false;
 }
 
 export interface CommandSchema {
@@ -52,17 +55,26 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
 
   let i = 0;
   let cmdSchema: CommandSchema | undefined;
+  // After a bare `--` every word is a command or positional, even one that
+  // starts with `-`: `bowser fill e1 -- --json` fills "--json".
+  let optionsDone = false;
 
   while (i < argv.length) {
     const a = argv[i]!;
 
-    if (a === "-h" || a === "--help") {
+    if (!optionsDone && a === "--") {
+      optionsDone = true;
+      i++;
+      continue;
+    }
+
+    if (!optionsDone && (a === "-h" || a === "--help")) {
       out.help = true;
       i++;
       continue;
     }
 
-    if (a.startsWith("--")) {
+    if (!optionsDone && a.startsWith("--")) {
       const eq = a.indexOf("=");
       const name = eq >= 0 ? a.slice(2, eq) : a.slice(2);
       const spec = findFlag(schemas, cmdSchema, name);
@@ -76,7 +88,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       continue;
     }
 
-    if (a.startsWith("-") && a.length > 1) {
+    if (!optionsDone && a.startsWith("-") && a.length > 1) {
       const eq = a.indexOf("=");
       const short = eq >= 0 ? a.slice(1, eq) : a.slice(1);
       const spec = findShort(schemas, cmdSchema, short);

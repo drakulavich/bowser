@@ -60,9 +60,10 @@ export function buildTools(): McpTool[] {
     const required: string[] = [];
     for (const p of cmd.positional) {
       properties[p.name] = { type: "string", description: `${p.name} (positional argument)` };
-      if (p.required) required.push(p.name);
+      if (p.required || p.mcpRequired) required.push(p.name);
     }
     for (const f of cmd.flags) {
+      if (f.mcp === false) continue;
       properties[f.name] = {
         type: f.kind === "boolean" ? "boolean" : "string",
         description: `--${f.name}`,
@@ -72,7 +73,7 @@ export function buildTools(): McpTool[] {
     properties.session = { type: "string", description: 'bowser session name (default: "default")' };
     tools.push({
       name: cmd.name,
-      description: cmd.summary,
+      description: cmd.mcpSummary ?? cmd.summary,
       inputSchema: { type: "object", properties, required },
     });
   }
@@ -81,27 +82,32 @@ export function buildTools(): McpTool[] {
 
 /** Reconstruct a CLI argv from structured MCP tool arguments so the call routes
  *  through the existing run() dispatcher. Shape:
- *  [--session <s>] --json <name> <positionals…> <flags…> */
+ *  [--session <s>] --json <name> <flags…> [-- <positionals…>]
+ *  The `--` keeps a value such as "--json" or "--stdin" a positional: it is
+ *  data from the client, never a flag. */
 export function toArgv(schema: CommandSchema, args: Record<string, unknown>): string[] {
   const argv: string[] = [];
   const session = args.session;
   if (typeof session === "string" && session.length > 0) argv.push("--session", session);
   argv.push("--json", schema.name);
+  const positionals: string[] = [];
   for (const p of schema.positional) {
     const v = args[p.name];
     // Stop at the first gap so a missing positional can't shift later ones.
     if (v === undefined || v === null) break;
-    argv.push(String(v));
+    positionals.push(String(v));
   }
   for (const f of schema.flags) {
     const v = args[f.name];
     if (v === undefined || v === null) continue;
+    if (f.mcp === false) throw new Error(`usage: --${f.name} is not available over MCP`);
     if (f.kind === "boolean") {
       if (v === true || v === "true") argv.push(`--${f.name}`);
     } else {
       argv.push(`--${f.name}=${String(v)}`);
     }
   }
+  if (positionals.length > 0) argv.push("--", ...positionals);
   return argv;
 }
 

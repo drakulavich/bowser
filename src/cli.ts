@@ -4,13 +4,14 @@ import { parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import type { CommandContext } from "./commands/context.ts";
 
-export async function run(argv: string[]): Promise<string> {
+/** `base` seeds the command context; tests inject `connect` through it. */
+export async function run(argv: string[], base: Partial<CommandContext> = {}): Promise<string> {
   const args = parse(SCHEMAS, argv);
   if (!args.command) return renderHelp(COMMANDS);
   const command = findCommand(args.command);
   // parse() already rejects an unknown command; this is the type narrowing.
   if (!command) throw new Error(`unknown command: ${args.command}`);
-  const ctx: CommandContext = { session: args.session, json: args.json };
+  const ctx: CommandContext = { ...base, session: args.session, json: args.json };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 

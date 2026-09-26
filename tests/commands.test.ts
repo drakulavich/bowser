@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 import { findCommand } from "../src/cli/registry.ts";
-import { reply, syncState, type CommandContext } from "../src/commands/context.ts";
+import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath } from "../src/daemon/client.ts";
 import { cmdInstall } from "../src/commands/install.ts";
 import {
@@ -1297,5 +1297,170 @@ describe("context helpers", () => {
     expect(next.title).toBe("New");
     expect(next.refs).toEqual(prev.refs);
     expect(next.updatedAt).toBeGreaterThan(1);
+  });
+});
+
+describe("fill --stdin", () => {
+  const REFS = [{ id: "e2", selector: "input", role: "textbox", name: "Password", tag: "input" }];
+  const SECRET = "hunter2-S3cr3t!";
+
+  let connected: boolean;
+  let c: ReturnType<typeof fakeClient>;
+  let reads: number;
+  /** A context whose stdin holds `input` and whose connect is recorded. */
+  const sctx = (input: string, overrides: Partial<CommandContext> = {}): CommandContext => ({
+    ...ctx(),
+    connect: async () => { connected = true; return c; },
+    readStdin: async () => { reads++; return input; },
+    ...overrides,
+  });
+  const typed = () => c.calls.filter(([op]) => op === "type").map(([, a]) => a[0]);
+
+  beforeEach(async () => {
+    connected = false;
+    reads = 0;
+    c = fakeClient({ evaluate: resolving({ e2: "input" }) });
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+  });
+
+  const CASES: Array<[string, string, string]> = [
+    ["one trailing \\n is removed", `${SECRET}\n`, SECRET],
+    ["one trailing \\r\\n is removed", `${SECRET}\r\n`, SECRET],
+    ["input without a line ending is kept whole", SECRET, SECRET],
+    ["only the last of two line endings is removed", `${SECRET}\n\n`, `${SECRET}\n`],
+    ["only the last of two \\r\\n endings is removed", `${SECRET}\r\n\r\n`, `${SECRET}\r\n`],
+    ["trailing spaces and tabs before the newline are kept", `${SECRET} \t\n`, `${SECRET} \t`],
+    ["leading whitespace is kept", `  ${SECRET}\n`, `  ${SECRET}`],
+    ["multi-line input keeps its inner newlines", "line one\nline two\n", "line one\nline two"],
+    ["quotes are kept verbatim", `he said "hi" and 'bye'\n`, `he said "hi" and 'bye'`],
+    ["dollar signs and backticks are kept verbatim", "$HOME $(id) `id` ${x}\n", "$HOME $(id) `id` ${x}"],
+    ["backslashes are kept verbatim", "a\\b\\n\\\\\n", "a\\b\\n\\\\"],
+    ["empty input fills the empty string", "", ""],
+    ["a lone newline fills the empty string", "\n", ""],
+  ];
+  for (const [name, input, expected] of CASES) {
+    test(`types stdin as given: ${name}`, async () => {
+      await cmdFill(sctx(input), "e2", undefined, { stdin: true });
+      expect(typed()).toEqual([expected]);
+    });
+  }
+
+  test("the plain answer names the ref and does not echo the text", async () => {
+    const out = await cmdFill(sctx(`${SECRET}\n`), "e2", undefined, { stdin: true });
+    expect(out).toBe(`filled e2 (textbox "Password")`);
+    expect(out).not.toContain(SECRET);
+  });
+
+  test("the --json answer has no text key and does not echo the text", async () => {
+    const out = await cmdFill(sctx(`${SECRET}\n`, { json: true }), "e2", undefined, { stdin: true });
+    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2" });
+    expect(out).not.toContain(SECRET);
+  });
+
+  test("fill <ref> <text> still echoes the text under --json", async () => {
+    const out = await cmdFill(sctx("", { json: true }), "e2", "visible");
+    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2", text: "visible" });
+    expect(reads).toBe(0);
+  });
+
+  test("--stdin with a <text> positional is a usage error before stdin or the daemon", async () => {
+    await expect(cmdFill(sctx(SECRET), "e2", "x", { stdin: true })).rejects.toThrow(/^usage: .*--stdin/);
+    expect(reads).toBe(0);
+    expect(connected).toBe(false);
+  });
+
+  test("neither <text> nor --stdin is a usage error naming both forms", async () => {
+    await expect(cmdFill(sctx(SECRET), "e2", undefined)).rejects.toThrow(/^usage: bowser fill <ref> <text>.*--stdin/);
+    expect(reads).toBe(0);
+    expect(connected).toBe(false);
+  });
+
+  test("stdin is read before any daemon request", async () => {
+    const order: string[] = [];
+    await cmdFill(
+      sctx("", {
+        readStdin: async () => { order.push("stdin"); return SECRET; },
+        connect: async () => { order.push("connect"); return c; },
+      }),
+      "e2", undefined, { stdin: true },
+    );
+    expect(order).toEqual(["stdin", "connect"]);
+  });
+
+  test("an error after reading stdin does not contain the text", async () => {
+    // Wrong-kind and missing refs are the errors that follow the read.
+    await saveState({ name: session, url: "https://x", title: "X", refs: [
+      { id: "e1", selector: "li", role: "listitem", name: "", tag: "li" },
+    ], updatedAt: Date.now() });
+    for (const ref of ["e1", "e9"]) {
+      const err = await cmdFill(sctx(SECRET), ref, undefined, { stdin: true }).catch((e: Error) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).not.toContain(SECRET);
+    }
+    expect(connected).toBe(false);
+  });
+
+  test("the registry's fill reads stdin under --stdin", async () => {
+    await findCommand("fill")!.run(sctx(`${SECRET}\n`), { positional: ["e2"], flags: { stdin: true } });
+    expect(typed()).toEqual([SECRET]);
+  });
+
+  test("the registry's fill refuses --stdin with a <text> positional", async () => {
+    await expect(
+      findCommand("fill")!.run(sctx(SECRET), { positional: ["e2", "x"], flags: { stdin: true } }),
+    ).rejects.toThrow(/^usage:/);
+    expect(connected).toBe(false);
+  });
+
+  test("the registry's fill without <text> or --stdin is a usage error, not an empty fill", async () => {
+    await expect(findCommand("fill")!.run(sctx(SECRET), { positional: ["e2"], flags: {} })).rejects.toThrow(/^usage:/);
+    expect(connected).toBe(false);
+  });
+
+  test("the registry's fill <ref> \"\" still fills the empty string", async () => {
+    await findCommand("fill")!.run(sctx(SECRET), { positional: ["e2", ""], flags: {} });
+    expect(typed()).toEqual([""]);
+    expect(reads).toBe(0);
+  });
+
+  test("the default reader refuses a terminal with a usage error and does not read", async () => {
+    let read = false;
+    await expect(readStdin({ isTTY: true }, async () => { read = true; return SECRET; })).rejects.toThrow(/^usage: .*--stdin/);
+    expect(read).toBe(false);
+  });
+
+  test("the default reader reads a pipe", async () => {
+    expect(await readStdin({ isTTY: false }, async () => SECRET)).toBe(SECRET);
+    expect(await readStdin({}, async () => SECRET)).toBe(SECRET);
+  });
+
+  test("the CLI exits 1 on --stdin plus <text>, without a daemon or echoing stdin", async () => {
+    const home = await mkdtemp(join(tmpdir(), "bowser-stdin-"));
+    const prevHome = process.env.HOME;
+    const inHome = async <T>(fn: () => Promise<T>): Promise<T> => {
+      process.env.HOME = home;
+      try { return await fn(); } finally { process.env.HOME = prevHome; }
+    };
+    try {
+      await inHome(() => saveState({ name: "stdin", url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() }));
+      const p = Bun.spawn({
+        cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", "stdin", "fill", "e2", "x", "--stdin"],
+        // No inherited backend settings: an invalid BOWSER_BACKEND would fail
+        // this for the wrong reason.
+        env: { ...process.env, HOME: home, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined },
+        stdin: new TextEncoder().encode(`${SECRET}\n`),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [code, stdout, stderr] = await Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
+      expect(stderr).toStartWith("bowser: usage:");
+      expect(stdout + stderr).not.toContain(SECRET);
+      expect(code).toBe(1);
+      expect(existsSync(await inHome(async () => pidPath("stdin")))).toBe(false);
+    } finally {
+      const pid = Number(await inHome(() => Bun.file(pidPath("stdin")).text()).catch(() => ""));
+      if (pid > 0) try { process.kill(pid); } catch {}
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
