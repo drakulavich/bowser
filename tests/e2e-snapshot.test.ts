@@ -9,14 +9,11 @@
 // (tests/fixtures/snapshot-*.html; playwright-cli 0.1.13, Edge, same way),
 // for rules the other pages miss.
 //
-// Documented deviations (each swaps named golden lines, see Deviation; the
-// golden files stay playwright-cli's text):
-// - WebKit, todo-app-added: a mouse click does not focus a <button> on macOS,
-//   so [active] stays on <body> instead of moving to "Add".
-// - Chromium, todo-app-toggled: bowser's `check` toggles via el.click() and
-//   moves no focus, so "Add" keeps [active] where playwright-cli's real click
-//   left it on <body>.
-// - WebKit, kitchen-sink and probe: links without their own cursor style have
+// Documented deviations, WebKit against the Edge captures (each swaps named
+// golden lines, see Deviation; the golden files stay playwright-cli's text):
+// - todo-app-added: a mouse click does not focus a <button> on macOS, so
+//   [active] stays on <body> instead of moving to "Add".
+// - kitchen-sink and probe: links without their own cursor style have
 //   computed cursor `auto` on WebKit, so they print no [cursor=pointer].
 //
 // Skipped by default. Run with: BOWSER_E2E=1 bun test tests/e2e-snapshot.test.ts
@@ -26,7 +23,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdCheck, cmdClick, cmdFill, cmdResize } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
@@ -42,7 +38,7 @@ async function golden(name: string): Promise<string> {
   return (await Bun.file(join(FIXTURES, "snapshots", `${name}.yaml`)).text()).replace(/\n$/, "");
 }
 
-/** A line of a golden that one backend prints differently, and what it prints
+/** A line of a golden that WebKit prints differently, and what it prints
  *  instead. Each use says why; the golden itself stays playwright-cli's text. */
 type Deviation = { line: string; becomes: string };
 
@@ -58,7 +54,7 @@ function withDeviations(text: string, deviations: Deviation[]): string {
   return lines.join("\n");
 }
 
-/** WebKit's UA stylesheet leaves a link's computed cursor at `auto` (Chromium
+/** WebKit's UA stylesheet leaves a link's computed cursor at `auto` (Edge
  *  sets `pointer`), so on WebKit a link without an explicit `cursor` style
  *  prints no [cursor=pointer]. An engine difference, not a walker bug. The
  *  links are named so one with its own `cursor:pointer` style still counts. */
@@ -108,22 +104,17 @@ const EDITABLE_HTML = `<!doctype html>
 <html><head><title>Editable</title></head>
 <body><div id="notes" contenteditable="true" role="textbox" aria-label="Notes" style="min-height:2em">old text</div></body></html>`;
 
-runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveBackend)", () => {
+runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
   let tmp: string;
   let origHome: string | undefined;
   let server: ReturnType<typeof Bun.serve> | undefined;
   let base: string;
-  let backend: "webkit" | "chrome";
 
   beforeAll(async () => {
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-snapshot-"));
     process.env.HOME = tmp;
-    backend = resolveBackend().kind;
-    if (backend === "chrome" && !detectChromium()) {
-      throw new Error("BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found.");
-    }
     const pages: Record<string, string> = {
       "/todo-app.html": "todo-app.html",
       "/kitchen-sink.html": "kitchen-sink.html",
@@ -176,12 +167,12 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
     await cmdClick(ctx, "e5");
     const added = tree(await cmdSnapshot(ctx));
     // WebKit on macOS does not focus a <button> on a mouse click (platform
-    // focus rules), so after clicking Add focus stays on <body>. Chromium, like
-    // the Edge capture, focuses the button.
-    const webkitFocus: Deviation[] = backend === "webkit" ? [
+    // focus rules), so after clicking Add focus stays on <body>. The Edge
+    // capture focuses the button.
+    const webkitFocus: Deviation[] = [
       { line: "- generic [ref=e1]:", becomes: "- generic [active] [ref=e1]:" },
       { line: '    - button "Add" [active] [ref=e5] [cursor=pointer]', becomes: '    - button "Add" [ref=e5] [cursor=pointer]' },
-    ] : [];
+    ];
     expect(added).toBe(withDeviations(await golden("todo-app-added"), webkitFocus));
     // Sticky: unchanged elements keep their refs, new ones continue the counter.
     expect(await refNamed("Clear completed")).toBe("e10");
@@ -199,21 +190,16 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
     await cmdCheck(ctx, "e12");
     // playwright-cli's check clicks the checkbox, which takes focus and is then
     // replaced by the re-render, leaving focus on <body>. bowser's check toggles
-    // through el.click(), which moves no focus, so on Chromium the Add button
-    // clicked before keeps [active]. (On WebKit Add never took focus, so the
-    // golden matches as is.) An action-command difference, not a walker bug.
-    const chromeFocus: Deviation[] = backend === "chrome" ? [
-      { line: "- generic [active] [ref=e1]:", becomes: "- generic [ref=e1]:" },
-      { line: '    - button "Add" [ref=e5] [cursor=pointer]', becomes: '    - button "Add" [active] [ref=e5] [cursor=pointer]' },
-    ] : [];
-    expect(tree(await cmdSnapshot(ctx))).toBe(withDeviations(await golden("todo-app-toggled"), chromeFocus));
+    // through el.click(), which moves no focus; on WebKit Add never took focus,
+    // so focus is on <body> too and the golden matches as is.
+    expect(tree(await cmdSnapshot(ctx))).toBe(await golden("todo-app-toggled"));
   }, 60_000);
 
   test("kitchen sink at 1280x720 prints playwright-cli's tree, refs restarting at e1", async () => {
     await cmdGoto(ctx, `${base}/kitchen-sink.html`);
     await cmdResize(ctx, "1280", "720");
-    // The page updates its size text from the resize event, which Chromium
-    // fires on its next frame; re-snapshot until it lands (refs are sticky, so
+    // The page updates its size text from the resize event, which may fire
+    // on the next frame; re-snapshot until it lands (refs are sticky, so
     // the extra snapshots change nothing else).
     let out = await cmdSnapshot(ctx);
     for (let i = 0; i < 40 && !out.includes(": 1280x720"); i++) {
@@ -221,15 +207,13 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens (backend from resolveB
       out = await cmdSnapshot(ctx);
     }
     const want = await golden("kitchen-sink");
-    expect(tree(out)).toBe(withDeviations(want, backend === "webkit" ? webkitLinkCursor(want, ["Page two"]) : []));
+    expect(tree(out)).toBe(withDeviations(want, webkitLinkCursor(want, ["Page two"])));
   }, 60_000);
 
   test("probe page: names, text merging, quoting and state attributes match playwright-cli", async () => {
     await cmdGoto(ctx, `${base}/probe.html`);
     const want = await golden("probe");
-    expect(tree(await cmdSnapshot(ctx))).toBe(withDeviations(want, backend === "webkit"
-      ? webkitLinkCursor(want, ["Home", 'Say "hi"', "inline link", "link"])
-      : []));
+    expect(tree(await cmdSnapshot(ctx))).toBe(withDeviations(want, webkitLinkCursor(want, ["Home", 'Say "hi"', "inline link", "link"])));
   }, 60_000);
 
   test("inline text-only generics flatten like playwright-cli's; a pointer-events:none iframe gets no ref", async () => {

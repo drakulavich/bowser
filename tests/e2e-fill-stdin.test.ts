@@ -9,7 +9,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
@@ -23,7 +22,7 @@ const PAGE = `<!doctype html><html><head><title>Login</title></head><body>
 <form><label>Username <input id="user" type="text"></label>
 <label>Password <input id="pw" type="password"></label></form></body></html>`;
 
-runOrSkip("e2e: fill --stdin keeps a secret out of argv and output (backend from resolveBackend)", () => {
+runOrSkip("e2e: fill --stdin keeps a secret out of argv and output", () => {
   const ctx: CommandContext = { session: "fillstdin", json: false };
   let tmp: string;
   let origHome: string | undefined;
@@ -33,9 +32,6 @@ runOrSkip("e2e: fill --stdin keeps a secret out of argv and output (backend from
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-fillstdin-"));
     process.env.HOME = tmp;
-    if (resolveBackend().kind === "chrome" && !detectChromium()) {
-      throw new Error("BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found.");
-    }
     server = Bun.serve({
       port: 0,
       fetch: () => new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }),

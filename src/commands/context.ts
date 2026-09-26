@@ -78,9 +78,7 @@ export function reply(ctx: CommandContext, json: Record<string, unknown>, text: 
 /** One answered dialog, as `["confirm" dialog with message "sure?"]: accepted`. */
 function dialogLine(d: DialogReport): string {
   // No hint for an alert: accepting and dismissing it are the same.
-  const what = d.state === "failed" ? `could not be answered (${d.error ?? "unknown error"})`
-    : d.unanswered && d.type !== "alert" ? "dismissed (run dialog-accept before the action to accept it)"
-    : d.state;
+  const what = d.unanswered && d.type !== "alert" ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
   return `[${JSON.stringify(d.type)} dialog with message ${JSON.stringify(d.message)}]: ${what}`;
 }
 

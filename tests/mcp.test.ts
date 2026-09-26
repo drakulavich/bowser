@@ -329,7 +329,7 @@ describe("bowser mcp never reads its own stdin for a command", () => {
     const proc = Bun.spawn(
       [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "mcp"],
       {
-        env: { ...process.env, HOME: home, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined },
+        env: { ...process.env, HOME: home },
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",

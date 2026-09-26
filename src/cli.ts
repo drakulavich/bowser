@@ -20,7 +20,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
  *  dialogs follow the message as `### Modal state`. */
 export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
   const msg = err instanceof Error ? err.message : String(err);
-  const userError = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i.test(msg);
+  const userError = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|ref '.*' is not an? |no open page|bowser requires macOS)/i.test(msg);
   const modal = failedModalState(err);
   return { stderr: `bowser: ${msg}${modal ? `\n${modal}` : ""}`, code: userError ? 1 : 2 };
 }

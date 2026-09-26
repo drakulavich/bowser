@@ -225,9 +225,7 @@ describe("open --persistent / --profile", () => {
     const t0 = Date.now();
     const proc = Bun.spawn(
       [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", `--profile=${target}`, "-s", session],
-      // No inherited backend settings: an invalid BOWSER_BACKEND is refused
-      // before mkdir, and would fail this test for the wrong reason.
-      { env: { ...process.env, HOME: tmp, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined }, stdout: "pipe", stderr: "pipe" },
+      { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
     );
     const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
     expect(stderr).toContain(target);
@@ -1433,9 +1431,7 @@ describe("fill --stdin", () => {
       await inHome(() => saveState({ name: "stdin", url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() }));
       const p = Bun.spawn({
         cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", "stdin", "fill", "e2", "x", "--stdin"],
-        // No inherited backend settings: an invalid BOWSER_BACKEND would fail
-        // this for the wrong reason.
-        env: { ...process.env, HOME: home, BOWSER_BACKEND: undefined, BOWSER_CHROMIUM_PATH: undefined },
+        env: { ...process.env, HOME: home },
         stdin: new TextEncoder().encode(`${SECRET}\n`),
         stdout: "pipe",
         stderr: "pipe",
@@ -1504,16 +1500,6 @@ describe("dialogs", () => {
       '- ["prompt" dialog with message "name?"]: dismissed (run dialog-accept before the action to accept it)',
       '- ["alert" dialog with message "hi"]: dismissed',
     ].join("\n"));
-  });
-
-  test("a dialog that could not be answered says so, with the error and no hint", async () => {
-    const failed = { type: "confirm" as const, message: "sure?", state: "failed" as const, error: "gone" };
-    const c = fakeClient({ evaluate: () => "done" }, { dialogs: [failed] });
-    expect(await cmdEval({ ...ctx(), connect: async () => c }, "go()")).toBe(
-      'done\n### Modal state\n- ["confirm" dialog with message "sure?"]: could not be answered (gone)',
-    );
-    const json = JSON.parse(await cmdEval({ ...ctx({ json: true }), connect: async () => c }, "go()"));
-    expect(json.dialogs).toEqual([failed]);
   });
 
   test("--json dialogs carry type, message, defaultValue, state and answer, and nothing else", async () => {

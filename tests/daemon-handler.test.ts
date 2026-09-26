@@ -4,9 +4,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Browser, DialogListener } from "../src/browser.ts";
+import type { Browser } from "../src/browser.ts";
 import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
-import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogState } from "../src/daemon/protocol.ts";
+import { IS_URGENT, type DaemonRequest, type DaemonResponse } from "../src/daemon/protocol.ts";
 import { createSerializer } from "../src/serialize.ts";
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
@@ -31,12 +31,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     forward: rec("forward", undefined),
     reload: rec("reload", undefined),
     close: rec("close", undefined),
-    cdpAvailable: () => true,
-    cdp: rec("cdp", { cookies: [{ name: "a", value: "1" }], success: true }),
-    subscribe: (event) => { calls.push(["subscribe", [event]]); return true; },
-    // Chrome-like: dialogs arrive as events. webkitBrowser() below has the page shim.
-    watchDialogs: () => true,
-    answerDialog: rec("answerDialog", undefined),
+    watchNavigation: () => {},
     ...over,
   };
   return b;
@@ -60,6 +55,10 @@ function fakeBrowserWithPage(url: string, title: string): Browser & { setPage(ur
 }
 
 const req = (op: DaemonRequest["op"], args?: unknown[]): DaemonRequest => ({ id: 7, op, args });
+const rep = (op: DaemonRequest["op"], args?: unknown[]): DaemonRequest => ({ ...req(op, args), report: true });
+
+/** The browser calls an op made, without the dialog shim's page reads. */
+const actions = (b: { calls: Array<[string, unknown[]]> }) => b.calls.filter(([n]) => n !== "evaluate");
 
 describe("createHandler", () => {
   test("ping answers pong without touching the browser", async () => {
@@ -105,7 +104,7 @@ describe("createHandler", () => {
     await h(req("navigate", ["https://y/"]));
     await h(req("select", ["#s", "blue"]));
     await h(req("resize", [900, 700]));
-    expect(b.calls).toEqual([["navigate", ["https://y/"]], ["select", ["#s", "blue"]], ["resize", [900, 700]]]);
+    expect(actions(b)).toEqual([["navigate", ["https://y/"]], ["select", ["#s", "blue"]], ["resize", [900, 700]]]);
   });
 
   test("check and uncheck map to setChecked", async () => {
@@ -113,7 +112,7 @@ describe("createHandler", () => {
     const h = createHandler(b);
     await h(req("check", ["#c"]));
     await h(req("uncheck", ["#c"]));
-    expect(b.calls).toEqual([["setChecked", ["#c", true]], ["setChecked", ["#c", false]]]);
+    expect(actions(b)).toEqual([["setChecked", ["#c", true]], ["setChecked", ["#c", false]]]);
   });
 
   test("screenshot with a path writes the file and returns { path }", async () => {
@@ -212,34 +211,42 @@ test("a queued op that overruns its budget answers with a timeout error", async 
   ]);
 });
 
-test("an op that answers a dialog and then overruns its budget: the timeout reply carries the report, and a later one waits for the next printing request", async () => {
+test("an op that overruns its budget: the timeout reply carries the reports queued before it, and its own late ones wait for the next printing request", async () => {
   let release!: () => void;
   const hang = new Promise<void>((r) => { release = r; });
-  const b = dialogBrowser();
-  b.click = async () => { b.on().opened(confirmBox); await hang; b.on().opened(promptBox); };
+  const b = webkitBrowser();
+  b.click = async () => { await hang; b.page("prompt", "name?", "def"); };
   const handle = createHandler(b);
+  // An op that prints nothing reads the page's confirm and leaves it queued.
+  await handle(req("evaluate", ["window.confirm('sure?')"]));
   const replies: DaemonResponse[] = [];
   const lane = { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r: DaemonResponse) => { replies.push(r); }, timedOut: handle.timedOut };
   dispatch({ id: 1, op: "click", args: ["#go"], report: true }, lane);
   await Bun.sleep(80);
   expect(replies).toEqual([{
     id: 1, ok: false, error: "operation 'click' timed out after 20ms",
-    dialogs: [{ ...confirmBox, state: "dismissed", unanswered: true }],
+    dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
   }]);
   release();
   await Bun.sleep(20);
   // The late op's report was not spent on a reply nobody reads.
-  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
+  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
+    { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
+  ]);
 });
 
 test("a timed-out request that prints nothing leaves the queued reports alone", async () => {
-  const b = dialogBrowser();
-  b.click = async () => { b.on().opened(confirmBox); await new Promise(() => {}); };
+  const b = webkitBrowser();
+  b.click = async () => { await new Promise(() => {}); };
   const handle = createHandler(b);
+  await handle(req("evaluate", ["window.confirm('sure?')"]));
   const replies: DaemonResponse[] = [];
   dispatch({ id: 1, op: "click", args: ["#go"] }, { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r) => { replies.push(r); }, timedOut: handle.timedOut });
   await Bun.sleep(60);
   expect(replies).toEqual([{ id: 1, ok: false, error: "operation 'click' timed out after 20ms" }]);
+  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
+    { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
+  ]);
 });
 
 test("a non-urgent op waits its turn behind the one before it", async () => {
@@ -268,203 +275,8 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
   expect(replies).toEqual(["click", "type"]);
 });
 
-// A browser whose page can open a dialog: the handler's dialog listener is
-// captured, so a test fires `opened` exactly when the real page would, from
-// inside the op that caused it.
-function dialogBrowser(over: Partial<Browser> = {}) {
-  let on: DialogListener | undefined;
-  const b = fakeBrowser({
-    watchDialogs: (l) => { on = l; return true; },
-    ...over,
-  });
-  return Object.assign(b, { on: () => on! });
-}
-
-const confirmBox: DialogState = { type: "confirm", message: "sure?" };
-const promptBox: DialogState = { type: "prompt", message: "name?", defaultValue: "def" };
-const answers = (b: { calls: Array<[string, unknown[]]> }) => b.calls.filter(([n]) => n === "answerDialog");
-
-const rep = (op: DaemonRequest["op"], args?: unknown[]): DaemonRequest => ({ ...req(op, args), report: true });
-
-describe("dialogs: answered the moment they open", () => {
-  test("the handler listens for dialogs as soon as it exists, before any op navigates", () => {
-    const b = dialogBrowser();
-    createHandler(b);
-    expect(b.on()).toBeDefined();
-  });
-
-  test("with no one-shot answer a dialog is dismissed at once, and the op that opened it replies normally with it", async () => {
-    const b = dialogBrowser();
-    b.click = async () => { b.on().opened(confirmBox); };
-    const res = await createHandler(b)(rep("click", ["#go"]));
-    expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
-    expect(res).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "dismissed", unanswered: true }] });
-  });
-
-  test("a report is given once: the next reply carries none", async () => {
-    const b = dialogBrowser();
-    b.click = async () => { b.on().opened(confirmBox); };
-    const h = createHandler(b);
-    await h(rep("click", ["#go"]));
-    expect(await h(rep("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
-  });
-
-  test("two dialogs from one op are both answered and reported, in order", async () => {
-    const b = dialogBrowser();
-    b.click = async () => { b.on().opened(promptBox); b.on().opened({ type: "alert", message: "hi" }); };
-    const res = await createHandler(b)(rep("click", ["#go"]));
-    expect(res.dialogs?.map((d) => d.type)).toEqual(["prompt", "alert"]);
-    expect(answers(b)).toHaveLength(2);
-  });
-
-  test("dialog-answer is a queued op that sets a one-shot answer and touches no page", async () => {
-    expect(IS_URGENT.has("dialog-answer")).toBe(false);
-    const b = dialogBrowser();
-    expect(await createHandler(b)(req("dialog-answer", [true, "typed"]))).toEqual({ id: 7, ok: true });
-    expect(b.calls).toEqual([]);
-  });
-
-  test("a one-shot accept answers the next prompt with its text, and is used once", async () => {
-    const b = dialogBrowser();
-    b.click = async () => { b.on().opened(promptBox); };
-    const h = createHandler(b);
-    await h(req("dialog-answer", [true, "typed"]));
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "accepted", answer: "typed" }]);
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
-    expect(answers(b)).toEqual([["answerDialog", [true, "typed"]], ["answerDialog", [false, undefined]]]);
-  });
-
-  test("a one-shot accept with no text answers a prompt with its default value; a confirm gets no prompt text", async () => {
-    const b = dialogBrowser();
-    const h = createHandler(b);
-    await h(req("dialog-answer", [true]));
-    b.on().opened(promptBox);
-    await h(req("dialog-answer", [true]));
-    b.on().opened(confirmBox);
-    expect(answers(b)).toEqual([["answerDialog", [true, "def"]], ["answerDialog", [true, undefined]]]);
-  });
-
-  test("a one-shot dismiss is reported dismissed without the hint", async () => {
-    const b = dialogBrowser();
-    b.click = async () => { b.on().opened(promptBox); };
-    const h = createHandler(b);
-    await h(req("dialog-answer", [false]));
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed" }]);
-  });
-
-  test("setting a one-shot answer replaces the previous one", async () => {
-    const b = dialogBrowser();
-    const h = createHandler(b);
-    await h(req("dialog-answer", [true]));
-    await h(req("dialog-answer", [false]));
-    b.on().opened(confirmBox);
-    expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
-  });
-
-  test("a navigation starting or landing drops the one-shot answer", async () => {
-    const b = dialogBrowser();
-    const h = createHandler(b);
-    await h(req("dialog-answer", [true]));
-    b.on().navigation();
-    b.on().opened(confirmBox);
-    expect(answers(b)).toEqual([["answerDialog", [false, undefined]]]);
-  });
-
-  test("beforeunload is accepted so the navigation proceeds, and leaves the one-shot answer for the next dialog", async () => {
-    const b = dialogBrowser();
-    const h = createHandler(b);
-    await h(req("dialog-answer", [true]));
-    b.on().opened({ type: "beforeunload", message: "" });
-    b.on().opened(confirmBox);
-    expect(answers(b)).toEqual([["answerDialog", [true, undefined]], ["answerDialog", [true, undefined]]]);
-    expect((await h(rep("evaluate", ["1"]))).dialogs?.map((d) => d.state)).toEqual(["accepted", "accepted"]);
-  });
-
-  test("an answer that fails is retried once as a dismiss, and reported as what happened", async () => {
-    let calls = 0;
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); if (calls++ === 0) throw new Error("gone"); } });
-    b.click = async () => { b.on().opened(confirmBox); };
-    const h = createHandler(b);
-    await h(req("dialog-answer", [true]));
-    expect(await h(rep("click", ["#go"]))).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "dismissed" }] });
-    expect(answers(b)).toEqual([["answerDialog", [true, undefined]], ["answerDialog", [false, undefined]]]);
-  });
-
-  test("an answer that fails twice is reported as not answered, with the error, and the op still replies", async () => {
-    const b = dialogBrowser({ answerDialog: async (...a) => { b.calls.push(["answerDialog", a]); throw new Error("gone"); } });
-    b.click = async () => { b.on().opened(confirmBox); };
-    expect(await createHandler(b)(rep("click", ["#go"]))).toEqual({ id: 7, ok: true, dialogs: [{ ...confirmBox, state: "failed", error: "gone" }] });
-    expect(answers(b)).toHaveLength(2);
-  });
-
-  test("an answer that never settles is reported failed within one bound, and a later dialog is still reported, in order", async () => {
-    const b = dialogBrowser({ answerDialog: () => new Promise<void>(() => {}) });
-    b.click = async () => { b.on().opened(confirmBox); };
-    const h = createHandler(b);
-    const t0 = performance.now();
-    const first = await h(rep("click", ["#go"]));
-    expect(performance.now() - t0).toBeLessThan(2000 + 500);
-    expect(first.dialogs).toEqual([{ ...confirmBox, state: "failed", error: "answer timed out" }]);
-    b.answerDialog = async () => {};
-    b.click = async () => { b.on().opened(promptBox); };
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...promptBox, state: "dismissed", unanswered: true }]);
-  }, 15_000);
-
-  test("a first answer that times out is followed by a dismiss, so a dialog still open closes; the report stays failed whatever the dismiss does", async () => {
-    // The outcome is unknown: a slow accept may still land, and then the
-    // dismiss fails with "no dialog". So the dismiss is for liveness only.
-    let n = 0;
-    const b = dialogBrowser({
-      answerDialog: (...a) => { b.calls.push(["answerDialog", a]); return n++ === 0 ? new Promise<void>(() => {}) : Promise.resolve(); },
-    });
-    b.click = async () => { b.on().opened(confirmBox); };
-    const h = createHandler(b);
-    await h(req("dialog-answer", [true]));
-    const t0 = performance.now();
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ ...confirmBox, state: "failed", error: "answer timed out" }]);
-    expect(performance.now() - t0).toBeLessThan(2000 + 500);
-    expect(answers(b)).toEqual([["answerDialog", [true, undefined]], ["answerDialog", [false, undefined]]]);
-  }, 15_000);
-
-  test("two dialogs whose answers settle out of order are reported in the order they opened", async () => {
-    let n = 0;
-    const b = dialogBrowser({ answerDialog: async () => { if (n++ === 0) await Bun.sleep(30); } });
-    b.click = async () => { b.on().opened(promptBox); b.on().opened({ type: "alert", message: "hi" }); };
-    const res = await createHandler(b)(rep("click", ["#go"]));
-    expect(res.dialogs?.map((d) => d.type)).toEqual(["prompt", "alert"]);
-  });
-
-  test("urgent replies carry no dialog reports, and do not consume them", async () => {
-    const b = dialogBrowser();
-    const h = createHandler(b);
-    b.on().opened(confirmBox);
-    expect(await h(rep("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
-    expect((await h(rep("evaluate", ["1"]))).dialogs).toHaveLength(1);
-  });
-test("a request that prints no dialogs leaves the queued reports for the next one that does", async () => {
-    const b = dialogBrowser();
-    const h = createHandler(b);
-    b.on().opened(confirmBox); // a page timer, between commands
-    expect(await h(req("evaluate", ["1"]))).toEqual({ id: 7, ok: true, result: 42 });
-    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ ...confirmBox, state: "dismissed", unanswered: true }]);
-  });
-
-  for (const op of ["navigate", "reload", "back", "forward"] as const) {
-    test(`${op} drops the one-shot answer before it navigates, so the new page's load-time dialog is dismissed`, async () => {
-      const b = dialogBrowser();
-      // The new document's inline script opens a dialog before any navigation event arrives.
-      const opens = async () => { b.on().opened(confirmBox); };
-      Object.assign(b, { [op]: opens });
-      const h = createHandler(b);
-      await h(req("dialog-answer", [true]));
-      const res = await h(rep(op, op === "navigate" ? ["https://x/load"] : []));
-      expect(res.dialogs).toEqual([{ ...confirmBox, state: "dismissed", unanswered: true }]);
-    });
-  }
-});
-
-// A webkit browser: no dialog events (watchDialogs is false), and a page that
-// is a plain object the page scripts really run against. Its engine answers a
+// A WebKit browser: no dialog events, and a page that is a plain object the
+// page scripts really run against. Its engine answers a
 // dialog no shim catches the way WebKit's does: dismissed, and nobody told.
 // `load()` is a new document, as the page navigating itself; `navigate` is one too.
 // Leaving a document fires its pagehide listeners. Real WebKit also calls the
@@ -472,7 +284,7 @@ test("a request that prints no dialogs leaves the queued reports for the next on
 // `callback: false` and `pagehide: false` take those away, to show what
 // holds without them.
 function webkitBrowser({ callback = true, pagehide = true } = {}) {
-  let on: DialogListener | undefined;
+  let on: (() => void) | undefined;
   const engine = () => {
     const hide: Array<() => void> = [];
     return {
@@ -483,7 +295,7 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
   };
   let win = engine();
   const b = fakeBrowser({
-    watchDialogs: (l) => { on = l; return false; },
+    watchNavigation: (fn) => { on = fn; },
     // Like Bun.WebView: the expression is awaited and comes back through JSON.
     evaluate: async (expr) => {
       b.calls.push(["evaluate", [expr]]);
@@ -493,7 +305,7 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
     },
     navigate: async (url) => { b.calls.push(["navigate", [url]]); load(); },
   });
-  const go = (next: typeof win) => { (win.leave as () => void)(); win = next; if (callback) on!.navigation(); };
+  const go = (next: typeof win) => { (win.leave as () => void)(); win = next; if (callback) on!(); };
   const load = () => go(engine());
   /** The page's own call, as a click handler makes it. */
   const page = <T>(name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (win[name] as (...a: unknown[]) => T)(...a);
@@ -638,6 +450,14 @@ describe("dialogs on webkit: the page shim answers them", () => {
     });
   });
 
+  test("urgent replies carry no dialog reports, and do not consume them", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    await h(req("evaluate", ["window.confirm('sure?')"]));
+    expect(await h(rep("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toHaveLength(1);
+  });
+
   test("a dialog a timer opened is read by the next op but waits for one that prints it", async () => {
     const b = webkitBrowser();
     const h = createHandler(b);
@@ -645,11 +465,5 @@ describe("dialogs on webkit: the page shim answers them", () => {
     b.page("confirm", "later");
     expect(await h(req("evaluate", ["2"]))).toEqual({ id: 7, ok: true, result: 2 });
     expect((await h(rep("evaluate", ["3"]))).dialogs).toEqual([{ type: "confirm", message: "later", state: "dismissed", unanswered: true }]);
-  });
-
-  test("on chrome nothing is shimmed: an eval reaches the page as given", async () => {
-    const b = fakeBrowser();
-    await createHandler(b)(rep("evaluate", ["1 + 1"]));
-    expect(b.calls).toEqual([["evaluate", ["1 + 1"]]]);
   });
 });

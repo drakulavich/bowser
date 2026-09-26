@@ -15,7 +15,6 @@ import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, resolveBackend } from "../src/backend.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { pidPath, socketPath } from "../src/daemon/client.ts";
 import { sessionDir } from "../src/state.ts";
@@ -31,12 +30,6 @@ runOrSkip("e2e: an unreachable daemon does not survive close", () => {
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-orphan-"));
     process.env.HOME = tmp;
-    if (resolveBackend().kind === "chrome" && !detectChromium()) {
-      throw new Error(
-        "BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found. " +
-          "Install chromium-headless-shell, set BOWSER_CHROMIUM_PATH, or set BOWSER_BACKEND=webkit on macOS.",
-      );
-    }
   });
 
   afterAll(async () => {

@@ -1,11 +1,8 @@
 // End-to-end: `open --persistent` / `open --profile=<dir>` keep cookies and
 // localStorage across `close` and a fresh daemon; without either flag they are
-// gone. Runs on whichever backend resolves, so run it once per backend:
+// gone. Run with:
 //
-//   BOWSER_E2E=1 BOWSER_BACKEND=webkit bun test tests/e2e-persistent.test.ts
-//   BOWSER_E2E=1 BOWSER_BACKEND=chrome \
-//     BOWSER_CHROMIUM_PATH=$(find ~/.bowser/chromium -type f -name chrome-headless-shell | head -1) \
-//     bun test tests/e2e-persistent.test.ts
+//   BOWSER_E2E=1 bun test tests/e2e-persistent.test.ts
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
@@ -13,7 +10,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdClose, cmdOpen, type OpenOptions } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
@@ -37,9 +33,6 @@ runOrSkip("e2e: persistent profile survives close", () => {
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-persist-e2e-"));
     process.env.HOME = tmp;
-    if (resolveBackend().kind === "chrome" && !detectChromium()) {
-      throw new Error("BOWSER_E2E=1 resolved to chrome but no Chromium was found; set BOWSER_CHROMIUM_PATH.");
-    }
     // A real http origin: data: URLs have no localStorage and no cookies.
     server = Bun.serve({
       port: 0,

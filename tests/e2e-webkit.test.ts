@@ -1,9 +1,9 @@
-// End-to-end on the WebKit backend: every command that works without CDP,
+// End-to-end on WebKit: every command,
 // driven the way an agent would drive it (snapshot → ref → act → read back).
 // Page state is verified with `eval` so a passing test proves the DOM
 // changed, not just that the command returned.
 //
-// macOS only (webkit is a macOS backend). Run with:
+// macOS only (WebKit is). Run with:
 //   BOWSER_E2E=1 bun test tests/e2e-webkit.test.ts
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -31,7 +31,6 @@ const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.ski
 runOrSkip("e2e: WebKit agent loop", () => {
   let tmp: string;
   let origHome: string | undefined;
-  let origBackend: string | undefined;
   let server: { stop: () => void } | undefined;
   let base: string;
 
@@ -41,12 +40,8 @@ runOrSkip("e2e: WebKit agent loop", () => {
 
   beforeAll(async () => {
     origHome = process.env.HOME;
-    origBackend = process.env.BOWSER_BACKEND;
     tmp = await mkdtemp(join(tmpdir(), "bowser-webkit-"));
     process.env.HOME = tmp;
-    // Force webkit even on a machine with `bowser install`ed Chromium. The
-    // daemon inherits the live env, so this reaches it.
-    process.env.BOWSER_BACKEND = "webkit";
 
     const sink = await readFile(join(import.meta.dir, "fixtures/kitchen-sink.html"), "utf8");
     const two = `<!doctype html><html><head><title>Page Two</title></head><body><main><h1>Two</h1><a href="/">Back home</a></main></body></html>`;
@@ -65,8 +60,6 @@ runOrSkip("e2e: WebKit agent loop", () => {
     try { await cmdClose(ctx); } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
-    if (origBackend === undefined) delete process.env.BOWSER_BACKEND;
-    else process.env.BOWSER_BACKEND = origBackend;
     await rm(tmp, { recursive: true, force: true });
   });
 

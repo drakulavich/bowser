@@ -10,7 +10,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { detectChromium, resolveBackend } from "../src/backend.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdSelect, cmdUncheck,
@@ -33,7 +32,7 @@ function tree(out: string): string {
   return m[1]!;
 }
 
-runOrSkip("e2e: a stale ref fails at once (backend from resolveBackend)", () => {
+runOrSkip("e2e: a stale ref fails at once", () => {
   const ctx: CommandContext = { session: "staleref", json: false };
   let tmp: string;
   let origHome: string | undefined;
@@ -44,9 +43,6 @@ runOrSkip("e2e: a stale ref fails at once (backend from resolveBackend)", () => 
     origHome = process.env.HOME;
     tmp = await mkdtemp(join(tmpdir(), "bowser-staleref-"));
     process.env.HOME = tmp;
-    if (resolveBackend().kind === "chrome" && !detectChromium()) {
-      throw new Error("BOWSER_E2E=1 resolved to the chrome backend but no Chromium binary was found.");
-    }
     const pages: Record<string, string> = {
       "/todo-app.html": "todo-app.html",
       "/kitchen-sink.html": "kitchen-sink.html",

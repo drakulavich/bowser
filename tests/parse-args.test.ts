@@ -86,9 +86,9 @@ describe("parse", () => {
 });
 
 describe("a removed command", () => {
-  // install fetched Chromium and the cookie commands needed CDP; both went
-  // with the Chrome backend. Each is now an ordinary unknown command, a user
-  // error (exit 1), before any daemon work.
+  // install and the cookie commands went with the second engine: bowser is
+  // WebKit only. Each is now an ordinary unknown command, a user error
+  // (exit 1), before any daemon work.
   for (const name of ["install", "cookie-list", "cookie-get", "cookie-set", "cookie-delete", "cookie-clear"]) {
     test(`${name} is an unknown command, exit 1`, async () => {
       const err = await run([name]).then(() => undefined, (e: unknown) => e);

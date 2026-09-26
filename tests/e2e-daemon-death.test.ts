@@ -1,6 +1,5 @@
 // A command whose daemon dies mid-request must fail, not hang: the CLI seam of
-// docs/superpowers/specs/2026-09-25-daemon-disconnect-design.md. Runs on
-// whichever backend resolves. Run with:
+// docs/superpowers/specs/2026-09-25-daemon-disconnect-design.md. Run with:
 //   BOWSER_E2E=1 bun test tests/e2e-daemon-death.test.ts
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -15,7 +14,7 @@ import { pidPath } from "../src/daemon/client.ts";
 
 // Copied from the user-error check in src/cli.ts (the `import.meta.main`
 // block); a match there means exit code 1 instead of 2.
-const USER_ERROR = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|no open page|invalid BOWSER_BACKEND|BOWSER_BACKEND=webkit)/i;
+const USER_ERROR = /^(usage:|unknown command|unknown flag|invalid --|expected a ref|ref '.*' not found|no open page|bowser requires macOS)/i;
 
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
@@ -23,7 +22,6 @@ const runOrSkip = E2E ? describe : describe.skip;
 runOrSkip("e2e: the daemon dies under a command", () => {
   let tmp: string;
   let origHome: string | undefined;
-  let origBackend: string | undefined;
   let server: { stop: () => void } | undefined;
   let url: string;
   // Resolved when the page fetches /inflight, i.e. once the eval is running
@@ -35,7 +33,6 @@ runOrSkip("e2e: the daemon dies under a command", () => {
 
   beforeAll(async () => {
     origHome = process.env.HOME;
-    origBackend = process.env.BOWSER_BACKEND;
     tmp = await mkdtemp(join(tmpdir(), "bowser-daemon-death-"));
     process.env.HOME = tmp;
     const s = Bun.serve({
@@ -53,8 +50,6 @@ runOrSkip("e2e: the daemon dies under a command", () => {
     try { await cmdClose(ctx); } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
-    if (origBackend === undefined) delete process.env.BOWSER_BACKEND;
-    else process.env.BOWSER_BACKEND = origBackend;
     await rm(tmp, { recursive: true, force: true });
   });
 

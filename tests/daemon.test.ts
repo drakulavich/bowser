@@ -1,15 +1,14 @@
-// Tests that the parent process validates backend config before spawning the
-// (silent, detached) daemon — so a bad BOWSER_BACKEND fails fast with a clear,
-// actionable message instead of being swallowed and surfacing as a 5s startup
-// timeout. See docs/superpowers/specs/2026-06-04-macos-webkit-backend-design.md.
+// The daemon client: socket and pid paths, spawning, the health check, and a
+// daemon that goes away mid-request.
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ensureSessionDir } from "../src/state.ts";
 
+import { reportFailure } from "../src/cli.ts";
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 
@@ -60,7 +59,7 @@ describe("spawned daemon HOME propagation", () => {
   // captured at startup and ignores that runtime mutation — so the daemon resolved
   // socketPath() against the real HOME while the client used the redirected one,
   // and they never met. spawnDaemon must pass `env: { ...process.env }` so a child
-  // sees the live HOME. This asserts that exact propagation without needing Chromium.
+  // sees the live HOME. This asserts that exact propagation without a browser.
   test("a child spawned like the daemon sees a runtime HOME mutation", async () => {
     const orig = process.env.HOME;
     const redirected = `/tmp/bowser-home-prop-${Date.now()}`;
@@ -83,26 +82,36 @@ describe("spawned daemon HOME propagation", () => {
   });
 });
 
-describe("connectOrSpawn backend validation", () => {
-  let origBackend: string | undefined;
+// bowser runs only WebKit's Bun.WebView, which exists only on macOS. The
+// daemon would die opening it, seen by the CLI only as "did not start in
+// time", so the CLI refuses before it spawns one.
+describe("connectOrSpawn on a platform without WebKit", () => {
+  let tmp: string;
+  let origHome: string | undefined;
 
-  beforeEach(() => {
-    origBackend = process.env.BOWSER_BACKEND;
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-platform-"));
+    process.env.HOME = tmp;
   });
 
-  afterEach(() => {
-    if (origBackend !== undefined) process.env.BOWSER_BACKEND = origBackend;
-    else delete process.env.BOWSER_BACKEND;
+  afterAll(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
   });
 
-  test("invalid BOWSER_BACKEND rejects before spawning the daemon", async () => {
-    process.env.BOWSER_BACKEND = "firefox";
-    // A unique session with no running daemon: connect fails, then validation
-    // throws in the catch branch *before* any spawn/poll. Asserting this exact
-    // message (not "did not start in time") proves the fast-fail path.
-    const session = `validate-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    await expect(connectOrSpawn(session)).rejects.toThrow(/invalid BOWSER_BACKEND/);
-  });
+  for (const platform of ["linux", "win32"]) {
+    test(`${platform}: refuses to spawn a daemon, a user error (exit 1)`, async () => {
+      const session = `platform-${platform}`;
+      const started = Date.now();
+      const err = await connectOrSpawn(session, { platform }).then(() => undefined, (e: unknown) => e);
+      expect((err as Error).message).toBe("bowser requires macOS (WebKit)");
+      expect(reportFailure(err).code).toBe(1);
+      // Refused before any spawn: no pidfile, and no wait for a startup timeout.
+      expect(await Bun.file(pidPath(session)).exists()).toBe(false);
+      expect(Date.now() - started).toBeLessThan(2000);
+    });
+  }
 });
 
 // A daemon can hold a connectable socket and never answer — stopped, or blocked

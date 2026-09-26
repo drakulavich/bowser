@@ -6,10 +6,9 @@
 // Wire format is unchanged from before this file existed: newline-delimited
 // JSON, requests `{ id, op, args }`, responses `{ id, ok, result | error }`.
 
-/** A dialog the page opened. `defaultValue` carries CDP's `defaultPrompt`,
- *  renamed here to match the other fields' style; only a prompt has one. */
+/** A dialog the page opened. Only a prompt has a `defaultValue`. */
 export interface DialogState {
-  type: "alert" | "confirm" | "prompt" | "beforeunload";
+  type: "alert" | "confirm" | "prompt";
   message: string;
   defaultValue?: string;
 }
@@ -18,12 +17,9 @@ export interface DialogState {
  *  the moment it opens, with the one-shot answer or else dismissed. The
  *  --json form is this minus `unanswered`. */
 export interface DialogReport extends DialogState {
-  /** "failed": the browser refused both the answer and a dismiss. */
-  state: "accepted" | "dismissed" | "failed";
+  state: "accepted" | "dismissed";
   /** The text an accepted prompt was answered with. */
   answer?: string;
-  /** Why a "failed" dialog could not be answered. */
-  error?: string;
   /** Dismissed because no one-shot answer was set; the plain output adds a
    *  hint. */
   unanswered?: true;

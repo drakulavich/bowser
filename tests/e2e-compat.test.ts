@@ -78,7 +78,6 @@ function missingFrom(sub: Entry[], sup: Entry[]): Entry[] {
 runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
   let tmp: string;
   let origHome: string | undefined;
-  let origBackend: string | undefined;
   let server: { stop: () => void } | undefined;
   let base: string;
   let pwReady = false;
@@ -126,9 +125,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
 
   beforeAll(async () => {
     origHome = process.env.HOME;
-    origBackend = process.env.BOWSER_BACKEND;
     tmp = await mkdtemp(join(tmpdir(), "bowser-compat-"));
-    process.env.BOWSER_BACKEND = "webkit";
 
     const html = await readFile(join(import.meta.dir, "fixtures/todo-app.html"), "utf8");
     const s = Bun.serve({
@@ -160,8 +157,6 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
     if (pwReady) { try { await pw("close"); } catch {} }
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
-    if (origBackend === undefined) delete process.env.BOWSER_BACKEND;
-    else process.env.BOWSER_BACKEND = origBackend;
     await rm(tmp, { recursive: true, force: true });
   });
 
