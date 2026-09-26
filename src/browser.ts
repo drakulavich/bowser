@@ -336,14 +336,22 @@ export function wrapView(view: ViewLike, spec: Backend, timing: NavTiming = NAV_
       // Chrome says when any navigation starts, the page's own included,
       // before the new document can open a dialog. Only the main frame's
       // count: an iframe navigating leaves the page's one-shot answer alone.
-      // The event carries no parent id, and Bun delivers no frameNavigated
-      // (measured, Bun 1.4.2), so the main frame is the first one seen: no
-      // iframe can start navigating before the page's first navigation.
+      // The event carries no parent id, so the main frame's id is asked for
+      // once, as the root of Page.getFrameTree (it needs the CDP session,
+      // which exists by the first event; measured, Bun 1.4.2). Unknown, the
+      // event counts: dropping an answer is the safe side.
       let mainFrame: string | undefined;
+      let asking: Promise<string | undefined> | undefined;
+      const main = () => (asking ??= cdp("Page.getFrameTree")
+        .then((r) => (mainFrame = (r as { frameTree: { frame: { id: string } } }).frameTree.frame.id))
+        .catch(() => { asking = undefined; return undefined; }));
       subscribe("Page.frameStartedNavigating", (data) => {
         const { frameId } = data as { frameId: string };
-        mainFrame ??= frameId;
-        if (frameId === mainFrame) on.navigation();
+        if (mainFrame !== undefined) {
+          if (frameId === mainFrame) on.navigation();
+          return;
+        }
+        void main().then((id) => { if (id === undefined || frameId === id) on.navigation(); });
       });
       return watching;
     },

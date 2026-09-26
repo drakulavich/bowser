@@ -293,14 +293,20 @@ describe("wrapView subscribe", () => {
 
 describe("wrapView dialogs", () => {
   /** A chrome view that remembers its listeners, so a test can deliver a CDP event. */
-  function listening() {
+  function listening(mainFrame = "f") {
     const listeners = new Map<string, (e: { type: string; data?: unknown }) => void>();
-    const v = fakeView({ addEventListener: (n, h) => { listeners.set(n, h); } });
+    const v = fakeView({
+      addEventListener: (n, h) => { listeners.set(n, h); },
+      cdp: async (m, p) => {
+        v.calls.push(["cdp", [m, p]]);
+        return m === "Page.getFrameTree" ? { frameTree: { frame: { id: mainFrame }, childFrames: [] } } : {};
+      },
+    });
     const emit = (type: string, data: unknown) => listeners.get(type)?.({ type, data });
     return { v, emit };
   }
 
-  test("on chrome, CDP dialog events reach the listener as DialogState, and navigations starting and landing too", () => {
+  test("on chrome, CDP dialog events reach the listener as DialogState, and navigations starting and landing too", async () => {
     const { v, emit } = listening();
     const seen: unknown[] = [];
     const b = wrapView(v, chrome);
@@ -311,6 +317,7 @@ describe("wrapView dialogs", () => {
     emit("Page.javascriptDialogOpening", { url: "u", frameId: "f", message: "name?", type: "prompt", hasBrowserHandler: false, defaultPrompt: "def" });
     emit("Page.javascriptDialogOpening", { url: "u", frameId: "f", message: "sure?", type: "confirm", hasBrowserHandler: false, defaultPrompt: "" });
     emit("Page.frameStartedNavigating", { frameId: "f", url: "https://x/next", loaderId: "l", navigationType: "differentDocument" });
+    await Bun.sleep(0); // the main frame's id is asked for once
     v.land("https://x/next");
     expect(seen).toEqual([
       ["opened", { type: "prompt", message: "name?", defaultValue: "def" }],
@@ -320,17 +327,32 @@ describe("wrapView dialogs", () => {
     ]);
   });
 
-  test("on chrome an iframe starting a navigation is not a navigation of the page: only the main frame's count", () => {
-    const { v, emit } = listening();
+  test("on chrome an iframe starting a navigation is not a navigation of the page, even when it is the first frame seen", async () => {
+    const { v, emit } = listening("MAIN");
     let navigations = 0;
     wrapView(v, chrome).watchDialogs({ opened() {}, navigation: () => { navigations++; } });
-    const started = (frameId: string) =>
+    const started = async (frameId: string) => {
       emit("Page.frameStartedNavigating", { frameId, url: "https://x/", loaderId: "l", navigationType: "differentDocument" });
-    started("MAIN"); // the page's first navigation is always the main frame's
-    started("CHILD");
-    started("CHILD");
-    started("MAIN");
+      await Bun.sleep(0);
+    };
+    await started("CHILD"); // an iframe of the initial about:blank, before the page's first navigation
+    expect(navigations).toBe(0);
+    await started("MAIN");
+    await started("CHILD");
+    await started("MAIN");
     expect(navigations).toBe(2);
+    // The main frame's id is asked for once, then remembered.
+    expect(v.calls.filter(([n, a]) => n === "cdp" && a[0] === "Page.getFrameTree")).toHaveLength(1);
+  });
+
+  test("on chrome, when the main frame cannot be asked for, a navigation still counts: the answer is dropped", async () => {
+    const { v, emit } = listening();
+    v.cdp = async () => { throw new Error("no session"); };
+    let navigations = 0;
+    wrapView(v, chrome).watchDialogs({ opened() {}, navigation: () => { navigations++; } });
+    emit("Page.frameStartedNavigating", { frameId: "X", url: "https://x/", loaderId: "l", navigationType: "differentDocument" });
+    await Bun.sleep(0);
+    expect(navigations).toBe(1);
   });
 
   test("on chrome watching needs no CDP call, so it works before the first navigation (Bun enables the Page domain)", async () => {
