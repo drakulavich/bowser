@@ -127,6 +127,16 @@ const RULES: Rule[] = [
         (re) => (text.match(re)?.length ?? 0) !== (file === "src/browser.ts" ? 1 : 0),
       ),
   },
+  {
+    name: "a user error's message goes out as a UserError, never a plain Error",
+    // reportFailure gives exit 1 to a UserError (src/errors.ts) and exit 2 to
+    // anything else, whatever the message says (#51 item 3). A plain Error
+    // with a user-error message would quietly exit 2. This sees literals
+    // only; a message built elsewhere and passed in is held by
+    // tests/exit-codes.test.ts, site by site.
+    violates: (_file, text) =>
+      /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(text),
+  },
 ];
 
 describe("src layering rules", () => {
