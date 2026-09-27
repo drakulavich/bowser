@@ -100,10 +100,23 @@ runOrSkip("e2e: real browser", () => {
     // 500 buttons: each is one ref'd line, so the tree is well over 8 KB.
     const items = Array.from({ length: 500 }, (_, i) => `<button>item-${i}</button>`).join("");
     const big = `<html><head><title>Big</title></head><body>${items}</body></html>`;
-    await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(big)}`);
-    const yaml = await cmdSnapshot({ session, json: false });
-    expect(yaml.length).toBeGreaterThan(8192);
-    expect(yaml).toContain("item-0");
-    expect(yaml).toContain("item-499"); // the tail proves nothing was truncated
+    // Served, not a data: URL: the page's URL comes back from the browser
+    // with every navigation, and Bun.WebView's navigate() to a URL over
+    // ~8 KB sometimes never settles (#61: a 17.5 KB data: URL hung `open`
+    // for its 30 s budget in about 1 open in 15). This test is about the
+    // daemon's reply, so the URL stays short.
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => new Response(big, { headers: { "content-type": "text/html; charset=utf-8" } }),
+    });
+    try {
+      await cmdOpen({ session, json: false }, server.url.toString());
+      const yaml = await cmdSnapshot({ session, json: false });
+      expect(yaml.length).toBeGreaterThan(8192);
+      expect(yaml).toContain("item-0");
+      expect(yaml).toContain("item-499"); // the tail proves nothing was truncated
+    } finally {
+      server.stop(true);
+    }
   }, 30_000);
 });
