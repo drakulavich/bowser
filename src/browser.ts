@@ -140,6 +140,10 @@ export interface NavTiming {
 }
 export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 
+/** How long `close` waits, after leaving a persistent profile's page, for
+ *  WebKit to commit localStorage: twice its 500 ms transaction window. */
+export const STORAGE_COMMIT_WAIT_MS = 1000;
+
 /** The key `view.press` is given for a key name (F11). Bun maps a named key to
  *  a WebKit editing command where one exists, and "Tab" becomes "insert tab":
  *  a `\t` lands in the field and no keydown fires. The tab character is sent
@@ -280,7 +284,12 @@ function navigationWatch(
 /** Turn a view into a Browser. Separate from openBrowser so tests can pass a
  *  fake view; openBrowser is the only caller with a real one. `profile` is
  *  the persistent store's directory, if the view has one. */
-export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile?: string): Browser {
+export function wrapView(
+  view: ViewLike,
+  timing: NavTiming = NAV_TIMING,
+  profile?: string,
+  commitWaitMs = STORAGE_COMMIT_WAIT_MS,
+): Browser {
   let navigated: () => void = () => {};
   // One evaluate at a time per view: WebKit throws ERR_INVALID_STATE for a
   // second while one is pending. The daemon's serializer runs one op at a
@@ -335,15 +344,18 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
       else await evaluate(RELOAD);
     }),
     close: async () => {
-      // WebKit writes a persistent profile lazily, and the daemon exits right
-      // after this, so it must be made to flush first (measured: a
-      // localStorage item written just before `close` was lost 14 times in
-      // 15). WebKit hands a page's storage over when the page goes away;
-      // leaving it for about:blank kept the item 40 times in 40.
+      // WebKit commits localStorage in a transaction 500 ms after a write
+      // (measured ~530 ms, also with the CPU saturated), and Bun force-kills
+      // the browser when the daemon exits right after this. A write in the
+      // last half second before `close` was lost (#61: 2 in 10 e2e runs
+      // under load). Leaving the page for about:blank stops new writes; it
+      // does not commit anything by itself, so close then waits out the
+      // window before closing the view.
       if (profile) {
         try {
           await view.navigate("about:blank");
         } catch {}
+        await Bun.sleep(commitWaitMs);
       }
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
