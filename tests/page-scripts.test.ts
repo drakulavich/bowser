@@ -48,7 +48,7 @@ describe("page scripts quote their inputs", () => {
     expect(await runCode("const a = 2; a * 3")).toEqual({ value: undefined });
     // Unbalanced parens that would read as an expression inside a wrapper
     // stay a body, so the syntax error surfaces.
-    await expect(runCode("1), (2")).rejects.toThrow(SyntaxError);
+    await expect(runCode("1), x = (2")).rejects.toThrow(SyntaxError);
   });
 
   test("run-code answers { fn: true } for a function result, and runs nothing more", async () => {

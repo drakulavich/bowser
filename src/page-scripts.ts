@@ -845,7 +845,7 @@ function parses(body: string): boolean {
 /** `run-code`'s script (spec F18). Code that parses as one expression is
  *  evaluated as one, so an IIFE gives its value; any other code is the body
  *  of an async function, so `return` and `await` work. It must also parse as
- *  a body on its own: `1), (2` reads as an expression only inside the
+ *  a body on its own: `1), x = (2` reads as an expression only inside the
  *  wrapper's parentheses. The page answers `{ value }`, or `{ fn: true }` for
  *  a function result (a playwright-cli `async page => …` snippet), which the
  *  command refuses. Parsed here, in Bun: a page's CSP may forbid `Function`. */
