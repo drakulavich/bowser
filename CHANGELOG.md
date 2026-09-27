@@ -21,6 +21,12 @@ All notable changes to this project are documented here. This project follows
   wrong, because the exit code was read from the message. The code is now set where bowser raises
   the error: its own user errors exit 1, everything else exits 2. No message text changed. (#51)
 
+### Changed
+
+- **A saved ref no longer carries a CSS selector.** Ref commands already act on the element the
+  live page resolves for the ref, so `snapshot` stops writing `selector` into `state.json`'s refs.
+  A `state.json` written by 0.8.0 still loads; its `selector` fields are ignored. (#51)
+
 ## [0.8.0] — 2026-09-27
 
 ### BREAKING: no release binaries; install through npm or from source

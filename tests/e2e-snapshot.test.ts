@@ -160,6 +160,15 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     expect(tree(await cmdSnapshot(ctx))).toBe(await golden("todo-app"));
   }, 60_000);
 
+  // A ref carries no saved selector: ref commands act on the element the
+  // page resolves now (liveSelector), and a saved one would only tempt a
+  // command to use it (#51 item 4).
+  test("the saved refs carry no selector", async () => {
+    const refs = (await loadState(ctx.session))!.refs;
+    expect(refs.length).toBeGreaterThan(0);
+    for (const r of refs) expect(Object.keys(r)).not.toContain("selector");
+  }, 60_000);
+
   test("fill + click Add through the new refs prints the added tree with sticky refs", async () => {
     // Same commands as the capture: fill e4, click e5.
     expect(await refNamed("New todo")).toBe("e4");

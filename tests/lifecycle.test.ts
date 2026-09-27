@@ -209,7 +209,7 @@ describe("F21: a timeout names the command", () => {
   async function seed(session: string) {
     await saveState({
       name: session, url: "https://x", title: "X", updatedAt: 1,
-      refs: [{ id: "e2", selector: "#x", role: "textbox", name: "Under", tag: "input" }],
+      refs: [{ id: "e2", role: "textbox", name: "Under", tag: "input" }],
     });
   }
 

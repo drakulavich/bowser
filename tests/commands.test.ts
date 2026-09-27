@@ -49,10 +49,10 @@ async function seedRefs() {
     url: "https://x",
     title: "X",
     refs: [
-      { id: "e1", selector: "a",        role: "link",     name: "Home",  tag: "a" },
-      { id: "e2", selector: "input",    role: "textbox",  name: "Email", tag: "input" },
-      { id: "e3", selector: "select",   role: "combobox", name: "Color", tag: "select" },
-      { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
+      { id: "e1", role: "link",     name: "Home",  tag: "a" },
+      { id: "e2", role: "textbox",  name: "Email", tag: "input" },
+      { id: "e3", role: "combobox", name: "Color", tag: "select" },
+      { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
     ],
     updatedAt: Date.now(),
   });
@@ -401,7 +401,7 @@ describe("snapshot", () => {
   const snap = {
     url: "https://x", title: "X",
     tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
-    refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+    refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
   };
   const yaml = "### Page\n- Page URL: https://x\n- Page Title: X\n### Snapshot\n" +
     "```yaml\n- link \"Home\" [ref=e1]:\n  - /url: /\n```";
@@ -728,7 +728,7 @@ describe("cmdClick", () => {
         title: "Example",
         tree: [],
         refs: [
-          { id: "e1", selector: "html > body > button", role: "button", name: "Go", tag: "button" },
+          { id: "e1", role: "button", name: "Go", tag: "button" },
         ],
       }),
     });
@@ -766,7 +766,7 @@ describe("cmdFill", () => {
         title: "Example",
         tree: [],
         refs: [
-          { id: "e1", selector: "html > body > input", role: "textbox", name: "Email", tag: "input" },
+          { id: "e1", role: "textbox", name: "Email", tag: "input" },
         ],
       }),
     });
@@ -802,7 +802,7 @@ describe("click", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+      refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e1: "a" }) });
@@ -818,7 +818,7 @@ describe("fill", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      refs: [{ id: "e2", role: "textbox", name: "Email", tag: "input" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e2: "input" }) });
@@ -839,7 +839,7 @@ describe("fill", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      refs: [{ id: "e2", role: "textbox", name: "Email", tag: "input" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: answering(answer) });
@@ -885,7 +885,7 @@ describe("fill", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      refs: [{ id: "e2", role: "textbox", name: "Email", tag: "input" }],
       updatedAt: Date.now(),
     });
     const resolve = resolving({ e2: "input" });
@@ -955,7 +955,7 @@ describe("hover", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+      refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e1: "a" }) });
@@ -970,7 +970,7 @@ describe("select", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" }],
+      refs: [{ id: "e3", role: "combobox", name: "Color", tag: "select" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e3: "select" }) });
@@ -984,7 +984,7 @@ describe("select", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" }],
+      refs: [{ id: "e3", role: "combobox", name: "Color", tag: "select" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e3: "select" }), select: () => false });
@@ -1000,7 +1000,7 @@ describe("check / uncheck", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" }],
+      refs: [{ id: "e4", role: "checkbox", name: "Agree", tag: "input" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e4: "input.cb" }) });
@@ -1012,7 +1012,7 @@ describe("check / uncheck", () => {
       name: session,
       url: "https://x",
       title: "X",
-      refs: [{ id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" }],
+      refs: [{ id: "e4", role: "checkbox", name: "Agree", tag: "input" }],
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e4: "input.cb" }) });
@@ -1023,9 +1023,9 @@ describe("check / uncheck", () => {
 
 describe("F20: click, check and uncheck refuse a disabled element and uncheck a checked radio", () => {
   const REFS = [
-    { id: "e1", selector: "button", role: "button",   name: "Go",    tag: "button" },
-    { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
-    { id: "e5", selector: "input.r", role: "radio",    name: "Large", tag: "input" },
+    { id: "e1", role: "button",   name: "Go",    tag: "button" },
+    { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
+    { id: "e5", role: "radio",    name: "Large", tag: "input" },
   ];
   beforeEach(async () => {
     await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
@@ -1073,21 +1073,38 @@ describe("actions refuse a ref of the wrong kind", () => {
   // One ref per kind the spec (§5) names, plus non-interactive ones that full-tree
   // snapshots now give refs to.
   const REFS = [
-    { id: "e1",  selector: "li",       role: "listitem",         name: "",       tag: "li" },
-    { id: "e2",  selector: "input.cb", role: "checkbox",         name: "Agree",  tag: "input" },
-    { id: "e3",  selector: "input.r",  role: "radio",            name: "Red",    tag: "input" },
-    { id: "e4",  selector: "button.s", role: "switch",           name: "Dark",   tag: "button" },
-    { id: "e5",  selector: "div.mc",   role: "menuitemcheckbox", name: "Bold",   tag: "div" },
-    { id: "e6",  selector: "div.mr",   role: "menuitemradio",    name: "Left",   tag: "div" },
-    { id: "e7",  selector: "select",   role: "combobox",         name: "Color",  tag: "select" },
-    { id: "e8",  selector: "input.t",  role: "textbox",          name: "Email",  tag: "input" },
-    { id: "e9",  selector: "textarea", role: "textbox",          name: "Notes",  tag: "textarea" },
-    { id: "e10", selector: "input.q",  role: "searchbox",        name: "Search", tag: "input" },
-    { id: "e11", selector: "input.n",  role: "spinbutton",       name: "Qty",    tag: "input" },
-    { id: "e12", selector: "input.l",  role: "combobox",         name: "City",   tag: "input" },
-    { id: "e13", selector: "div.ce",   role: "generic",          name: "",       tag: "div", editable: true },
-    { id: "e14", selector: "p",        role: "paragraph",        name: "",       tag: "p" },
+    { id: "e1",  role: "listitem",         name: "",       tag: "li" },
+    { id: "e2",  role: "checkbox",         name: "Agree",  tag: "input" },
+    { id: "e3",  role: "radio",            name: "Red",    tag: "input" },
+    { id: "e4",  role: "switch",           name: "Dark",   tag: "button" },
+    { id: "e5",  role: "menuitemcheckbox", name: "Bold",   tag: "div" },
+    { id: "e6",  role: "menuitemradio",    name: "Left",   tag: "div" },
+    { id: "e7",  role: "combobox",         name: "Color",  tag: "select" },
+    { id: "e8",  role: "textbox",          name: "Email",  tag: "input" },
+    { id: "e9",  role: "textbox",          name: "Notes",  tag: "textarea" },
+    { id: "e10", role: "searchbox",        name: "Search", tag: "input" },
+    { id: "e11", role: "spinbutton",       name: "Qty",    tag: "input" },
+    { id: "e12", role: "combobox",         name: "City",   tag: "input" },
+    { id: "e13", role: "generic",          name: "",       tag: "div", editable: true },
+    { id: "e14", role: "paragraph",        name: "",       tag: "p" },
   ];
+  // The selector the page answers for each ref, as liveSelector resolves it.
+  const LIVE: Record<string, string> = {
+    e1: "li",
+    e2: "input.cb",
+    e3: "input.r",
+    e4: "button.s",
+    e5: "div.mc",
+    e6: "div.mr",
+    e7: "select",
+    e8: "input.t",
+    e9: "textarea",
+    e10: "input.q",
+    e11: "input.n",
+    e12: "input.l",
+    e13: "div.ce",
+    e14: "p",
+  };
 
   let connected: boolean;
   let c: ReturnType<typeof fakeClient>;
@@ -1095,7 +1112,7 @@ describe("actions refuse a ref of the wrong kind", () => {
 
   beforeEach(async () => {
     connected = false;
-    c = fakeClient({ evaluate: resolving(Object.fromEntries(REFS.map((r) => [r.id, r.selector]))) });
+    c = fakeClient({ evaluate: resolving(LIVE) });
     await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
   });
 
@@ -1130,7 +1147,7 @@ describe("actions refuse a ref of the wrong kind", () => {
 
   test("check and uncheck accept checkbox, radio, switch, menuitemcheckbox, menuitemradio", async () => {
     for (const id of ["e2", "e3", "e4", "e5", "e6"]) {
-      const sel = REFS.find((r) => r.id === id)!.selector;
+      const sel = LIVE[id]!;
       await cmdCheck(actx(), id);
       await cmdUncheck(actx(), id);
       expect(c.calls).toContainEqual(["check", [sel]]);
@@ -1178,7 +1195,9 @@ describe("actions refuse a ref of the wrong kind", () => {
 });
 
 describe("ref commands resolve the ref in the live page first", () => {
-  // Saved selectors start with "saved-"; the page answers with "fresh-" ones.
+  // The refs as 0.8.0 wrote them to state.json, each with the selector it was
+  // saved with. Refs have no selector now; an old file still loads, and its
+  // "saved-" selectors must reach no op. The page answers with "fresh-" ones.
   const REFS = [
     { id: "e1", selector: "saved-a",      role: "link",     name: "Home",  tag: "a" },
     { id: "e2", selector: "saved-input",  role: "textbox",  name: "Email", tag: "input" },
@@ -1199,7 +1218,9 @@ describe("ref commands resolve the ref in the live page first", () => {
   ];
 
   beforeEach(async () => {
-    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+    await ensureSessionDir(session);
+    await Bun.write(join(sessionDir(session), "state.json"),
+      JSON.stringify({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() }));
   });
 
   for (const [name, ref, op, run, enabled] of COMMANDS) {
@@ -1624,7 +1645,7 @@ describe("context helpers", () => {
   });
 
   test("syncState keeps refs and name, replaces url and title, bumps updatedAt", async () => {
-    const refs = [{ id: "e1", selector: "a", role: "link", name: "x", tag: "a" }];
+    const refs = [{ id: "e1", role: "link", name: "x", tag: "a" }];
     await saveState({ name: "sync", url: "https://old/", title: "Old", refs, updatedAt: 1 });
     const prev = (await loadState("sync"))!;
     await syncState(prev, { url: "https://new/", title: "New" });
@@ -1638,7 +1659,7 @@ describe("context helpers", () => {
 });
 
 describe("fill --stdin", () => {
-  const REFS = [{ id: "e2", selector: "input", role: "textbox", name: "Password", tag: "input" }];
+  const REFS = [{ id: "e2", role: "textbox", name: "Password", tag: "input" }];
   const SECRET = "hunter2-S3cr3t!";
 
   let connected: boolean;
@@ -1709,7 +1730,7 @@ describe("fill --stdin", () => {
 
   test("fill <ref> <text>: a missing, wrong-kind or stale ref error does not contain the text", async () => {
     await saveState({ name: session, url: "https://x", title: "X", refs: [
-      ...REFS, { id: "e1", selector: "li", role: "listitem", name: "", tag: "li" },
+      ...REFS, { id: "e1", role: "listitem", name: "", tag: "li" },
     ], updatedAt: Date.now() });
     // e2 is stale: the page no longer has it, so liveSelector refuses.
     c = fakeClient({ evaluate: resolving({ e2: null }) });
@@ -1748,7 +1769,7 @@ describe("fill --stdin", () => {
   test("an error after reading stdin does not contain the text", async () => {
     // Wrong-kind and missing refs are the errors that follow the read.
     await saveState({ name: session, url: "https://x", title: "X", refs: [
-      { id: "e1", selector: "li", role: "listitem", name: "", tag: "li" },
+      { id: "e1", role: "listitem", name: "", tag: "li" },
     ], updatedAt: Date.now() });
     for (const ref of ["e1", "e9"]) {
       const err = await cmdFill(sctx(SECRET), ref, undefined, { stdin: true }).catch((e: Error) => e);
@@ -1828,8 +1849,8 @@ describe("dialogs", () => {
     await saveState({
       name: session, url: "https://x", title: "X", updatedAt: Date.now(),
       refs: [
-        { id: "e1", selector: "button", role: "button", name: "go", tag: "button" },
-        { id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" },
+        { id: "e1", role: "button", name: "go", tag: "button" },
+        { id: "e2", role: "textbox", name: "Email", tag: "input" },
       ],
     });
   }
@@ -1895,9 +1916,9 @@ describe("dialogs", () => {
     await saveState({
       name: session, url: "https://x", title: "X", updatedAt: Date.now(),
       refs: [
-        { id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" },
-        { id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" },
-        { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
+        { id: "e2", role: "textbox", name: "Email", tag: "input" },
+        { id: "e3", role: "combobox", name: "Color", tag: "select" },
+        { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
       ],
     });
     const c = () => fakeClient({ evaluate: resolving({ e2: "input", e3: "select", e4: "input.cb" }) }, { dialogs: [dismissed] });
@@ -1975,7 +1996,7 @@ describe("a failed page command still reports its dialogs", () => {
   test("a user error keeps exit code 1 and its message first", async () => {
     await saveState({
       name: session, url: "https://x", title: "X", updatedAt: Date.now(),
-      refs: [{ id: "e1", selector: "button", role: "button", name: "go", tag: "button" }],
+      refs: [{ id: "e1", role: "button", name: "go", tag: "button" }],
     });
     const c = fakeClient({ evaluate: () => null }, { dialogs: [dismissed] });
     const err = await run([`--session=${session}`, "click", "e1"], { connect: async () => c }).catch((e) => e);
@@ -2003,7 +2024,7 @@ describe("fill and type errors never carry the entered text", () => {
 
   beforeEach(async () => {
     await saveState({ name: session, url: "https://x", title: "X", updatedAt: Date.now(),
-      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Password", tag: "input" }] });
+      refs: [{ id: "e2", role: "textbox", name: "Password", tag: "input" }] });
   });
 
   const RUNS: Array<[string, string, (c: ReturnType<typeof fakeClient>) => Promise<string>]> = [

@@ -5,11 +5,10 @@
 // IIFE string (tests/layers.test.ts).
 
 // cssPath(el): a unique id, else an nth-of-type chain from <html>. The
-// selector a ref is saved with and the one an action on it uses, inlined into
-// SNAPSHOT_SCRIPT and resolveRefScript so both compute it the same way. Chains
-// and sibling indexes are memoized per evaluation: a ref'd node's ancestors
-// are ref'd too, and a long list would otherwise rescan its siblings for
-// every item. Plain JavaScript under String.raw: no backticks, no dollar-brace.
+// selector an action on a ref uses, computed in the live page by
+// resolveRefScript; a ref saves none. Chains and sibling indexes are memoized
+// per evaluation. Plain JavaScript under String.raw: no backticks, no
+// dollar-brace.
 const CSS_PATH = String.raw`
   const chains = new Map();
   const nthIndex = new Map();
@@ -458,7 +457,6 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   }
 
   // ---- refs ----
-  ${CSS_PATH}
   const refs = [];
   function assignRef(n, el) {
     let r = store.refs.get(el);
@@ -468,7 +466,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     }
     store.byRef.set(r.ref, new WeakRef(el));
     n.ref = r.ref;
-    const saved = { id: r.ref, selector: cssPath(el), role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
+    const saved = { id: r.ref, role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
     if (tagOf(el) === 'A' && el.getAttribute('href')) saved.href = el.getAttribute('href');
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && valueOf(el)) saved.value = String(valueOf(el)).slice(0, 120);
     if (el.isContentEditable) saved.editable = true;

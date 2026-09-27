@@ -59,10 +59,10 @@ async function seed(session: string): Promise<void> {
   await saveState({
     name: session, url: "https://x/", title: "X", updatedAt: Date.now(),
     refs: [
-      { id: "e1", selector: "button", role: "button", name: "Go", tag: "button" },
-      { id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" },
-      { id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" },
-      { id: "e4", selector: "input.r", role: "radio", name: "A", tag: "input" },
+      { id: "e1", role: "button", name: "Go", tag: "button" },
+      { id: "e2", role: "textbox", name: "Email", tag: "input" },
+      { id: "e3", role: "combobox", name: "Color", tag: "select" },
+      { id: "e4", role: "radio", name: "A", tag: "input" },
     ],
   });
 }

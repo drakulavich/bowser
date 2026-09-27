@@ -155,7 +155,7 @@ describe("per-command help", () => {
     const snap = {
       url: "https://x", title: "X",
       tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
-      refs: [{ id: "e1", selector: "a", role: "link", name: "Home", tag: "a" }],
+      refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
     };
     const c = fakeClient({ evaluate: () => snap });
     const cwd = process.cwd();

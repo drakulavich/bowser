@@ -119,10 +119,9 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
 
     const client = await connectOrSpawn(session);
     try {
-      // Read the input value back to confirm typing worked.
-      const typed = await client.request("evaluate", [
-        `document.querySelector(${JSON.stringify(searchBox.selector)})?.value`,
-      ]);
+      // Read the input value back to confirm typing worked. fill clicks the
+      // box before typing, so it is the focused element; refs carry no selector.
+      const typed = await client.request("evaluate", ["document.activeElement?.value"]);
       console.log("Input value after fill:", typed);
       expect(String(typed)).toContain("OpenClaw");
 

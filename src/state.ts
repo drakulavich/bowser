@@ -2,7 +2,7 @@
 // One-shot mode means each command spawns a fresh WebView, so we need to
 // persist just enough to make multi-step flows work:
 //   - the current URL (so we can re-navigate)
-//   - the last snapshot (so @eN refs resolve to CSS selectors)
+//   - the last snapshot's refs (a ref command checks the ref's kind against it)
 //
 // State lives under ~/.bowser/sessions/<name>/.
 
@@ -13,7 +13,6 @@ import { UserError } from "./errors.ts";
 
 export interface Ref {
   id: string; // "e1", no '@' prefix (playwright-cli compatible)
-  selector: string;
   role: string;
   name: string;
   tag: string;

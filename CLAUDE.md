@@ -10,8 +10,6 @@ Every line below traces to a real failure that no test or type check catches. Wh
 
 ## Code traps
 
-- A ref command acts on `liveSelector(c, ref)`, never on the saved `target.selector`, which can time out or hit a different element. (#37)
-- The snapshot walker never reads a password field's value. Route any new `el.value` read through `isPassword`. (#40)
 - An op that acts on the page belongs in `ACTS` (`src/daemon/server.ts`). (#7, F10 in PR #46, #51)
 
 ## Git
