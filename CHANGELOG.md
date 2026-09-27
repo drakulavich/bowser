@@ -16,9 +16,11 @@ All notable changes to this project are documented here. This project follows
 - **`open` and `goto` of a URL over ~8 KB no longer hang.** In Bun 1.4.2 a reply over 8 KB from
   the browser sometimes arrived only when Bun sent the browser its next message
   (oven-sh/bun#44134), so with a long `data:` URL about 1 `goto` in 10 under load waited out its
-  op budget. While a browser call is pending, bowser now sends a no-op to a second, 1x1 view every
-  100 ms, which releases the reply. 0 hangs in 2400 opens and gotos under the same load. Each
-  session runs one more WebKit content process (~25 MB). (#63)
+  op budget. When a browser call has been pending for 1 s, bowser now opens a second, 1x1 view
+  and sends it a no-op every 100 ms while calls are pending, which releases the reply. 0 hangs in
+  1200 opens and gotos and 600 link clicks under the same load; a stalled one takes about 1.1 s. A
+  session whose calls all answer within 1 s never opens that view (it costs a WebKit content
+  process, ~25 MB); a session that does keeps it until `close`. (#63)
 
 ## [0.8.1] — 2026-09-27
 
