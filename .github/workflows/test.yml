@@ -39,7 +39,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: E2E on WebKit
         # e2e-compat skips here: the runner has no playwright-cli.
-        run: bun test tests/e2e.test.ts tests/e2e-todo.test.ts tests/e2e-snapshot.test.ts tests/e2e-stale-ref.test.ts tests/e2e-password.test.ts tests/e2e-webkit.test.ts tests/e2e-webkit-sessions.test.ts tests/e2e-daemon-death.test.ts tests/e2e-orphan.test.ts tests/e2e-persistent.test.ts tests/e2e-fill-stdin.test.ts tests/e2e-dialogs.test.ts tests/e2e-far-element.test.ts tests/e2e-forms.test.ts tests/e2e-hangs.test.ts tests/e2e-session-claim.test.ts tests/e2e-mcp.test.ts tests/e2e-spawn-exit.test.ts tests/e2e-compat.test.ts
+        run: bun test tests/e2e.test.ts tests/e2e-todo.test.ts tests/e2e-snapshot.test.ts tests/e2e-stale-ref.test.ts tests/e2e-password.test.ts tests/e2e-webkit.test.ts tests/e2e-webkit-sessions.test.ts tests/e2e-daemon-death.test.ts tests/e2e-orphan.test.ts tests/e2e-persistent.test.ts tests/e2e-fill-stdin.test.ts tests/e2e-dialogs.test.ts tests/e2e-far-element.test.ts tests/e2e-forms.test.ts tests/e2e-actions.test.ts tests/e2e-hangs.test.ts tests/e2e-session-claim.test.ts tests/e2e-mcp.test.ts tests/e2e-spawn-exit.test.ts tests/e2e-compat.test.ts
       - name: E2E - the npm package, installed
         # Runs what a user installs: `npm pack`, then `npm i -g` into a temp
         # prefix, then that prefix's bin/bowser. This covers the `files` list (a

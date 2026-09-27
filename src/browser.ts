@@ -130,6 +130,16 @@ export interface NavTiming {
 }
 export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 
+/** The key `view.press` is given for a key name (F11). Bun maps a named key to
+ *  a WebKit editing command where one exists, and "Tab" becomes "insert tab":
+ *  a `\t` lands in the field and no keydown fires. The tab character is sent
+ *  as a raw key event instead: focus moves as the browser's own Tab moves it,
+ *  and the page sees a trusted keydown with key "Tab" (measured on WebKit,
+ *  Bun 1.4.2). Every other key passes through. */
+function pressKey(key: string): string {
+  return key === "Tab" ? "\t" : key;
+}
+
 /** Bun.WebView resolves click()/press()/goBack() when the input is delivered,
  *  ~30 ms before the page it triggers commits (measured on WebKit, local
  *  pages). `state` right after `click` therefore reported the old URL. The
@@ -278,7 +288,7 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     evaluate: (expr) => evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
-    press: (key) => nav.act(() => view.press(key)),
+    press: (key) => nav.act(() => view.press(pressKey(key))),
     hover: async (selector) => { await evaluate(hoverScript(selector)); },
     select: async (selector, value) => (await evaluate(selectScript(selector, value))) === true,
     setChecked: async (selector, checked) => (await evaluate(setCheckedScript(selector, checked))) !== false,

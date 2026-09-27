@@ -77,6 +77,23 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/submitted");
   });
 
+  test("press Tab sends the tab character, which WebKit takes as a key event that moves focus (F11)", async () => {
+    const v = fakeView();
+    const b = wrapView(v, fast);
+    await b.press("Tab");
+    await b.press("Enter");
+    await b.press("t");
+    expect(v.calls.filter(([op]) => op === "press")).toEqual([["press", ["\t"]], ["press", ["Enter"]], ["press", ["t"]]]);
+  });
+
+  test("press Tab still goes through the watch", async () => {
+    const v = fakeView();
+    v.press = async (k) => { v.calls.push(["press", [k]]); setTimeout(() => v.land("https://x/next"), 10); };
+    const b = wrapView(v, fast);
+    await b.press("Tab");
+    expect(b.url).toBe("https://x/next");
+  });
+
   test("a failed navigation ends the wait without failing the action", async () => {
     const v = fakeView();
     v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; setTimeout(() => { v.onNavigationFailed?.(new Error("-999")); }, 20); };
