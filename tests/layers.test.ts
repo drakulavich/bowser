@@ -93,6 +93,14 @@ const RULES: Rule[] = [
     // path "just in case" starts coming back.
     violates: (_file, text) => /chrom|\bcdp\b/i.test(text),
   },
+  {
+    name: "only src/state.ts reads the home directory",
+    // Tests redirect HOME in beforeAll, after src is imported. state.ts
+    // resolves home paths per call (tests/state.test.ts pins that); a new
+    // module reading HOME itself could capture it at load and write to the
+    // real ~/.bowser from tests (PR #8). Go through state.ts instead.
+    violates: (file, text) => file !== "src/state.ts" && /process\.env\.HOME\b|\bhomedir\s*\(/.test(text),
+  },
 ];
 
 describe("src layering rules", () => {

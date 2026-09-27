@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveRef, sessionDir, sessionsRoot, type SessionState } from "../src/state.ts";
+import { profileDir, resolveRef, sessionDir, sessionsRoot, type SessionState } from "../src/state.ts";
 
 const state: SessionState = {
   name: "t",
@@ -38,6 +38,25 @@ describe("sessionDir rejects a name that is not one path segment", () => {
   }
   test("an ordinary name still resolves under the sessions root", () => {
     expect(sessionDir("s1")).toBe(join(sessionsRoot(), "s1"));
+  });
+});
+
+// Tests redirect HOME in beforeAll, after src is imported. A path captured at
+// module load would keep the real home, and those tests would write to the
+// real ~/.bowser while passing (PR #8). The paths must follow HOME per call.
+describe("paths under HOME are resolved at call time", () => {
+  test("sessionsRoot and profileDir follow a HOME changed after import", () => {
+    const orig = process.env.HOME;
+    try {
+      process.env.HOME = "/tmp/bowser-home-a";
+      expect(sessionsRoot()).toBe("/tmp/bowser-home-a/.bowser/sessions");
+      expect(profileDir("x")).toBe("/tmp/bowser-home-a/.bowser/profiles/x");
+      process.env.HOME = "/tmp/bowser-home-b";
+      expect(sessionsRoot()).toBe("/tmp/bowser-home-b/.bowser/sessions");
+      expect(profileDir("x")).toBe("/tmp/bowser-home-b/.bowser/profiles/x");
+    } finally {
+      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+    }
   });
 });
 
