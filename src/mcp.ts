@@ -21,6 +21,7 @@ import { parse } from "./cli/parser.ts";
 import { failedModalState } from "./commands/context.ts";
 import type { CommandSchema } from "./cli/parser.ts";
 import pkg from "../package.json";
+import { UserError } from "./errors.ts";
 
 const VERSION = (pkg as { version: string }).version;
 
@@ -100,7 +101,7 @@ export function toArgv(schema: CommandSchema, args: Record<string, unknown>): st
   for (const f of schema.flags) {
     const v = args[f.name];
     if (v === undefined || v === null) continue;
-    if (f.mcp === false) throw new Error(`usage: --${f.name} is not available over MCP`);
+    if (f.mcp === false) throw new UserError(`usage: --${f.name} is not available over MCP`);
     if (f.kind === "boolean") {
       if (v === true || v === "true") argv.push(`--${f.name}`);
     } else {

@@ -5,6 +5,7 @@ import { connectOrSpawn, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, type SessionState } from "../state.ts";
+import { UserError } from "../errors.ts";
 
 export interface CommandContext {
   session: string;
@@ -26,7 +27,7 @@ export async function readStdin(
   read: () => Promise<string> = () => Bun.stdin.text(),
 ): Promise<string> {
   if (stdin.isTTY) {
-    throw new Error("usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin");
+    throw new UserError("usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin");
   }
   return read();
 }
@@ -54,7 +55,7 @@ export function emptyState(name: string): SessionState {
 
 export async function loadRef(session: string, ref: string) {
   const prev = await loadState(session);
-  if (!prev) throw new Error("no open page. Run 'bowser open <url>' first.");
+  if (!prev) throw new UserError("no open page. Run 'bowser open <url>' first.");
   return { prev, target: resolveRef(prev, ref) };
 }
 
@@ -67,10 +68,10 @@ export async function loadRef(session: string, ref: string) {
 export async function liveSelector(c: DaemonConnection, ref: string, opts: { enabled?: boolean } = {}): Promise<string> {
   const selector = await c.request("evaluate", [resolveRefScript(ref, opts)]);
   if (opts.enabled && (selector as { disabled?: unknown } | null)?.disabled === true) {
-    throw new Error(`ref '${ref}' is disabled`);
+    throw new UserError(`ref '${ref}' is disabled`);
   }
   if (typeof selector !== "string") {
-    throw new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`);
+    throw new UserError(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`);
   }
   return selector;
 }
@@ -132,8 +133,8 @@ export function withPageClient<T>(
       return await fn(c);
     } catch (err) {
       // The daemon handed this command its reports, so they are printed with
-      // the error or never: the message stays as it was (the exit code is
-      // read from it), and the dialogs ride along on the error.
+      // the error or never: the error stays the same object (its class sets
+      // the exit code), and the dialogs ride along on it.
       const dialogs = c.dialogs();
       if (dialogs.length === 0) throw err;
       throw Object.assign(err instanceof Error ? err : new Error(String(err)), { dialogs });

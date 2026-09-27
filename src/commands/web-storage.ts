@@ -8,6 +8,7 @@ import {
   storageClearScript, storageDeleteScript, storageGetScript, storageListScript, storageSetScript,
 } from "../page-scripts.ts";
 import { reply, withClient, type CommandContext } from "./context.ts";
+import { UserError } from "../errors.ts";
 
 async function storageList(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
@@ -28,7 +29,7 @@ async function storageGet(
   command: string,
   key: string,
 ): Promise<string> {
-  if (!key) throw new Error(`usage: bowser ${command} <key>`);
+  if (!key) throw new UserError(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     const val = (await c.request("evaluate", [
       storageGetScript(area, key),
@@ -44,8 +45,8 @@ async function storageSet(
   key: string,
   value: string,
 ): Promise<string> {
-  if (!key) throw new Error(`usage: bowser ${command} <key> <value>`);
-  if (value === undefined) throw new Error(`usage: bowser ${command} <key> <value>`);
+  if (!key) throw new UserError(`usage: bowser ${command} <key> <value>`);
+  if (value === undefined) throw new UserError(`usage: bowser ${command} <key> <value>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [
       storageSetScript(area, key, value),
@@ -60,7 +61,7 @@ async function storageDelete(
   command: string,
   key: string,
 ): Promise<string> {
-  if (!key) throw new Error(`usage: bowser ${command} <key>`);
+  if (!key) throw new UserError(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [
       storageDeleteScript(area, key),

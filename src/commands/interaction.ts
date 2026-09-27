@@ -6,6 +6,7 @@ import type { Command } from "../cli/registry.ts";
 import { fillScript, type FillOutcome } from "../page-scripts.ts";
 import type { Ref } from "../state.ts";
 import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext } from "./context.ts";
+import { UserError } from "../errors.ts";
 
 // Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so
 // check/uncheck/select/fill refuse a ref that cannot take the action, from the
@@ -23,7 +24,7 @@ const KINDS = {
 
 function requireKind(kind: keyof typeof KINDS, ref: string, target: Ref): void {
   const k = KINDS[kind];
-  if (!k.ok(target)) throw new Error(`ref '${ref}' is not ${k.what} (${target.role})`);
+  if (!k.ok(target)) throw new UserError(`ref '${ref}' is not ${k.what} (${target.role})`);
 }
 
 export async function cmdClick(
@@ -56,7 +57,7 @@ function withoutFinalNewline(s: string): string {
  *  `withPageClient` still hangs the dialogs on it. Its stack is reset
  *  because it repeats the message. Only that request is wrapped: bowser's own
  *  messages never contain the text, and a short text such as "x" would
- *  otherwise match one and turn a user error (exit 1) into exit 2. */
+ *  otherwise match one and replace a user error's message. */
 async function withholdingText<T>(command: string, text: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
@@ -89,8 +90,8 @@ export async function cmdFill(
   text: string | undefined,
   opts: { stdin?: boolean } = {},
 ): Promise<string> {
-  if (opts.stdin && text !== undefined) throw new Error(`${FILL_USAGE} (not both)`);
-  if (!opts.stdin && text === undefined) throw new Error(FILL_USAGE);
+  if (opts.stdin && text !== undefined) throw new UserError(`${FILL_USAGE} (not both)`);
+  if (!opts.stdin && text === undefined) throw new UserError(FILL_USAGE);
   const value = opts.stdin ? withoutFinalNewline(await (ctx.readStdin ?? readStdin)()) : text!;
   const { target } = await loadRef(ctx.session, ref);
   requireKind("fill", ref, target);
@@ -99,9 +100,9 @@ export async function cmdFill(
     await c.request("click", [selector]);
     const found = await withholdingText("fill", value, () => c.request("evaluate", [fillScript(selector, value)]));
     const { outcome, type } = readFillAnswer(found);
-    if (outcome === "disabled" || outcome === "readonly") throw new Error(`ref '${ref}' is not an editable element (${outcome})`);
-    if (outcome === "nan") throw new Error(`ref '${ref}' needs a number (input[type=number])`);
-    if (outcome === "rejected") throw new Error(`ref '${ref}' did not accept the value for input[type=${type}]`);
+    if (outcome === "disabled" || outcome === "readonly") throw new UserError(`ref '${ref}' is not an editable element (${outcome})`);
+    if (outcome === "nan") throw new UserError(`ref '${ref}' needs a number (input[type=number])`);
+    if (outcome === "rejected") throw new UserError(`ref '${ref}' did not accept the value for input[type=${type}]`);
     if (outcome !== "set") await withholdingText("fill", value, () => c.request("type", [value]));
     return replyPage(ctx, c, { ok: true, ref }, `filled ${ref} (${target.role} "${target.name}")`);
   });
@@ -117,7 +118,7 @@ export async function cmdType(ctx: CommandContext, text: string): Promise<string
 }
 
 export async function cmdPress(ctx: CommandContext, key: string): Promise<string> {
-  if (!key) throw new Error("usage: bowser press <key>");
+  if (!key) throw new UserError("usage: bowser press <key>");
   return withPageClient(ctx, async (c) => {
     await c.request("press", [key]);
     return replyPage(ctx, c, { ok: true, key }, `pressed ${key}`);
@@ -133,12 +134,12 @@ export async function cmdHover(ctx: CommandContext, ref: string): Promise<string
 }
 
 export async function cmdSelect(ctx: CommandContext, ref: string, value: string): Promise<string> {
-  if (value === undefined) throw new Error("usage: bowser select <ref> <value>");
+  if (value === undefined) throw new UserError("usage: bowser select <ref> <value>");
   const { target } = await loadRef(ctx.session, ref);
   requireKind("select", ref, target);
   return withPageClient(ctx, async (c) => {
     const found = await c.request("select", [await liveSelector(c, ref), value]);
-    if (!found) throw new Error(`ref '${ref}' has no option ${JSON.stringify(value)}`);
+    if (!found) throw new UserError(`ref '${ref}' has no option ${JSON.stringify(value)}`);
     return replyPage(ctx, c, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
   });
 }
@@ -157,7 +158,7 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   requireKind("check", ref, target);
   return withPageClient(ctx, async (c) => {
     const done = await c.request("uncheck", [await liveSelector(c, ref, { enabled: true })]);
-    if (done === false) throw new Error(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
+    if (done === false) throw new UserError(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
     return replyPage(ctx, c, { ok: true, ref }, `unchecked ${ref}`);
   });
 }
@@ -174,7 +175,7 @@ export async function cmdResize(
     !Number.isInteger(width) || !Number.isInteger(height) ||
     width <= 0 || height <= 0
   ) {
-    throw new Error("usage: bowser resize <width> <height>");
+    throw new UserError("usage: bowser resize <width> <height>");
   }
   return withClient(ctx, async (c) => {
     await c.request("resize", [width, height]);

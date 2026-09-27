@@ -1972,7 +1972,7 @@ describe("a failed page command still reports its dialogs", () => {
     expect(reportFailure(err)).toEqual({ stderr: `bowser: Error: boom\n${MODAL}`, code: 2 });
   });
 
-  test("a user error keeps exit code 1 and its message first, so the CLI still classifies it", async () => {
+  test("a user error keeps exit code 1 and its message first", async () => {
     await saveState({
       name: session, url: "https://x", title: "X", updatedAt: Date.now(),
       refs: [{ id: "e1", selector: "button", role: "button", name: "go", tag: "button" }],

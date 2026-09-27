@@ -7,14 +7,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { pidPath } from "../src/daemon/client.ts";
-
-// Copied from the user-error check in src/cli.ts (the `import.meta.main`
-// block); a match there means exit code 1 instead of 2.
-const USER_ERROR = /^(usage:|unknown command|unknown flag|expected a ref|ref '.*' not found|no open page|bowser requires macOS)/i;
 
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
@@ -63,7 +60,7 @@ runOrSkip("e2e: the daemon dies under a command", () => {
     // Settle-only view of the command, so an early rejection is never unhandled.
     const outcome = evaluating.then(
       (value) => ({ ok: true as const, value }),
-      (err: unknown) => ({ ok: false as const, message: err instanceof Error ? err.message : String(err) }),
+      (err: unknown) => ({ ok: false as const, message: err instanceof Error ? err.message : String(err), code: reportFailure(err).code }),
     );
 
     await inflight;
@@ -79,6 +76,6 @@ runOrSkip("e2e: the daemon dies under a command", () => {
     expect(settled).not.toBe("timed out");
     if (settled === "timed out" || settled.ok) throw new Error(`eval did not fail: ${JSON.stringify(settled)}`);
     expect(settled.message).toContain(`daemon for session '${ctx.session}' closed the connection`);
-    expect(USER_ERROR.test(settled.message)).toBe(false);
+    expect(settled.code).toBe(2);
   }, 20_000);
 });

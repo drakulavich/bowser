@@ -10,6 +10,7 @@ import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
 import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext } from "./context.ts";
+import { UserError } from "../errors.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
  *  state op reads the page's location.href (realUrl), which stays about:blank
@@ -65,7 +66,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
   // The parser accepts `--profile=`; treating it as absent would quietly
   // start an ephemeral session the caller believes is persistent.
   if (opts.profile !== undefined && !opts.profile.trim()) {
-    throw new Error("usage: --profile needs a directory, e.g. --profile=./profile");
+    throw new UserError("usage: --profile needs a directory, e.g. --profile=./profile");
   }
   await ensureSessionDir(ctx.session);
   const profile = opts.profile !== undefined
@@ -78,7 +79,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
     // running may have another one, and navigating it would silently lose
     // the persistence asked for, so refuse before touching the page.
     if (profile && (await c.request("state")).profile !== profile) {
-      throw new Error(
+      throw new UserError(
         `usage: session '${ctx.session}' is already open with a different profile; run 'bowser close' first`,
       );
     }
@@ -95,7 +96,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
 }
 
 export async function cmdGoto(ctx: CommandContext, typed: string): Promise<string> {
-  if (!typed) throw new Error("usage: bowser goto <url>");
+  if (!typed) throw new UserError("usage: bowser goto <url>");
   const url = normalizeUrl(typed);
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withPageClient(ctx, async (c) => {

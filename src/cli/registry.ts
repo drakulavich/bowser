@@ -20,6 +20,7 @@ import { COMMANDS as SNAPSHOT } from "../commands/snapshot.ts";
 import { COMMANDS as STORAGE_STATE } from "../commands/storage-state.ts";
 import { COMMANDS as WEB_STORAGE } from "../commands/web-storage.ts";
 import type { FlagSpec, Schemas } from "./parser.ts";
+import { UserError } from "../errors.ts";
 
 export interface Positional {
   name: string;
@@ -55,7 +56,7 @@ const MCP_COMMAND: Command = {
   flags: [],
   mcp: false,
   run: () => {
-    throw new Error("usage: run 'bowser mcp' as a top-level subcommand");
+    throw new UserError("usage: run 'bowser mcp' as a top-level subcommand");
   },
 };
 
