@@ -7,6 +7,8 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **A password field's `value` attribute could reach the snapshot.** An `<input type="password" role="spinbutton" value="…">` that another element names with `aria-labelledby` put its initial value into that element's name, bypassing the password guard. The walker now treats it like any password field. Found by the Codex review of PR #59; present since the full-tree snapshot.
+
 - **The URL bowser reports follows `history.pushState`.** After a same-document URL change
   (`pushState`, `replaceState`, a hash change), `click`'s reply, `state.json` and every command
   that reports the page URL gave the old URL while `snapshot` showed the new one. The URL is now

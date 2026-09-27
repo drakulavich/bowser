@@ -331,7 +331,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
         const v = el.getAttribute('aria-valuetext');
         if (v !== null) return v;
         const n = el.getAttribute('aria-valuenow');
-        return n !== null ? n : (el.getAttribute('value') || '');
+        return n !== null ? n : (isPassword(el) ? '' : (el.getAttribute('value') || ''));
       }
       if (role === 'menu') { o.visited.add(el); return ''; }
     }

@@ -29,6 +29,7 @@ const CODE = "COMBO-ROLE-SECRET-99";
 // Set by the page on a password field whose `type` property claims "button".
 const ODD = "ODD-TYPE-GETTER-CANARY-555";
 const USER = "alice-visible";
+const ATTR = "PASSWORD-ATTRIBUTE-CANARY-444";
 
 // Password fields with a lowercase type, an uppercase type and an explicit
 // combobox role; buttons named through aria-labelledby by each of them; and a
@@ -37,10 +38,12 @@ const PAGE = `<!doctype html><html><head><title>Login</title></head><body>
 <label for="pw">Password</label><input id="pw" type="password">
 <label for="pin">PIN</label><input id="pin" type="PASSWORD">
 <input id="code" type="password" role="combobox" aria-label="Code">
+<input id="attr" type="password" role="spinbutton" value="${ATTR}">
 <label for="user">User</label><input id="user" type="text">
 <button aria-labelledby="pw">Go</button>
 <button aria-labelledby="pin">Pin go</button>
 <button aria-labelledby="code">Code go</button>
+<button aria-labelledby="attr">Attribute go</button>
 <input id="odd" type="password">
 <button aria-labelledby="odd">Odd go</button>
 <script>
@@ -59,7 +62,7 @@ function tree(out: string): string {
   return m[1]!;
 }
 
-const secrets = [SECRET, PIN, CODE, ODD];
+const secrets = [SECRET, PIN, CODE, ODD, ATTR];
 
 runOrSkip("e2e: snapshot never reveals a password field's value", () => {
   const ctx: CommandContext = { session: "password", json: false };
@@ -125,7 +128,7 @@ runOrSkip("e2e: snapshot never reveals a password field's value", () => {
 
   test("aria-labelledby a password field adds nothing to a button's name", () => {
     const lines = tree(plain).split("\n").map((l) => l.trim());
-    for (const name of ["Go", "Pin go", "Code go", "Odd go"]) {
+    for (const name of ["Go", "Pin go", "Code go", "Odd go", "Attribute go"]) {
       expect(lines.some((l) => l.startsWith(`- button ${JSON.stringify(name)} [ref=e`))).toBe(true);
     }
   });
