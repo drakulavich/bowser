@@ -164,7 +164,7 @@ bowser -s=app close
 ## Installation
 
 ```bash
-npm install -g @drakulavich/bowser-cli   # requires Bun ≥ 1.3.12
+npm install -g @drakulavich/bowser-cli   # requires Bun ≥ 1.4.2
 ```
 
 bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only there. Elsewhere a command that would start a session fails with the error "bowser requires macOS (WebKit)". If you need Chromium, or Linux or Windows, use `playwright-cli`.
