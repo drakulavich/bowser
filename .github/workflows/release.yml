@@ -4,9 +4,9 @@ on:
   push:
     tags:
       - "v*"
-  # Allow manual runs from the Actions UI (handy for re-publishing binaries
-  # against an already-pushed tag). Every job checks out that tag, not the
-  # branch the run was started from.
+  # Allow manual runs from the Actions UI (handy for re-running a release
+  # against an already-pushed tag). The release is made for that tag, and the
+  # npm job checks it out, not the branch the run was started from.
   workflow_dispatch:
     inputs:
       tag:
@@ -17,83 +17,23 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        # bowser runs only on macOS (WebKit through Bun.WebView). Both targets
-        # build on macos-latest (Apple silicon); the x64 one is a cross-compile,
-        # which avoids queuing on the scarce Intel runners.
-        include:
-          - os: macos-latest
-            target: bun-darwin-arm64
-            asset: bowser-macos-arm64
-          - os: macos-latest
-            target: bun-darwin-x64
-            asset: bowser-macos-x64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install
-      - name: Compile single-file binary
-        run: |
-          mkdir -p dist
-          bun build src/cli.ts \
-            --compile \
-            --target=${{ matrix.target }} \
-            --outfile dist/${{ matrix.asset }}
-      - name: Smoke-test the binary
-        # Only run when the compiled target matches the runner — everything
-        # else is a cross-compile that can't execute here.
-        if: matrix.target == 'bun-darwin-arm64'
-        run: ./dist/${{ matrix.asset }} --help
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
-
+  # bowser ships only through npm (and from source): no binaries are built or
+  # attached. The GitHub Release carries generated notes and no assets.
   publish:
-    needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the GitHub Release + upload assets
+      contents: write # create the GitHub Release
     steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-          persist-credentials: false
       - name: Resolve tag
         id: tag
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: echo "name=$TAG" >> "$GITHUB_OUTPUT"
-      - uses: actions/download-artifact@v8
-        with:
-          path: dist
-          merge-multiple: true
-      - name: List downloaded assets
-        run: ls -la dist
-      - name: Compute SHA-256 checksums
-        run: |
-          cd dist
-          sha256sum bowser-* > SHA256SUMS.txt
-          cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: Bowser ${{ steps.tag.outputs.name }}
           generate_release_notes: true
-          files: |
-            dist/bowser-macos-arm64
-            dist/bowser-macos-x64
-            dist/SHA256SUMS.txt
 
   npm:
     # Publish @drakulavich/bowser-cli through npm trusted publishing (OIDC):
