@@ -646,7 +646,7 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 
 // Bare expressions, not IIFEs: they take no input, so there is nothing to
 // quote. Named here so this file really is every string bowser evaluates in
-// the page, which is what the layer rule and CLAUDE.md claim.
+// the page, which is what the layer rule claims.
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
 export const HISTORY_BACK = "history.back()";
