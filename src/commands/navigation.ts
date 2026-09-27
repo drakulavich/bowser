@@ -287,16 +287,16 @@ async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> 
   } catch {
     // no sessions root; nothing to close
   }
-  const closed: string[] = [];
-  const failed: string[] = [];
-  for (const name of names) {
+  const results = await Promise.all(names.map(async (name) => {
     try {
       await (isValidSessionName(name) ? closeOne(ctx, name, proc) : closeLegacy(name));
-      closed.push(name);
+      return { name, error: undefined };
     } catch (err) {
-      failed.push(`- ${name}: ${err instanceof Error ? err.message : String(err)}`);
+      return { name, error: err instanceof Error ? err.message : String(err) };
     }
-  }
+  }));
+  const closed = results.filter((r) => r.error === undefined).map((r) => r.name);
+  const failed = results.filter((r) => r.error !== undefined).map((r) => `- ${r.name}: ${r.error}`);
   const done = closed.length > 0
     ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}`
     : "";
