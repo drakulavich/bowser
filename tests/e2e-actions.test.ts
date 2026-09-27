@@ -154,6 +154,23 @@ runOrSkip("e2e: actions on WebKit", () => {
     expect(await log()).toBe("[]");
   });
 
+  // aria-checked="mixed" counts as on for uncheck, and as off for check, as
+  // in playwright. The page's handler cycles mixed -> true -> false, like the
+  // APG mixed checkbox, so uncheck clicks until it reads false.
+  describe("aria-checked=mixed", () => {
+    test("uncheck clicks it until it reads false", async () => {
+      await cmdUncheck(ctx, await ref("AriaMixed"));
+      expect(await js("ariamixed.getAttribute('aria-checked')")).toBe(`"false"`);
+      expect(await log()).toBe(`["click:ariamixed","click:ariamixed"]`);
+    });
+
+    test("check clicks it once", async () => {
+      await cmdCheck(ctx, await ref("AriaMixed"));
+      expect(await js("ariamixed.getAttribute('aria-checked')")).toBe(`"true"`);
+      expect(await log()).toBe(`["click:ariamixed"]`);
+    });
+  });
+
   describe("F20: uncheck on a radio", () => {
     test("a checked radio: exit 1, it stays checked", async () => {
       const e = await ref("Large");

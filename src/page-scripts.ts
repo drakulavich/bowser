@@ -735,17 +735,23 @@ export function selectScript(selector: string, value: string): string {
  *  answers true. It answers false, clicking nothing, for `uncheck` of a
  *  checked radio: the click would leave it checked (spec F20). A radio is an
  *  input[type=radio], or an element the last snapshot gave the role radio or
- *  menuitemradio; one without `checked` reads its aria-checked. */
+ *  menuitemradio; one without `checked` reads its aria-checked.
+ *  aria-checked="mixed" is off for `check`, as in playwright, and on for
+ *  `uncheck`: a mixed checkbox usually goes to true on a click (the APG
+ *  cycle), so `uncheck` clicks once more when it then reads true. */
 export function setCheckedScript(selector: string, checked: boolean): string {
   return `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('check: element not found');
         const input = el instanceof HTMLInputElement;
-        const on = input ? el.checked : el.getAttribute('aria-checked') === 'true';
+        const aria = () => el.getAttribute('aria-checked');
+        const on = input ? el.checked : aria() === 'true';
         const role = window[Symbol.for('bowser.aria-refs')]?.refs?.get(el)?.role;
         const radio = (input && el.type === 'radio') || role === 'radio' || role === 'menuitemradio';
         if (${!checked} && radio && on) return false;
-        if (on !== ${checked}) el.click();
+        const mixed = ${!checked} && !input && !radio && aria() === 'mixed';
+        if (on !== ${checked} || mixed) el.click();
+        if (mixed && aria() === 'true') el.click();
         return true;
       })()`;
 }
