@@ -12,9 +12,9 @@ import {
 import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext } from "./context.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
- *  state op resolves the URL via realUrl() (view.url, or location.href when that
- *  is empty), so reaching here with about:blank means the page never
- *  committed — a genuine load failure. */
+ *  state op reads the page's location.href (realUrl), which stays about:blank
+ *  when the first navigation never commits, so reaching here with about:blank
+ *  is a genuine load failure. */
 function assertNavigated(requested: string, finalUrl: string): void {
   if (requested && requested !== "about:blank" && finalUrl === "about:blank") {
     throw new Error(`navigate: page did not load ${requested} (ended on about:blank)`);
