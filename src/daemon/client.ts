@@ -3,6 +3,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import pkg from "../../package.json";
 import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { sessionDir, statePath } from "../state.ts";
@@ -132,6 +133,8 @@ export interface ConnectOptions {
   /** The platform a daemon would run on; `process.platform` unless a test
    *  fakes it. */
   platform?: string;
+  /** The Bun a daemon would run on; the running one unless a test fakes it. */
+  runtime?: BunRuntime;
   /** Start a daemon even where one ran and exited. Only `open` sets it: every
    *  other command refuses such a session (F28). */
   reopen?: boolean;
@@ -147,6 +150,22 @@ export function browserExited(session: string): string {
 /** Why bowser cannot start a daemon off macOS: its only engine is WebKit's
  *  Bun.WebView, which throws on other platforms. A user error (exit 1). */
 export const REQUIRES_MACOS = "bowser requires macOS (WebKit)";
+
+/** What the Bun guard looks at in the running Bun. */
+export interface BunRuntime {
+  version: string;
+  webView: boolean;
+}
+
+/** Why bowser refuses a Bun below `engines.bun`, or one without Bun.WebView:
+ *  npm does not enforce `engines.bun`, and on such a Bun the daemon would die
+ *  unseen. A user error (exit 1). The floor is read from package.json, so the
+ *  message follows it. */
+export function unsupportedBun(runtime: BunRuntime): string | undefined {
+  const floor = pkg.engines.bun;
+  if (runtime.webView && Bun.semver.satisfies(runtime.version, floor)) return undefined;
+  return `bowser requires Bun ${floor} (found ${runtime.version})`;
+}
 
 /** The environment variable that carries the profile to a spawned daemon.
  *  Env rather than argv: `looksLikeOurDaemon` identifies a daemon by its last
@@ -191,6 +210,9 @@ export async function connectOrSpawn(
     // socket, so off macOS it would die unseen, and the caller would get only
     // the "did not start in time" timeout below. Refuse with the real reason.
     if ((opts.platform ?? process.platform) !== "darwin") throw new Error(REQUIRES_MACOS);
+    // The Bun guard, for the same reason: the daemon would die unseen.
+    const bunError = unsupportedBun(opts.runtime ?? { version: Bun.version, webView: typeof Bun.WebView === "function" });
+    if (bunError) throw new Error(bunError);
     await spawnDaemon(session, opts.profile);
     // Poll until the socket is listening.
     const start = Date.now();
