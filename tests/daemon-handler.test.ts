@@ -146,6 +146,27 @@ describe("createHandler", () => {
     expect(await createHandler(other)(req("evaluate", ["x()"]))).toEqual({ id: 7, ok: false, error: "TypeError: x is not a function" });
   });
 
+  // The measured behaviour (spec F34, measured manually): a dead page fails
+  // every page op until `reload`, which brings it back. The daemon reloads
+  // nothing by itself, and after the reload ops answer again.
+  test("a crashed page keeps failing, is not reloaded by the daemon, and works after reload", async () => {
+    const crashed = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
+    let dead = true;
+    const b = fakeBrowser({
+      evaluate: async () => {
+        if (dead) throw new Error("JavaScript execution returned a result of an unsupported type");
+        return { value: 2, dialogs: [] };
+      },
+      reload: async () => { b.calls.push(["reload", []]); dead = false; },
+    });
+    const h = createHandler(b);
+    expect(await h(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
+    expect(await h(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
+    expect(b.calls.filter(([n]) => n === "reload")).toEqual([]);
+    expect(await h(req("reload"))).toEqual({ id: 7, ok: true });
+    expect(await h(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: true, result: 2 });
+  });
+
   test("an unknown op on the wire is rejected, not thrown", async () => {
     const res = await createHandler(fakeBrowser())({ id: 7, op: "dblclick" as DaemonRequest["op"], args: [] });
     expect(res).toEqual({ id: 7, ok: false, error: "unknown op: dblclick" });

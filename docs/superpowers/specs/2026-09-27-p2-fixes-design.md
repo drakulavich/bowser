@@ -411,6 +411,17 @@ the connection. A refused connection still means a stale socket, and `close` rem
 - playwright-cli: Playwright marks a crashed page, and later calls fail with a "crashed" error. This was
   not measured here: there is no crash trigger to use through `playwright-cli`.
 
+**Measured manually** (2026-09-27, Bun 1.4.2, macOS, during Task D). A session `wk` in a scratch
+`HOME` was opened on a `data:` URL. Its WebContent pid was the one new `com.apple.WebKit.WebContent`
+pid across `open` (pgrep diff; ppid 1, started at `open`), and it was killed with `kill -9`. After
+the first kill, `eval "String(window.mark)"` printed `undefined` with exit 0. The relaunched process
+was found the same way and killed. After that, `eval "location.href"` and `snapshot` failed with the
+engine's `JavaScript execution returned a result of an unsupported type`, which the fix now reports as
+`the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'`, exit 2. Then
+`reload` printed `reloaded …`, and `eval "1+1"` printed `2`. This is not automated: WebContent
+processes are launchd children (ppid 1, `launchctl procinfo` names no responsible pid), so no public
+seam proves a process belongs to the session, and a test could kill another app's page (Safari).
+
 **Behaviour.**
 1. When a page op fails with the engine's dead-page message (`JavaScript execution returned a result of
    an unsupported type`), the error reads:
@@ -540,8 +551,8 @@ the connection. A refused connection still means a stale socket, and `close` rem
      `aria-hidden` SVG: the engines differ there, which is out of scope;
    - F18, per the decision: `(() => { return 5 })()` prints `5`; `await …; return 1` prints `1`;
      `async page => …` exits 1;
-   - F34: kill this session's own WebContent process twice (found by the pid diff; the test skips if the
-     diff is not exactly one pid). The next `eval` exits 2 with the crash message, and `reload` recovers;
+   - F34: none. The e2e kill test was dropped (ownership of a WebContent pid cannot be proved); the
+     unit test in 1 and the manual measurement in F34 replace it.
    - F7 (retires the CLAUDE.md line): `bun src/cli.ts open <data: URL>` spawned as a process exits within
      a bound, which fails if `proc.unref()` is removed; then `close`.
 3. **CI:** the npm-shape step in `test.yml` (F7 Behaviour 3). `release.yml` has no binary job. A manual
