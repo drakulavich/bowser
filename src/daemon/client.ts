@@ -279,6 +279,14 @@ export async function connectOrSpawn(
   return checked(client, session, answer, opts);
 }
 
+/** The argv a spawned daemon runs with. Always `bun <package>/src/daemon/main.ts
+ *  <session>`: from a checkout and from an npm install alike, main.ts sits
+ *  beside this file. `looksLikeOurDaemon` must recognise it (tests/daemon.test.ts
+ *  pins the round trip): a form it cannot read makes a live daemon look stale. */
+export function daemonCommand(session: string): string[] {
+  return [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+}
+
 async function spawnDaemon(session: string, profile?: string): Promise<void> {
   const { ensureSessionDir } = await import("../state.ts");
   await ensureSessionDir(session);
@@ -296,9 +304,7 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
     }
   }
 
-  // Always `bun <package>/src/daemon/main.ts <session>`: from a checkout and
-  // from an npm install alike, main.ts sits beside this file.
-  const cmd = [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+  const cmd = daemonCommand(session);
 
   // When BOWSER_DAEMON_DEBUG is set, let the daemon's stdio through so spawn
   // failures are diagnosable.
