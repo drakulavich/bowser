@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The URL bowser reports follows `history.pushState`.** After a same-document URL change
+  (`pushState`, `replaceState`, a hash change), `click`'s reply, `state.json` and every command
+  that reports the page URL gave the old URL while `snapshot` showed the new one. The URL is now
+  read from the page's `location.href`. (#51)
+
 ## [0.8.0] — 2026-09-27
 
 ### BREAKING: no release binaries; install through npm or from source

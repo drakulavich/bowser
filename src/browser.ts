@@ -37,15 +37,15 @@ export interface ViewLike {
   goForward?(): Promise<void>;
 }
 
-/** Resolve the committed page URL. WebKit's `view.url` is right after every
- *  navigation (query strings and redirects included; measured, Bun 1.4.2),
- *  but it is "" before the first one, where the page is about:blank. When
- *  it is empty, read location.href from the page instead. */
+/** Resolve the page URL from the page's own location.href. WebKit's
+ *  `view.url` keeps the old URL after a same-document change (pushState,
+ *  replaceState, a hash change) and is "" before the first navigation; in
+ *  every other case the two agree (measured, Bun 1.4.2). `view.url` is the
+ *  fallback when the page cannot answer. */
 export async function resolveUrl(
   viewUrl: string,
   evalHref: () => Promise<unknown>,
 ): Promise<string> {
-  if (viewUrl) return viewUrl;
   try {
     const loc = await evalHref();
     return typeof loc === "string" && loc ? loc : viewUrl;
