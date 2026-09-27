@@ -115,6 +115,18 @@ const RULES: Rule[] = [
     // remainder of a partial write is never sent.
     violates: (_file, text) => /\bBun\.(?:listen|connect)\s*\(/.test(text) && !/\bdrain\s*\(/.test(text),
   },
+  {
+    name: "onNavigated and onNavigationFailed are each assigned once, in src/browser.ts",
+    // Each is a single slot on the view, and navigationWatch owns both: a
+    // second assignment silently replaces the watch behind nav.act, and no
+    // other unit test notices. Anyone else goes through Browser.watchNavigation.
+    // Any assignment outside browser.ts breaks it, and so does a count other
+    // than one inside it (a deleted watch too).
+    violates: (file, text) =>
+      [/\bonNavigated\s*=(?!=)/g, /\bonNavigationFailed\s*=(?!=)/g].some(
+        (re) => (text.match(re)?.length ?? 0) !== (file === "src/browser.ts" ? 1 : 0),
+      ),
+  },
 ];
 
 describe("src layering rules", () => {
