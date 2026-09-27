@@ -4,6 +4,7 @@
 import type { Command } from "../cli/registry.ts";
 import { runCodeScript } from "../page-scripts.ts";
 import { replyPage, withPageClient, type CommandContext } from "./context.ts";
+import { UserError } from "../errors.ts";
 
 function formatEvalResult(result: unknown): string {
   if (result === undefined || result === null) return "";
@@ -12,7 +13,7 @@ function formatEvalResult(result: unknown): string {
 }
 
 export async function cmdEval(ctx: CommandContext, expression: string): Promise<string> {
-  if (!expression) throw new Error("usage: bowser eval <expression>");
+  if (!expression) throw new UserError("usage: bowser eval <expression>");
   return withPageClient(ctx, async (c) => {
     const result = await c.request("evaluate", [expression]);
     return replyPage(ctx, c, { ok: true, result }, formatEvalResult(result));
@@ -24,10 +25,10 @@ export async function cmdEval(ctx: CommandContext, expression: string): Promise<
 const NO_PAGE = "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return";
 
 export async function cmdRunCode(ctx: CommandContext, code: string): Promise<string> {
-  if (!code) throw new Error("usage: bowser run-code <code>");
+  if (!code) throw new UserError("usage: bowser run-code <code>");
   return withPageClient(ctx, async (c) => {
     const answer = (await c.request("evaluate", [runCodeScript(code)])) as { value?: unknown; fn?: true } | undefined;
-    if (answer?.fn) throw new Error(NO_PAGE);
+    if (answer?.fn) throw new UserError(NO_PAGE);
     const result = answer?.value;
     return replyPage(ctx, c, { ok: true, result }, formatEvalResult(result));
   });

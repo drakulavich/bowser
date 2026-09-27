@@ -8,6 +8,7 @@ import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
+import { UserError } from "../errors.ts";
 
 export function socketPath(session: string): string {
   // Use a short path — Unix socket names have a ~104-char limit on macOS.
@@ -177,7 +178,7 @@ export function otherVersion(session: string, answer: unknown): string {
 function checked(client: DaemonClient, session: string, answer: unknown, opts: ConnectOptions): DaemonClient {
   if (opts.anyVersion || answer === pkg.version) return client;
   client.close();
-  throw new Error(otherVersion(session, answer));
+  throw new UserError(otherVersion(session, answer));
 }
 
 /** Why a command refuses a session whose daemon ran and is gone: its page,
@@ -243,14 +244,14 @@ export async function connectOrSpawn(
     // A daemon ran here (it left state.json) and none answers now: its
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.
-    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new Error(browserExited(session));
+    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new UserError(browserExited(session));
     // The one platform check. The daemon opens its WebView before it opens its
     // socket, so off macOS it would die unseen, and the caller would get only
     // the "did not start in time" timeout below. Refuse with the real reason.
-    if ((opts.platform ?? process.platform) !== "darwin") throw new Error(REQUIRES_MACOS);
+    if ((opts.platform ?? process.platform) !== "darwin") throw new UserError(REQUIRES_MACOS);
     // The Bun guard, for the same reason: the daemon would die unseen.
     const bunError = unsupportedBun(opts.runtime ?? { version: Bun.version, webView: typeof Bun.WebView === "function" });
-    if (bunError) throw new Error(bunError);
+    if (bunError) throw new UserError(bunError);
     await spawnDaemon(session, opts.profile);
     // Poll until the socket is listening.
     const start = Date.now();
@@ -279,6 +280,14 @@ export async function connectOrSpawn(
   return checked(client, session, answer, opts);
 }
 
+/** The argv a spawned daemon runs with. Always `bun <package>/src/daemon/main.ts
+ *  <session>`: from a checkout and from an npm install alike, main.ts sits
+ *  beside this file. `looksLikeOurDaemon` must recognise it (tests/daemon.test.ts
+ *  pins the round trip): a form it cannot read makes a live daemon look stale. */
+export function daemonCommand(session: string): string[] {
+  return [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+}
+
 async function spawnDaemon(session: string, profile?: string): Promise<void> {
   const { ensureSessionDir } = await import("../state.ts");
   await ensureSessionDir(session);
@@ -296,9 +305,7 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
     }
   }
 
-  // Always `bun <package>/src/daemon/main.ts <session>`: from a checkout and
-  // from an npm install alike, main.ts sits beside this file.
-  const cmd = [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+  const cmd = daemonCommand(session);
 
   // When BOWSER_DAEMON_DEBUG is set, let the daemon's stdio through so spawn
   // failures are diagnosable.

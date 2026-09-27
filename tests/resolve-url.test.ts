@@ -1,35 +1,29 @@
-// Unit tests for the location.href URL-resolution fallback. WebKit's
-// view.url is "" before the first navigation, where the page is about:blank.
+// Unit tests for resolveUrl. The page's location.href is the URL: WebKit's
+// view.url keeps the old URL after pushState, replaceState or a hash change,
+// and is "" before the first navigation, where the page is about:blank.
+// view.url is the fallback when the page cannot answer.
 import { describe, expect, test } from "bun:test";
 import { resolveUrl } from "../src/browser.ts";
 
 describe("resolveUrl", () => {
-  test("returns view.url unchanged when it is set (no evaluate)", async () => {
-    let called = false;
-    const out = await resolveUrl("https://example.com/?q=1", async () => { called = true; return "x"; });
-    expect(out).toBe("https://example.com/?q=1");
-    expect(called).toBe(false);
+  test("location.href wins over a non-empty view.url (after pushState)", async () => {
+    expect(await resolveUrl("http://x/a", async () => "http://x/pushed")).toBe("http://x/pushed");
   });
 
-  test("takes about:blank from view.url as it is", async () => {
-    let called = false;
-    expect(await resolveUrl("about:blank", async () => { called = true; return "x"; })).toBe("about:blank");
-    expect(called).toBe(false);
-  });
-
-  test("falls back to location.href when view.url is empty", async () => {
+  test("a fresh view reads about:blank from the page", async () => {
     expect(await resolveUrl("", async () => "about:blank")).toBe("about:blank");
   });
 
-  test("returns the original url when evaluate throws", async () => {
+  test("falls back to view.url when the read throws", async () => {
+    expect(await resolveUrl("http://x/a", async () => { throw new Error("eval failed"); })).toBe("http://x/a");
     expect(await resolveUrl("", async () => { throw new Error("eval failed"); })).toBe("");
   });
 
-  test("returns the original url when evaluate yields a non-string", async () => {
-    expect(await resolveUrl("", async () => undefined)).toBe("");
+  test("falls back to view.url when the read yields a non-string", async () => {
+    expect(await resolveUrl("http://x/a", async () => undefined)).toBe("http://x/a");
   });
 
-  test("returns the original url when evaluate yields an empty string", async () => {
-    expect(await resolveUrl("", async () => "")).toBe("");
+  test("falls back to view.url when the read yields an empty string", async () => {
+    expect(await resolveUrl("http://x/a", async () => "")).toBe("http://x/a");
   });
 });

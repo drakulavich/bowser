@@ -3,6 +3,9 @@
 // refuse a disabled control and `uncheck` a checked radio instead of
 // reporting success and doing nothing (F20). Each check reads the page back
 // with `eval`, including a log of every click and keydown the page saw.
+// The second block (issue #51, items 7 and 11) checks that the URL bowser
+// reports follows the page: after `history.pushState`, and after a `select`
+// or `check` whose change handler navigates to a slow page.
 //
 // macOS only (WebKit is). Run with:
 //   BOWSER_E2E=1 bun test tests/e2e-actions.test.ts
@@ -14,7 +17,7 @@ import { join } from "node:path";
 
 import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
-import { cmdCheck, cmdClick, cmdPress, cmdUncheck } from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdPress, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -192,4 +195,69 @@ runOrSkip("e2e: actions on WebKit", () => {
       expect(await log()).toBe("[]");
     });
   });
+});
+
+runOrSkip("e2e: the reported URL follows the page (#51)", () => {
+  const ctx: CommandContext = { session: `actions-nav-${process.pid}`, json: false };
+  let tmp: string;
+  let origHome: string | undefined;
+  let server: ReturnType<typeof Bun.serve> | undefined;
+
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-actions-nav-"));
+    process.env.HOME = tmp;
+    const page = await readFile(join(import.meta.dir, "fixtures/navigating-controls.html"), "utf8");
+    const html = (body: string) => new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
+    server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        // Slow, as in the spec's measurement: the old page is still up when
+        // the action returns unless bowser waits for the navigation.
+        if (new URL(req.url).pathname === "/next") {
+          await Bun.sleep(1500);
+          return html("<!doctype html><title>Next</title><h1>Next</h1>");
+        }
+        return html(page);
+      },
+    });
+  });
+
+  afterAll(async () => {
+    try { await cmdClose(ctx); } catch {}
+    server?.stop(true);
+    if (origHome !== undefined) process.env.HOME = origHome;
+    else delete process.env.HOME;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    await cmdOpen(ctx, new URL("/a", server!.url).toString());
+    await cmdSnapshot(ctx);
+  }, 30_000);
+
+  async function ref(name: string): Promise<string> {
+    const r = (await loadState(ctx.session))!.refs.find((x) => x.name === name);
+    if (!r) throw new Error(`no ref named ${JSON.stringify(name)}`);
+    return r.id;
+  }
+  const next = () => new URL("/next", server!.url).toString();
+
+  test("click on a pushState button replies with the new URL, and state.json holds it", async () => {
+    const pushed = new URL("/pushed?x=1", server!.url).toString();
+    const out = await cmdClick({ ...ctx, json: true }, await ref("Push"));
+    expect(JSON.parse(out).url).toBe(pushed);
+    expect((await loadState(ctx.session))!.url).toBe(pushed);
+    expect(await cmdSnapshot(ctx)).toContain(`- Page URL: ${pushed}\n`);
+  });
+
+  test("select whose change handler navigates: the next snapshot shows the new page", async () => {
+    await cmdSelect(ctx, await ref("Pick"), "b");
+    expect(await cmdSnapshot(ctx)).toContain(`- Page URL: ${next()}\n`);
+  }, 30_000);
+
+  test("check whose change handler navigates: the next snapshot shows the new page", async () => {
+    await cmdCheck(ctx, await ref("Go"));
+    expect(await cmdSnapshot(ctx)).toContain(`- Page URL: ${next()}\n`);
+  }, 30_000);
 });

@@ -3,6 +3,7 @@ import { renderCommandHelp, renderHelp } from "./cli/help.ts";
 import { helpRequested, parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { failedModalState, type CommandContext } from "./commands/context.ts";
+import { UserError } from "./errors.ts";
 
 /** `base` seeds the command context; tests inject `connect` through it. */
 export async function run(argv: string[], base: Partial<CommandContext> = {}): Promise<string> {
@@ -11,7 +12,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   const command = findCommand(args.command);
   // parse() rejects an unknown command unless --help came first; this is
   // that case, and the type narrowing.
-  if (!command) throw new Error(`unknown command: ${args.command}`);
+  if (!command) throw new UserError(`unknown command: ${args.command}`);
   // -h/--help anywhere before `--` prints the help and runs nothing:
   // `close --help` once closed the session.
   if (args.help) return renderCommandHelp(command);
@@ -19,7 +20,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   // once printed 1. Words after `--` count too.
   const declared = command.positional.length;
   if (args.positional.length > declared) {
-    throw new Error(
+    throw new UserError(
       `usage: too many arguments for '${command.name}': expected ${declared}, received ${args.positional.length}`,
     );
   }
@@ -28,13 +29,13 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
 }
 
 /** What the CLI prints for a failed command, and its exit code: `1` for a
- *  user error, `2` otherwise, read from the message alone. A page command's
- *  dialogs follow the message as `### Modal state`. */
+ *  `UserError`, `2` for any other error. The throw site decides, never the
+ *  message: a page error that reads `usage: …` is still exit 2. A page
+ *  command's dialogs follow the message as `### Modal state`. */
 export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
   const msg = err instanceof Error ? err.message : String(err);
-  const userError = /^(usage:|unknown command|unknown flag|expected a ref|ref '.*' not found|ref '.*' (is not an? |is disabled$|is a radio button; |has no option |did not accept the value |needs a number )|no open page|run-code runs JavaScript in the page and has no Playwright 'page'|session '.*' is (not open|running bowser )|bowser requires (macOS|Bun) )/i.test(msg);
   const modal = failedModalState(err);
-  return { stderr: `bowser: ${msg}${modal ? `\n${modal}` : ""}`, code: userError ? 1 : 2 };
+  return { stderr: `bowser: ${msg}${modal ? `\n${modal}` : ""}`, code: err instanceof UserError ? 1 : 2 };
 }
 
 /** `bowser mcp` starts the server only when argv asks for nothing else.

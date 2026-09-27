@@ -3,6 +3,32 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A password field's `value` attribute could reach the snapshot.** An `<input type="password" role="spinbutton" value="…">` that another element names with `aria-labelledby` put its initial value into that element's name, bypassing the password guard. The walker now treats it like any password field. Found by the Codex review of PR #59; present since the full-tree snapshot.
+
+- **The URL bowser reports follows `history.pushState`.** After a same-document URL change
+  (`pushState`, `replaceState`, a hash change), `click`'s reply, `state.json` and every command
+  that reports the page URL gave the old URL while `snapshot` showed the new one. The URL is now
+  read from the page's `location.href`. (#51)
+- **`select`, `check` and `uncheck` wait for a navigation their page handler starts.** A
+  `<select onchange="location.href = …">`, or a checkbox with the same handler, left the next
+  `snapshot` on the old page until the new one arrived. They now wait for it, as `click` and
+  `press` do. `hover` and `type` wait the same way. Each of these that does not navigate now
+  takes about 100 ms longer. (#51)
+- **A page error exits 2, whatever its text.** `eval` (or `run-code`) of a page that throws
+  `usage: …`, `ref 'e1' not found …` or `no open page …` exited 1, as if the command line were
+  wrong, because the exit code was read from the message. The code is now set where bowser raises
+  the error: its own user errors exit 1, everything else exits 2. No message text changed. (#51)
+
+### Changed
+
+- **A saved ref no longer carries a CSS selector.** Ref commands already act on the element the
+  live page resolves for the ref, so `snapshot` stops writing `selector` into `state.json`'s refs.
+  A `state.json` written by 0.8.0 still loads; its `selector` fields are ignored. (#51)
+
 ## [0.8.0] — 2026-09-27
 
 ### BREAKING: no release binaries; install through npm or from source

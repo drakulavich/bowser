@@ -2,17 +2,17 @@
 // One-shot mode means each command spawns a fresh WebView, so we need to
 // persist just enough to make multi-step flows work:
 //   - the current URL (so we can re-navigate)
-//   - the last snapshot (so @eN refs resolve to CSS selectors)
+//   - the last snapshot's refs (a ref command checks the ref's kind against it)
 //
 // State lives under ~/.bowser/sessions/<name>/.
 
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { UserError } from "./errors.ts";
 
 export interface Ref {
   id: string; // "e1", no '@' prefix (playwright-cli compatible)
-  selector: string;
   role: string;
   name: string;
   tag: string;
@@ -62,7 +62,7 @@ export function isValidSessionName(name: string): boolean {
  *  or `--daemon victim` would pass for the daemon of `victim`. */
 export function sessionDir(name: string): string {
   if (!isValidSessionName(name)) {
-    throw new Error(
+    throw new UserError(
       `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got ${JSON.stringify(name)}`,
     );
   }
@@ -99,13 +99,13 @@ export async function saveState(state: SessionState): Promise<void> {
 
 export function resolveRef(state: SessionState, ref: string): Ref {
   if (!/^e\d+$/.test(ref)) {
-    throw new Error(
+    throw new UserError(
       `expected a ref like 'e1', got '${ref}'. Run 'bowser snapshot' first.`,
     );
   }
   const found = state.refs.find((r) => r.id === ref);
   if (!found) {
-    throw new Error(
+    throw new UserError(
       `ref '${ref}' not found in last snapshot of session '${state.name}'. ` +
         `Run 'bowser snapshot' to refresh.`,
     );

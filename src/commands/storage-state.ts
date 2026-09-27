@@ -21,6 +21,7 @@ import { resolve } from "node:path";
 import type { Command } from "../cli/registry.ts";
 import { storageListScript, storageRestoreScript } from "../page-scripts.ts";
 import { reply, withClient, type CommandContext } from "./context.ts";
+import { UserError } from "../errors.ts";
 
 interface StorageStateOrigin {
   origin: string;
@@ -42,7 +43,7 @@ function pageOrigin(url: string): string | null {
 }
 
 export async function cmdStateSave(ctx: CommandContext, file: string): Promise<string> {
-  if (!file) throw new Error("usage: bowser state-save <file>");
+  if (!file) throw new UserError("usage: bowser state-save <file>");
   const target = resolve(file);
   return withClient(ctx, async (c) => {
     const state = await c.request("state");
@@ -66,7 +67,7 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
 }
 
 export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<string> {
-  if (!file) throw new Error("usage: bowser state-load <file>");
+  if (!file) throw new UserError("usage: bowser state-load <file>");
   const target = resolve(file);
   const f = Bun.file(target);
   if (!(await f.exists())) throw new Error(`state-load: file not found: ${target}`);

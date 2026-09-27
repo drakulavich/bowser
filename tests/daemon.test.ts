@@ -11,9 +11,9 @@ import { ensureSessionDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, daemonCommand, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
-import { claimSession } from "../src/daemon/pidfile.ts";
+import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 
 describe("socketPath", () => {
@@ -25,6 +25,18 @@ describe("socketPath", () => {
     } finally {
       if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
     }
+  });
+});
+
+// `close` and `claimSession` recognise a daemon by its command line. A spawn
+// line the identifier cannot read (say, the profile moved to argv after the
+// session) makes a live daemon look stale: a racing claim takes its session,
+// and `close` refuses to signal it. No other test spawns and then identifies.
+describe("daemonCommand", () => {
+  test("is a command line looksLikeOurDaemon recognises, for its session only", () => {
+    const line = daemonCommand("sess").join(" ");
+    expect(looksLikeOurDaemon(line, "sess")).toBe(true);
+    expect(looksLikeOurDaemon(line, "other")).toBe(false);
   });
 });
 

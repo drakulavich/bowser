@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  HISTORY_BACK, HISTORY_FORWARD, NAV_ARM, NAV_COUNT, READ_TITLE, READ_URL, RELOAD,
+  NAV_ARM, NAV_COUNT, READ_TITLE, READ_URL, RELOAD,
   hoverScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 
@@ -11,6 +11,16 @@ export interface BrowserOptions {
   height?: number;
   /** Persistent profile directory (`open --persistent`); ephemeral without. */
   profile?: string;
+}
+
+// bun-types (1.4.2) declares back()/forward(); the object has goBack() and
+// goForward() instead, and back/forward are undefined (measured, Bun 1.4.2).
+// Declared here so openBrowser can pass the real view as a ViewLike.
+declare module "bun" {
+  interface WebView {
+    goBack(): Promise<void>;
+    goForward(): Promise<void>;
+  }
 }
 
 /** The slice of Bun.WebView that Browser uses. Optional members are the ones
@@ -31,21 +41,21 @@ export interface ViewLike {
   readonly loading: boolean;
   onNavigated: ((url: string, title: string) => void) | null;
   onNavigationFailed: ((error: Error) => void) | null;
-  /** Runtime names. @types/bun (1.4.0) declares back()/forward() instead;
-   *  those do not exist on the object. Do not "fix" these to match the types. */
-  goBack?(): Promise<void>;
-  goForward?(): Promise<void>;
+  /** Runtime names. @types/bun declares back()/forward() instead; those do
+   *  not exist on the object. Do not "fix" these to match the types. */
+  goBack(): Promise<void>;
+  goForward(): Promise<void>;
 }
 
-/** Resolve the committed page URL. WebKit's `view.url` is right after every
- *  navigation (query strings and redirects included; measured, Bun 1.4.2),
- *  but it is "" before the first one, where the page is about:blank. When
- *  it is empty, read location.href from the page instead. */
+/** Resolve the page URL from the page's own location.href. WebKit's
+ *  `view.url` keeps the old URL after a same-document change (pushState,
+ *  replaceState, a hash change) and is "" before the first navigation; in
+ *  every other case the two agree (measured, Bun 1.4.2). `view.url` is the
+ *  fallback when the page cannot answer. */
 export async function resolveUrl(
   viewUrl: string,
   evalHref: () => Promise<unknown>,
 ): Promise<string> {
-  if (viewUrl) return viewUrl;
   try {
     const loc = await evalHref();
     return typeof loc === "string" && loc ? loc : viewUrl;
@@ -204,46 +214,54 @@ function navigationWatch(
     const began = Date.now();
     while (landed === before && still() && Date.now() - began < timing.settleMs) await sleep(10);
   };
+  /** After an action: wait for a navigation that begins within graceMs to
+   *  land, up to settleMs. `before` and `wasLoading` are read before it. */
+  const awaitNavigation = async (before: number, wasLoading: boolean): Promise<void> => {
+    const start = Date.now();
+    while (Date.now() - start < timing.graceMs) {
+      if (landed !== before) return;
+      if (view.loading && !wasLoading) {
+        onNavigation();
+        return settle(before, () => view.loading);
+      }
+      await sleep(10);
+    }
+    // One read at the end of the window, not a poll: each read is an
+    // evaluate, and fewer of them means fewer chances to race the commit.
+    if (landed !== before) return;
+    let seen = await count(timing.graceMs);
+    if (seen < 1) return;
+    onNavigation();
+    // A failure ends the wait unless the page started another navigation
+    // since: a script navigating again cancels the first with -999 while
+    // the second still loads, and that second one is what the action led to.
+    const began = Date.now();
+    let base = landed;
+    const baseArrived = arrived;
+    while (Date.now() - began < timing.settleMs) {
+      if (arrived !== baseArrived) return;
+      if (landed !== base) {
+        const now = await count(began + timing.settleMs - Date.now());
+        if (now <= seen) return;
+        seen = now;
+        base = landed;
+      }
+      await sleep(10);
+    }
+  };
   return {
-    async act(action: () => Promise<void>): Promise<void> {
+    /** Run `action` and wait for a navigation it started; see above.
+     *  Answers what the action answered. */
+    async act<T>(action: () => Promise<T>): Promise<T> {
       const before = landed;
       // A navigation already in flight is not ours: only a false→true transition
       // of `loading` counts, or one stuck navigation would cost every later
       // action the full settleMs. The page flag is cleared for the same reason.
       const wasLoading = view.loading;
       await ask(NAV_ARM, timing.graceMs);
-      await action();
-      const start = Date.now();
-      while (Date.now() - start < timing.graceMs) {
-        if (landed !== before) return;
-        if (view.loading && !wasLoading) {
-          onNavigation();
-          return settle(before, () => view.loading);
-        }
-        await sleep(10);
-      }
-      // One read at the end of the window, not a poll: each read is an
-      // evaluate, and fewer of them means fewer chances to race the commit.
-      if (landed !== before) return;
-      let seen = await count(timing.graceMs);
-      if (seen < 1) return;
-      onNavigation();
-      // A failure ends the wait unless the page started another navigation
-      // since: a script navigating again cancels the first with -999 while
-      // the second still loads, and that second one is what the action led to.
-      const began = Date.now();
-      let base = landed;
-      const baseArrived = arrived;
-      while (Date.now() - began < timing.settleMs) {
-        if (arrived !== baseArrived) return;
-        if (landed !== base) {
-          const now = await count(began + timing.settleMs - Date.now());
-          if (now <= seen) return;
-          seen = now;
-          base = landed;
-        }
-        await sleep(10);
-      }
+      const result = await action();
+      await awaitNavigation(before, wasLoading);
+      return result;
     },
     /** Reload the committed page to free a stuck call; see Browser.interrupt. */
     async interrupt(): Promise<void> {
@@ -287,11 +305,14 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
-    type: (text) => view.type(text),
+    type: (text) => nav.act(() => view.type(text)),
     press: (key) => nav.act(() => view.press(pressKey(key))),
-    hover: async (selector) => { await evaluate(hoverScript(selector)); },
-    select: async (selector, value) => (await evaluate(selectScript(selector, value))) === true,
-    setChecked: async (selector, checked) => (await evaluate(setCheckedScript(selector, checked))) !== false,
+    // A page's change or mouse handler can navigate, so the page-script
+    // actions go through the watch too (#51: a select whose onchange set
+    // location.href left the next snapshot on the old page).
+    hover: (selector) => nav.act(async () => { await evaluate(hoverScript(selector)); }),
+    select: (selector, value) => nav.act(async () => (await evaluate(selectScript(selector, value))) === true),
+    setChecked: (selector, checked) => nav.act(async () => (await evaluate(setCheckedScript(selector, checked))) !== false),
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
       // takes no full-page option. Element-bounded screenshots are not supported.
@@ -304,14 +325,8 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
       return Buffer.from(bytes).toString("base64");
     },
     resize: (width, height) => view.resize(width, height),
-    back: () => nav.act(async () => {
-      if (typeof view.goBack === "function") await view.goBack();
-      else await evaluate(HISTORY_BACK);
-    }),
-    forward: () => nav.act(async () => {
-      if (typeof view.goForward === "function") await view.goForward();
-      else await evaluate(HISTORY_FORWARD);
-    }),
+    back: () => nav.act(() => view.goBack()),
+    forward: () => nav.act(() => view.goForward()),
     reload: () => nav.act(async () => {
       // Native reload() resolves before the reload commits, like goBack();
       // measured in the daemon: a navigate() 1 ms later was rejected with

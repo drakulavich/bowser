@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMMANDS } from "../src/cli/registry.ts";
+import pkg from "../package.json";
 
 const ROOT = join(import.meta.dir, "..");
 const README = readFileSync(join(ROOT, "README.md"), "utf8");
@@ -82,4 +83,29 @@ describe("screenshot is documented as the viewport", () => {
       expect(doc).not.toMatch(/Full-page (screenshot|only)|are\s+full-page/i);
     }
   });
+});
+
+// The Bun floor is engines.bun in package.json; the runtime guard reads it
+// there. The docs, the openspec notes and CI state it by hand, and a bump that
+// missed one would go unnoticed. Every statement must name the floor, and each
+// file must keep at least one, so a deleted statement fails too.
+describe("every statement of the Bun floor names engines.bun", () => {
+  const floor = pkg.engines.bun.replace(/^>=\s*/, "");
+  const FLOOR_FILES = [
+    "README.md",
+    "skills/bowser/SKILL.md",
+    ".github/workflows/test.yml",
+    "openspec/config.yaml",
+    "openspec/specs/GLOSSARY.md",
+  ];
+  for (const file of FLOOR_FILES) {
+    test(file, () => {
+      const text = readFileSync(join(ROOT, file), "utf8");
+      const stated = [...text.matchAll(/Bun\s*(?:≥|>=)\s*([\d.]+)|bun-version:\s*"?>=\s*([\d.]+)/g)].map((m) =>
+        (m[1] ?? m[2]!).replace(/\.$/, ""),
+      );
+      expect(stated.length).toBeGreaterThan(0);
+      expect(stated.filter((v) => v !== floor)).toEqual([]);
+    });
+  }
 });

@@ -93,6 +93,50 @@ const RULES: Rule[] = [
     // path "just in case" starts coming back.
     violates: (_file, text) => /chrom|\bcdp\b/i.test(text),
   },
+  {
+    name: "only src/state.ts reads the home directory",
+    // Tests redirect HOME in beforeAll, after src is imported. state.ts
+    // resolves home paths per call (tests/state.test.ts pins that); a new
+    // module reading HOME itself could capture it at load and write to the
+    // real ~/.bowser from tests (PR #8). Go through state.ts instead.
+    violates: (file, text) => file !== "src/state.ts" && /process\.env\.HOME\b|\bhomedir\s*\(/.test(text),
+  },
+  {
+    name: "only src/socket-write.ts calls .write( (Bun.write and process.stdout/stderr aside)",
+    // Bun's socket.write() accepts what the buffer takes (about 8 KB on a
+    // macOS Unix socket) and silently drops the rest; screenshot hung for 30 s
+    // on it (#9). socketWriteAll() queues the remainder for `drain`.
+    violates: (file, text) =>
+      file !== "src/socket-write.ts" && /(?<!\bBun|\bprocess\.std(?:out|err))\.write\s*\(/.test(text),
+  },
+  {
+    name: "a file that opens a Bun socket wires a drain handler",
+    // socketWriteAll() flushes its queue from `drain`; without the handler the
+    // remainder of a partial write is never sent.
+    violates: (_file, text) => /\bBun\.(?:listen|connect)\s*\(/.test(text) && !/\bdrain\s*\(/.test(text),
+  },
+  {
+    name: "onNavigated and onNavigationFailed are each assigned once, in src/browser.ts",
+    // Each is a single slot on the view, and navigationWatch owns both: a
+    // second assignment silently replaces the watch behind nav.act, and no
+    // other unit test notices. Anyone else goes through Browser.watchNavigation.
+    // Any assignment outside browser.ts breaks it, and so does a count other
+    // than one inside it (a deleted watch too).
+    violates: (file, text) =>
+      [/\bonNavigated\s*=(?!=)/g, /\bonNavigationFailed\s*=(?!=)/g].some(
+        (re) => (text.match(re)?.length ?? 0) !== (file === "src/browser.ts" ? 1 : 0),
+      ),
+  },
+  {
+    name: "a user error's message goes out as a UserError, never a plain Error",
+    // reportFailure gives exit 1 to a UserError (src/errors.ts) and exit 2 to
+    // anything else, whatever the message says (#51 item 3). A plain Error
+    // with a user-error message would quietly exit 2. This sees literals
+    // only; a message built elsewhere and passed in is held by
+    // tests/exit-codes.test.ts, site by site.
+    violates: (_file, text) =>
+      /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(text),
+  },
 ];
 
 describe("src layering rules", () => {

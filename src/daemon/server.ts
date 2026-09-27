@@ -349,7 +349,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
 
 /** The ops that act on the current document by native input or a page
  *  script of their own: the shim must be there first. */
-const ACTS: ReadonlySet<Op> = new Set<Op>(["click", "type", "press", "hover", "select", "check", "uncheck"]);
+export const ACTS: ReadonlySet<Op> = new Set<Op>(["click", "type", "press", "hover", "select", "check", "uncheck"]);
 
 /** The ops that navigate the page themselves. */
 const NAVIGATES: ReadonlySet<Op> = new Set<Op>(["navigate", "reload", "back", "forward"]);

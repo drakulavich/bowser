@@ -7,6 +7,7 @@ import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
 import { dialogsJson, modalState, reply, withClient, withPageClient, type CommandContext } from "./context.ts";
+import { UserError } from "../errors.ts";
 
 export async function cmdSnapshot(
   ctx: CommandContext,
@@ -14,7 +15,7 @@ export async function cmdSnapshot(
 ): Promise<string> {
   // 0 (the default) means unlimited, as in playwright-cli.
   if (opts.depth !== undefined && !/^\d+$/.test(opts.depth)) {
-    throw new Error(`usage: --depth=N requires a non-negative integer (got '${opts.depth}')`);
+    throw new UserError(`usage: --depth=N requires a non-negative integer (got '${opts.depth}')`);
   }
   const depth = Number(opts.depth ?? 0);
   return withPageClient(ctx, async (c) => {

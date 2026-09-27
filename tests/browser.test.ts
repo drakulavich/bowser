@@ -1,6 +1,8 @@
 // wrapView() against a fake view.
 import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
+import { ACTS, createHandler } from "../src/daemon/server.ts";
+import type { Op } from "../src/daemon/protocol.ts";
 import { NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
@@ -22,6 +24,8 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     type: async (t) => { calls.push(["type", [t]]); },
     press: async (k) => { calls.push(["press", [k]]); },
     resize: async (w, h) => { calls.push(["resize", [w, h]]); },
+    goBack: async () => { calls.push(["goBack", []]); },
+    goForward: async () => { calls.push(["goForward", []]); },
     /** A navigation lands: url changes, loading ends, onNavigated fires. */
     land(url) { v.url = url; v.loading = false; v.onNavigated?.(url, ""); },
     ...over,
@@ -263,28 +267,19 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/");
   });
 
-  test("back and forward use goBack/goForward when the runtime has them", async () => {
-    const v = fakeView({
-      goBack: async () => { v.calls.push(["goBack", []]); },
-      goForward: async () => { v.calls.push(["goForward", []]); },
-    });
+  test("back and forward call goBack/goForward, with no page fallback", async () => {
+    const v = fakeView();
     const b = wrapView(v, fast);
     await b.back();
     await b.forward();
     expect(own(v.calls)).toEqual([["goBack", []], ["goForward", []]]);
   });
 
-  test("back, forward and reload fall back to history/location when the runtime lacks them", async () => {
+  test("reload falls back to location.reload() when the runtime lacks it", async () => {
     const v = fakeView();
     const b = wrapView(v, fast);
-    await b.back();
-    await b.forward();
     await b.reload();
-    expect(own(v.calls)).toEqual([
-      ["evaluate", ["history.back()"]],
-      ["evaluate", ["history.forward()"]],
-      ["evaluate", ["location.reload()"]],
-    ]);
+    expect(own(v.calls)).toEqual([["evaluate", ["location.reload()"]]]);
   });
 
   test("reload prefers the native call and waits for its navigation to land", async () => {
@@ -357,4 +352,47 @@ describe("wrapView watchNavigation", () => {
     await b.click("a");
     expect(seen).toEqual(["navigation", "landed", "navigation"]);
   });
+});
+
+// Every op in the daemon's ACTS set acts on the page, and a page handler can
+// navigate on anything it does (#51 item 11: a select whose onchange set
+// location.href left the next snapshot on the old page). So each one's
+// Browser method must run inside the navigation watch: NAV_ARM before the
+// action, NAV_COUNT after it. Driven through createHandler, so the op-to-
+// method mapping is the daemon's own.
+const ACT_ARGS: Partial<Record<Op, string[]>> = {
+  click: ["#act-target"],
+  type: ["act-text"],
+  press: ["act-key"],
+  hover: ["#act-target"],
+  select: ["#act-target", "v"],
+  check: ["#act-target"],
+  uncheck: ["#act-target"],
+};
+
+describe("every ACTS op runs inside the navigation watch", () => {
+  test("the table below covers every ACTS op", () => {
+    expect(Object.keys(ACT_ARGS).sort()).toEqual([...ACTS].sort());
+  });
+
+  for (const op of ACTS) {
+    test(op, async () => {
+      const v = fakeView();
+      const handle = createHandler(wrapView(v, fast));
+      const args = ACT_ARGS[op] ?? [];
+      const res = await handle({ id: 1, op, args });
+      expect(res.ok).toBe(true);
+      // "act" is the call that carries this op's first argument: a native
+      // call, or the evaluate of its page script. The dialog shim's reads
+      // around the op are "other".
+      const seq = v.calls.map(([name, a]) => {
+        if (name === "evaluate" && a[0] === NAV_ARM) return "arm";
+        if (name === "evaluate" && a[0] === NAV_COUNT) return "count";
+        return a.some((x) => String(x).includes(args[0]!)) ? "act" : "other";
+      });
+      const arm = seq.indexOf("arm");
+      expect(arm).toBeGreaterThanOrEqual(0);
+      expect(seq.slice(arm + 1, seq.indexOf("count", arm))).toEqual(["act"]);
+    });
+  }
 });

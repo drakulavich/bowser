@@ -5,11 +5,10 @@
 // IIFE string (tests/layers.test.ts).
 
 // cssPath(el): a unique id, else an nth-of-type chain from <html>. The
-// selector a ref is saved with and the one an action on it uses, inlined into
-// SNAPSHOT_SCRIPT and resolveRefScript so both compute it the same way. Chains
-// and sibling indexes are memoized per evaluation: a ref'd node's ancestors
-// are ref'd too, and a long list would otherwise rescan its siblings for
-// every item. Plain JavaScript under String.raw: no backticks, no dollar-brace.
+// selector an action on a ref uses, computed in the live page by
+// resolveRefScript; a ref saves none. Chains and sibling indexes are memoized
+// per evaluation. Plain JavaScript under String.raw: no backticks, no
+// dollar-brace.
 const CSS_PATH = String.raw`
   const chains = new Map();
   const nthIndex = new Map();
@@ -108,6 +107,8 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   // A password field's value never leaves the page: no value child, no saved
   // ref value, no part of any accessible name. Deliberately unlike playwright-cli.
   const isPassword = (el) => tagOf(el) === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'password';
+  // The walker's only read of an element's value (tests/page-scripts.test.ts).
+  const valueOf = (el) => isPassword(el) ? '' : el.value;
 
   // ---- roles (html-aam implicit roles, as Playwright computes them) ----
   const VALID_ROLES = new Set(('alert alertdialog application article banner blockquote button caption cell checkbox code ' +
@@ -314,8 +315,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     if (o.embedded || o.mode === 'descendant') {
       if (role === 'textbox') {
         o.visited.add(el);
-        if (isPassword(el)) return '';
-        return tag === 'INPUT' || tag === 'TEXTAREA' ? el.value : (el.textContent || '');
+        return tag === 'INPUT' || tag === 'TEXTAREA' ? valueOf(el) : (el.textContent || '');
       }
       if (role === 'combobox' || role === 'listbox') {
         o.visited.add(el);
@@ -324,14 +324,14 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
           if (!selected.length && el.options.length) selected = [el.options[0]];
           return selected.map((x) => textAlt(x, child)).join(' ');
         }
-        return tag === 'INPUT' && !isPassword(el) ? el.value : '';
+        return tag === 'INPUT' ? valueOf(el) : '';
       }
       if (['progressbar', 'scrollbar', 'slider', 'spinbutton', 'meter'].includes(role)) {
         o.visited.add(el);
         const v = el.getAttribute('aria-valuetext');
         if (v !== null) return v;
         const n = el.getAttribute('aria-valuenow');
-        return n !== null ? n : (el.getAttribute('value') || '');
+        return n !== null ? n : (isPassword(el) ? '' : (el.getAttribute('value') || ''));
       }
       if (role === 'menu') { o.visited.add(el); return ''; }
     }
@@ -340,7 +340,8 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     if (role !== 'presentation' && role !== 'none') {
       if (tag === 'INPUT' && ['button', 'submit', 'reset'].includes(el.type)) {
         o.visited.add(el);
-        if (!isPassword(el) && (el.value || '').trim()) return el.value;
+        const v = valueOf(el) || '';
+        if (v.trim()) return v;
         if (el.type === 'submit') return 'Submit';
         if (el.type === 'reset') return 'Reset';
         return el.getAttribute('title') || '';
@@ -456,7 +457,6 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   }
 
   // ---- refs ----
-  ${CSS_PATH}
   const refs = [];
   function assignRef(n, el) {
     let r = store.refs.get(el);
@@ -466,9 +466,9 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     }
     store.byRef.set(r.ref, new WeakRef(el));
     n.ref = r.ref;
-    const saved = { id: r.ref, selector: cssPath(el), role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
+    const saved = { id: r.ref, role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
     if (tagOf(el) === 'A' && el.getAttribute('href')) saved.href = el.getAttribute('href');
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && !isPassword(el) && el.value) saved.value = String(el.value).slice(0, 120);
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && valueOf(el)) saved.value = String(valueOf(el)).slice(0, 120);
     if (el.isContentEditable) saved.editable = true;
     refs.push(saved);
   }
@@ -494,7 +494,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     addState(n, el);
     cursorOf.set(n, b.cursor);
     if ((tagOf(el) === 'INPUT' && !['checkbox', 'radio', 'file'].includes(el.type) && !isPassword(el)) || tagOf(el) === 'TEXTAREA') {
-      n.children.push(el.value);
+      n.children.push(valueOf(el));
     }
     return n;
   }
@@ -670,8 +670,6 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 // the page, which is what the layer rule claims.
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
-export const HISTORY_BACK = "history.back()";
-export const HISTORY_FORWARD = "history.forward()";
 export const RELOAD = "location.reload()";
 
 // The navigation watch's page side (browser.ts, nav.act). On WebKit a

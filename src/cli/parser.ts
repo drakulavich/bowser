@@ -1,3 +1,5 @@
+import { UserError } from "../errors.ts";
+
 export type FlagKind = "string" | "boolean";
 
 export interface FlagSpec {
@@ -83,7 +85,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       const name = eq >= 0 ? a.slice(2, eq) : a.slice(2);
       const spec = findFlag(schemas, cmdSchema, name);
       if (!spec) {
-        error ??= new Error(`unknown flag: --${name}`);
+        error ??= new UserError(`unknown flag: --${name}`);
         i++;
         continue;
       }
@@ -101,7 +103,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       const short = eq >= 0 ? a.slice(1, eq) : a.slice(1);
       const spec = findShort(schemas, cmdSchema, short);
       if (!spec) {
-        error ??= new Error(`unknown flag: -${short}`);
+        error ??= new UserError(`unknown flag: -${short}`);
         i++;
         continue;
       }
@@ -117,7 +119,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
     if (!out.command) {
       out.command = a;
       cmdSchema = schemas.commands.find((c) => c.name === a);
-      if (!cmdSchema) error ??= new Error(`unknown command: ${a}`);
+      if (!cmdSchema) error ??= new UserError(`unknown command: ${a}`);
       i++;
       continue;
     }

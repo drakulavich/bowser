@@ -178,7 +178,7 @@ describe("snapshot wrapper", () => {
 
   test("--json prints only { snapshot: <tree> }, pretty-printed, no url/title/refs", async () => {
     const out = await snapshot(page([kitchenSink], { refs: [
-      { id: "e2", selector: "main", role: "main", name: "", tag: "main" },
+      { id: "e2", role: "main", name: "", tag: "main" },
     ] }), { json: true });
     expect(out).toBe(JSON.stringify({ snapshot: kitchenSinkTree }, null, 2));
   });
@@ -192,8 +192,8 @@ describe("snapshot wrapper", () => {
 
   test("saves every ref from the walker result to state.json", async () => {
     const refs = [
-      { id: "e5", selector: "form > button", role: "button", name: "Add", tag: "button" },
-      { id: "e11", selector: "a", role: "link", name: "Page two", tag: "a", href: "/two" },
+      { id: "e5", role: "button", name: "Add", tag: "button" },
+      { id: "e11", role: "link", name: "Page two", tag: "a", href: "/two" },
     ];
     const c = fakeClient({ evaluate: () => page([], { refs }) });
     await cmdSnapshot({ session: "snap-state", json: false, connect: async () => c }, {});

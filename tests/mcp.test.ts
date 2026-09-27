@@ -291,7 +291,7 @@ describe("MCP positionals are data, never flags", () => {
       process.env.HOME = home;
       try {
         await saveState({ name: "dash", url: "https://x", title: "X", updatedAt: Date.now(),
-          refs: [{ id: "e1", selector: "input", role: "textbox", name: "Email", tag: "input" }] });
+          refs: [{ id: "e1", role: "textbox", name: "Email", tag: "input" }] });
         const c = fakeClient({ evaluate: (e) => (e === resolveRefScript("e1") ? "input" : undefined) });
         const deps: McpDeps = {
           run: (argv) => run(argv, { connect: async () => c, readStdin: async () => { throw new Error("read stdin"); } }),
@@ -445,7 +445,7 @@ describe("MCP fill and type never echo the entered text", () => {
       process.env.HOME = home;
       try {
         await saveState({ name: "echo", url: "https://x", title: "X", updatedAt: Date.now(),
-          refs: [{ id: "e1", selector: "input", role: "textbox", name: "Password", tag: "input" }] });
+          refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }] });
         const c = fakeClient({ evaluate: (e) => (e === resolveRefScript("e1") ? "input" : undefined) });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
         const res: any = await handleMcpRequest(
@@ -475,7 +475,7 @@ describe("MCP fill and type errors never carry the entered text", () => {
     process.env.HOME = home;
     try {
       await saveState({ name: "echoerr", url: "https://x", title: "X", updatedAt: Date.now(),
-        refs: [{ id: "e1", selector: "input", role: "textbox", name: "Password", tag: "input" }] });
+        refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }] });
       const c = fakeClient({
         evaluate: (e) => (e === resolveRefScript("e1") ? "input" : undefined),
         type: () => { throw new Error(message); },
