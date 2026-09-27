@@ -20,7 +20,7 @@ What sets it apart from `playwright-cli`:
 bowser runs on macOS only (it needs WebKit, which `Bun.WebView` provides only there).
 
 ```bash
-# From npm (requires Bun ≥ 1.3.12 on your PATH)
+# From npm (requires Bun ≥ 1.4.2 on your PATH)
 npm install -g @drakulavich/bowser-cli
 
 # ...or directly from source
@@ -33,7 +33,7 @@ bun link                     # exposes `bowser` on $PATH
 Prebuilt single-file binaries for macOS (arm64/x64) are also attached to every GitHub Release — see
 [Releases](https://github.com/drakulavich/bowser/releases).
 
-Requires Bun ≥ 1.3.12 for the npm/source install.
+Requires Bun ≥ 1.4.2 for the npm/source install.
 
 On another platform, any command that would start a session fails with the error "bowser requires macOS (WebKit)" (exit 1).
 

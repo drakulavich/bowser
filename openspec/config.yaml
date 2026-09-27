@@ -4,7 +4,7 @@ context: |
   bowser: a Bun-native CLI (`@drakulavich/bowser-cli`, command `bowser`) that drives a
   real browser through concise shell commands — a drop-in, command-compatible
   alternative to Microsoft `playwright-cli` for AI agents. Built on `Bun.WebView`
-  (Bun >= 1.3.12). Each named Session keeps a long-lived browser process (a per-session
+  (Bun >= 1.4.2). Each named Session keeps a long-lived browser process (a per-session
   Daemon over a Unix socket) so multi-step flows survive between commands; session state
   lives under `~/.bowser/sessions/<name>/`.
   Backends: macOS defaults to native WebKit; Chrome/Chromium over the DevTools Protocol
