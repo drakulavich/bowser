@@ -9,11 +9,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { isLikelyPng } from "../src/browser.ts";
+import { isLikelyPng, openBrowser } from "../src/browser.ts";
 import { cmdClick } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
+import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -137,4 +138,54 @@ runOrSkip("e2e: real browser", () => {
       expect(got).toBe("landed");
     }
   }, 120_000);
+
+  // A navigation the page starts to a long URL. WebKit refuses a link to a
+  // data: URL, so this one is served. Measured without the workaround, 0 of
+  // 500 such clicks stalled (the host sends one large frame for them, not
+  // navigate()'s two), so this pins the path rather than the bug.
+  test("a link click to a >8 KB URL lands, 20 times, within 5 s each", async () => {
+    const q = "a".repeat(17_000);
+    const server = Bun.serve({
+      port: 0,
+      fetch: (req) => {
+        const u = new URL(req.url);
+        const body = u.pathname === "/long"
+          ? "<title>long</title><p>landed</p>"
+          : `<title>start</title><a href="/long?${u.searchParams.get("i")}-${q}">go</a>`;
+        return new Response(body, { headers: { "content-type": "text/html" } });
+      },
+    });
+    try {
+      for (let i = 0; i < 20; i++) {
+        await cmdOpen({ session, json: false }, `${server.url}?i=${i}`);
+        await cmdSnapshot({ session, json: false });
+        const link = (await loadState(session))?.refs.find((r) => r.role === "link");
+        const got = await Promise.race([
+          cmdClick({ session, json: false }, link!.id).then(async () => (await loadState(session))?.url ?? ""),
+          Bun.sleep(5000).then(() => `click ${i} still pending after 5 s`),
+        ]);
+        expect(got).toContain(`/long?${i}-aaa`);
+      }
+    } finally {
+      server.stop(true);
+    }
+  }, 120_000);
+
+  // The workaround's second view costs a WebContent process; a session that
+  // never meets the bug must not open it.
+  test("a session on short URLs never opens the kick view", async () => {
+    const b = await openBrowser();
+    try {
+      await b.navigate(`data:text/html,${encodeURIComponent(html)}`);
+      await b.evaluate(SNAPSHOT_SCRIPT);
+      await b.click("#go");
+      await b.click("#more");
+      await b.realUrl();
+      await b.screenshot();
+      await Bun.sleep(1500);
+      expect(b.kickerOpened).toBe(false);
+    } finally {
+      await b.close();
+    }
+  }, 30_000);
 });
