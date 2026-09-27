@@ -148,6 +148,12 @@ runOrSkip("e2e: actions on WebKit", () => {
     });
   });
 
+  test("check reads aria-checked on a role=checkbox: an already checked one is not clicked off", async () => {
+    await cmdCheck(ctx, await ref("AriaOn"));
+    expect(await js("ariaon.getAttribute('aria-checked')")).toBe(`"true"`);
+    expect(await log()).toBe("[]");
+  });
+
   describe("F20: uncheck on a radio", () => {
     test("a checked radio: exit 1, it stays checked", async () => {
       const e = await ref("Large");
