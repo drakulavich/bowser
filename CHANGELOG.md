@@ -51,6 +51,20 @@ with no report).
 - **`BOWSER_OP_TIMEOUT_MS` is documented as read when the session starts.** Setting it on a later
   command did nothing, silently. It is still one budget per session: to change it, `close` and
   `open` again.
+- **`press Tab` moves focus.** It typed a tab character into the focused field, and from `<body>`
+  focused nothing; the page saw no `keydown`. It now moves focus as the browser's own Tab does, the
+  field's value unchanged, and a page `keydown` listener sees a trusted `Tab`. Other keys are
+  unchanged.
+- **`click`, `check` and `uncheck` refuse a disabled element.** They reported success and did
+  nothing, and `check` on an `aria-disabled` checkbox ran its click handler. A disabled element, by
+  the rule the snapshot uses for `[disabled]` (a disabled control or `<fieldset>`, or
+  `aria-disabled="true"` on it or an ancestor), now fails at once with `ref 'eN' is disabled`
+  (exit 1), and nothing is clicked. `playwright-cli` waits out its timeout instead.
+- **`uncheck` refuses a checked radio.** It clicked it, reported `unchecked`, and the radio stayed
+  checked. It now fails with `ref 'eN' is a radio button; select another option in its group to
+  uncheck it` (exit 1), as `playwright-cli` does. On an unchecked radio it succeeds and does
+  nothing. `check` and `uncheck` read `aria-checked` on an element that is not an `<input>`, so
+  `check` on an `aria-checked="true"` checkbox no longer clicks it off.
 
 ## [0.7.0] — 2026-09-27
 

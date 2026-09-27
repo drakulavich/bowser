@@ -36,13 +36,13 @@ Do **not** use for static HTTP fetches.
 | `bowser open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies/localStorage/IndexedDB in `~/.bowser/profiles/<session>/` across `close`; `--profile=dir` uses `dir` (implies `--persistent`). `close` keeps the profile; `rm -rf` it to delete. One running session per profile. |
 | `bowser goto <url>` | Navigate within current session. `open` and `goto` add a missing scheme: `http://` for `localhost`, `127.0.0.1`, `[::1]` (`localhost:3000/x`), `https://` otherwise (`example.com`); a URL with a scheme is used as typed |
 | `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
-| `bowser click <ref>` | Click an element by ref |
+| `bowser click <ref>` | Click an element by ref. A `[disabled]` one fails at once with exit 1 and is not clicked |
 | `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin`. Refuses a disabled or readonly field (exit 1). Sets `date`/`time`/`datetime-local`/`month`/`week`/`color` inputs directly (`fill e9 2024-01-02`); a value they do not keep, or text on `type=number`, fails with exit 1 |
 | `bowser type <text>` | Type into focused element. Prints `typed N characters` (`typed 1 character` for one), never the text; `--json` gives `{"ok":true,"length":N}` |
-| `bowser press <key>` | Press a keyboard key |
+| `bowser press <key>` | Press a keyboard key. `Tab` moves focus to the next field |
 | `bowser hover <ref>` | Hover an element |
 | `bowser select <ref> <value>` | Choose a `<select>` option by value or label (the first match in document order); no match fails with exit 1 and changes nothing |
-| `bowser check <ref>` / `uncheck <ref>` | Toggle a checkbox/radio |
+| `bowser check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox/radio. A `[disabled]` one fails (exit 1); `uncheck` on a checked radio fails (exit 1): select another option in its group |
 | `bowser dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next dialog, before the action (a prompt gets `text`); without one it is dismissed |
 | `bowser screenshot [--filename=f]` | Full-page screenshot (PNG) |
 | `bowser resize <width> <height>` | Set the viewport size in pixels |
@@ -184,6 +184,8 @@ bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only t
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
 - **"ref 'eN' has no option \"…\""** — `select` found no option with that value or label. Read the options in the snapshot and pass one of them.
 - **"ref 'eN' is not an editable element (disabled)"** or `(readonly)` — the page does not let that field be edited now; enable it first (e.g. fill the field that unlocks it) or pick another.
+- **"ref 'eN' is disabled"** — `click`, `check` or `uncheck` on an element the page has disabled (`[disabled]` in the snapshot); nothing was clicked. Do what enables it first, then act again.
+- **"ref 'eN' is a radio button; select another option in its group to uncheck it"** — a radio cannot be unchecked on its own: `check` another radio in its group.
 - **"did not accept the value for input[type=date]"** or **"needs a number"** — use the input's own format: `YYYY-MM-DD` for `date`, `HH:MM` for `time`, `#rrggbb` (lowercase) for `color`, digits for `number`.
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.
