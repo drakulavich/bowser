@@ -13,6 +13,12 @@ All notable changes to this project are documented here. This project follows
   (2 in 10 runs of `tests/e2e-persistent.test.ts` under load). `close` now leaves the page and
   waits 1 s before closing the view, so it takes about a second longer for a persistent
   session. (#61)
+- **`open` and `goto` of a URL over ~8 KB no longer hang.** In Bun 1.4.2 a reply over 8 KB from
+  the browser sometimes arrived only when Bun sent the browser its next message
+  (oven-sh/bun#44134), so with a long `data:` URL about 1 `goto` in 10 under load waited out its
+  op budget. While a browser call is pending, bowser now sends a no-op to a second, 1x1 view every
+  100 ms, which releases the reply. 0 hangs in 2400 opens and gotos under the same load. Each
+  session runs one more WebKit content process (~25 MB). (#63)
 
 ## [0.8.1] — 2026-09-27
 
