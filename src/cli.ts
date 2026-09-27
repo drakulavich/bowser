@@ -32,7 +32,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
  *  dialogs follow the message as `### Modal state`. */
 export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
   const msg = err instanceof Error ? err.message : String(err);
-  const userError = /^(usage:|unknown command|unknown flag|expected a ref|ref '.*' not found|ref '.*' (is not an? |is disabled$|is a radio button; |has no option |did not accept the value |needs a number )|no open page|session '.*' is (not open|running bowser )|bowser requires (macOS|Bun) )/i.test(msg);
+  const userError = /^(usage:|unknown command|unknown flag|expected a ref|ref '.*' not found|ref '.*' (is not an? |is disabled$|is a radio button; |has no option |did not accept the value |needs a number )|no open page|run-code runs JavaScript in the page and has no Playwright 'page'|session '.*' is (not open|running bowser )|bowser requires (macOS|Bun) )/i.test(msg);
   const modal = failedModalState(err);
   return { stderr: `bowser: ${msg}${modal ? `\n${modal}` : ""}`, code: userError ? 1 : 2 };
 }

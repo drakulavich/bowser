@@ -830,8 +830,26 @@ export function storageRestoreScript(
   );
 }
 
+// Compiles `body` without running it: whether the code parses that way.
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (body: string) => unknown;
+function parses(body: string): boolean {
+  try { new AsyncFunction(body); return true; } catch { return false; }
+}
+
+/** `run-code`'s script (spec F18). Code that parses as one expression is
+ *  evaluated as one, so an IIFE gives its value; any other code is the body
+ *  of an async function, so `return` and `await` work. It must also parse as
+ *  a body on its own: `1), (2` reads as an expression only inside the
+ *  wrapper's parentheses. The page answers `{ value }`, or `{ fn: true }` for
+ *  a function result (a playwright-cli `async page => …` snippet), which the
+ *  command refuses. Parsed here, in Bun: a page's CSP may forbid `Function`. */
 export function runCodeScript(code: string): string {
-  return `(() => { ${code} })()`;
+  const expression = parses(`return (\n${code}\n);`) && parses(code);
+  const run = expression ? `(\n${code}\n)` : `(async () => {\n${code}\n})()`;
+  return `(async () => {
+  const value = await ${run};
+  return typeof value === 'function' ? { fn: true } : { value };
+})()`;
 }
 
 /** The ref's element in the live page, as a CSS_PATH computed now, or null

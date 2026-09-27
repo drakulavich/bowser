@@ -29,7 +29,7 @@ import {
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
-import { fillScript, resolveRefScript } from "../src/page-scripts.ts";
+import { fillScript, resolveRefScript, runCodeScript } from "../src/page-scripts.ts";
 
 /** An evaluate handler that answers the ref-resolve script the way the page
  *  would: the element's fresh selector, or null when it is gone. Any other
@@ -1570,36 +1570,40 @@ describe("eval", () => {
 });
 
 describe("run-code", () => {
-  test("wraps code in IIFE before sending to evaluate", async () => {
-    const c = fakeClient({ evaluate: () => 2 });
+  test("sends the code in runCodeScript and prints the page's value", async () => {
+    const c = fakeClient({ evaluate: () => ({ value: 2 }) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 1+1");
     expect(out).toBe("2");
-    const expr = c.calls[0]![1][0] as string;
-    expect(expr).toContain("return 1+1");
-    expect(expr).toContain("() => {");
-    expect(expr).toContain("})()");
+    expect(c.calls[0]![1][0]).toBe(runCodeScript("return 1+1"));
+  });
+
+  test("a function result exits 1 with the no-Playwright-page message (spec F18)", async () => {
+    const c = fakeClient({ evaluate: () => ({ fn: true }) });
+    const err = await cmdRunCode({ ...ctx(), connect: async () => c }, "async page => 1").then(() => null, (e: Error) => e);
+    expect(err?.message).toBe("run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return");
+    expect(reportFailure(err).code).toBe(1);
   });
 
   test("string result is printed as-is", async () => {
-    const c = fakeClient({ evaluate: () => "hi" });
+    const c = fakeClient({ evaluate: () => ({ value: "hi" }) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 'hi'");
     expect(out).toBe("hi");
   });
 
   test("object result is JSON.stringified", async () => {
-    const c = fakeClient({ evaluate: () => [1, 2, 3] });
+    const c = fakeClient({ evaluate: () => ({ value: [1, 2, 3] }) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return [1,2,3]");
     expect(out).toBe("[1,2,3]");
   });
 
   test("undefined result prints empty string", async () => {
-    const c = fakeClient({ evaluate: () => undefined });
+    const c = fakeClient({ evaluate: () => ({}) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "1+1");
     expect(out).toBe("");
   });
 
   test("--json wraps result in { ok, result }", async () => {
-    const c = fakeClient({ evaluate: () => "x" });
+    const c = fakeClient({ evaluate: () => ({ value: "x" }) });
     const out = await cmdRunCode({ ...ctx({ json: true }), connect: async () => c }, "return 'x'");
     expect(JSON.parse(out)).toEqual({ ok: true, result: "x" });
   });

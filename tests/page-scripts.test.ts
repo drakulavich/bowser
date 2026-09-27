@@ -33,7 +33,27 @@ describe("page scripts quote their inputs", () => {
       "const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o;"));
   });
 
-  test("run-code wraps the body in an IIFE", () => {
-    expect(runCodeScript("return 1;")).toBe("(() => { return 1; })()");
+  // The script runs here in Bun: none of these codes touch the page.
+  const runCode = async (code: string): Promise<unknown> => (0, eval)(runCodeScript(code));
+
+  test("run-code evaluates one expression as an expression (spec F18)", async () => {
+    expect(await runCode("(() => { return 5 })()")).toEqual({ value: 5 });
+    expect(await runCode("1 + 1 // a trailing comment")).toEqual({ value: 2 });
+    expect(await runCode("Promise.resolve(3)")).toEqual({ value: 3 });
+  });
+
+  test("run-code runs anything else as the body of an async function", async () => {
+    expect(await runCode("return 1;")).toEqual({ value: 1 });
+    expect(await runCode("await new Promise(r => setTimeout(r, 5)); return 1")).toEqual({ value: 1 });
+    expect(await runCode("const a = 2; a * 3")).toEqual({ value: undefined });
+    // Unbalanced parens that would read as an expression inside a wrapper
+    // stay a body, so the syntax error surfaces.
+    await expect(runCode("1), (2")).rejects.toThrow(SyntaxError);
+  });
+
+  test("run-code answers { fn: true } for a function result, and runs nothing more", async () => {
+    expect(await runCode("async page => { return await page.title() }")).toEqual({ fn: true });
+    expect(await runCode("() => document.title")).toEqual({ fn: true });
+    expect(await runCode("return function () {}")).toEqual({ fn: true });
   });
 });

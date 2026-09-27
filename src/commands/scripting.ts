@@ -19,10 +19,16 @@ export async function cmdEval(ctx: CommandContext, expression: string): Promise<
   });
 }
 
+/** playwright-cli's run-code calls a function with a Playwright `page`;
+ *  bowser's runs page JavaScript and has no `page` to hand it (spec F18). */
+const NO_PAGE = "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return";
+
 export async function cmdRunCode(ctx: CommandContext, code: string): Promise<string> {
   if (!code) throw new Error("usage: bowser run-code <code>");
   return withPageClient(ctx, async (c) => {
-    const result = await c.request("evaluate", [runCodeScript(code)]);
+    const answer = (await c.request("evaluate", [runCodeScript(code)])) as { value?: unknown; fn?: true } | undefined;
+    if (answer?.fn) throw new Error(NO_PAGE);
+    const result = answer?.value;
     return replyPage(ctx, c, { ok: true, result }, formatEvalResult(result));
   });
 }
