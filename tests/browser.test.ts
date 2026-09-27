@@ -61,6 +61,103 @@ describe("wrapView close", () => {
   });
 });
 
+// #63, oven-sh/bun#44134: a reply frame over 8 KB (a navigation to a long URL,
+// an evaluate with a long result) sometimes reaches Bun only when the browser
+// host gets its next message. The fakes model that: `host.stall(done)` holds a
+// reply until the next message, and every call on a view is a message.
+describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
+  function fakeHost() {
+    let held: Array<() => void> = [];
+    return {
+      messages: 0,
+      /** A message reaches the host: it writes out what it held. */
+      message() { this.messages++; const h = held; held = []; for (const f of h) f(); },
+      /** The host holds this reply until the next message. */
+      stall(done: () => void) { held.push(done); },
+    };
+  }
+  type Host = ReturnType<typeof fakeHost>;
+  /** A kicker whose calls are messages. `stuck` holds its own reply to that
+   *  call behind the next message, as a reply queued after a stalled one is. */
+  function fakeKicker(host: Host, stuck: { evaluate?: boolean } = {}) {
+    const calls: string[] = [];
+    let closed = false;
+    const k = {
+      calls,
+      get closed() { return closed; },
+      evaluate: (expr: string) => new Promise<unknown>((r) => {
+        calls.push("evaluate"); host.message();
+        if (stuck.evaluate) host.stall(() => r(expr)); else r(expr);
+      }),
+      resize: (w: number, h: number) => new Promise<void>((r) => { calls.push(`resize ${w}x${h}`); host.message(); r(); }),
+      close: () => { closed = true; },
+    };
+    return k;
+  }
+  const within = <T>(p: Promise<T>, ms: number) =>
+    Promise.race([p.then(() => "settled", () => "rejected"), Bun.sleep(ms).then(() => "pending")]);
+
+  test("a navigate whose reply stalls settles", async () => {
+    const host = fakeHost();
+    const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
+    const b = wrapView(v, fast, undefined, 0, fakeKicker(host));
+    expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("settled");
+    expect(b.url).toBe("data:text/html,long");
+  });
+
+  test("its failure still reaches the caller", async () => {
+    const host = fakeHost();
+    const v = fakeView({ navigate: () => new Promise<void>((_, no) => { host.message(); host.stall(() => no(new Error("nav failed"))); }) });
+    const b = wrapView(v, fast, undefined, 0, fakeKicker(host));
+    expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("rejected");
+  });
+
+  // The residual of a navigate-only kick: `state` reads location.href, which
+  // is the long URL again (1 in 600 gotos under load).
+  test("an evaluate whose reply stalls settles, with its result", async () => {
+    const host = fakeHost();
+    const v = fakeView({ evaluate: (expr) => new Promise((r) => { host.message(); host.stall(() => r(`long ${expr}`)); }) });
+    const b = wrapView(v, fast, undefined, 0, fakeKicker(host));
+    expect(await within(b.realUrl(), 1000)).toBe("settled");
+    expect(await b.evaluate("x")).toBe("long x");
+  });
+
+  test("a navigation an action started lands although its event stalls", async () => {
+    const host = fakeHost();
+    const v = fakeView({ click: async () => { host.message(); v.loading = true; host.stall(() => v.land("https://x/next")); } });
+    const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, fakeKicker(host));
+    const t0 = Date.now();
+    await b.click("a");
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(b.url).toBe("https://x/next");
+  });
+
+  test("a kick whose own reply stalls does not stop the kicking", async () => {
+    // The reply needs two more messages: each one flushes part of it.
+    const host = fakeHost();
+    const v = fakeView({
+      navigate: () => new Promise<void>((r) => { host.message(); host.stall(() => host.stall(r)); }),
+    });
+    const k = fakeKicker(host, { evaluate: true });
+    const b = wrapView(v, fast, undefined, 0, k);
+    expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("settled");
+    expect(k.calls).toContain("resize 1x1");
+  });
+
+  test("kicks only while a call is pending, and close closes the kicker", async () => {
+    const host = fakeHost();
+    const k = fakeKicker(host);
+    const b = wrapView(fakeView({ navigate: () => Bun.sleep(250) }), fast, undefined, 0, k);
+    await b.navigate("https://slow/");
+    const kicks = k.calls.length;
+    expect(kicks).toBeGreaterThan(0);
+    await Bun.sleep(250);
+    expect(k.calls.length).toBe(kicks);
+    await b.close();
+    expect(k.closed).toBe(true);
+  });
+});
+
 const fast = { graceMs: 40, settleMs: 300 };
 
 /** The calls an action made, without the watch's own page reads. */
