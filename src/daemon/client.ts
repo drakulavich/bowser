@@ -169,8 +169,7 @@ export function unsupportedBun(runtime: BunRuntime): string | undefined {
 
 /** The environment variable that carries the profile to a spawned daemon.
  *  Env rather than argv: `looksLikeOurDaemon` identifies a daemon by its last
- *  two argv words, and env reaches both spawn paths (bun main.ts and the
- *  compiled binary's --daemon) unchanged. */
+ *  two argv words. */
 export const DAEMON_PROFILE_ENV = "BOWSER_DAEMON_PROFILE";
 
 /** Connect to a session's daemon, or spawn one if it isn't running. */
@@ -254,17 +253,9 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
     }
   }
 
-  // When running as a compiled single-file binary, import.meta.url points to
-  // a virtual /$bunfs/root/ path that Bun.spawn cannot execute. In that case
-  // re-invoke the binary itself with a hidden --daemon flag; cli.ts intercepts
-  // it before the normal command dispatcher and starts the daemon directly.
-  // Use includes(), not startsWith(): Bun reports this module's import.meta.url
-  // as "file:///$bunfs/root/..." (with a file:// scheme), so a startsWith check
-  // misses it and silently falls through to the broken, unspawnable path.
-  const isCompiled = import.meta.url.includes("/$bunfs/");
-  const cmd: string[] = isCompiled
-    ? [process.execPath, "--daemon", session]
-    : [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+  // Always `bun <package>/src/daemon/main.ts <session>`: from a checkout and
+  // from an npm install alike, main.ts sits beside this file.
+  const cmd = [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
 
   // When BOWSER_DAEMON_DEBUG is set, let the daemon's stdio through so spawn
   // failures are diagnosable.
@@ -286,8 +277,10 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
   // event loop open until a child exits — but the daemon runs forever (keepalive
   // interval), so without unref() a daemon-spawning command (e.g. `bowser open`
   // on a fresh session) prints its result and then hangs indefinitely instead of
-  // returning to the shell. `bun test` masks this (the test runner force-exits);
-  // the real binary does not. unref() lets the short-lived CLI exit immediately.
+  // returning to the shell. Measured from source: without it, `bun src/cli.ts
+  // open <url>` printed `opened …` and hung until killed. `bun test` masks this
+  // (the runner force-exits); tests/e2e-spawn-exit.test.ts runs the CLI as its
+  // own process and fails without it.
   proc.unref();
 }
 

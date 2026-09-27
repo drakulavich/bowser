@@ -330,8 +330,9 @@ function useWritableCwd(): void {
  *
  *  `run` MUST be passed in by the caller (cli.ts entry layer hands its own
  *  `run`). Do NOT `import("./cli.ts")` here: cli.ts is mid-evaluation when it
- *  invokes this (blocked on its top-level `await runMcpServer()`), so a dynamic
- *  import of it deadlocks in the compiled binary. */
+ *  invokes this (blocked on its top-level `await runMcpServer()`); a dynamic
+ *  import of it deadlocked in the old compiled binary, and whether it does
+ *  from source was never measured. */
 export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string }): Promise<void> {
   useWritableCwd();
   const d: McpDeps = { run: deps.run, version: deps.version ?? VERSION };

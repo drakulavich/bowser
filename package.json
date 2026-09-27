@@ -9,8 +9,7 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "bun build src/cli.ts --compile --outfile dist/bowser"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "engines": {
     "bun": ">=1.3.12"
