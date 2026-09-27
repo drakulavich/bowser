@@ -9,11 +9,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { isLikelyPng } from "../src/browser.ts";
+import { isLikelyPng, openBrowser } from "../src/browser.ts";
 import { cmdClick } from "../src/commands/interaction.ts";
-import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
+import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -100,11 +101,8 @@ runOrSkip("e2e: real browser", () => {
     // 500 buttons: each is one ref'd line, so the tree is well over 8 KB.
     const items = Array.from({ length: 500 }, (_, i) => `<button>item-${i}</button>`).join("");
     const big = `<html><head><title>Big</title></head><body>${items}</body></html>`;
-    // Served, not a data: URL: the page's URL comes back from the browser
-    // with every navigation, and Bun.WebView's navigate() to a URL over
-    // ~8 KB sometimes never settles (#61: a 17.5 KB data: URL hung `open`
-    // for its 30 s budget in about 1 open in 15). This test is about the
-    // daemon's reply, so the URL stays short.
+    // Served, not a data: URL: this test is about the daemon's reply, so the
+    // URL stays short. A long URL is the next test's subject.
     const server = Bun.serve({
       port: 0,
       fetch: () => new Response(big, { headers: { "content-type": "text/html; charset=utf-8" } }),
@@ -117,6 +115,77 @@ runOrSkip("e2e: real browser", () => {
       expect(yaml).toContain("item-499"); // the tail proves nothing was truncated
     } finally {
       server.stop(true);
+    }
+  }, 30_000);
+
+  // #63, oven-sh/bun#44134: a reply over 8 KB from the browser host sometimes
+  // arrives only with the host's next message. A 17.5 KB data: URL makes two
+  // (the navigation's) and `state` reads it back in a third. Under load, 10 in
+  // 100 gotos waited out their op budget before the workaround in browser.ts.
+  // Sixty in a row pass by chance about once in 500 runs without it.
+  test("goto a >8 KB data: URL, 60 times, never waits out its budget", async () => {
+    await cmdOpen({ session, json: false }, "data:text/html,start");
+    for (let i = 0; i < 60; i++) {
+      const head = `data:text/html,<title>long-${i}</title><p>`;
+      const url = head + "a".repeat(17_500 - head.length);
+      const got = await Promise.race([
+        cmdGoto({ session, json: true }, url).then((out) => {
+          const at = JSON.parse(out).url as string;
+          return at.includes(`long-${i}`) ? "landed" : at.slice(0, 80);
+        }),
+        Bun.sleep(5000).then(() => `goto ${i} still pending after 5 s`),
+      ]);
+      expect(got).toBe("landed");
+    }
+  }, 120_000);
+
+  // A navigation the page starts to a long URL. WebKit refuses a link to a
+  // data: URL, so this one is served. Measured without the workaround, 0 of
+  // 500 such clicks stalled (the host sends one large frame for them, not
+  // navigate()'s two), so this pins the path rather than the bug.
+  test("a link click to a >8 KB URL lands, 20 times, within 5 s each", async () => {
+    const q = "a".repeat(17_000);
+    const server = Bun.serve({
+      port: 0,
+      fetch: (req) => {
+        const u = new URL(req.url);
+        const body = u.pathname === "/long"
+          ? "<title>long</title><p>landed</p>"
+          : `<title>start</title><a href="/long?${u.searchParams.get("i")}-${q}">go</a>`;
+        return new Response(body, { headers: { "content-type": "text/html" } });
+      },
+    });
+    try {
+      for (let i = 0; i < 20; i++) {
+        await cmdOpen({ session, json: false }, `${server.url}?i=${i}`);
+        await cmdSnapshot({ session, json: false });
+        const link = (await loadState(session))?.refs.find((r) => r.role === "link");
+        const got = await Promise.race([
+          cmdClick({ session, json: false }, link!.id).then(async () => (await loadState(session))?.url ?? ""),
+          Bun.sleep(5000).then(() => `click ${i} still pending after 5 s`),
+        ]);
+        expect(got).toContain(`/long?${i}-aaa`);
+      }
+    } finally {
+      server.stop(true);
+    }
+  }, 120_000);
+
+  // The workaround's second view costs a WebContent process; a session that
+  // never meets the bug must not open it.
+  test("a session on short URLs never opens the kick view", async () => {
+    const b = await openBrowser();
+    try {
+      await b.navigate(`data:text/html,${encodeURIComponent(html)}`);
+      await b.evaluate(SNAPSHOT_SCRIPT);
+      await b.click("#go");
+      await b.click("#more");
+      await b.realUrl();
+      await b.screenshot();
+      await Bun.sleep(1500);
+      expect(b.kickerOpened).toBe(false);
+    } finally {
+      await b.close();
     }
   }, 30_000);
 });

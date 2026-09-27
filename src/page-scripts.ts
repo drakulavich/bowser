@@ -671,6 +671,8 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
 export const RELOAD = "location.reload()";
+/** Evaluated in browser.ts's kicker view, never in the page (oven-sh/bun#44134). */
+export const NO_OP = "0";
 
 // The navigation watch's page side (browser.ts, nav.act). On WebKit a
 // navigation the page starts (a link, a form submit, a script setting
