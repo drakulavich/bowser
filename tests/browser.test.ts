@@ -37,8 +37,20 @@ describe("wrapView close", () => {
   test("with a persistent profile, close leaves the page first so its storage is written", async () => {
     const v = fakeView();
     v.close = () => { v.calls.push(["close", []]); };
-    await wrapView(v, undefined, "/p").close();
+    await wrapView(v, undefined, "/p", 0).close();
     expect(v.calls).toEqual([["navigate", ["about:blank"]], ["close", []]]);
+  });
+
+  // #61: WebKit commits localStorage 500 ms after a write, and Bun kills the
+  // browser at exit, so a write made just before close was lost unless close
+  // outlasted that window after the page was left.
+  test("with a persistent profile, close waits out the storage commit window after leaving the page", async () => {
+    let left = 0;
+    let closed = 0;
+    const v = fakeView({ navigate: async () => { left = Date.now(); } });
+    v.close = () => { closed = Date.now(); };
+    await wrapView(v, undefined, "/p", 150).close();
+    expect(closed - left).toBeGreaterThanOrEqual(150);
   });
 
   test("an ephemeral view just closes", async () => {

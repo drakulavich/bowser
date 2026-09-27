@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`close` keeps a localStorage write made just before it, in a persistent session.** WebKit
+  commits localStorage 500 ms after a write, and the browser is killed when the daemon exits, so
+  with `--persistent` or `--profile` a write in the last half second before `close` was lost
+  (2 in 10 runs of `tests/e2e-persistent.test.ts` under load). `close` now leaves the page and
+  waits 1 s before closing the view, so it takes about a second longer for a persistent
+  session. (#61)
+
 ## [0.8.1] — 2026-09-27
 
 ### Fixed
