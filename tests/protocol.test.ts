@@ -8,12 +8,12 @@ declare const c: DaemonConnection;
 
 async function typeChecks(): Promise<void> {
   // Zero-arg ops accept no args or an empty tuple.
-  const pong: "pong" = await c.request("ping");
+  const version: string = await c.request("ping");
   const st: { url: string; title: string } = await c.request("state", []);
   // Results are typed without casts.
   const shot: { path: string } | string = await c.request("screenshot", ["/tmp/x.png"]);
   const r: unknown = await c.request("evaluate", ["1"]);
-  void [pong, st, shot, r];
+  void [version, st, shot, r];
 
   // @ts-expect-error navigate requires a url
   await c.request("navigate");
@@ -30,7 +30,7 @@ describe("daemon protocol", () => {
     const ops: Op[] = ["ping", "state", "dialog-answer"];
     expect(ops).toHaveLength(3);
     void typeChecks;
-    const okType: ResultOf<"ping"> = "pong";
-    expect(okType).toBe("pong");
+    const okType: ResultOf<"ping"> = "0.8.0";
+    expect(okType).toBe("0.8.0");
   });
 });

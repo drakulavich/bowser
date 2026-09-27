@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import pkg from "../package.json";
 import type { Browser } from "../src/browser.ts";
 import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
 import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport } from "../src/daemon/protocol.ts";
@@ -62,9 +63,9 @@ const rep = (op: DaemonRequest["op"], args?: unknown[]): DaemonRequest => ({ ...
 const actions = (b: { calls: Array<[string, unknown[]]> }) => b.calls.filter(([n]) => n !== "evaluate");
 
 describe("createHandler", () => {
-  test("ping answers pong without touching the browser", async () => {
+  test("ping answers the package version without touching the browser", async () => {
     const b = fakeBrowser();
-    expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
+    expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: pkg.version });
     expect(b.calls).toEqual([]);
   });
 
@@ -651,7 +652,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
     const b = webkitBrowser();
     const h = createHandler(b);
     await h(req("evaluate", ["window.confirm('sure?')"]));
-    expect(await h(rep("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
+    expect(await h(rep("ping"))).toEqual({ id: 7, ok: true, result: pkg.version });
     expect((await h(rep("evaluate", ["1"]))).dialogs).toHaveLength(1);
   });
 

@@ -138,6 +138,37 @@ export interface ConnectOptions {
   /** Start a daemon even where one ran and exited. Only `open` sets it: every
    *  other command refuses such a session (F28). */
   reopen?: boolean;
+  /** Accept a daemon of another bowser version. Only `close` and `list` set
+   *  it: they must still reach a daemon left running by an upgrade (F2). */
+  anyVersion?: boolean;
+}
+
+/** A daemon whose socket accepted the connection and never answered the
+ *  health check: stopped, or blocked in a syscall. Unlike a refused
+ *  connection, it is still running, so `close` must not treat its socket as
+ *  stale (F3). */
+export class DaemonNotAnswering extends Error {
+  constructor(session: string) {
+    super(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
+  }
+}
+
+/** Why a command refuses a daemon of another bowser version, found running
+ *  after an upgrade: its ops and their behaviour may differ from this CLI's,
+ *  and restarting it quietly would drop its page (F2). A user error (exit 1).
+ *  `answer` is what it said to `ping`: its version, or "pong" from every
+ *  daemon before the version was sent. */
+export function otherVersion(session: string, answer: unknown): string {
+  const v = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer) ? answer : "an older version";
+  return `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`;
+}
+
+/** The client, once its daemon has answered `ping` with `answer`; refused
+ *  when the daemon is of another version, unless `opts.anyVersion`. */
+function checked(client: DaemonClient, session: string, answer: unknown, opts: ConnectOptions): DaemonClient {
+  if (opts.anyVersion || answer === pkg.version) return client;
+  client.close();
+  throw new Error(otherVersion(session, answer));
 }
 
 /** Why a command refuses a session whose daemon ran and is gone: its page,
@@ -180,6 +211,7 @@ export async function connectOrSpawn(
   const sock = socketPath(session);
   const client = new DaemonClient(sock, session);
   let connected = false;
+  let answer: unknown;
   try {
     await client.connect();
     connected = true;
@@ -187,20 +219,18 @@ export async function connectOrSpawn(
     // answers — stopped, or blocked in a syscall — would otherwise hang every
     // caller forever, `list` included. Treating it as unreachable is what the
     // callers already know how to handle.
-    await withTimeout(client.request("ping"), HEALTH_PING_MS, "ping");
-    return client;
+    answer = await withTimeout(client.request("ping"), HEALTH_PING_MS, "ping");
   } catch {
     // Close before falling through: a connected socket that is never closed
     // keeps the process alive after the command has printed its answer.
     client.close();
-    if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
     // Do not replace a daemon whose socket accepted our connection but whose
     // health check timed out. Unlinking its socket and spawning another daemon
     // would leave two browser processes for one session, while the old one
-    // would no longer be addressable by its pidfile.
-    if (connected) {
-      throw new Error(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
-    }
+    // would no longer be addressable by its pidfile. Reported before the
+    // spawn: false case, so `close` can tell it from a stale socket (F3).
+    if (connected) throw new DaemonNotAnswering(session);
+    if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
     // A daemon ran here (it left state.json) and none answers now: its
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.
@@ -217,14 +247,16 @@ export async function connectOrSpawn(
     const start = Date.now();
     while (Date.now() - start < 5000) {
       const c = new DaemonClient(sock, session);
+      let reply: unknown;
       try {
         await c.connect();
-        await withTimeout(c.request("ping"), HEALTH_PING_MS, "ping");
-        return c;
+        reply = await withTimeout(c.request("ping"), HEALTH_PING_MS, "ping");
       } catch {
         c.close();
         await Bun.sleep(50);
+        continue;
       }
+      return checked(c, session, reply, opts);
     }
     // A daemon that dies opening its browser never reaches its socket, so its
     // error is invisible here. A persistent store is the likely cause when one
@@ -234,6 +266,8 @@ export async function connectOrSpawn(
       : "";
     throw new Error(`daemon for session '${session}' did not start in time${hint}`);
   }
+  // Checked outside the try: its refusal must not fall into the spawn path.
+  return checked(client, session, answer, opts);
 }
 
 async function spawnDaemon(session: string, profile?: string): Promise<void> {

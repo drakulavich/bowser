@@ -11,7 +11,7 @@ import { ensureSessionDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -233,7 +233,9 @@ describe("connectOrSpawn health check", () => {
     const server = Bun.listen({ unix: socketPath(session), socket: { data() {} } });
     try {
       const started = Date.now();
-      await expect(connectOrSpawn(session, { spawn: false })).rejects.toThrow(/no daemon/);
+      // Told apart from a refused connection even when no spawn is wanted:
+      // `close` must not treat a running daemon's socket as stale (F3).
+      await expect(connectOrSpawn(session, { spawn: false })).rejects.toBeInstanceOf(DaemonNotAnswering);
       await expect(connectOrSpawn(session)).rejects.toThrow(/run 'bowser close -s wedged'/);
       // The point is that it returns at all; the bound is generous so a loaded
       // CI machine does not fail on timing.
@@ -271,7 +273,7 @@ describe("daemon goes away mid-request", () => {
           for (const line of data.toString().split("\n")) {
             if (!line) continue;
             const req = JSON.parse(line) as { id: number; op: string };
-            if (req.op === "ping") s.write(JSON.stringify({ id: req.id, ok: true, result: "pong" }) + "\n");
+            if (req.op === "ping") s.write(JSON.stringify({ id: req.id, ok: true, result: pkg.version }) + "\n");
             else s.end();
           }
         },

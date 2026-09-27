@@ -18,6 +18,7 @@
 
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
+import pkg from "../../package.json";
 import { openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
@@ -154,7 +155,8 @@ type Handlers = {
 };
 
 const handlers: Handlers = {
-  ping: async () => "pong",
+  // The version, so a client of another version refuses this daemon (F2).
+  ping: async () => pkg.version,
   shutdown: async (browser) => {
     // Respond first, then exit: the caller gets its { ok: true } before the
     // process goes away. A macrotask, not a microtask: the reply is written
