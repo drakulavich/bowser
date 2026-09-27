@@ -1,8 +1,8 @@
 // Upgrade and lifecycle (P2 Task 1): the version check against a daemon from
-// another bowser (F2), `close` of a silent daemon with no pidfile (F3), and
-// how long `list` takes (F32). Every daemon here is a fake on the session's
-// real socket, driven through `run()` or the CLI as its own process. No
-// browser.
+// another bowser (F2), `close` of a silent daemon with no pidfile (F3), how
+// long `list` takes (F32), and a timeout that names the command (F21). Every
+// daemon here is a fake on the session's real socket, driven through `run()`
+// or the CLI as its own process. No browser.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -13,7 +13,10 @@ import { join } from "node:path";
 import pkg from "../package.json";
 import { reportFailure, run } from "../src/cli.ts";
 import { socketPath } from "../src/daemon/client.ts";
-import { ensureSessionDir, sessionDir } from "../src/state.ts";
+import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
+import { dispatch } from "../src/daemon/server.ts";
+import { createSerializer } from "../src/serialize.ts";
+import { ensureSessionDir, saveState, sessionDir } from "../src/state.ts";
 import { daemonOf, fakeDaemon, SILENT } from "./helpers/fake-daemon.ts";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -174,4 +177,67 @@ describe("F32: list", () => {
       await rm(sessionDir("mute32"), { recursive: true, force: true });
     }
   }, 10_000);
+});
+
+describe("F21: a timeout names the command", () => {
+  /** A daemon on the real dispatcher with a 50 ms budget, whose `click`
+   *  never settles. */
+  async function stuckClickDaemon(session: string) {
+    await ensureSessionDir(session);
+    const serialize = createSerializer();
+    const handle = async (req: DaemonRequest): Promise<DaemonResponse> => {
+      if (req.op === "ping") return { id: req.id, ok: true, result: pkg.version };
+      if (req.op === "evaluate") return { id: req.id, ok: true, result: "#x" };
+      if (req.op === "click") return new Promise(() => {});
+      return { id: req.id, ok: true };
+    };
+    return Bun.listen({
+      unix: socketPath(session),
+      socket: {
+        data(s, data) {
+          for (const line of data.toString().split("\n").filter(Boolean)) {
+            dispatch(JSON.parse(line) as DaemonRequest, {
+              handle, serialize, timeoutMs: 50,
+              reply: (res) => { s.write(JSON.stringify(res) + "\n"); },
+            });
+          }
+        },
+      },
+    });
+  }
+
+  async function seed(session: string) {
+    await saveState({
+      name: session, url: "https://x", title: "X", updatedAt: 1,
+      refs: [{ id: "e2", selector: "#x", role: "textbox", name: "Under", tag: "input" }],
+    });
+  }
+
+  test("fill names itself and its click step", async () => {
+    const session = "t21fill";
+    const server = await stuckClickDaemon(session);
+    await seed(session);
+    try {
+      expect(await failure(["fill", "e2", "hi", "-s", session])).toEqual({
+        stderr: "bowser: 'fill' timed out after 50ms (in its 'click' step)",
+        code: 2,
+      });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("click prints no step", async () => {
+    const session = "t21click";
+    const server = await stuckClickDaemon(session);
+    await seed(session);
+    try {
+      expect(await failure(["click", "e2", "-s", session])).toEqual({
+        stderr: "bowser: 'click' timed out after 50ms",
+        code: 2,
+      });
+    } finally {
+      server.stop(true);
+    }
+  });
 });

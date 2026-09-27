@@ -111,13 +111,14 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   };
   const ms = lane.timeoutMs;
   const timer = ms > 0 ? setTimeout(() => {
+    const timedOut = timeoutMessage(req, ms);
     if (!running) {
       const prev = lane.serialize.running ?? "an earlier operation";
-      answer({ id: req.id, ok: false, error: `operation '${req.op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)` });
+      answer({ id: req.id, ok: false, error: `${timedOut} (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)` });
       return;
     }
     const dialogs = lane.timedOut?.(req);
-    answer({ id: req.id, ok: false, error: `operation '${req.op}' timed out after ${ms}ms`, ...(dialogs ? { dialogs } : {}) });
+    answer({ id: req.id, ok: false, error: timedOut, ...(dialogs ? { dialogs } : {}) });
     // Runs while this op still holds the serializer, so no later queued op
     // can overlap it; see Browser.interrupt for what it may overlap.
     grace = setTimeout(() => {
@@ -137,6 +138,15 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   }, req.op).catch(() => {
     // handle() never rejects; guards against an unhandled rejection.
   });
+}
+
+/** A timeout names the command the user ran, and the op when it is one of
+ *  the command's steps: `fill` sends `click` first, and `snapshot` and
+ *  `eval` both send `evaluate` (F21). A request with no `cmd` is its op. */
+function timeoutMessage(req: DaemonRequest, ms: number): string {
+  const cmd = req.cmd ?? req.op;
+  const step = cmd === req.op ? "" : ` (in its '${req.op}' step)`;
+  return `'${cmd}' timed out after ${ms}ms${step}`;
 }
 
 /** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS

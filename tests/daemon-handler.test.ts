@@ -209,7 +209,7 @@ test("a queued op that overruns its budget answers with a timeout error", async 
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
   await Bun.sleep(40);
   expect(replies).toEqual([
-    { id: 1, ok: false, error: "operation 'click' timed out after 5ms" },
+    { id: 1, ok: false, error: "'click' timed out after 5ms" },
   ]);
 });
 
@@ -226,7 +226,7 @@ test("an op that overruns its budget: the timeout reply carries the reports queu
   dispatch({ id: 1, op: "click", args: ["#go"], report: true }, lane);
   await Bun.sleep(80);
   expect(replies).toEqual([{
-    id: 1, ok: false, error: "operation 'click' timed out after 20ms",
+    id: 1, ok: false, error: "'click' timed out after 20ms",
     dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
   }]);
   release();
@@ -245,7 +245,7 @@ test("a timed-out request that prints nothing leaves the queued reports alone", 
   const replies: DaemonResponse[] = [];
   dispatch({ id: 1, op: "click", args: ["#go"] }, { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r) => { replies.push(r); }, timedOut: handle.timedOut });
   await Bun.sleep(60);
-  expect(replies).toEqual([{ id: 1, ok: false, error: "operation 'click' timed out after 20ms" }]);
+  expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 20ms" }]);
   expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
     { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
   ]);
@@ -282,7 +282,7 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
 // it past their own budgets.
 describe("the queue-time budget", () => {
   const QUEUED = (op: string, ms: number, prev: string) =>
-    `operation '${op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
+    `'${op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
 
   test("a request still queued behind a timed-out op fails at its own deadline, and never runs", async () => {
     const replies: Array<[number, DaemonResponse]> = [];
@@ -305,7 +305,7 @@ describe("the queue-time budget", () => {
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
     await Bun.sleep(900);
     expect(replies.map(([, r]) => r)).toEqual([
-      { id: 1, ok: false, error: "operation 'click' timed out after 400ms" },
+      { id: 1, ok: false, error: "'click' timed out after 400ms" },
       { id: 2, ok: false, error: QUEUED("evaluate", 400, "click") },
     ]);
     // Its deadline counts from receipt (50 ms), so it answers near 450 ms;
@@ -316,6 +316,26 @@ describe("the queue-time budget", () => {
     await Bun.sleep(20);
     // Its client was already told it failed, so it is dropped, not run late.
     expect(ran).toEqual([1]);
+  });
+
+  test("F21: a queued step names its command and keeps the waiting tail", async () => {
+    const replies: DaemonResponse[] = [];
+    const lane = {
+      handle: () => new Promise<DaemonResponse>(() => {}), // never settles
+      serialize: createSerializer(),
+      timeoutMs: 30,
+      reply: (res: DaemonResponse) => { replies.push(res); },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"], cmd: "click" }, lane);
+    dispatch({ id: 2, op: "evaluate", args: ["1"], cmd: "snapshot" }, lane);
+    await Bun.sleep(80);
+    expect(replies).toEqual([
+      { id: 1, ok: false, error: "'click' timed out after 30ms" },
+      {
+        id: 2, ok: false,
+        error: "'snapshot' timed out after 30ms (in its 'evaluate' step) (waiting for 'click', which timed out and is still running; run 'bowser close' if the session stays stuck)",
+      },
+    ]);
   });
 
   test("a request that reaches the head of the queue in time runs, on its remaining budget", async () => {

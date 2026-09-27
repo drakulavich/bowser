@@ -9,6 +9,8 @@ import { loadState, resolveRef, saveState, type SessionState } from "../state.ts
 export interface CommandContext {
   session: string;
   json: boolean;
+  /** The command being run; the daemon's timeout message names it (F21). */
+  command?: string;
   // Injected in tests.
   connect?: (session: string, opts?: ConnectOptions) => Promise<DaemonConnection>;
   /** All of standard input, for `fill --stdin`. Defaults to `readStdin`;
@@ -38,7 +40,7 @@ export async function withClient<T>(
   fn: (c: DaemonConnection) => Promise<T>,
   opts: ConnectOptions = {},
 ): Promise<T> {
-  const client = await connector(ctx)(ctx.session, opts);
+  const client = await connector(ctx)(ctx.session, ctx.command ? { ...opts, command: ctx.command } : opts);
   try {
     return await fn(client);
   } finally {

@@ -36,6 +36,9 @@ export class DaemonClient implements DaemonConnection {
   constructor(
     private readonly path: string,
     private readonly session: string,
+    /** The command the user ran, sent with each request so a timeout can
+     *  name it (F21). */
+    private readonly command?: string,
   ) {}
 
   private get closedMessage(): string {
@@ -106,7 +109,11 @@ export class DaemonClient implements DaemonConnection {
     if (!this.sock) throw new Error("client not connected");
     if (this.closed) return Promise.reject(new Error(this.closedMessage));
     const id = this.nextId++;
-    const line = JSON.stringify(this.report ? { id, op, args, report: true } : { id, op, args }) + "\n";
+    const line = JSON.stringify({
+      id, op, args,
+      ...(this.report ? { report: true } : {}),
+      ...(this.command ? { cmd: this.command } : {}),
+    }) + "\n";
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: (result) => resolve(result as ResultOf<O>), reject });
       socketWriteAll(this.sock! as unknown as WritableSocket, line);
@@ -141,6 +148,8 @@ export interface ConnectOptions {
   /** Accept a daemon of another bowser version. Only `close` and `list` set
    *  it: they must still reach a daemon left running by an upgrade (F2). */
   anyVersion?: boolean;
+  /** The command the user ran; a timeout names it (F21). */
+  command?: string;
 }
 
 /** A daemon whose socket accepted the connection and never answered the
@@ -209,7 +218,7 @@ export async function connectOrSpawn(
   opts: ConnectOptions = {},
 ): Promise<DaemonClient> {
   const sock = socketPath(session);
-  const client = new DaemonClient(sock, session);
+  const client = new DaemonClient(sock, session, opts.command);
   let connected = false;
   let answer: unknown;
   try {
@@ -246,7 +255,7 @@ export async function connectOrSpawn(
     // Poll until the socket is listening.
     const start = Date.now();
     while (Date.now() - start < 5000) {
-      const c = new DaemonClient(sock, session);
+      const c = new DaemonClient(sock, session, opts.command);
       let reply: unknown;
       try {
         await c.connect();

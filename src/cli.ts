@@ -23,7 +23,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
       `usage: too many arguments for '${command.name}': expected ${declared}, received ${args.positional.length}`,
     );
   }
-  const ctx: CommandContext = { ...base, session: args.session, json: args.json };
+  const ctx: CommandContext = { ...base, session: args.session, json: args.json, command: command.name };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 

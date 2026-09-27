@@ -90,6 +90,9 @@ export interface DaemonRequest {
   /** The sender prints dialog reports: the reply hands over the queued ones.
    *  Without it they stay queued for a command that prints them. */
   report?: true;
+  /** The command the user ran, which a timeout names; its ops are the
+   *  command's steps (F21). */
+  cmd?: string;
 }
 
 export interface DaemonResponse {
