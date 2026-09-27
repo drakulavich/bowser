@@ -40,6 +40,14 @@ used a release binary, run `bowser close --all` with it, delete it, then
 
 On another platform, any command that would start a session fails with the error "bowser requires macOS (WebKit)" (exit 1).
 
+### Upgrading
+
+Run `bowser close --all` before you upgrade. A session keeps the daemon that started it, and after
+an upgrade every command but `close` and `list` refuses a daemon of another version:
+"session '<name>' is running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it
+again" (exit 1). A daemon from bowser 0.7 or older reports no version, so `<v>` reads `an older version`.
+`close` still ends such a daemon, and `list` still lists it.
+
 ### Screenshots
 
 Screenshots are written as PNG files. `bowser screenshot --filename out.png` writes
@@ -182,7 +190,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `resize <width> <height>` | Set the viewport size in pixels |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
-| `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped. |
+| `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped, including a daemon from bowser 0.5 or older that does not answer: it wrote no pidfile, so `close` exits 2 and keeps the session until you end the process yourself (the error says how). |
 | `close --all` | Close every open session. If one cannot be closed, it still tries the rest, then fails (exit 2) naming each such session with its reason and listing the ones it closed |
 | `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
 | `localstorage-get <key>` | Read a `localStorage` value |
@@ -244,7 +252,7 @@ Notes:
 
 | Variable | Effect |
 | --- | --- |
-| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser. |
+| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser. The daemon reads it once, when the session starts: to change it, `close` the session and `open` it again with the new value. A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2). |
 | `BOWSER_DAEMON_DEBUG` | `1` lets the session daemon's stdout and stderr through to the terminal, for debugging a daemon that fails to start. |
 
 ## Tests

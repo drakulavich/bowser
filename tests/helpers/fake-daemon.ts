@@ -40,7 +40,7 @@ export async function fakeDaemon(session: string, answer: Answer): Promise<FakeD
 }
 
 /** A daemon of a given version: `ping` answers `version` ("pong" is every
- *  daemon before 0.8), `state` a blank page, `evaluate` 1. */
+ *  daemon through 0.7), `state` a blank page, `evaluate` 1. */
 export function daemonOf(version: string): Answer {
   return (req) => (req.op === "ping" ? version : req.op === "state" ? { url: "about:blank", title: "" } : req.op === "evaluate" ? 1 : undefined);
 }

@@ -21,6 +21,37 @@ A release binary is ad-hoc signed with no Team ID, so Gatekeeper rejects it, and
 - The hidden `--daemon` entry and the `build` script are gone. The daemon always runs as
   `bun <package>/src/daemon/main.ts <session>`.
 
+### Changed: a session started by another bowser version is refused
+
+After an upgrade, the new CLI drove the old version's still-running daemon: an op the old daemon
+lacked failed with `unknown op`, and the rest ran with the old behaviour (a `prompt` was dismissed
+with no report).
+
+- **The daemon answers `ping` with its version.** A command that finds a daemon of another version,
+  or one from before this change, fails before it sends anything else: `session '<name>' is running
+  bowser <v> (this is <w>); run 'bowser close -s <name>', then open it again` (exit 1). `open` is
+  refused too: it cannot restart the daemon without dropping its page.
+- `close`, `close --all` and `list` skip the check, so an old daemon is still listed and shut down.
+  Run `bowser close --all` before you upgrade.
+
+### Fixed
+
+- **`close` no longer orphans a silent daemon from bowser 0.5 or older.** Such a daemon wrote no
+  pidfile, and when it accepted the connection but never answered, `close` removed the session and
+  reported success while the process ran on. It now fails with exit 2 and keeps the session: `close:
+  session '<name>' has no pidfile (a daemon from bowser 0.5 or older) and its daemon did not answer;
+  find it with 'pgrep -fl -- "--daemon <name>"', end it, then run close again`. `close --all`
+  reports it as a failed session. A socket nobody listens on is still removed.
+- **`list` returns at once with live sessions.** It took about 1 s whenever a session was live: a
+  second probe left a 1 s timer running after the answer was printed.
+- **A timeout names the command you ran.** `fill` timed out as `operation 'click' timed out after
+  3000ms`; it now reads `'fill' timed out after 3000ms (in its 'click' step)`. The step is left out
+  when the command and the op share a name. A queued timeout keeps its `(waiting for '<op>', …)`
+  tail. Exit code unchanged (2).
+- **`BOWSER_OP_TIMEOUT_MS` is documented as read when the session starts.** Setting it on a later
+  command did nothing, silently. It is still one budget per session: to change it, `close` and
+  `open` again.
+
 ## [0.7.0] — 2026-09-27
 
 ### Changed: extra arguments are an error

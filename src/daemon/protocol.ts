@@ -36,7 +36,7 @@ export interface PageState {
 
 export interface DaemonOps {
   /** Answers the daemon's bowser version (package.json). Every daemon
-   *  before 0.8 answered "pong"; the client refuses both kinds (F2). */
+   *  through 0.7 answered "pong"; the client refuses both kinds (F2). */
   ping:             { args: [];                                          result: string;               urgent: true };
   shutdown:         { args: [];                                          result: void;                 urgent: true };
   state:            { args: [];                                          result: PageState };
