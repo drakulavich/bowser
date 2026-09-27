@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  HISTORY_BACK, HISTORY_FORWARD, NAV_ARM, NAV_COUNT, READ_TITLE, READ_URL, RELOAD,
+  NAV_ARM, NAV_COUNT, READ_TITLE, READ_URL, RELOAD,
   hoverScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 
@@ -11,6 +11,16 @@ export interface BrowserOptions {
   height?: number;
   /** Persistent profile directory (`open --persistent`); ephemeral without. */
   profile?: string;
+}
+
+// bun-types (1.4.2) declares back()/forward(); the object has goBack() and
+// goForward() instead, and back/forward are undefined (measured, Bun 1.4.2).
+// Declared here so openBrowser can pass the real view as a ViewLike.
+declare module "bun" {
+  interface WebView {
+    goBack(): Promise<void>;
+    goForward(): Promise<void>;
+  }
 }
 
 /** The slice of Bun.WebView that Browser uses. Optional members are the ones
@@ -31,10 +41,10 @@ export interface ViewLike {
   readonly loading: boolean;
   onNavigated: ((url: string, title: string) => void) | null;
   onNavigationFailed: ((error: Error) => void) | null;
-  /** Runtime names. @types/bun (1.4.0) declares back()/forward() instead;
-   *  those do not exist on the object. Do not "fix" these to match the types. */
-  goBack?(): Promise<void>;
-  goForward?(): Promise<void>;
+  /** Runtime names. @types/bun declares back()/forward() instead; those do
+   *  not exist on the object. Do not "fix" these to match the types. */
+  goBack(): Promise<void>;
+  goForward(): Promise<void>;
 }
 
 /** Resolve the page URL from the page's own location.href. WebKit's
@@ -304,14 +314,8 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
       return Buffer.from(bytes).toString("base64");
     },
     resize: (width, height) => view.resize(width, height),
-    back: () => nav.act(async () => {
-      if (typeof view.goBack === "function") await view.goBack();
-      else await evaluate(HISTORY_BACK);
-    }),
-    forward: () => nav.act(async () => {
-      if (typeof view.goForward === "function") await view.goForward();
-      else await evaluate(HISTORY_FORWARD);
-    }),
+    back: () => nav.act(() => view.goBack()),
+    forward: () => nav.act(() => view.goForward()),
     reload: () => nav.act(async () => {
       // Native reload() resolves before the reload commits, like goBack();
       // measured in the daemon: a navigate() 1 ms later was rejected with

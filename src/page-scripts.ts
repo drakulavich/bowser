@@ -670,8 +670,6 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 // the page, which is what the layer rule claims.
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
-export const HISTORY_BACK = "history.back()";
-export const HISTORY_FORWARD = "history.forward()";
 export const RELOAD = "location.reload()";
 
 // The navigation watch's page side (browser.ts, nav.act). On WebKit a

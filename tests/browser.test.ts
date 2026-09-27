@@ -22,6 +22,8 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     type: async (t) => { calls.push(["type", [t]]); },
     press: async (k) => { calls.push(["press", [k]]); },
     resize: async (w, h) => { calls.push(["resize", [w, h]]); },
+    goBack: async () => { calls.push(["goBack", []]); },
+    goForward: async () => { calls.push(["goForward", []]); },
     /** A navigation lands: url changes, loading ends, onNavigated fires. */
     land(url) { v.url = url; v.loading = false; v.onNavigated?.(url, ""); },
     ...over,
@@ -263,28 +265,19 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/");
   });
 
-  test("back and forward use goBack/goForward when the runtime has them", async () => {
-    const v = fakeView({
-      goBack: async () => { v.calls.push(["goBack", []]); },
-      goForward: async () => { v.calls.push(["goForward", []]); },
-    });
+  test("back and forward call goBack/goForward, with no page fallback", async () => {
+    const v = fakeView();
     const b = wrapView(v, fast);
     await b.back();
     await b.forward();
     expect(own(v.calls)).toEqual([["goBack", []], ["goForward", []]]);
   });
 
-  test("back, forward and reload fall back to history/location when the runtime lacks them", async () => {
+  test("reload falls back to location.reload() when the runtime lacks it", async () => {
     const v = fakeView();
     const b = wrapView(v, fast);
-    await b.back();
-    await b.forward();
     await b.reload();
-    expect(own(v.calls)).toEqual([
-      ["evaluate", ["history.back()"]],
-      ["evaluate", ["history.forward()"]],
-      ["evaluate", ["location.reload()"]],
-    ]);
+    expect(own(v.calls)).toEqual([["evaluate", ["location.reload()"]]]);
   });
 
   test("reload prefers the native call and waits for its navigation to land", async () => {
