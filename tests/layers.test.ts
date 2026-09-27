@@ -101,6 +101,20 @@ const RULES: Rule[] = [
     // real ~/.bowser from tests (PR #8). Go through state.ts instead.
     violates: (file, text) => file !== "src/state.ts" && /process\.env\.HOME\b|\bhomedir\s*\(/.test(text),
   },
+  {
+    name: "only src/socket-write.ts calls .write( (Bun.write and process.stdout/stderr aside)",
+    // Bun's socket.write() accepts what the buffer takes (about 8 KB on a
+    // macOS Unix socket) and silently drops the rest; screenshot hung for 30 s
+    // on it (#9). socketWriteAll() queues the remainder for `drain`.
+    violates: (file, text) =>
+      file !== "src/socket-write.ts" && /(?<!\bBun|\bprocess\.std(?:out|err))\.write\s*\(/.test(text),
+  },
+  {
+    name: "a file that opens a Bun socket wires a drain handler",
+    // socketWriteAll() flushes its queue from `drain`; without the handler the
+    // remainder of a partial write is never sent.
+    violates: (_file, text) => /\bBun\.(?:listen|connect)\s*\(/.test(text) && !/\bdrain\s*\(/.test(text),
+  },
 ];
 
 describe("src layering rules", () => {
