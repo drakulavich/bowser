@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import {
   fillScript, hoverScript, runCodeScript, selectScript, setCheckedScript,
   storageDeleteScript, storageGetScript, storageListScript, storageRestoreScript, storageSetScript,
-  storageScript,
+  storageScript, SNAPSHOT_SCRIPT,
 } from "../src/page-scripts.ts";
 
 const nasty = `a"b'c\\d`;
@@ -55,5 +55,28 @@ describe("page scripts quote their inputs", () => {
     expect(await runCode("async page => { return await page.title() }")).toEqual({ fn: true });
     expect(await runCode("() => document.title")).toEqual({ fn: true });
     expect(await runCode("return function () {}")).toEqual({ fn: true });
+  });
+});
+
+// The walker reads an element's value only through valueOf, which answers ''
+// for a password field. A new raw `x.value` read anywhere in SNAPSHOT_SCRIPT
+// fails here. Not caught: el['value'], Reflect.get, FormData and
+// getAttribute('value'); tests/e2e-password.test.ts covers the known paths.
+describe("the snapshot walker reads values only through valueOf", () => {
+  /** Each `.value` read that is not an assignment, as the line it is on. */
+  const valueReads = (script: string): string[] =>
+    script.split("\n").flatMap((line) => [...line.matchAll(/\.value\b(?!\s*=(?!=))/g)].map(() => line.trim()));
+
+  test("the one raw .value read is valueOf's own", () => {
+    const reads = valueReads(SNAPSHOT_SCRIPT);
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatch(/^const valueOf = \(el\) => /);
+    expect(reads[0]).toContain("isPassword(el)");
+  });
+
+  test("the check sees a planted read and ignores assignments", () => {
+    const planted = SNAPSHOT_SCRIPT.replace("// ---- the walk ----", "// ---- the walk ----\n  const leak = (el) => el.value;");
+    expect(valueReads(planted).sort()).toEqual([...valueReads(SNAPSHOT_SCRIPT), "const leak = (el) => el.value;"].sort());
+    expect(valueReads("saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')")).toEqual(["saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')"]);
   });
 });

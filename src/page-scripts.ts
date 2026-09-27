@@ -108,6 +108,8 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   // A password field's value never leaves the page: no value child, no saved
   // ref value, no part of any accessible name. Deliberately unlike playwright-cli.
   const isPassword = (el) => tagOf(el) === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'password';
+  // The walker's only read of an element's value (tests/page-scripts.test.ts).
+  const valueOf = (el) => isPassword(el) ? '' : el.value;
 
   // ---- roles (html-aam implicit roles, as Playwright computes them) ----
   const VALID_ROLES = new Set(('alert alertdialog application article banner blockquote button caption cell checkbox code ' +
@@ -314,8 +316,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     if (o.embedded || o.mode === 'descendant') {
       if (role === 'textbox') {
         o.visited.add(el);
-        if (isPassword(el)) return '';
-        return tag === 'INPUT' || tag === 'TEXTAREA' ? el.value : (el.textContent || '');
+        return tag === 'INPUT' || tag === 'TEXTAREA' ? valueOf(el) : (el.textContent || '');
       }
       if (role === 'combobox' || role === 'listbox') {
         o.visited.add(el);
@@ -324,7 +325,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
           if (!selected.length && el.options.length) selected = [el.options[0]];
           return selected.map((x) => textAlt(x, child)).join(' ');
         }
-        return tag === 'INPUT' && !isPassword(el) ? el.value : '';
+        return tag === 'INPUT' ? valueOf(el) : '';
       }
       if (['progressbar', 'scrollbar', 'slider', 'spinbutton', 'meter'].includes(role)) {
         o.visited.add(el);
@@ -340,7 +341,8 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     if (role !== 'presentation' && role !== 'none') {
       if (tag === 'INPUT' && ['button', 'submit', 'reset'].includes(el.type)) {
         o.visited.add(el);
-        if (!isPassword(el) && (el.value || '').trim()) return el.value;
+        const v = valueOf(el) || '';
+        if (v.trim()) return v;
         if (el.type === 'submit') return 'Submit';
         if (el.type === 'reset') return 'Reset';
         return el.getAttribute('title') || '';
@@ -468,7 +470,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     n.ref = r.ref;
     const saved = { id: r.ref, selector: cssPath(el), role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
     if (tagOf(el) === 'A' && el.getAttribute('href')) saved.href = el.getAttribute('href');
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && !isPassword(el) && el.value) saved.value = String(el.value).slice(0, 120);
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && valueOf(el)) saved.value = String(valueOf(el)).slice(0, 120);
     if (el.isContentEditable) saved.editable = true;
     refs.push(saved);
   }
@@ -494,7 +496,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     addState(n, el);
     cursorOf.set(n, b.cursor);
     if ((tagOf(el) === 'INPUT' && !['checkbox', 'radio', 'file'].includes(el.type) && !isPassword(el)) || tagOf(el) === 'TEXTAREA') {
-      n.children.push(el.value);
+      n.children.push(valueOf(el));
     }
     return n;
   }
