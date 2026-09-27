@@ -391,6 +391,32 @@ describe("the queue-time budget", () => {
     ]);
   });
 
+  test("a request that reaches the head of the queue with too little budget left times out running, with the plain message", async () => {
+    // Its budget counts from receipt, so it may start with a sliver left and
+    // overrun it while running. It was not queued at its deadline, so it
+    // gets no "waiting for" tail (seen on CI, run 36299769857).
+    const replies: Array<[number, DaemonResponse]> = [];
+    const t0 = Date.now();
+    const lane = {
+      handle: async (req: DaemonRequest) => {
+        await Bun.sleep(150);
+        return { id: req.id, ok: true as const };
+      },
+      serialize: createSerializer(),
+      timeoutMs: 200,
+      reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+    };
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane);
+    dispatch({ id: 2, op: "evaluate", args: ["location.href"] }, lane);
+    await Bun.sleep(400);
+    expect(replies.map(([, r]) => r)).toEqual([
+      { id: 1, ok: true },
+      { id: 2, ok: false, error: "'evaluate' timed out after 200ms" },
+    ]);
+    // Still bounded by its budget from receipt.
+    expect(replies[1]![0]).toBeLessThan(260);
+  });
+
   test("ping still answers at once while the queue is wedged past every budget", async () => {
     const replies: DaemonResponse[] = [];
     const lane = {

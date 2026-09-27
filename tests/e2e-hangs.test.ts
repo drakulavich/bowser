@@ -53,12 +53,24 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   let base: string;
   const sessions: string[] = [];
 
-  /** Open a fresh session whose daemon has a budget of `budgetMs`. */
+  /** Open a fresh session whose daemon has a budget of `budgetMs`, on the
+   *  home page. This is setup, not the behaviour under test: a new daemon's
+   *  first navigation can overrun a 1 s budget on a slow runner (CI run
+   *  36294974018 failed in the F9 goto test's `open` with "'navigate' timed
+   *  out"). The daemon keeps running, so a timed-out open is followed by
+   *  `goto`s until one lands; each is bounded by the budget. */
   const openWith = async (session: string, budgetMs: number): Promise<CommandContext> => {
     process.env.BOWSER_OP_TIMEOUT_MS = String(budgetMs);
     sessions.push(session);
     const ctx: CommandContext = { session, json: false };
-    await cmdOpen(ctx, `${base}/`);
+    let landed = await timed(() => cmdOpen(ctx, `${base}/`));
+    const deadline = performance.now() + 20_000;
+    while (landed.error !== undefined) {
+      expect(landed.error).toContain("timed out after");
+      if (performance.now() > deadline) throw new Error(`setup: ${session} never reached ${base}/: ${landed.error}`);
+      await Bun.sleep(200);
+      landed = await timed(() => cmdGoto(ctx, `${base}/`));
+    }
     return ctx;
   };
 
@@ -182,13 +194,22 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     // runner it had not within 8 s (PR #46), so both outcomes are accepted
     // and neither may take longer than a budget. Recovery itself is pinned
     // by the goto test below and the dispatch unit tests.
+    //
+    // A third outcome, also within F9: the lane frees while an attempt is
+    // queued, so it runs on what is left of its budget from receipt, and can
+    // overrun it there. It then fails as a running op, without the "waiting
+    // for" tail (CI run 36299769857; pinned by the dispatch unit test "a
+    // request that reaches the head of the queue with too little budget
+    // left …"). It is still bounded by its budget.
+    const QUEUED = `'eval' timed out after ${budget}ms (in its 'evaluate' step) (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
+    const RAN_OUT = `'eval' timed out after ${budget}ms (in its 'evaluate' step)`;
     let href: string | undefined;
     const deadline = performance.now() + 20_000;
     while (href === undefined && performance.now() < deadline) {
-      const attempt = await timed(async () => { href = await cmdEval(ctx, "location.href"); });
+      const attempt = await timed(async () => { href = await cmdEval({ ...ctx, command: "eval" }, "location.href"); });
       expect(attempt.ms).toBeLessThan(budget + 1000);
       if (attempt.error) {
-        expect(attempt.error).toContain("(waiting for 'evaluate', which timed out and is still running");
+        expect([QUEUED, RAN_OUT]).toContain(attempt.error);
         await Bun.sleep(200);
       }
     }
