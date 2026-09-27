@@ -12,7 +12,7 @@ Every line below traces to a real failure that no test or type check catches. Wh
 
 - A ref command acts on `liveSelector(c, ref)`, never on the saved `target.selector`, which can time out or hit a different element. (#37)
 - The snapshot walker never reads a password field's value. Route any new `el.value` read through `isPassword`. (#40)
-- An action that can navigate runs inside `nav.act()`. Otherwise the next `state` or `snapshot` reports the old page. (#7, F10 in PR #46)
+- An op that acts on the page belongs in `ACTS` (`src/daemon/server.ts`); a test then holds it to `nav.act` and the dialog shim. (#7, F10 in PR #46, #51)
 
 ## Git
 

@@ -1,6 +1,8 @@
 // wrapView() against a fake view.
 import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
+import { ACTS, createHandler } from "../src/daemon/server.ts";
+import type { Op } from "../src/daemon/protocol.ts";
 import { NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
@@ -350,4 +352,47 @@ describe("wrapView watchNavigation", () => {
     await b.click("a");
     expect(seen).toEqual(["navigation", "landed", "navigation"]);
   });
+});
+
+// Every op in the daemon's ACTS set acts on the page, and a page handler can
+// navigate on anything it does (#51 item 11: a select whose onchange set
+// location.href left the next snapshot on the old page). So each one's
+// Browser method must run inside the navigation watch: NAV_ARM before the
+// action, NAV_COUNT after it. Driven through createHandler, so the op-to-
+// method mapping is the daemon's own.
+const ACT_ARGS: Partial<Record<Op, string[]>> = {
+  click: ["#act-target"],
+  type: ["act-text"],
+  press: ["act-key"],
+  hover: ["#act-target"],
+  select: ["#act-target", "v"],
+  check: ["#act-target"],
+  uncheck: ["#act-target"],
+};
+
+describe("every ACTS op runs inside the navigation watch", () => {
+  test("the table below covers every ACTS op", () => {
+    expect(Object.keys(ACT_ARGS).sort()).toEqual([...ACTS].sort());
+  });
+
+  for (const op of ACTS) {
+    test(op, async () => {
+      const v = fakeView();
+      const handle = createHandler(wrapView(v, fast));
+      const args = ACT_ARGS[op] ?? [];
+      const res = await handle({ id: 1, op, args });
+      expect(res.ok).toBe(true);
+      // "act" is the call that carries this op's first argument: a native
+      // call, or the evaluate of its page script. The dialog shim's reads
+      // around the op are "other".
+      const seq = v.calls.map(([name, a]) => {
+        if (name === "evaluate" && a[0] === NAV_ARM) return "arm";
+        if (name === "evaluate" && a[0] === NAV_COUNT) return "count";
+        return a.some((x) => String(x).includes(args[0]!)) ? "act" : "other";
+      });
+      const arm = seq.indexOf("arm");
+      expect(arm).toBeGreaterThanOrEqual(0);
+      expect(seq.slice(arm + 1, seq.indexOf("count", arm))).toEqual(["act"]);
+    });
+  }
 });

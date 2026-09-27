@@ -214,46 +214,54 @@ function navigationWatch(
     const began = Date.now();
     while (landed === before && still() && Date.now() - began < timing.settleMs) await sleep(10);
   };
+  /** After an action: wait for a navigation that begins within graceMs to
+   *  land, up to settleMs. `before` and `wasLoading` are read before it. */
+  const awaitNavigation = async (before: number, wasLoading: boolean): Promise<void> => {
+    const start = Date.now();
+    while (Date.now() - start < timing.graceMs) {
+      if (landed !== before) return;
+      if (view.loading && !wasLoading) {
+        onNavigation();
+        return settle(before, () => view.loading);
+      }
+      await sleep(10);
+    }
+    // One read at the end of the window, not a poll: each read is an
+    // evaluate, and fewer of them means fewer chances to race the commit.
+    if (landed !== before) return;
+    let seen = await count(timing.graceMs);
+    if (seen < 1) return;
+    onNavigation();
+    // A failure ends the wait unless the page started another navigation
+    // since: a script navigating again cancels the first with -999 while
+    // the second still loads, and that second one is what the action led to.
+    const began = Date.now();
+    let base = landed;
+    const baseArrived = arrived;
+    while (Date.now() - began < timing.settleMs) {
+      if (arrived !== baseArrived) return;
+      if (landed !== base) {
+        const now = await count(began + timing.settleMs - Date.now());
+        if (now <= seen) return;
+        seen = now;
+        base = landed;
+      }
+      await sleep(10);
+    }
+  };
   return {
-    async act(action: () => Promise<void>): Promise<void> {
+    /** Run `action` and wait for a navigation it started; see above.
+     *  Answers what the action answered. */
+    async act<T>(action: () => Promise<T>): Promise<T> {
       const before = landed;
       // A navigation already in flight is not ours: only a false→true transition
       // of `loading` counts, or one stuck navigation would cost every later
       // action the full settleMs. The page flag is cleared for the same reason.
       const wasLoading = view.loading;
       await ask(NAV_ARM, timing.graceMs);
-      await action();
-      const start = Date.now();
-      while (Date.now() - start < timing.graceMs) {
-        if (landed !== before) return;
-        if (view.loading && !wasLoading) {
-          onNavigation();
-          return settle(before, () => view.loading);
-        }
-        await sleep(10);
-      }
-      // One read at the end of the window, not a poll: each read is an
-      // evaluate, and fewer of them means fewer chances to race the commit.
-      if (landed !== before) return;
-      let seen = await count(timing.graceMs);
-      if (seen < 1) return;
-      onNavigation();
-      // A failure ends the wait unless the page started another navigation
-      // since: a script navigating again cancels the first with -999 while
-      // the second still loads, and that second one is what the action led to.
-      const began = Date.now();
-      let base = landed;
-      const baseArrived = arrived;
-      while (Date.now() - began < timing.settleMs) {
-        if (arrived !== baseArrived) return;
-        if (landed !== base) {
-          const now = await count(began + timing.settleMs - Date.now());
-          if (now <= seen) return;
-          seen = now;
-          base = landed;
-        }
-        await sleep(10);
-      }
+      const result = await action();
+      await awaitNavigation(before, wasLoading);
+      return result;
     },
     /** Reload the committed page to free a stuck call; see Browser.interrupt. */
     async interrupt(): Promise<void> {
@@ -297,11 +305,14 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     navigate: (url) => view.navigate(url),
     evaluate: (expr) => evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
-    type: (text) => view.type(text),
+    type: (text) => nav.act(() => view.type(text)),
     press: (key) => nav.act(() => view.press(pressKey(key))),
-    hover: async (selector) => { await evaluate(hoverScript(selector)); },
-    select: async (selector, value) => (await evaluate(selectScript(selector, value))) === true,
-    setChecked: async (selector, checked) => (await evaluate(setCheckedScript(selector, checked))) !== false,
+    // A page's change or mouse handler can navigate, so the page-script
+    // actions go through the watch too (#51: a select whose onchange set
+    // location.href left the next snapshot on the old page).
+    hover: (selector) => nav.act(async () => { await evaluate(hoverScript(selector)); }),
+    select: (selector, value) => nav.act(async () => (await evaluate(selectScript(selector, value))) === true),
+    setChecked: (selector, checked) => nav.act(async () => (await evaluate(setCheckedScript(selector, checked))) !== false),
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
       // takes no full-page option. Element-bounded screenshots are not supported.

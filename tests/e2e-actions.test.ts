@@ -250,4 +250,14 @@ runOrSkip("e2e: the reported URL follows the page (#51)", () => {
     expect((await loadState(ctx.session))!.url).toBe(pushed);
     expect(await cmdSnapshot(ctx)).toContain(`- Page URL: ${pushed}\n`);
   });
+
+  test("select whose change handler navigates: the next snapshot shows the new page", async () => {
+    await cmdSelect(ctx, await ref("Pick"), "b");
+    expect(await cmdSnapshot(ctx)).toContain(`- Page URL: ${next()}\n`);
+  }, 30_000);
+
+  test("check whose change handler navigates: the next snapshot shows the new page", async () => {
+    await cmdCheck(ctx, await ref("Go"));
+    expect(await cmdSnapshot(ctx)).toContain(`- Page URL: ${next()}\n`);
+  }, 30_000);
 });

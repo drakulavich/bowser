@@ -11,6 +11,11 @@ All notable changes to this project are documented here. This project follows
   (`pushState`, `replaceState`, a hash change), `click`'s reply, `state.json` and every command
   that reports the page URL gave the old URL while `snapshot` showed the new one. The URL is now
   read from the page's `location.href`. (#51)
+- **`select`, `check` and `uncheck` wait for a navigation their page handler starts.** A
+  `<select onchange="location.href = …">`, or a checkbox with the same handler, left the next
+  `snapshot` on the old page until the new one arrived. They now wait for it, as `click` and
+  `press` do. `hover` and `type` wait the same way. Each of these that does not navigate now
+  takes about 100 ms longer. (#51)
 
 ## [0.8.0] — 2026-09-27
 
