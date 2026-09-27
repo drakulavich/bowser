@@ -134,6 +134,18 @@ describe("createHandler", () => {
     expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({ id: 7, ok: false, error: "click: element not found" });
   });
 
+  // Spec F34: after its web process died twice, WebKit fails every page op
+  // with this message; the reply names the crash and the way out.
+  test("the engine's dead-page message becomes the crash message; other errors pass through", async () => {
+    const dead = async () => { throw new Error("JavaScript execution returned a result of an unsupported type"); };
+    const crashed = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
+    const b = fakeBrowser({ evaluate: dead, click: dead });
+    expect(await createHandler(b)(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
+    expect(await createHandler(b)(req("click", ["#a"]))).toEqual({ id: 7, ok: false, error: crashed });
+    const other = fakeBrowser({ evaluate: async () => { throw new Error("TypeError: x is not a function"); } });
+    expect(await createHandler(other)(req("evaluate", ["x()"]))).toEqual({ id: 7, ok: false, error: "TypeError: x is not a function" });
+  });
+
   test("an unknown op on the wire is rejected, not thrown", async () => {
     const res = await createHandler(fakeBrowser())({ id: 7, op: "dblclick" as DaemonRequest["op"], args: [] });
     expect(res).toEqual({ id: 7, ok: false, error: "unknown op: dblclick" });

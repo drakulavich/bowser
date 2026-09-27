@@ -205,6 +205,13 @@ const handlers: Handlers = {
   reload: (browser) => browser.reload(),
 };
 
+/** What WebKit answers every evaluate and click with once the page's web
+ *  process has died twice: the first time the engine relaunches it and
+ *  reloads the page, the second time it does not (spec F34, measured on Bun
+ *  1.4.2). No page value gives this message: evaluate serializes page-side. */
+const DEAD_PAGE = "JavaScript execution returned a result of an unsupported type";
+const PAGE_CRASHED = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
+
 /** What createHandler returns: the request handler, and the hook `dispatch`
  *  calls when a request overruns its budget. */
 export type Handler = ((req: DaemonRequest) => Promise<DaemonResponse>) & {
@@ -276,7 +283,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
       return result === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { id: req.id, ok: false, error: msg };
+      return { id: req.id, ok: false, error: msg.includes(DEAD_PAGE) ? PAGE_CRASHED : msg };
     }
   }
 
