@@ -60,6 +60,11 @@ jobs:
           npm i -g --prefix "$prefix" "$RUNNER_TEMP/$tarball"
           bowser="$prefix/bin/bowser"
           t() { perl -e 'alarm shift; exec @ARGV or die "exec failed: $!"' -- 60 "$@"; }
+          cleanup() {
+            t "$bowser" close --session ci-smoke >/dev/null 2>&1 || true
+            t "$bowser" close --session ci-persist >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
           t "$bowser" open "data:text/html,<h1>ci</h1>" --session ci-smoke
           t "$bowser" eval "document.querySelector('h1').textContent" --session ci-smoke | grep -q ci
           # The daemon runs from the installed package, as `bun <pkg>/src/daemon/main.ts <session>`.
