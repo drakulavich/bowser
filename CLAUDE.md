@@ -7,7 +7,6 @@ Every line below traces to a real failure that no test or type check catches. Wh
 ## Checking a change
 
 - `bun test` skips every browser test and does not type-check. Before calling a daemon, browser or page-script change done, also run `bun run typecheck` and `BOWSER_E2E=1 bun test`. (PR #23, PR #46)
-- `bun test` never runs the compiled binary. Its daemon spawn needs `proc.unref()` (without it `bowser open` prints and then hangs), the `/$bunfs/` check with the `--daemon` re-invoke, and no `process.exit()` after `startDaemon()`. If you touch any of these, build the binary and run `open` and `close` with it; otherwise only CI's e2e job notices. (#9, PR #10)
 
 ## Code traps
 

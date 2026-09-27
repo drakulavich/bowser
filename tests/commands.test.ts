@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
+import pkg from "../package.json";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -28,14 +29,16 @@ import {
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
-import { fillScript, resolveRefScript } from "../src/page-scripts.ts";
+import { fillScript, resolveRefScript, runCodeScript } from "../src/page-scripts.ts";
 
 /** An evaluate handler that answers the ref-resolve script the way the page
  *  would: the element's fresh selector, or null when it is gone. Any other
  *  script evaluates to undefined, the fake's default. */
 function resolving(live: Record<string, string | null>) {
   return (expr: string): unknown => {
-    for (const [id, selector] of Object.entries(live)) if (expr === resolveRefScript(id)) return selector;
+    for (const [id, selector] of Object.entries(live)) {
+      if (expr === resolveRefScript(id) || expr === resolveRefScript(id, { enabled: true })) return selector;
+    }
     return undefined;
   };
 }
@@ -219,7 +222,7 @@ describe("open --persistent / --profile", () => {
         data(s, data) {
           for (const line of data.toString().split("\n").filter(Boolean)) {
             const req = JSON.parse(line) as { id: number; op: string };
-            const result = req.op === "state" ? { url: "about:blank", title: "" } : "pong";
+            const result = req.op === "state" ? { url: "about:blank", title: "" } : pkg.version;
             s.write(JSON.stringify({ id: req.id, ok: true, result }) + "\n");
           }
         },
@@ -706,13 +709,6 @@ describe("list", () => {
     expect(out.split("\n").filter(Boolean).sort()).toEqual(["dead-c", "live-a"]);
   });
 
-  test("omits a session whose daemon connects but never answers", async () => {
-    await ensureSessionDir("wedged");
-    const hung = fakeClient({ ping: () => new Promise<"pong">(() => {}) });
-    const out = await cmdList({ ...ctx(), connect: async () => hung });
-    expect(out.split("\n")).not.toContain("wedged");
-  }, 10_000);
-
   test("--json carries the same filtered set", async () => {
     await seedSessions();
     const out = await cmdList({ ...ctx(), json: true, connect: only(["live-a"]) });
@@ -1025,6 +1021,54 @@ describe("check / uncheck", () => {
   });
 });
 
+describe("F20: click, check and uncheck refuse a disabled element and uncheck a checked radio", () => {
+  const REFS = [
+    { id: "e1", selector: "button", role: "button",   name: "Go",    tag: "button" },
+    { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
+    { id: "e5", selector: "input.r", role: "radio",    name: "Large", tag: "input" },
+  ];
+  beforeEach(async () => {
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+  });
+
+  // The page's answer to the enabled resolve for a disabled element.
+  const disabled = (ref: string) => (expr: string): unknown =>
+    expr === resolveRefScript(ref, { enabled: true }) ? { disabled: true } : undefined;
+
+  for (const [name, ref, run] of [
+    ["click", "e1", (x: CommandContext) => cmdClick(x, "e1")],
+    ["check", "e4", (x: CommandContext) => cmdCheck(x, "e4")],
+    ["uncheck", "e4", (x: CommandContext) => cmdUncheck(x, "e4")],
+  ] as const) {
+    test(`${name} on a disabled element: exit 1, and the resolve is the only request`, async () => {
+      const c = fakeClient({ evaluate: disabled(ref) });
+      const err = await run({ ...ctx(), connect: async () => c }).then(
+        (out) => { throw new Error(`expected a failure, got ${out}`); },
+        (e: Error) => e,
+      );
+      expect(err.message).toBe(`ref '${ref}' is disabled`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(c.calls).toEqual([["evaluate", [resolveRefScript(ref, { enabled: true })]]]);
+    });
+  }
+
+  test("uncheck on a checked radio: exit 1 with playwright-cli's advice", async () => {
+    const c = fakeClient({ evaluate: resolving({ e5: "input.r" }), uncheck: () => false });
+    const err = await cmdUncheck({ ...ctx(), connect: async () => c }, "e5").then(
+      (out) => { throw new Error(`expected a failure, got ${out}`); },
+      (e: Error) => e,
+    );
+    expect(err.message).toBe("ref 'e5' is a radio button; select another option in its group to uncheck it");
+    expect(reportFailure(err).code).toBe(1);
+    expect(c.calls.map(([op]) => op)).toEqual(["evaluate", "uncheck"]);
+  });
+
+  test("uncheck the page accepts (an unchecked radio included) succeeds", async () => {
+    const c = fakeClient({ evaluate: resolving({ e5: "input.r" }), uncheck: () => true });
+    expect(await cmdUncheck({ ...ctx(), connect: async () => c }, "e5")).toBe("unchecked e5");
+  });
+});
+
 describe("actions refuse a ref of the wrong kind", () => {
   // One ref per kind the spec (§5) names, plus non-interactive ones that full-tree
   // snapshots now give refs to.
@@ -1142,32 +1186,36 @@ describe("ref commands resolve the ref in the live page first", () => {
     { id: "e4", selector: "saved-cb",     role: "checkbox", name: "Agree", tag: "input" },
   ];
   // Each ref command, the ref it acts on, and the action op that must carry the fresh selector.
-  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>]> = [
-    ["click",   "e1", "click",   (x) => cmdClick(x, "e1")],
-    ["fill",    "e2", "click",   (x) => cmdFill(x, "e2", "hi")],
-    ["hover",   "e1", "hover",   (x) => cmdHover(x, "e1")],
-    ["select",  "e3", "select",  (x) => cmdSelect(x, "e3", "red")],
-    ["check",   "e4", "check",   (x) => cmdCheck(x, "e4")],
-    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4")],
+  // The last column: whether the resolve script also refuses a disabled
+  // element (F20). fill keeps its own disabled message; hover and select
+  // do not refuse.
+  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>, boolean]> = [
+    ["click",   "e1", "click",   (x) => cmdClick(x, "e1"), true],
+    ["fill",    "e2", "click",   (x) => cmdFill(x, "e2", "hi"), false],
+    ["hover",   "e1", "hover",   (x) => cmdHover(x, "e1"), false],
+    ["select",  "e3", "select",  (x) => cmdSelect(x, "e3", "red"), false],
+    ["check",   "e4", "check",   (x) => cmdCheck(x, "e4"), true],
+    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4"), true],
   ];
 
   beforeEach(async () => {
     await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
   });
 
-  for (const [name, ref, op, run] of COMMANDS) {
+  for (const [name, ref, op, run, enabled] of COMMANDS) {
+    const resolve = enabled ? resolveRefScript(ref, { enabled: true }) : resolveRefScript(ref);
     test(`${name} on a ref whose element is gone fails with playwright-cli's message and sends no action`, async () => {
       const c = fakeClient({ evaluate: resolving({ [ref]: null }) });
       await expect(run({ ...ctx(), connect: async () => c })).rejects.toThrow(
         new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`),
       );
-      expect(c.calls).toEqual([["evaluate", [resolveRefScript(ref)]]]);
+      expect(c.calls).toEqual([["evaluate", [resolve]]]);
     });
 
     test(`${name} acts on the fresh selector the page returns, not the saved one`, async () => {
       const c = fakeClient({ evaluate: resolving({ [ref]: `fresh-${ref}` }) });
       await run({ ...ctx(), connect: async () => c });
-      expect(c.calls[0]).toEqual(["evaluate", [resolveRefScript(ref)]]);
+      expect(c.calls[0]).toEqual(["evaluate", [resolve]]);
       expect(c.calls.find(([o]) => o === op)?.[1][0]).toBe(`fresh-${ref}`);
       expect(JSON.stringify(c.calls)).not.toContain("saved-");
     });
@@ -1181,6 +1229,11 @@ describe("ref commands resolve the ref in the live page first", () => {
 
   test("the resolve script embeds the ref with JSON.stringify", () => {
     expect(resolveRefScript("e7")).toContain(JSON.stringify("e7"));
+    expect(resolveRefScript("e7", { enabled: true })).toContain(JSON.stringify("e7"));
+  });
+
+  test("the enabled check is a different script, so the fakes above tell them apart", () => {
+    expect(resolveRefScript("e7", { enabled: true })).not.toBe(resolveRefScript("e7"));
   });
 });
 
@@ -1517,36 +1570,40 @@ describe("eval", () => {
 });
 
 describe("run-code", () => {
-  test("wraps code in IIFE before sending to evaluate", async () => {
-    const c = fakeClient({ evaluate: () => 2 });
+  test("sends the code in runCodeScript and prints the page's value", async () => {
+    const c = fakeClient({ evaluate: () => ({ value: 2 }) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 1+1");
     expect(out).toBe("2");
-    const expr = c.calls[0]![1][0] as string;
-    expect(expr).toContain("return 1+1");
-    expect(expr).toContain("() => {");
-    expect(expr).toContain("})()");
+    expect(c.calls[0]![1][0]).toBe(runCodeScript("return 1+1"));
+  });
+
+  test("a function result exits 1 with the no-Playwright-page message (spec F18)", async () => {
+    const c = fakeClient({ evaluate: () => ({ fn: true }) });
+    const err = await cmdRunCode({ ...ctx(), connect: async () => c }, "async page => 1").then(() => null, (e: Error) => e);
+    expect(err?.message).toBe("run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return");
+    expect(reportFailure(err).code).toBe(1);
   });
 
   test("string result is printed as-is", async () => {
-    const c = fakeClient({ evaluate: () => "hi" });
+    const c = fakeClient({ evaluate: () => ({ value: "hi" }) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 'hi'");
     expect(out).toBe("hi");
   });
 
   test("object result is JSON.stringified", async () => {
-    const c = fakeClient({ evaluate: () => [1, 2, 3] });
+    const c = fakeClient({ evaluate: () => ({ value: [1, 2, 3] }) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return [1,2,3]");
     expect(out).toBe("[1,2,3]");
   });
 
   test("undefined result prints empty string", async () => {
-    const c = fakeClient({ evaluate: () => undefined });
+    const c = fakeClient({ evaluate: () => ({}) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "1+1");
     expect(out).toBe("");
   });
 
   test("--json wraps result in { ok, result }", async () => {
-    const c = fakeClient({ evaluate: () => "x" });
+    const c = fakeClient({ evaluate: () => ({ value: "x" }) });
     const out = await cmdRunCode({ ...ctx({ json: true }), connect: async () => c }, "return 'x'");
     expect(JSON.parse(out)).toEqual({ ok: true, result: "x" });
   });

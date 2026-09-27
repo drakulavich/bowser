@@ -160,8 +160,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     // The page holds the resolver, so the promise stays reachable and never
     // settles. An unreachable one is not a hang: JSC collects it and WebKit
     // rejects the evaluate "no longer reachable" (~6 s, measured).
-    const stuck = await timed(() => cmdEval(ctx, "new Promise((resolve) => { window.hold = resolve; })"));
-    expect(stuck.error).toBe(`operation 'evaluate' timed out after ${budget}ms`);
+    // `command` is what run() sets: the timeout names the command (F21).
+    const stuck = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
+    expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
     expect(stuck.ms).toBeLessThan(budget + 1000);
 
     // Sent at once: the reload comes after a grace (the 1 s budget here) and
@@ -170,7 +171,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const next = await timed(() => cmdEval(ctx, "1"));
     if (next.error) {
       expect(next.error).toBe(
-        `operation 'evaluate' timed out after ${budget}ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`,
+        `'evaluate' timed out after ${budget}ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`,
       );
     }
     expect(next.ms).toBeLessThan(budget + 1000);
@@ -202,8 +203,8 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const budget = 1000;
     const ctx = await openWith("hanggoto", budget);
 
-    const stuck = await timed(() => cmdGoto(ctx, `${base}/never`));
-    expect(stuck.error).toBe(`operation 'navigate' timed out after ${budget}ms`);
+    const stuck = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/never`));
+    expect(stuck.error).toBe(`'goto' timed out after ${budget}ms (in its 'navigate' step)`);
 
     // Sent at once: the daemon reloads only after a grace (the 1 s budget
     // here), so this may time out in the queue, but never past its budget.

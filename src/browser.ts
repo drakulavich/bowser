@@ -83,8 +83,9 @@ export interface Browser {
   hover(selector: string): Promise<void>;
   /** False when no option's value or label is `value`; nothing changed. */
   select(selector: string, value: string): Promise<boolean>;
-  setChecked(selector: string, checked: boolean): Promise<void>;
-  screenshot(): Promise<string>; // base64-encoded PNG (full page)
+  /** false: `uncheck` of a checked radio, refused in the page (F20). */
+  setChecked(selector: string, checked: boolean): Promise<boolean>;
+  screenshot(): Promise<string>; // base64-encoded PNG of the viewport
   resize(width: number, height: number): Promise<void>;
   back(): Promise<void>;
   forward(): Promise<void>;
@@ -128,6 +129,16 @@ export interface NavTiming {
   settleMs: number;
 }
 export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
+
+/** The key `view.press` is given for a key name (F11). Bun maps a named key to
+ *  a WebKit editing command where one exists, and "Tab" becomes "insert tab":
+ *  a `\t` lands in the field and no keydown fires. The tab character is sent
+ *  as a raw key event instead: focus moves as the browser's own Tab moves it,
+ *  and the page sees a trusted keydown with key "Tab" (measured on WebKit,
+ *  Bun 1.4.2). Every other key passes through. */
+function pressKey(key: string): string {
+  return key === "Tab" ? "\t" : key;
+}
 
 /** Bun.WebView resolves click()/press()/goBack() when the input is delivered,
  *  ~30 ms before the page it triggers commits (measured on WebKit, local
@@ -277,13 +288,13 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     evaluate: (expr) => evaluate(expr),
     click: (selector) => nav.act(() => view.click(selector)),
     type: (text) => view.type(text),
-    press: (key) => nav.act(() => view.press(key)),
+    press: (key) => nav.act(() => view.press(pressKey(key))),
     hover: async (selector) => { await evaluate(hoverScript(selector)); },
     select: async (selector, value) => (await evaluate(selectScript(selector, value))) === true,
-    setChecked: async (selector, checked) => { await evaluate(setCheckedScript(selector, checked)); },
+    setChecked: async (selector, checked) => (await evaluate(setCheckedScript(selector, checked))) !== false,
     screenshot: async () => {
-      // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
-      // Element-bounded screenshots are not supported in v1.
+      // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
+      // takes no full-page option. Element-bounded screenshots are not supported.
       const data = await view.screenshot?.();
       if (!data) throw new Error("screenshot: not supported by this Bun.WebView");
       const bytes = await pngBytesFrom(data);

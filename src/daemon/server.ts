@@ -18,6 +18,7 @@
 
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
+import pkg from "../../package.json";
 import { openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
@@ -110,13 +111,14 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   };
   const ms = lane.timeoutMs;
   const timer = ms > 0 ? setTimeout(() => {
+    const timedOut = timeoutMessage(req, ms);
     if (!running) {
       const prev = lane.serialize.running ?? "an earlier operation";
-      answer({ id: req.id, ok: false, error: `operation '${req.op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)` });
+      answer({ id: req.id, ok: false, error: `${timedOut} (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)` });
       return;
     }
     const dialogs = lane.timedOut?.(req);
-    answer({ id: req.id, ok: false, error: `operation '${req.op}' timed out after ${ms}ms`, ...(dialogs ? { dialogs } : {}) });
+    answer({ id: req.id, ok: false, error: timedOut, ...(dialogs ? { dialogs } : {}) });
     // Runs while this op still holds the serializer, so no later queued op
     // can overlap it; see Browser.interrupt for what it may overlap.
     grace = setTimeout(() => {
@@ -138,6 +140,15 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   });
 }
 
+/** A timeout names the command the user ran, and the op when it is one of
+ *  the command's steps: `fill` sends `click` first, and `snapshot` and
+ *  `eval` both send `evaluate` (F21). A request with no `cmd` is its op. */
+function timeoutMessage(req: DaemonRequest, ms: number): string {
+  const cmd = req.cmd ?? req.op;
+  const step = cmd === req.op ? "" : ` (in its '${req.op}' step)`;
+  return `'${cmd}' timed out after ${ms}ms${step}`;
+}
+
 /** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
  *  (set to 0 to disable). Guards a wedged WebKit call from hanging forever. */
 function opTimeoutMs(): number {
@@ -154,7 +165,8 @@ type Handlers = {
 };
 
 const handlers: Handlers = {
-  ping: async () => "pong",
+  // The version, so a client of another version refuses this daemon (F2).
+  ping: async () => pkg.version,
   shutdown: async (browser) => {
     // Respond first, then exit: the caller gets its { ok: true } before the
     // process goes away. A macrotask, not a microtask: the reply is written
@@ -174,7 +186,7 @@ const handlers: Handlers = {
   press: (browser, key) => browser.press(key),
   hover: (browser, selector) => browser.hover(selector),
   select: (browser, selector, value) => browser.select(selector, value),
-  check: (browser, selector) => browser.setChecked(selector, true),
+  check: async (browser, selector) => { await browser.setChecked(selector, true); },
   uncheck: (browser, selector) => browser.setChecked(selector, false),
   screenshot: async (browser, path) => {
     // When the CLI passes an absolute path, the daemon writes the PNG itself
@@ -192,6 +204,13 @@ const handlers: Handlers = {
   forward: (browser) => browser.forward(),
   reload: (browser) => browser.reload(),
 };
+
+/** What WebKit answers every evaluate and click with once the page's web
+ *  process has died twice: the first time the engine relaunches it and
+ *  reloads the page, the second time it does not (spec F34, measured on Bun
+ *  1.4.2). No page value gives this message: evaluate serializes page-side. */
+const DEAD_PAGE = "JavaScript execution returned a result of an unsupported type";
+const PAGE_CRASHED = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
 
 /** What createHandler returns: the request handler, and the hook `dispatch`
  *  calls when a request overruns its budget. */
@@ -264,7 +283,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
       return result === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { id: req.id, ok: false, error: msg };
+      return { id: req.id, ok: false, error: msg.includes(DEAD_PAGE) ? PAGE_CRASHED : msg };
     }
   }
 

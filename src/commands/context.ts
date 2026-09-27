@@ -9,6 +9,8 @@ import { loadState, resolveRef, saveState, type SessionState } from "../state.ts
 export interface CommandContext {
   session: string;
   json: boolean;
+  /** The command being run; the daemon's timeout message names it (F21). */
+  command?: string;
   // Injected in tests.
   connect?: (session: string, opts?: ConnectOptions) => Promise<DaemonConnection>;
   /** All of standard input, for `fill --stdin`. Defaults to `readStdin`;
@@ -38,7 +40,7 @@ export async function withClient<T>(
   fn: (c: DaemonConnection) => Promise<T>,
   opts: ConnectOptions = {},
 ): Promise<T> {
-  const client = await connector(ctx)(ctx.session, opts);
+  const client = await connector(ctx)(ctx.session, ctx.command ? { ...opts, command: ctx.command } : opts);
   try {
     return await fn(client);
   } finally {
@@ -60,9 +62,13 @@ export async function loadRef(session: string, ref: string) {
  *  whose element is gone (removed, or from a previous document) fails here,
  *  before any action, with playwright-cli's message; acting on the saved
  *  selector instead would wait out the op timeout or hit whatever element
- *  moved into its place. One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, ref: string): Promise<string> {
-  const selector = await c.request("evaluate", [resolveRefScript(ref)]);
+ *  moved into its place. With `enabled`, a disabled element fails too, at
+ *  once, and nothing is clicked (F20). One daemon round trip. */
+export async function liveSelector(c: DaemonConnection, ref: string, opts: { enabled?: boolean } = {}): Promise<string> {
+  const selector = await c.request("evaluate", [resolveRefScript(ref, opts)]);
+  if (opts.enabled && (selector as { disabled?: unknown } | null)?.disabled === true) {
+    throw new Error(`ref '${ref}' is disabled`);
+  }
   if (typeof selector !== "string") {
     throw new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`);
   }

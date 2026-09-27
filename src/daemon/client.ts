@@ -3,6 +3,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import pkg from "../../package.json";
 import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { sessionDir, statePath } from "../state.ts";
@@ -35,6 +36,9 @@ export class DaemonClient implements DaemonConnection {
   constructor(
     private readonly path: string,
     private readonly session: string,
+    /** The command the user ran, sent with each request so a timeout can
+     *  name it (F21). */
+    private readonly command?: string,
   ) {}
 
   private get closedMessage(): string {
@@ -105,7 +109,11 @@ export class DaemonClient implements DaemonConnection {
     if (!this.sock) throw new Error("client not connected");
     if (this.closed) return Promise.reject(new Error(this.closedMessage));
     const id = this.nextId++;
-    const line = JSON.stringify(this.report ? { id, op, args, report: true } : { id, op, args }) + "\n";
+    const line = JSON.stringify({
+      id, op, args,
+      ...(this.report ? { report: true } : {}),
+      ...(this.command ? { cmd: this.command } : {}),
+    }) + "\n";
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: (result) => resolve(result as ResultOf<O>), reject });
       socketWriteAll(this.sock! as unknown as WritableSocket, line);
@@ -132,9 +140,44 @@ export interface ConnectOptions {
   /** The platform a daemon would run on; `process.platform` unless a test
    *  fakes it. */
   platform?: string;
+  /** The Bun a daemon would run on; the running one unless a test fakes it. */
+  runtime?: BunRuntime;
   /** Start a daemon even where one ran and exited. Only `open` sets it: every
    *  other command refuses such a session (F28). */
   reopen?: boolean;
+  /** Accept a daemon of another bowser version. Only `close` and `list` set
+   *  it: they must still reach a daemon left running by an upgrade (F2). */
+  anyVersion?: boolean;
+  /** The command the user ran; a timeout names it (F21). */
+  command?: string;
+}
+
+/** A daemon whose socket accepted the connection and never answered the
+ *  health check: stopped, or blocked in a syscall. Unlike a refused
+ *  connection, it is still running, so `close` must not treat its socket as
+ *  stale (F3). */
+export class DaemonNotAnswering extends Error {
+  constructor(session: string) {
+    super(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
+  }
+}
+
+/** Why a command refuses a daemon of another bowser version, found running
+ *  after an upgrade: its ops and their behaviour may differ from this CLI's,
+ *  and restarting it quietly would drop its page (F2). A user error (exit 1).
+ *  `answer` is what it said to `ping`: its version, or "pong" from every
+ *  daemon before the version was sent. */
+export function otherVersion(session: string, answer: unknown): string {
+  const v = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer) ? answer : "an older version";
+  return `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`;
+}
+
+/** The client, once its daemon has answered `ping` with `answer`; refused
+ *  when the daemon is of another version, unless `opts.anyVersion`. */
+function checked(client: DaemonClient, session: string, answer: unknown, opts: ConnectOptions): DaemonClient {
+  if (opts.anyVersion || answer === pkg.version) return client;
+  client.close();
+  throw new Error(otherVersion(session, answer));
 }
 
 /** Why a command refuses a session whose daemon ran and is gone: its page,
@@ -148,10 +191,25 @@ export function browserExited(session: string): string {
  *  Bun.WebView, which throws on other platforms. A user error (exit 1). */
 export const REQUIRES_MACOS = "bowser requires macOS (WebKit)";
 
+/** What the Bun guard looks at in the running Bun. */
+export interface BunRuntime {
+  version: string;
+  webView: boolean;
+}
+
+/** Why bowser refuses a Bun below `engines.bun`, or one without Bun.WebView:
+ *  npm does not enforce `engines.bun`, and on such a Bun the daemon would die
+ *  unseen. A user error (exit 1). The floor is read from package.json, so the
+ *  message follows it. */
+export function unsupportedBun(runtime: BunRuntime): string | undefined {
+  const floor = pkg.engines.bun;
+  if (runtime.webView && Bun.semver.satisfies(runtime.version, floor)) return undefined;
+  return `bowser requires Bun ${floor} (found ${runtime.version})`;
+}
+
 /** The environment variable that carries the profile to a spawned daemon.
  *  Env rather than argv: `looksLikeOurDaemon` identifies a daemon by its last
- *  two argv words, and env reaches both spawn paths (bun main.ts and the
- *  compiled binary's --daemon) unchanged. */
+ *  two argv words. */
 export const DAEMON_PROFILE_ENV = "BOWSER_DAEMON_PROFILE";
 
 /** Connect to a session's daemon, or spawn one if it isn't running. */
@@ -160,8 +218,9 @@ export async function connectOrSpawn(
   opts: ConnectOptions = {},
 ): Promise<DaemonClient> {
   const sock = socketPath(session);
-  const client = new DaemonClient(sock, session);
+  const client = new DaemonClient(sock, session, opts.command);
   let connected = false;
+  let answer: unknown;
   try {
     await client.connect();
     connected = true;
@@ -169,20 +228,18 @@ export async function connectOrSpawn(
     // answers — stopped, or blocked in a syscall — would otherwise hang every
     // caller forever, `list` included. Treating it as unreachable is what the
     // callers already know how to handle.
-    await withTimeout(client.request("ping"), HEALTH_PING_MS, "ping");
-    return client;
+    answer = await withTimeout(client.request("ping"), HEALTH_PING_MS, "ping");
   } catch {
     // Close before falling through: a connected socket that is never closed
     // keeps the process alive after the command has printed its answer.
     client.close();
-    if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
     // Do not replace a daemon whose socket accepted our connection but whose
     // health check timed out. Unlinking its socket and spawning another daemon
     // would leave two browser processes for one session, while the old one
-    // would no longer be addressable by its pidfile.
-    if (connected) {
-      throw new Error(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
-    }
+    // would no longer be addressable by its pidfile. Reported before the
+    // spawn: false case, so `close` can tell it from a stale socket (F3).
+    if (connected) throw new DaemonNotAnswering(session);
+    if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
     // A daemon ran here (it left state.json) and none answers now: its
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.
@@ -191,19 +248,24 @@ export async function connectOrSpawn(
     // socket, so off macOS it would die unseen, and the caller would get only
     // the "did not start in time" timeout below. Refuse with the real reason.
     if ((opts.platform ?? process.platform) !== "darwin") throw new Error(REQUIRES_MACOS);
+    // The Bun guard, for the same reason: the daemon would die unseen.
+    const bunError = unsupportedBun(opts.runtime ?? { version: Bun.version, webView: typeof Bun.WebView === "function" });
+    if (bunError) throw new Error(bunError);
     await spawnDaemon(session, opts.profile);
     // Poll until the socket is listening.
     const start = Date.now();
     while (Date.now() - start < 5000) {
-      const c = new DaemonClient(sock, session);
+      const c = new DaemonClient(sock, session, opts.command);
+      let reply: unknown;
       try {
         await c.connect();
-        await withTimeout(c.request("ping"), HEALTH_PING_MS, "ping");
-        return c;
+        reply = await withTimeout(c.request("ping"), HEALTH_PING_MS, "ping");
       } catch {
         c.close();
         await Bun.sleep(50);
+        continue;
       }
+      return checked(c, session, reply, opts);
     }
     // A daemon that dies opening its browser never reaches its socket, so its
     // error is invisible here. A persistent store is the likely cause when one
@@ -213,6 +275,8 @@ export async function connectOrSpawn(
       : "";
     throw new Error(`daemon for session '${session}' did not start in time${hint}`);
   }
+  // Checked outside the try: its refusal must not fall into the spawn path.
+  return checked(client, session, answer, opts);
 }
 
 async function spawnDaemon(session: string, profile?: string): Promise<void> {
@@ -232,17 +296,9 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
     }
   }
 
-  // When running as a compiled single-file binary, import.meta.url points to
-  // a virtual /$bunfs/root/ path that Bun.spawn cannot execute. In that case
-  // re-invoke the binary itself with a hidden --daemon flag; cli.ts intercepts
-  // it before the normal command dispatcher and starts the daemon directly.
-  // Use includes(), not startsWith(): Bun reports this module's import.meta.url
-  // as "file:///$bunfs/root/..." (with a file:// scheme), so a startsWith check
-  // misses it and silently falls through to the broken, unspawnable path.
-  const isCompiled = import.meta.url.includes("/$bunfs/");
-  const cmd: string[] = isCompiled
-    ? [process.execPath, "--daemon", session]
-    : [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+  // Always `bun <package>/src/daemon/main.ts <session>`: from a checkout and
+  // from an npm install alike, main.ts sits beside this file.
+  const cmd = [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
 
   // When BOWSER_DAEMON_DEBUG is set, let the daemon's stdio through so spawn
   // failures are diagnosable.
@@ -264,8 +320,10 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
   // event loop open until a child exits — but the daemon runs forever (keepalive
   // interval), so without unref() a daemon-spawning command (e.g. `bowser open`
   // on a fresh session) prints its result and then hangs indefinitely instead of
-  // returning to the shell. `bun test` masks this (the test runner force-exits);
-  // the real binary does not. unref() lets the short-lived CLI exit immediately.
+  // returning to the shell. Measured from source: without it, `bun src/cli.ts
+  // open <url>` printed `opened …` and hung until killed. `bun test` masks this
+  // (the runner force-exits); tests/e2e-spawn-exit.test.ts runs the CLI as its
+  // own process and fails without it.
   proc.unref();
 }
 

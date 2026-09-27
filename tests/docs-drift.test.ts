@@ -69,3 +69,17 @@ describe("docs claim no command that is gone", () => {
     expect(claimed(SKILL).filter((n) => !REGISTERED.has(n))).toEqual([]);
   });
 });
+
+// Spec F17: a screenshot is the viewport (Bun.WebView takes no full-page
+// option), and the help, the MCP tool and the docs must not promise more.
+describe("screenshot is documented as the viewport", () => {
+  test("its summary, and so --help and the MCP description", () => {
+    expect(COMMANDS.find((c) => c.name === "screenshot")!.summary).toBe("Save a PNG screenshot of the viewport");
+  });
+  test("README and SKILL.md say viewport in its row, and drop the old full-page claims", () => {
+    for (const doc of [README, SKILL]) {
+      expect(doc.split("\n").find((l) => /^\| `(bowser )?screenshot /.test(l))).toContain("viewport");
+      expect(doc).not.toMatch(/Full-page (screenshot|only)|are\s+full-page/i);
+    }
+  });
+});

@@ -35,7 +35,9 @@ export interface PageState {
 }
 
 export interface DaemonOps {
-  ping:             { args: [];                                          result: "pong";               urgent: true };
+  /** Answers the daemon's bowser version (package.json). Every daemon
+   *  through 0.7 answered "pong"; the client refuses both kinds (F2). */
+  ping:             { args: [];                                          result: string;               urgent: true };
   shutdown:         { args: [];                                          result: void;                 urgent: true };
   state:            { args: [];                                          result: PageState };
   /** Set the one-shot answer for the next dialog on this page. */
@@ -48,7 +50,8 @@ export interface DaemonOps {
   hover:            { args: [selector: string];                          result: void };
   select:           { args: [selector: string, value: string];           result: boolean };
   check:            { args: [selector: string];                          result: void };
-  uncheck:          { args: [selector: string];                          result: void };
+  /** false: the element is a checked radio, left checked (F20). */
+  uncheck:          { args: [selector: string];                          result: boolean };
   /** With a path the daemon writes the PNG and returns `{ path }`; without
    *  one it returns base64 (reserved for a future --stdout). */
   screenshot:       { args: [path?: string];                             result: { path: string } | string };
@@ -88,6 +91,9 @@ export interface DaemonRequest {
   /** The sender prints dialog reports: the reply hands over the queued ones.
    *  Without it they stay queued for a command that prints them. */
   report?: true;
+  /** The command the user ran, which a timeout names; its ops are the
+   *  command's steps (F21). */
+  cmd?: string;
 }
 
 export interface DaemonResponse {

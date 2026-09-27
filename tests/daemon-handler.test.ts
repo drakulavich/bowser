@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import pkg from "../package.json";
 import type { Browser } from "../src/browser.ts";
 import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
 import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport } from "../src/daemon/protocol.ts";
@@ -24,7 +25,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     press: rec("press", undefined),
     hover: rec("hover", undefined),
     select: rec("select", true),
-    setChecked: rec("setChecked", undefined),
+    setChecked: rec("setChecked", true),
     screenshot: rec("screenshot", Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64")),
     resize: rec("resize", undefined),
     back: rec("back", undefined),
@@ -62,9 +63,9 @@ const rep = (op: DaemonRequest["op"], args?: unknown[]): DaemonRequest => ({ ...
 const actions = (b: { calls: Array<[string, unknown[]]> }) => b.calls.filter(([n]) => n !== "evaluate");
 
 describe("createHandler", () => {
-  test("ping answers pong without touching the browser", async () => {
+  test("ping answers the package version without touching the browser", async () => {
     const b = fakeBrowser();
-    expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
+    expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: pkg.version });
     expect(b.calls).toEqual([]);
   });
 
@@ -131,6 +132,39 @@ describe("createHandler", () => {
   test("a throwing browser method becomes { ok: false, error }", async () => {
     const b = fakeBrowser({ click: async () => { throw new Error("click: element not found"); } });
     expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({ id: 7, ok: false, error: "click: element not found" });
+  });
+
+  // Spec F34: after its web process died twice, WebKit fails every page op
+  // with this message; the reply names the crash and the way out.
+  test("the engine's dead-page message becomes the crash message; other errors pass through", async () => {
+    const dead = async () => { throw new Error("JavaScript execution returned a result of an unsupported type"); };
+    const crashed = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
+    const b = fakeBrowser({ evaluate: dead, click: dead });
+    expect(await createHandler(b)(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
+    expect(await createHandler(b)(req("click", ["#a"]))).toEqual({ id: 7, ok: false, error: crashed });
+    const other = fakeBrowser({ evaluate: async () => { throw new Error("TypeError: x is not a function"); } });
+    expect(await createHandler(other)(req("evaluate", ["x()"]))).toEqual({ id: 7, ok: false, error: "TypeError: x is not a function" });
+  });
+
+  // The measured behaviour (spec F34, measured manually): a dead page fails
+  // every page op until `reload`, which brings it back. The daemon reloads
+  // nothing by itself, and after the reload ops answer again.
+  test("a crashed page keeps failing, is not reloaded by the daemon, and works after reload", async () => {
+    const crashed = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
+    let dead = true;
+    const b = fakeBrowser({
+      evaluate: async () => {
+        if (dead) throw new Error("JavaScript execution returned a result of an unsupported type");
+        return { value: 2, dialogs: [] };
+      },
+      reload: async () => { b.calls.push(["reload", []]); dead = false; },
+    });
+    const h = createHandler(b);
+    expect(await h(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
+    expect(await h(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
+    expect(b.calls.filter(([n]) => n === "reload")).toEqual([]);
+    expect(await h(req("reload"))).toEqual({ id: 7, ok: true });
+    expect(await h(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: true, result: 2 });
   });
 
   test("an unknown op on the wire is rejected, not thrown", async () => {
@@ -208,7 +242,7 @@ test("a queued op that overruns its budget answers with a timeout error", async 
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
   await Bun.sleep(40);
   expect(replies).toEqual([
-    { id: 1, ok: false, error: "operation 'click' timed out after 5ms" },
+    { id: 1, ok: false, error: "'click' timed out after 5ms" },
   ]);
 });
 
@@ -225,7 +259,7 @@ test("an op that overruns its budget: the timeout reply carries the reports queu
   dispatch({ id: 1, op: "click", args: ["#go"], report: true }, lane);
   await Bun.sleep(80);
   expect(replies).toEqual([{
-    id: 1, ok: false, error: "operation 'click' timed out after 20ms",
+    id: 1, ok: false, error: "'click' timed out after 20ms",
     dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
   }]);
   release();
@@ -244,7 +278,7 @@ test("a timed-out request that prints nothing leaves the queued reports alone", 
   const replies: DaemonResponse[] = [];
   dispatch({ id: 1, op: "click", args: ["#go"] }, { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r) => { replies.push(r); }, timedOut: handle.timedOut });
   await Bun.sleep(60);
-  expect(replies).toEqual([{ id: 1, ok: false, error: "operation 'click' timed out after 20ms" }]);
+  expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 20ms" }]);
   expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
     { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
   ]);
@@ -281,7 +315,7 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
 // it past their own budgets.
 describe("the queue-time budget", () => {
   const QUEUED = (op: string, ms: number, prev: string) =>
-    `operation '${op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
+    `'${op}' timed out after ${ms}ms (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
 
   test("a request still queued behind a timed-out op fails at its own deadline, and never runs", async () => {
     const replies: Array<[number, DaemonResponse]> = [];
@@ -304,7 +338,7 @@ describe("the queue-time budget", () => {
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
     await Bun.sleep(900);
     expect(replies.map(([, r]) => r)).toEqual([
-      { id: 1, ok: false, error: "operation 'click' timed out after 400ms" },
+      { id: 1, ok: false, error: "'click' timed out after 400ms" },
       { id: 2, ok: false, error: QUEUED("evaluate", 400, "click") },
     ]);
     // Its deadline counts from receipt (50 ms), so it answers near 450 ms;
@@ -315,6 +349,26 @@ describe("the queue-time budget", () => {
     await Bun.sleep(20);
     // Its client was already told it failed, so it is dropped, not run late.
     expect(ran).toEqual([1]);
+  });
+
+  test("F21: a queued step names its command and keeps the waiting tail", async () => {
+    const replies: DaemonResponse[] = [];
+    const lane = {
+      handle: () => new Promise<DaemonResponse>(() => {}), // never settles
+      serialize: createSerializer(),
+      timeoutMs: 30,
+      reply: (res: DaemonResponse) => { replies.push(res); },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"], cmd: "click" }, lane);
+    dispatch({ id: 2, op: "evaluate", args: ["1"], cmd: "snapshot" }, lane);
+    await Bun.sleep(80);
+    expect(replies).toEqual([
+      { id: 1, ok: false, error: "'click' timed out after 30ms" },
+      {
+        id: 2, ok: false,
+        error: "'snapshot' timed out after 30ms (in its 'evaluate' step) (waiting for 'click', which timed out and is still running; run 'bowser close' if the session stays stuck)",
+      },
+    ]);
   });
 
   test("a request that reaches the head of the queue in time runs, on its remaining budget", async () => {
@@ -651,7 +705,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
     const b = webkitBrowser();
     const h = createHandler(b);
     await h(req("evaluate", ["window.confirm('sure?')"]));
-    expect(await h(rep("ping"))).toEqual({ id: 7, ok: true, result: "pong" });
+    expect(await h(rep("ping"))).toEqual({ id: 7, ok: true, result: pkg.version });
     expect((await h(rep("evaluate", ["1"]))).dialogs).toHaveLength(1);
   });
 

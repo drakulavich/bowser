@@ -3,6 +3,94 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### BREAKING: no release binaries; install through npm or from source
+
+A release binary is ad-hoc signed with no Team ID, so Gatekeeper rejects it, and a downloaded copy
+(with `com.apple.quarantine` set) hung on `--help` with no output.
+
+- **Releases no longer build or attach binaries.** A GitHub Release carries its notes and no
+  assets. bowser installs with `npm install -g @drakulavich/bowser-cli`, or from source.
+- **Migrating from a binary:** run `bowser close --all` with the old binary, delete it, then
+  `npm i -g @drakulavich/bowser-cli`. `close` still recognises a daemon an old binary started.
+- **The npm package needs Bun ≥ 1.4.2 on `PATH`.** npm does not enforce `engines.bun`, so a
+  command that would start a session on an older Bun, or on one without `Bun.WebView`, now fails
+  at once with `bowser requires Bun >=1.4.2 (found <version>)` (exit 1) instead of `did not start
+  in time`. The floor is read from `engines.bun`.
+- The hidden `--daemon` entry and the `build` script are gone. The daemon always runs as
+  `bun <package>/src/daemon/main.ts <session>`.
+
+### Changed: a session started by another bowser version is refused
+
+After an upgrade, the new CLI drove the old version's still-running daemon: an op the old daemon
+lacked failed with `unknown op`, and the rest ran with the old behaviour (a `prompt` was dismissed
+with no report).
+
+- **The daemon answers `ping` with its version.** A command that finds a daemon of another version,
+  or one from before this change, fails before it sends anything else: `session '<name>' is running
+  bowser <v> (this is <w>); run 'bowser close -s <name>', then open it again` (exit 1). `open` is
+  refused too: it cannot restart the daemon without dropping its page.
+- `close`, `close --all` and `list` skip the check, so an old daemon is still listed and shut down.
+  Run `bowser close --all` before you upgrade.
+
+### Fixed
+
+- **`close` no longer orphans a silent daemon from bowser 0.5 or older.** Such a daemon wrote no
+  pidfile, and when it accepted the connection but never answered, `close` removed the session and
+  reported success while the process ran on. It now fails with exit 2 and keeps the session: `close:
+  session '<name>' has no pidfile (a daemon from bowser 0.5 or older) and its daemon did not answer;
+  find it with 'pgrep -fl -- "--daemon <name>"', end it, then run close again`. `close --all`
+  reports it as a failed session. A socket nobody listens on is still removed.
+- **`list` returns at once with live sessions.** It took about 1 s whenever a session was live: a
+  second probe left a 1 s timer running after the answer was printed.
+- **A timeout names the command you ran.** `fill` timed out as `operation 'click' timed out after
+  3000ms`; it now reads `'fill' timed out after 3000ms (in its 'click' step)`. The step is left out
+  when the command and the op share a name. A queued timeout keeps its `(waiting for '<op>', …)`
+  tail. Exit code unchanged (2).
+- **`BOWSER_OP_TIMEOUT_MS` is documented as read when the session starts.** Setting it on a later
+  command did nothing, silently. It is still one budget per session: to change it, `close` and
+  `open` again.
+- **`press Tab` moves focus.** It typed a tab character into the focused field, and from `<body>`
+  focused nothing; the page saw no `keydown`. It now moves focus as the browser's own Tab does, the
+  field's value unchanged, and a page `keydown` listener sees a trusted `Tab`. Other keys are
+  unchanged.
+- **`click`, `check` and `uncheck` refuse a disabled element.** They reported success and did
+  nothing, and `check` on an `aria-disabled` checkbox ran its click handler. A disabled element, by
+  the rule the snapshot uses for `[disabled]` (a disabled control or `<fieldset>`, or
+  `aria-disabled="true"` on it or an ancestor), now fails at once with `ref 'eN' is disabled`
+  (exit 1), and nothing is clicked. `playwright-cli` waits out its timeout instead.
+- **`uncheck` refuses a checked radio.** It clicked it, reported `unchecked`, and the radio stayed
+  checked. It now fails with `ref 'eN' is a radio button; select another option in its group to
+  uncheck it` (exit 1), as `playwright-cli` does. On an unchecked radio it succeeds and does
+  nothing. `check` and `uncheck` read `aria-checked` on an element that is not an `<input>`, so
+  `check` on an `aria-checked="true"` checkbox no longer clicks it off.
+- **`uncheck` unchecks an `aria-checked="mixed"` checkbox.** It read mixed as unchecked, clicked
+  nothing and reported success. Mixed now counts as checked for `uncheck`, which clicks until the
+  element reads `false` (twice for the usual mixed → true → false cycle). `check` on mixed clicks
+  once, as `playwright-cli` does. `playwright-cli`'s `uncheck` leaves a mixed checkbox as it is.
+- **An SVG `<title>` names the SVG.** A link or button whose only content is an
+  `<svg><title>Logo</title>…</svg>` printed with no name (`link [ref=e2]`); it now prints
+  `link "Logo"`, with `img "Logo"` inside, as `playwright-cli` does. An `<svg>` or an element
+  inside one takes its first child `<title>`, after `aria-labelledby` and `aria-label`.
+- **`screenshot` is documented as the viewport.** The docs, `--help` and the MCP tool said
+  full-page; `Bun.WebView` captures the viewport only, which is also `playwright-cli`'s default.
+  The behaviour is unchanged. The summary now reads "Save a PNG screenshot of the viewport".
+- **`run-code` prints what the code gives.** The code was the body of a plain function, so the
+  documented IIFE form (`(() => { return 5 })()`) and `async page => …` printed an empty line, and
+  `await` was a syntax error. Code that is one expression is now evaluated as one and prints its
+  value; other code is the body of an async function, where `return` gives the result and `await`
+  works. A result that is a function, such as a `playwright-cli` snippet `async page => …`, fails
+  with `run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use
+  return` (exit 1). `run-code` runs in the page, unlike `playwright-cli`'s, which runs Playwright
+  code in Node.
+- **A crashed page is reported.** After the page's web process died a second time, every page
+  command failed with `JavaScript execution returned a result of an unsupported type` (exit 2). It
+  now fails with `the page crashed (its web process exited); run 'bowser reload' or 'bowser goto
+  <url>'` (exit 2). The page is not reloaded for you; `reload`, `goto` and `open <url>` recover it.
+  The first crash is still not reported: WebKit reloads the page, which nothing tells apart from a
+  page reloading itself.
+
 ## [0.7.0] — 2026-09-27
 
 ### Changed: extra arguments are an error

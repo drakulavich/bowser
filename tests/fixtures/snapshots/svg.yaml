@@ -1,0 +1,14 @@
+- generic [active] [ref=e1]:
+  - link "Logo" [ref=e2] [cursor=pointer]:
+    - /url: /
+    - img "Logo" [ref=e3]
+  - button "Close" [ref=e5]:
+    - img "Close" [ref=e6]
+  - img "Lab" [ref=e8]
+  - text: External
+  - img "External" [ref=e10]
+  - img [ref=e12]:
+    - img "Inner" [ref=e13]
+  - button "Save" [ref=e15]:
+    - img [ref=e16]
+    - text: Save

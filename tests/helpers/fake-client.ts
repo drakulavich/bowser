@@ -1,6 +1,6 @@
 // A DaemonConnection whose behavior is a partial map of typed handlers.
 // Ops without a handler get the same defaults the three old hand-written
-// fakes had: ping → "pong", state → the last navigated url with a "Fake …"
+// fakes had: ping → the package version, state → the last navigated url with a "Fake …"
 // title, screenshot → mirror the daemon (write the file when given a path),
 // select → true (the option was found), everything else → undefined.
 // Every request is recorded in `calls` as [op, args].
@@ -17,6 +17,7 @@
 // reportDialogs(), as the real daemon hands reports only to a command that
 // prints them. `reporting` says whether it did.
 
+import pkg from "../../package.json";
 import type { ArgsOf, DaemonConnection, DialogReport, Op, ResultOf } from "../../src/daemon/protocol.ts";
 
 export type FakeHandlers = {
@@ -31,7 +32,7 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
   let currentTitle = "";
 
   const defaults: FakeHandlers = {
-    ping: () => "pong",
+    ping: () => pkg.version,
     state: () => ({ url: currentUrl, title: currentTitle }),
     select: () => true,
   };

@@ -5,9 +5,9 @@
 // The command sequence reproduces the capture's, because refs and [active]
 // depend on it; kitchen-sink is resized to the capture's 1280x720 first.
 //
-// coverage.yaml and contents.yaml are later captures of their fixtures of tests/fixtures/snapshot-coverage.html
-// (tests/fixtures/snapshot-*.html; playwright-cli 0.1.13, Edge, same way),
-// for rules the other pages miss.
+// coverage.yaml, contents.yaml and svg.yaml are later captures of their
+// fixtures (tests/fixtures/snapshot-*.html; playwright-cli 0.1.13, Edge, same
+// way), for rules the other pages miss.
 //
 // Documented deviations, WebKit against the Edge captures (each swaps named
 // golden lines, see Deviation; the golden files stay playwright-cli's text):
@@ -121,6 +121,7 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
       "/probe.html": "snapshot-probe.html",
       "/coverage.html": "snapshot-coverage.html",
       "/contents.html": "snapshot-contents.html",
+      "/svg.html": "snapshot-svg.html",
     };
     server = Bun.serve({
       port: 0,
@@ -267,5 +268,16 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   test("display:contents elements take a ref from a visible child, like playwright-cli", async () => {
     await cmdGoto(ctx, `${base}/contents.html`);
     expect(tree(await cmdSnapshot(ctx))).toBe(await golden("contents"));
+  }, 60_000);
+
+  // An <svg>, or an element inside one, is named by its first child SVG
+  // <title> (spec F16), after aria-labelledby and aria-label: "Lab" and
+  // "External" win over their titles. The name flows into the link and the
+  // button named by their content; a <title> nested in a <g> names the <g>,
+  // not the <svg>.
+  test("an SVG <title> names the svg and the link or button around it, like playwright-cli", async () => {
+    await cmdGoto(ctx, `${base}/svg.html`);
+    const want = await golden("svg");
+    expect(tree(await cmdSnapshot(ctx))).toBe(withDeviations(want, webkitLinkCursor(want, ["Logo"])));
   }, 60_000);
 });

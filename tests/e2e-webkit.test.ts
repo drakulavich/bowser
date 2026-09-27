@@ -11,6 +11,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
@@ -256,6 +257,17 @@ runOrSkip("e2e: WebKit agent loop", () => {
   test("eval and run-code return page values", async () => {
     expect(await evalText("1 + 1")).toBe("2");
     expect(await cmdRunCode(text, "const t = document.title; return t.toUpperCase();")).toBe("KITCHEN SINK");
+  }, 60_000);
+
+  // Spec F18, option 1: one expression is evaluated as one; anything else is
+  // the body of an async function; a function result is refused.
+  test("run-code: an IIFE prints its value, await works in a body, a function exits 1", async () => {
+    expect(await cmdRunCode(text, "(() => { return 5 })()")).toBe("5");
+    expect(await cmdRunCode(text, "await new Promise(r => setTimeout(r, 100)); return 1")).toBe("1");
+    expect(await cmdRunCode(text, "document.title")).toBe("Kitchen Sink");
+    const err = await cmdRunCode(text, "async page => { return await page.title() }").then(() => null, (e: Error) => e);
+    expect(err?.message).toBe("run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return");
+    expect(reportFailure(err).code).toBe(1);
   }, 60_000);
 
   test("list shows the session; close --all ends it", async () => {

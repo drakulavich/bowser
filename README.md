@@ -11,7 +11,7 @@ Built on [`Bun.WebView`](https://bun.com/docs/runtime/webview) (new in Bun 1.3.1
 
 What sets it apart from `playwright-cli`:
 
-- **Bun-native.** Single static binary via `bun build --compile`. Fast cold start. No Node / npm / Playwright install dance.
+- **Bun-native.** Runs on Bun, no Node or Playwright install.
 - **Token-efficient.** Capabilities are shell commands, not MCP tool schemas. A skill description of a few hundred tokens covers the whole API.
 - **Persistent sessions.** Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
@@ -20,7 +20,7 @@ What sets it apart from `playwright-cli`:
 bowser runs on macOS only (it needs WebKit, which `Bun.WebView` provides only there).
 
 ```bash
-# From npm (requires Bun ≥ 1.4.2 on your PATH)
+# From npm
 npm install -g @drakulavich/bowser-cli
 
 # ...or directly from source
@@ -30,12 +30,23 @@ bun install
 bun link                     # exposes `bowser` on $PATH
 ```
 
-Prebuilt single-file binaries for macOS (arm64/x64) are also attached to every GitHub Release — see
-[Releases](https://github.com/drakulavich/bowser/releases).
+Bun ≥ 1.4.2 must be on your `PATH`: the npm package runs `src/cli.ts` with the `bun` it finds there.
+npm does not enforce that, so on an older Bun a command that would start a session fails with the
+error "bowser requires Bun >=1.4.2 (found <version>)" (exit 1).
 
-Requires Bun ≥ 1.4.2 for the npm/source install.
+bowser is distributed only through npm and from source; releases no longer attach binaries. If you
+used a release binary, run `bowser close --all` with it, delete it, then
+`npm i -g @drakulavich/bowser-cli`.
 
 On another platform, any command that would start a session fails with the error "bowser requires macOS (WebKit)" (exit 1).
+
+### Upgrading
+
+Run `bowser close --all` before you upgrade. A session keeps the daemon that started it, and after
+an upgrade every command but `close` and `list` refuses a daemon of another version:
+"session '<name>' is running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it
+again" (exit 1). A daemon from bowser 0.7 or older reports no version, so `<v>` reads `an older version`.
+`close` still ends such a daemon, and `list` still lists it.
 
 ### Screenshots
 
@@ -43,8 +54,9 @@ Screenshots are written as PNG files. `bowser screenshot --filename out.png` wri
 to `out.png` (relative paths resolve against your current directory); without
 `--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
 if that file already exists. The reply names the absolute path written (`wrote /…/out.png`,
-`{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. Captures are
-full-page (element-bounded screenshots are not supported yet).
+`{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. A capture is the
+viewport, as in `playwright-cli` without `--full-page`: bowser has no full-page or
+element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `resize` to capture more.
 
 ## Quickstart
 
@@ -59,6 +71,8 @@ bowser close                             # end session
 ```
 
 Each session runs one persistent browser process (spawned lazily on first command, addressed over a Unix socket). Commands attach, run, and detach — so typed text, modals, dynamic DOM, cookies, and auth all survive across invocations. Session state lives under `~/.bowser/sessions/<name>/`. Several commands started at once on a new session still share one browser.
+
+If the page's web process crashes, WebKit relaunches it and reloads the page once. That reload looks like the page reloading itself, so bowser does not report it: page state is gone, and old refs fail with `not found in the current page snapshot`. If the process dies again, WebKit does not reload the page, and every page command fails with `the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'` (exit 2). bowser does not reload it for you; `reload`, `goto` or `open <url>` recover it.
 
 If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1), instead of quietly starting an empty browser. `bowser open` (with `--persistent` again, for a persistent session) starts it anew; `bowser close` clears it. A session that never ran a browser still starts one on its first command.
 
@@ -167,19 +181,19 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies, `localStorage` and IndexedDB in `~/.bowser/profiles/<session>/` across `close` and restarts; `--profile=dir` keeps them in `dir` instead (implies `--persistent`). See [Persistent profiles](#persistent-profiles). |
 | `goto <url>` | Navigate within current session. For `open` and `goto` alike, a URL without a scheme gets one, as in `playwright-cli`: `http://` for `localhost`, `127.0.0.1` and `[::1]` (`localhost:3000/x` → `http://localhost:3000/x`), `https://` for any other host (`example.com` → `https://example.com`). A URL with a scheme (`http:`, `file:`, `about:`, `data:`, …) is used as typed. Unlike `playwright-cli`, `127.0.0.1` gets `http://`, not `https://`. |
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
-| `click <ref>` | Click an element |
+| `click <ref>` | Click an element. A disabled element (the snapshot's `[disabled]`: a disabled control or `<fieldset>`, or `aria-disabled="true"` on it or an ancestor) fails at once with `ref 'eN' is disabled`, exit 1, and is not clicked; `playwright-cli` waits out its timeout |
 | `fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type. `--stdin` reads the text from piped input and drops one trailing newline, so a secret never appears in the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed, with or without `--stdin`: `filled e4 (textbox "Password")`, and `--json` answers `{"ok":true,"ref":"e4"}`. `--stdin` is not offered over MCP. A disabled (a disabled `<fieldset>` included) or `readonly` field fails with `ref 'eN' is not an editable element (disabled)` or `(readonly)`, exit 1, value untouched; `playwright-cli` waits out its timeout. A `date`, `time`, `datetime-local`, `month`, `week` or `color` input gets the value set directly, as `playwright-cli` does (`fill e9 2024-01-02`); one it does not keep fails with `ref 'eN' did not accept the value for input[type=<type>]`. On `type=number`, text that is not a number fails with `ref 'eN' needs a number (input[type=number])`. Both exit 1 and leave the value as it was; no error repeats the text. |
 | `type <text>` | Type into focused element. The text is never echoed: it prints `typed N characters` (`typed 1 character` for one), counting code points, and `--json` answers `{"ok":true,"length":N}`. For `fill` and `type` alike, a browser error that quotes the text is replaced by `<command>: the browser's error message was withheld because it contained the entered text`; a dialog message the page shows is page content and is printed as is |
-| `press <key>` | Press a keyboard key |
+| `press <key>` | Press a keyboard key. `Tab` moves focus to the next field, as the browser's own Tab does, and types nothing |
 | `hover <ref>` | Hover an element |
 | `select <ref> <value>` | Choose a `<select>` option: the first, in document order, whose value or label is `<value>` (`select e3 Red` picks `<option value="r">Red</option>`). With no such option it fails at once with `ref 'eN' has no option "<value>"` (exit 1) and the select keeps its value; `playwright-cli` waits out its timeout |
-| `check <ref>` / `uncheck <ref>` | Toggle a checkbox |
+| `check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox or radio button. A disabled one fails like `click`. `uncheck` on a checked radio fails with `ref 'eN' is a radio button; select another option in its group to uncheck it`, exit 1; on an unchecked one it succeeds and does nothing. An `aria-checked="mixed"` checkbox is unchecked for `check` (one click, as in `playwright-cli`) and checked for `uncheck`, which clicks it until it reads `false` (`playwright-cli` leaves it mixed) |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
-| `screenshot [--filename=f]` | Full-page screenshot (PNG) |
+| `screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
 | `resize <width> <height>` | Set the viewport size in pixels |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
-| `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped. |
+| `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped, including a daemon from bowser 0.5 or older that does not answer: it wrote no pidfile, so `close` exits 2 and keeps the session until you end the process yourself (the error says how). |
 | `close --all` | Close every open session. If one cannot be closed, it still tries the rest, then fails (exit 2) naming each such session with its reason and listing the ones it closed |
 | `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
 | `localstorage-get <key>` | Read a `localStorage` value |
@@ -192,7 +206,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `sessionstorage-delete <key>` | Remove a `sessionStorage` entry |
 | `sessionstorage-clear` | Clear all `sessionStorage` entries |
 | `eval <expression>` | Evaluate a JS expression in the current page; prints the result |
-| `run-code <code>` | Run multi-statement JS in the current page; wrap in an IIFE, use `return` to produce a value |
+| `run-code <code>` | Run JavaScript in the current page and print the result. One expression is evaluated as one (`run-code "(() => { return 5 })()"` prints `5`); any other code is the body of an async function, so use `return` for the result, and `await` works (`run-code "await new Promise(r => setTimeout(r, 100)); return document.title"`). Unlike `playwright-cli`'s `run-code`, which calls a function with a Playwright `page` in Node, it runs in the page: a result that is a function, such as `async page => …`, fails with `run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return` (exit 1) |
 | `state-save <file>` | Save the current origin's localStorage to a Playwright-compatible `storageState` JSON file. Its `cookies` array is always empty: bowser has no cookie access (use `open --persistent` to keep logins). |
 | `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. |
 | `mcp` | Run a Model Context Protocol stdio server exposing every command above as an MCP tool. |
@@ -241,7 +255,7 @@ Notes:
 
 | Variable | Effect |
 | --- | --- |
-| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser. |
+| `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser. The daemon reads it once, when the session starts: to change it, `close` the session and `open` it again with the new value. A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2). |
 | `BOWSER_DAEMON_DEBUG` | `1` lets the session daemon's stdout and stderr through to the terminal, for debugging a daemon that fails to start. |
 
 ## Tests
@@ -259,20 +273,6 @@ BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub sea
 - `tests/e2e-webkit.test.ts` — every command driven on WebKit, with page state read back via `eval` after each one.
 - `tests/e2e-compat.test.ts` — diffs bowser against `playwright-cli` on the todo flow, asserting bowser's refs are a subset of playwright-cli's tree; skips without playwright-cli's WebKit installed.
 - `tests/e2e-search.test.ts` — live web: search GitHub for OpenClaw, find the repo link, type into the search box and press Enter.
-
-## Build a single binary
-
-```bash
-bun build src/cli.ts --compile --outfile dist/bowser
-./dist/bowser open https://example.com
-```
-
-Build for a specific Mac:
-
-```bash
-bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile dist/bowser-macos-arm64
-bun build src/cli.ts --compile --target=bun-darwin-x64   --outfile dist/bowser-macos-x64
-```
 
 ## Roadmap
 

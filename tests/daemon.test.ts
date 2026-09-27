@@ -9,8 +9,9 @@ import { join } from "node:path";
 
 import { ensureSessionDir, saveState } from "../src/state.ts";
 
+import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -117,6 +118,46 @@ describe("connectOrSpawn on a platform without WebKit", () => {
   }
 });
 
+// F7: npm does not enforce `engines.bun`, so an npm install runs on whatever
+// Bun is on PATH. A daemon on a Bun without a working Bun.WebView would die
+// unseen, and the CLI would print only "did not start in time". The floor is
+// read from package.json, so the message follows it.
+describe("connectOrSpawn on a Bun below the engines.bun floor", () => {
+  let tmp: string;
+  let origHome: string | undefined;
+  const floor = (pkg as { engines: { bun: string } }).engines.bun;
+
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-bunfloor-"));
+    process.env.HOME = tmp;
+  });
+
+  afterAll(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const cases: [string, string, { version: string; webView: boolean }][] = [
+    ["an older Bun", "bunfloor-old", { version: "1.0.0", webView: true }],
+    ["a Bun without Bun.WebView", "bunfloor-noview", { version: "99.0.0", webView: false }],
+  ];
+  afterAll(async () => {
+    // Only a regression spawns here; never leave its browser running.
+    for (const [, session] of cases) await killDaemons(session);
+  });
+  for (const [label, session, runtime] of cases) {
+    test(`${label}: refuses to spawn a daemon, a user error (exit 1)`, async () => {
+      const started = Date.now();
+      const err = await connectOrSpawn(session, { platform: "darwin", runtime }).then(() => undefined, (e: unknown) => e);
+      expect((err as Error).message).toBe(`bowser requires Bun ${floor} (found ${runtime.version})`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(await Bun.file(pidPath(session)).exists()).toBe(false);
+      expect(Date.now() - started).toBeLessThan(2000);
+    });
+  }
+});
+
 // F28: a session whose browser exited refuses every command but `open` and
 // `close`, instead of quietly starting a new, empty browser. A session that
 // never ran a daemon still starts one on its first command.
@@ -192,7 +233,9 @@ describe("connectOrSpawn health check", () => {
     const server = Bun.listen({ unix: socketPath(session), socket: { data() {} } });
     try {
       const started = Date.now();
-      await expect(connectOrSpawn(session, { spawn: false })).rejects.toThrow(/no daemon/);
+      // Told apart from a refused connection even when no spawn is wanted:
+      // `close` must not treat a running daemon's socket as stale (F3).
+      await expect(connectOrSpawn(session, { spawn: false })).rejects.toBeInstanceOf(DaemonNotAnswering);
       await expect(connectOrSpawn(session)).rejects.toThrow(/run 'bowser close -s wedged'/);
       // The point is that it returns at all; the bound is generous so a loaded
       // CI machine does not fail on timing.
@@ -230,7 +273,7 @@ describe("daemon goes away mid-request", () => {
           for (const line of data.toString().split("\n")) {
             if (!line) continue;
             const req = JSON.parse(line) as { id: number; op: string };
-            if (req.op === "ping") s.write(JSON.stringify({ id: req.id, ok: true, result: "pong" }) + "\n");
+            if (req.op === "ping") s.write(JSON.stringify({ id: req.id, ok: true, result: pkg.version }) + "\n");
             else s.end();
           }
         },

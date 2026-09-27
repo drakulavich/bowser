@@ -4,7 +4,7 @@ import { readFile, readdir, rm, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import type { Command } from "../cli/registry.ts";
-import { pidPath, socketPath } from "../daemon/client.ts";
+import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
 import { isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
@@ -185,17 +185,28 @@ export async function closeOne(
 ): Promise<string> {
   const pid = await readPid(session);
 
-  // Ask the daemon to stop. Failing to connect is not yet an error: the daemon
+  // Ask the daemon to stop, whatever its version: an upgrade can leave an
+  // older one running (F2). Failing to connect is not yet an error: the daemon
   // may be gone already, or unreachable while still running — which is the case
   // the pid below exists to settle, and which used to be reported as success.
   try {
-    const client = await connector(ctx)(session, { spawn: false });
+    const client = await connector(ctx)(session, { spawn: false, anyVersion: true });
     try {
       await client.request("shutdown");
     } finally {
       client.close();
     }
-  } catch {}
+  } catch (err) {
+    // A daemon that accepted and never answered is still running. With no
+    // pid to confirm it gone (bowser 0.5 wrote none), removing its session
+    // would orphan it and report success (F3).
+    if (err instanceof DaemonNotAnswering && pid === null) {
+      throw new Error(
+        `close: session '${session}' has no pidfile (a daemon from bowser 0.5 or older) and its daemon did not answer; ` +
+          `find it with 'pgrep -fl -- "--daemon ${session}"', end it, then run close again`,
+      );
+    }
+  }
 
   // Remove the socket file.
   try {
@@ -296,31 +307,20 @@ async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> 
   return done || "no sessions to close";
 }
 
-/** A session is live when its daemon answers. The socket file alone is not
- *  enough — a stale socket outlives a crashed daemon — and a pid alone is not
- *  either, since an orphan holds no socket. `ping` is on the urgent lane, so a
- *  busy daemon still answers and reads as live, which is correct. */
+/** A session is live when its daemon answers, whatever its version (F2). The
+ *  socket file alone is not enough — a stale socket outlives a crashed daemon —
+ *  and a pid alone is not either, since an orphan holds no socket. The
+ *  connector's own `ping` is the probe: it is bounded, and on the urgent lane,
+ *  so a busy daemon still answers and reads as live, which is correct. A second
+ *  probe raced against a sleep kept `list` alive for the sleep (F32). */
 async function isLive(ctx: CommandContext, session: string): Promise<boolean> {
   try {
-    const c = await connector(ctx)(session, { spawn: false });
-    try {
-      // Cap the probe. A daemon can hold a connectable socket and never answer
-      // — stopped, or blocked in a syscall — and `list` must report it rather
-      // than hang on it. A live daemon answers in microseconds; the urgent lane
-      // means a busy one does too.
-      return await Promise.race([
-        c.request("ping").then(() => true),
-        Bun.sleep(LIVE_PROBE_MS).then(() => false),
-      ]);
-    } finally {
-      c.close();
-    }
+    (await connector(ctx)(session, { spawn: false, anyVersion: true })).close();
+    return true;
   } catch {
     return false;
   }
 }
-
-const LIVE_PROBE_MS = 1000;
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
   let names: string[] = [];

@@ -21,9 +21,11 @@ export function isAlive(pid: number): boolean {
  *  pid without asking this first: pids are reused, and killing a stranger's
  *  process because a stale file named it would be far worse than leaking one of
  *  ours. The session must be a whole argument, not a substring, so the daemon
- *  for 'abc' cannot answer for 'ab'; the daemon runs either as
- *  `bun .../daemon/main.ts <session>` or, compiled, as `bowser --daemon
- *  <session>`, so one of those two markers must be present too. */
+ *  for 'abc' cannot answer for 'ab'; the daemon runs as
+ *  `bun .../daemon/main.ts <session>`, so that marker must be present too.
+ *  A daemon a 0.7-or-older release binary started runs as `bowser --daemon
+ *  <session>` and may outlive the switch to npm, so `close` still recognises
+ *  that form. */
 export function looksLikeOurDaemon(command: string, session: string): boolean {
   const line = command.trim();
   // The session is the daemon's last argument and the marker comes right
@@ -34,7 +36,7 @@ export function looksLikeOurDaemon(command: string, session: string): boolean {
   const marker = words.at(-2) ?? "";
   // Match the executable by name, not by path: the path changes across
   // upgrades (a Homebrew Cellar path carries the version), and `close` must
-  // still recognise a daemon the previous binary started. Release assets are
+  // still recognise a daemon the previous binary started. Old release assets were
   // named `bowser-macos-arm64` and the like, so a `bowser-` or `bowser.`
   // prefix counts too; `not-bowser-helper` does not.
   const exe = words[0]?.split("/").pop() ?? "";

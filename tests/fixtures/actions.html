@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Actions</title>
+</head>
+<body>
+  <main>
+    <h1>Actions</h1>
+    <input id="a" aria-label="A" />
+    <input id="b" aria-label="B" />
+    <input id="disbox" type="checkbox" aria-label="DisabledBox" disabled />
+    <fieldset disabled>
+      <input id="fsbox" type="checkbox" aria-label="FieldsetBox" />
+    </fieldset>
+    <input id="okbox" type="checkbox" aria-label="OkBox" />
+    <input id="small" type="radio" name="size" aria-label="Small" />
+    <input id="large" type="radio" name="size" aria-label="Large" checked />
+    <button id="disbtn" disabled>DisBtn</button>
+    <button id="okbtn">OkBtn</button>
+    <div id="ariadis" role="checkbox" aria-checked="false" aria-disabled="true" tabindex="0">AriaDis</div>
+    <div aria-disabled="true">
+      <div id="ariainner" role="checkbox" aria-checked="false" tabindex="0">AriaInherit</div>
+    </div>
+    <div id="ariaon" role="checkbox" aria-checked="true" tabindex="0">AriaOn</div>
+    <div id="ariamixed" role="checkbox" aria-checked="mixed" tabindex="0">AriaMixed</div>
+    <div id="ariaradio" role="radio" aria-checked="true" tabindex="0">AriaRadio</div>
+  </main>
+  <script>
+    // Every click and keydown, as "click:<id>" and "keydown:<key>:<trusted>",
+    // so a test can tell that a refused command ran no handler.
+    window.log = [];
+    document.addEventListener("click", (e) => {
+      const t = e.target.closest("[id]");
+      window.log.push("click:" + (t ? t.id : ""));
+      // A role=checkbox toggles itself, as a page's own script would.
+      if (t && t.getAttribute("role") === "checkbox") {
+        t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"));
+      }
+    }, true);
+    document.addEventListener("keydown", (e) => window.log.push("keydown:" + e.key + ":" + e.isTrusted), true);
+  </script>
+</body>
+</html>

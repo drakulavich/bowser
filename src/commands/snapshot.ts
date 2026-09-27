@@ -66,7 +66,7 @@ export async function cmdScreenshot(
   ctx: CommandContext,
   opts: { filename?: string } = {},
 ): Promise<string> {
-  // Full-page only. The default name auto-increments so repeated screenshots
+  // The viewport only, as playwright-cli without --full-page. The default name auto-increments so repeated screenshots
   // don't clobber each other; an explicit --filename writes exactly there.
   const filename =
     opts.filename ??
@@ -95,7 +95,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "screenshot",
-    summary: "Save a full-page PNG screenshot",
+    summary: "Save a PNG screenshot of the viewport",
     positional: [],
     flags: [{ name: "filename", kind: "string" }],
     run: (ctx, a) => cmdScreenshot(ctx, { filename: str(a.flags, "filename") }),
