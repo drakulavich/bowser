@@ -186,7 +186,7 @@ const handlers: Handlers = {
   press: (browser, key) => browser.press(key),
   hover: (browser, selector) => browser.hover(selector),
   select: (browser, selector, value) => browser.select(selector, value),
-  check: (browser, selector) => browser.setChecked(selector, true),
+  check: async (browser, selector) => { await browser.setChecked(selector, true); },
   uncheck: (browser, selector) => browser.setChecked(selector, false),
   screenshot: async (browser, path) => {
     // When the CLI passes an absolute path, the daemon writes the PNG itself

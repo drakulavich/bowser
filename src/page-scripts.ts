@@ -41,13 +41,46 @@ const CSS_PATH = String.raw`
     return 'html > ' + chain(el);
   }`;
 
+// The rule behind the snapshot's [disabled], inlined into SNAPSHOT_SCRIPT and
+// resolveRefScript so `click`/`check`/`uncheck` refuse exactly what the
+// snapshot marks (spec F20): a natively disabled control (a disabled
+// <fieldset> included, except in its first legend), or aria-disabled="true"
+// on the element or an ancestor, for the roles that take it. The scope must
+// define tagOf(el) and ariaRole(el); ariaRole is asked only of the element
+// itself, never of an ancestor. Plain JavaScript under String.raw.
+const DISABLED = String.raw`
+  const DISABLED_ROLES = ['application', 'button', 'composite', 'gridcell', 'group', 'input', 'link', 'menuitem',
+    'scrollbar', 'separator', 'tab', 'checkbox', 'columnheader', 'combobox', 'grid', 'listbox', 'menu', 'menubar',
+    'menuitemcheckbox', 'menuitemradio', 'option', 'radio', 'radiogroup', 'row', 'rowheader', 'searchbox', 'select',
+    'slider', 'spinbutton', 'switch', 'tablist', 'textbox', 'toolbar', 'tree', 'treegrid', 'treeitem'];
+  const inDisabledFieldset = (el) => {
+    const fs = el.closest('fieldset[disabled]');
+    if (!fs) return false;
+    const legend = fs.querySelector(':scope > legend');
+    return !legend || !legend.contains(el);
+  };
+  const nativelyDisabled = (el) => ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'OPTGROUP'].includes(tagOf(el)) &&
+    (el.hasAttribute('disabled') || (tagOf(el) === 'OPTION' && !!el.closest('optgroup[disabled]')) || inDisabledFieldset(el));
+  function ariaDisabled(el, ancestor) {
+    if (!el) return false;
+    if (!ancestor && nativelyDisabled(el)) return true;
+    if (ancestor || DISABLED_ROLES.includes(ariaRole(el) || '')) {
+      const a = (el.getAttribute('aria-disabled') || '').toLowerCase();
+      if (a === 'true') return true;
+      if (a === 'false') return false;
+      return ariaDisabled(el.parentElement, true);
+    }
+    return false;
+  }
+  const isDisabled = (el, role) => DISABLED_ROLES.includes(role) && ariaDisabled(el, false);`;
+
 // The snapshot walker, serialized into the page. It builds the aria tree from
 // document.body the way playwright-cli 0.1.x does (its injected script's
 // generateAriaTree, trimmed to what bowser prints: no iframes' contents, no
 // shadow DOM, no aria-owns) and returns SnapshotResult (src/snapshot.ts).
 // Written with String.raw, so backslashes below are plain JavaScript; the
 // only things this text may not contain are backticks and dollar-brace,
-// apart from the one interpolation, CSS_PATH.
+// apart from the two interpolations, DISABLED and CSS_PATH.
 //
 // Refs: every visible node that receives pointer events gets `e<N>`, in DOM
 // pre-order. The element -> {ref, role, name} map, the reverse ref ->
@@ -111,14 +144,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     !((a === 'aria-label' || a === 'aria-labelledby') && ['caption', 'code', 'deletion', 'emphasis', 'generic',
       'insertion', 'paragraph', 'presentation', 'strong', 'subscript', 'superscript'].includes(role)) &&
     !(a === 'aria-roledescription' && role === 'generic'));
-  const nativelyDisabled = (el) => ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'OPTGROUP'].includes(tagOf(el)) &&
-    (el.hasAttribute('disabled') || (tagOf(el) === 'OPTION' && !!el.closest('optgroup[disabled]')) || inDisabledFieldset(el));
-  const inDisabledFieldset = (el) => {
-    const fs = el.closest('fieldset[disabled]');
-    if (!fs) return false;
-    const legend = fs.querySelector(':scope > legend');
-    return !legend || !legend.contains(el);
-  };
+  ${DISABLED}
   const focusable = (el) => {
     if (nativelyDisabled(el)) return false;
     const t = tagOf(el);
@@ -386,27 +412,12 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
 
   // ---- state attributes ----
   const CHECKED_ROLES = ['checkbox', 'menuitemcheckbox', 'option', 'radio', 'switch', 'menuitemradio', 'treeitem'];
-  const DISABLED_ROLES = ['application', 'button', 'composite', 'gridcell', 'group', 'input', 'link', 'menuitem',
-    'scrollbar', 'separator', 'tab', 'checkbox', 'columnheader', 'combobox', 'grid', 'listbox', 'menu', 'menubar',
-    'menuitemcheckbox', 'menuitemradio', 'option', 'radio', 'radiogroup', 'row', 'rowheader', 'searchbox', 'select',
-    'slider', 'spinbutton', 'switch', 'tablist', 'textbox', 'toolbar', 'tree', 'treegrid', 'treeitem'];
   const EXPANDED_ROLES = ['application', 'button', 'checkbox', 'combobox', 'gridcell', 'link', 'listbox', 'menuitem',
     'row', 'rowheader', 'tab', 'treeitem', 'columnheader', 'menuitemcheckbox', 'menuitemradio', 'switch'];
   const LEVEL_ROLES = ['heading', 'listitem', 'row', 'treeitem'];
   const SELECTED_ROLES = ['cell', 'gridcell', 'option', 'row', 'tab', 'rowheader', 'columnheader', 'treeitem'];
   const HEADING_LEVELS = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
 
-  function ariaDisabled(el, ancestor) {
-    if (!el) return false;
-    if (!ancestor && nativelyDisabled(el)) return true;
-    if (ancestor || DISABLED_ROLES.includes(ariaRole(el) || '')) {
-      const a = (el.getAttribute('aria-disabled') || '').toLowerCase();
-      if (a === 'true') return true;
-      if (a === 'false') return false;
-      return ariaDisabled(el.parentElement, true);
-    }
-    return false;
-  }
   function addState(n, el) {
     const role = n.role, tag = tagOf(el);
     if (CHECKED_ROLES.includes(role)) {
@@ -416,7 +427,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
       else c = el.getAttribute('aria-checked') === 'true' ? true : el.getAttribute('aria-checked') === 'mixed' ? 'mixed' : false;
       if (c) n.checked = c;
     }
-    if (DISABLED_ROLES.includes(role) && ariaDisabled(el, false)) n.disabled = true;
+    if (isDisabled(el, role)) n.disabled = true;
     if ((EXPANDED_ROLES.includes(role) && el.getAttribute('aria-expanded') === 'true') ||
       (tag === 'SUMMARY' && el.parentElement && tagOf(el.parentElement) === 'DETAILS' && el.parentElement.open)) n.expanded = true;
     if (el === document.activeElement) n.active = true;
@@ -710,11 +721,22 @@ export function selectScript(selector: string, value: string): string {
       })()`;
 }
 
+/** Clicks the element when its checked state differs from `checked`, and
+ *  answers true. It answers false, clicking nothing, for `uncheck` of a
+ *  checked radio: the click would leave it checked (spec F20). A radio is an
+ *  input[type=radio], or an element the last snapshot gave the role radio or
+ *  menuitemradio; one without `checked` reads its aria-checked. */
 export function setCheckedScript(selector: string, checked: boolean): string {
   return `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('check: element not found');
-        if (Boolean(el.checked) !== ${checked}) el.click();
+        const input = el instanceof HTMLInputElement;
+        const on = input ? el.checked : el.getAttribute('aria-checked') === 'true';
+        const role = window[Symbol.for('bowser.aria-refs')]?.refs?.get(el)?.role;
+        const radio = (input && el.type === 'radio') || role === 'radio' || role === 'menuitemradio';
+        if (${!checked} && radio && on) return false;
+        if (on !== ${checked}) el.click();
+        return true;
       })()`;
 }
 
@@ -809,11 +831,19 @@ export function runCodeScript(code: string): string {
  *  point is covered (a fixed header), as playwright-cli does before acting:
  *  WebKit's native click waits for its target to be hittable, so a link below
  *  the fold timed out (spec F8). Here it costs no round trip. */
-export function resolveRefScript(ref: string): string {
+export function resolveRefScript(ref: string, opts: { enabled?: boolean } = {}): string {
+  // With `enabled`, a disabled element (DISABLED, the snapshot's rule, with
+  // the role the snapshot gave it) answers { disabled: true } instead, before
+  // any scroll: click, check and uncheck refuse it at no extra round trip.
+  const enabled = opts.enabled ? String.raw`
+  const tagOf = (x) => x.tagName.toUpperCase();
+  const ariaRole = (x) => store.refs?.get(x)?.role || null;
+  ${DISABLED}
+  if (isDisabled(el, ariaRole(el))) return { disabled: true };` : "";
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
   const el = store?.byRef?.get(${JSON.stringify(ref)})?.deref();
-  if (!el || !el.isConnected) return null;
+  if (!el || !el.isConnected) return null;${enabled}
   const r = el.getBoundingClientRect();
   const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
   // In view but under something else, like a fixed header: the point a

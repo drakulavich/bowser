@@ -83,7 +83,8 @@ export interface Browser {
   hover(selector: string): Promise<void>;
   /** False when no option's value or label is `value`; nothing changed. */
   select(selector: string, value: string): Promise<boolean>;
-  setChecked(selector: string, checked: boolean): Promise<void>;
+  /** false: `uncheck` of a checked radio, refused in the page (F20). */
+  setChecked(selector: string, checked: boolean): Promise<boolean>;
   screenshot(): Promise<string>; // base64-encoded PNG (full page)
   resize(width: number, height: number): Promise<void>;
   back(): Promise<void>;
@@ -280,7 +281,7 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     press: (key) => nav.act(() => view.press(key)),
     hover: async (selector) => { await evaluate(hoverScript(selector)); },
     select: async (selector, value) => (await evaluate(selectScript(selector, value))) === true,
-    setChecked: async (selector, checked) => { await evaluate(setCheckedScript(selector, checked)); },
+    setChecked: async (selector, checked) => (await evaluate(setCheckedScript(selector, checked))) !== false,
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
       // Element-bounded screenshots are not supported in v1.

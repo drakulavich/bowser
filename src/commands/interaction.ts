@@ -32,7 +32,7 @@ export async function cmdClick(
 ): Promise<string> {
   const { prev, target } = await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
-    await c.request("click", [await liveSelector(c, ref)]);
+    await c.request("click", [await liveSelector(c, ref, { enabled: true })]);
     const state = await c.request("state");
     await syncState(prev, state);
     return replyPage(ctx, c, { ok: true, ref, url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
@@ -147,7 +147,7 @@ export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string
   const { target } = await loadRef(ctx.session, ref);
   requireKind("check", ref, target);
   return withPageClient(ctx, async (c) => {
-    await c.request("check", [await liveSelector(c, ref)]);
+    await c.request("check", [await liveSelector(c, ref, { enabled: true })]);
     return replyPage(ctx, c, { ok: true, ref }, `checked ${ref}`);
   });
 }
@@ -156,7 +156,8 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   const { target } = await loadRef(ctx.session, ref);
   requireKind("check", ref, target);
   return withPageClient(ctx, async (c) => {
-    await c.request("uncheck", [await liveSelector(c, ref)]);
+    const done = await c.request("uncheck", [await liveSelector(c, ref, { enabled: true })]);
+    if (done === false) throw new Error(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
     return replyPage(ctx, c, { ok: true, ref }, `unchecked ${ref}`);
   });
 }

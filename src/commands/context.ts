@@ -62,9 +62,13 @@ export async function loadRef(session: string, ref: string) {
  *  whose element is gone (removed, or from a previous document) fails here,
  *  before any action, with playwright-cli's message; acting on the saved
  *  selector instead would wait out the op timeout or hit whatever element
- *  moved into its place. One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, ref: string): Promise<string> {
-  const selector = await c.request("evaluate", [resolveRefScript(ref)]);
+ *  moved into its place. With `enabled`, a disabled element fails too, at
+ *  once, and nothing is clicked (F20). One daemon round trip. */
+export async function liveSelector(c: DaemonConnection, ref: string, opts: { enabled?: boolean } = {}): Promise<string> {
+  const selector = await c.request("evaluate", [resolveRefScript(ref, opts)]);
+  if (opts.enabled && (selector as { disabled?: unknown } | null)?.disabled === true) {
+    throw new Error(`ref '${ref}' is disabled`);
+  }
   if (typeof selector !== "string") {
     throw new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`);
   }

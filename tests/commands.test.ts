@@ -36,7 +36,9 @@ import { fillScript, resolveRefScript } from "../src/page-scripts.ts";
  *  script evaluates to undefined, the fake's default. */
 function resolving(live: Record<string, string | null>) {
   return (expr: string): unknown => {
-    for (const [id, selector] of Object.entries(live)) if (expr === resolveRefScript(id)) return selector;
+    for (const [id, selector] of Object.entries(live)) {
+      if (expr === resolveRefScript(id) || expr === resolveRefScript(id, { enabled: true })) return selector;
+    }
     return undefined;
   };
 }
@@ -1019,6 +1021,54 @@ describe("check / uncheck", () => {
   });
 });
 
+describe("F20: click, check and uncheck refuse a disabled element and uncheck a checked radio", () => {
+  const REFS = [
+    { id: "e1", selector: "button", role: "button",   name: "Go",    tag: "button" },
+    { id: "e4", selector: "input.cb", role: "checkbox", name: "Agree", tag: "input" },
+    { id: "e5", selector: "input.r", role: "radio",    name: "Large", tag: "input" },
+  ];
+  beforeEach(async () => {
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+  });
+
+  // The page's answer to the enabled resolve for a disabled element.
+  const disabled = (ref: string) => (expr: string): unknown =>
+    expr === resolveRefScript(ref, { enabled: true }) ? { disabled: true } : undefined;
+
+  for (const [name, ref, run] of [
+    ["click", "e1", (x: CommandContext) => cmdClick(x, "e1")],
+    ["check", "e4", (x: CommandContext) => cmdCheck(x, "e4")],
+    ["uncheck", "e4", (x: CommandContext) => cmdUncheck(x, "e4")],
+  ] as const) {
+    test(`${name} on a disabled element: exit 1, and the resolve is the only request`, async () => {
+      const c = fakeClient({ evaluate: disabled(ref) });
+      const err = await run({ ...ctx(), connect: async () => c }).then(
+        (out) => { throw new Error(`expected a failure, got ${out}`); },
+        (e: Error) => e,
+      );
+      expect(err.message).toBe(`ref '${ref}' is disabled`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(c.calls).toEqual([["evaluate", [resolveRefScript(ref, { enabled: true })]]]);
+    });
+  }
+
+  test("uncheck on a checked radio: exit 1 with playwright-cli's advice", async () => {
+    const c = fakeClient({ evaluate: resolving({ e5: "input.r" }), uncheck: () => false });
+    const err = await cmdUncheck({ ...ctx(), connect: async () => c }, "e5").then(
+      (out) => { throw new Error(`expected a failure, got ${out}`); },
+      (e: Error) => e,
+    );
+    expect(err.message).toBe("ref 'e5' is a radio button; select another option in its group to uncheck it");
+    expect(reportFailure(err).code).toBe(1);
+    expect(c.calls.map(([op]) => op)).toEqual(["evaluate", "uncheck"]);
+  });
+
+  test("uncheck the page accepts (an unchecked radio included) succeeds", async () => {
+    const c = fakeClient({ evaluate: resolving({ e5: "input.r" }), uncheck: () => true });
+    expect(await cmdUncheck({ ...ctx(), connect: async () => c }, "e5")).toBe("unchecked e5");
+  });
+});
+
 describe("actions refuse a ref of the wrong kind", () => {
   // One ref per kind the spec (§5) names, plus non-interactive ones that full-tree
   // snapshots now give refs to.
@@ -1136,32 +1186,36 @@ describe("ref commands resolve the ref in the live page first", () => {
     { id: "e4", selector: "saved-cb",     role: "checkbox", name: "Agree", tag: "input" },
   ];
   // Each ref command, the ref it acts on, and the action op that must carry the fresh selector.
-  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>]> = [
-    ["click",   "e1", "click",   (x) => cmdClick(x, "e1")],
-    ["fill",    "e2", "click",   (x) => cmdFill(x, "e2", "hi")],
-    ["hover",   "e1", "hover",   (x) => cmdHover(x, "e1")],
-    ["select",  "e3", "select",  (x) => cmdSelect(x, "e3", "red")],
-    ["check",   "e4", "check",   (x) => cmdCheck(x, "e4")],
-    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4")],
+  // The last column: whether the resolve script also refuses a disabled
+  // element (F20). fill keeps its own disabled message; hover and select
+  // do not refuse.
+  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>, boolean]> = [
+    ["click",   "e1", "click",   (x) => cmdClick(x, "e1"), true],
+    ["fill",    "e2", "click",   (x) => cmdFill(x, "e2", "hi"), false],
+    ["hover",   "e1", "hover",   (x) => cmdHover(x, "e1"), false],
+    ["select",  "e3", "select",  (x) => cmdSelect(x, "e3", "red"), false],
+    ["check",   "e4", "check",   (x) => cmdCheck(x, "e4"), true],
+    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4"), true],
   ];
 
   beforeEach(async () => {
     await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
   });
 
-  for (const [name, ref, op, run] of COMMANDS) {
+  for (const [name, ref, op, run, enabled] of COMMANDS) {
+    const resolve = enabled ? resolveRefScript(ref, { enabled: true }) : resolveRefScript(ref);
     test(`${name} on a ref whose element is gone fails with playwright-cli's message and sends no action`, async () => {
       const c = fakeClient({ evaluate: resolving({ [ref]: null }) });
       await expect(run({ ...ctx(), connect: async () => c })).rejects.toThrow(
         new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`),
       );
-      expect(c.calls).toEqual([["evaluate", [resolveRefScript(ref)]]]);
+      expect(c.calls).toEqual([["evaluate", [resolve]]]);
     });
 
     test(`${name} acts on the fresh selector the page returns, not the saved one`, async () => {
       const c = fakeClient({ evaluate: resolving({ [ref]: `fresh-${ref}` }) });
       await run({ ...ctx(), connect: async () => c });
-      expect(c.calls[0]).toEqual(["evaluate", [resolveRefScript(ref)]]);
+      expect(c.calls[0]).toEqual(["evaluate", [resolve]]);
       expect(c.calls.find(([o]) => o === op)?.[1][0]).toBe(`fresh-${ref}`);
       expect(JSON.stringify(c.calls)).not.toContain("saved-");
     });
@@ -1175,6 +1229,11 @@ describe("ref commands resolve the ref in the live page first", () => {
 
   test("the resolve script embeds the ref with JSON.stringify", () => {
     expect(resolveRefScript("e7")).toContain(JSON.stringify("e7"));
+    expect(resolveRefScript("e7", { enabled: true })).toContain(JSON.stringify("e7"));
+  });
+
+  test("the enabled check is a different script, so the fakes above tell them apart", () => {
+    expect(resolveRefScript("e7", { enabled: true })).not.toBe(resolveRefScript("e7"));
   });
 });
 
