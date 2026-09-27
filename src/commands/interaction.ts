@@ -3,7 +3,7 @@
 // its kind, then act on the liveSelector the page returns for it.
 
 import type { Command } from "../cli/registry.ts";
-import { clearForFillScript } from "../page-scripts.ts";
+import { fillScript, type FillOutcome } from "../page-scripts.ts";
 import type { Ref } from "../state.ts";
 import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext } from "./context.ts";
 
@@ -71,6 +71,16 @@ async function withholdingText<T>(command: string, text: string, fn: () => Promi
   }
 }
 
+const FILL_OUTCOMES: readonly FillOutcome[] = ["type", "set", "disabled", "readonly", "nan", "rejected"];
+
+/** fillScript's answer. Anything else (the element vanished, a page that
+ *  overrode a builtin) reads as "type", what fill did before it asked. */
+function readFillAnswer(found: unknown): { outcome: FillOutcome; type: string } {
+  const a = found as { outcome?: unknown; type?: unknown } | null | undefined;
+  const outcome = FILL_OUTCOMES.find((o) => o === a?.outcome) ?? "type";
+  return { outcome, type: typeof a?.type === "string" ? a.type : "" };
+}
+
 /** With `stdin`, the text comes from standard input so a secret never
  *  reaches argv. In every mode the text is never echoed back. */
 export async function cmdFill(
@@ -87,8 +97,12 @@ export async function cmdFill(
   return withPageClient(ctx, async (c) => {
     const selector = await liveSelector(c, ref);
     await c.request("click", [selector]);
-    await c.request("evaluate", [clearForFillScript(selector)]);
-    await withholdingText("fill", value, () => c.request("type", [value]));
+    const found = await withholdingText("fill", value, () => c.request("evaluate", [fillScript(selector, value)]));
+    const { outcome, type } = readFillAnswer(found);
+    if (outcome === "disabled" || outcome === "readonly") throw new Error(`ref '${ref}' is not an editable element (${outcome})`);
+    if (outcome === "nan") throw new Error(`ref '${ref}' needs a number (input[type=number])`);
+    if (outcome === "rejected") throw new Error(`ref '${ref}' did not accept the value for input[type=${type}]`);
+    if (outcome !== "set") await withholdingText("fill", value, () => c.request("type", [value]));
     return replyPage(ctx, c, { ok: true, ref }, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
@@ -123,7 +137,8 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
   const { target } = await loadRef(ctx.session, ref);
   requireKind("select", ref, target);
   return withPageClient(ctx, async (c) => {
-    await c.request("select", [await liveSelector(c, ref), value]);
+    const found = await c.request("select", [await liveSelector(c, ref), value]);
+    if (!found) throw new Error(`ref '${ref}' has no option ${JSON.stringify(value)}`);
     return replyPage(ctx, c, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
   });
 }
@@ -207,7 +222,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "select",
-    summary: "Select an option value in the element with the given ref",
+    summary: "Select the option with the given value or label in the element with the given ref",
     positional: [{ name: "ref", required: true }, { name: "value", required: true }],
     flags: [],
     run: (ctx, a) => cmdSelect(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),

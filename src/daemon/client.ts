@@ -5,7 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
-import { sessionDir } from "../state.ts";
+import { sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 
 export function socketPath(session: string): string {
@@ -132,6 +132,16 @@ export interface ConnectOptions {
   /** The platform a daemon would run on; `process.platform` unless a test
    *  fakes it. */
   platform?: string;
+  /** Start a daemon even where one ran and exited. Only `open` sets it: every
+   *  other command refuses such a session (F28). */
+  reopen?: boolean;
+}
+
+/** Why a command refuses a session whose daemon ran and is gone: its page,
+ *  refs and, for `--persistent`, its store went with it, and a new daemon
+ *  started quietly would be an empty in-memory browser. A user error (exit 1). */
+export function browserExited(session: string): string {
+  return `session '${session}' is not open (its browser exited); run 'bowser open'`;
 }
 
 /** Why bowser cannot start a daemon off macOS: its only engine is WebKit's
@@ -173,6 +183,10 @@ export async function connectOrSpawn(
     if (connected) {
       throw new Error(`daemon for session '${session}' did not answer; run 'bowser close -s ${session}' to stop it`);
     }
+    // A daemon ran here (it left state.json) and none answers now: its
+    // browser exited. Only `open` may start another; `close` never spawns.
+    // A fresh session has no state.json and still spawns lazily.
+    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new Error(browserExited(session));
     // The one platform check. The daemon opens its WebView before it opens its
     // socket, so off macOS it would die unseen, and the caller would get only
     // the "did not start in time" timeout below. Refuse with the real reason.

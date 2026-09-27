@@ -4,7 +4,8 @@
 // exercise the full request/response surface with NO real stdio or daemon.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmodSync, existsSync, realpathSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +16,7 @@ import {
   handleMcpLine,
   type McpDeps,
 } from "../src/mcp.ts";
+import { parse } from "../src/cli/parser.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
 import { run } from "../src/cli.ts";
@@ -102,6 +104,17 @@ describe("toArgv", () => {
 
   test("no-positional, no-flag command", () => {
     expect(toArgv(schema("list"), {})).toEqual(["--json", "list"]);
+  });
+
+  // F4: the CLI refuses a word past a command's declared positionals. A tool
+  // call cannot trip that: toArgv takes positionals from the schema only.
+  test("never passes more positionals than a command declares, whatever the call sends", () => {
+    for (const s of SCHEMAS.commands) {
+      const args: Record<string, unknown> = { extra: "x", _0: "y" };
+      for (const p of s.positional) args[p.name] = "v";
+      const argv = toArgv(s, args);
+      expect(parse(SCHEMAS, argv).positional.length).toBe(s.positional.length);
+    }
   });
 
   test("a positional that looks like a flag goes after --", () => {
@@ -343,6 +356,79 @@ describe("bowser mcp never reads its own stdin for a command", () => {
       proc.kill();
       await proc.exited;
       await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+// F37: the server writes where the client can find it. An unwritable cwd
+// (or `/`) is swapped for <os.tmpdir()>/bowser-mcp at start, and every file
+// output is reported by its absolute path.
+describe("bowser mcp resolves file outputs against a writable directory", () => {
+  const HELPER = join(import.meta.dir, "helpers", "mcp-fake-daemon.ts");
+
+  /** Start the server in `cwd` with its own TMPDIR, send one tools/call, and
+   *  return the tool result's text. */
+  async function callIn(cwd: string, tmpDir: string, args: Record<string, string>): Promise<{ isError?: boolean; text: string }> {
+    const home = await mkdtemp(join(tmpdir(), "bowser-mcp-cwd-home-"));
+    const proc = Bun.spawn([process.execPath, HELPER], {
+      cwd,
+      env: { ...process.env, HOME: home, TMPDIR: tmpDir },
+      stdin: "pipe", stdout: "pipe", stderr: "pipe",
+    });
+    try {
+      const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "screenshot", arguments: { session: "m37", ...args } } };
+      proc.stdin.write(JSON.stringify(call) + "\n");
+      proc.stdin.end();
+      const out = await new Response(proc.stdout).text();
+      const res = JSON.parse(out.split("\n").find(Boolean) ?? "{}");
+      return { isError: res.result?.isError, text: res.result?.content?.[0]?.text ?? JSON.stringify(res) };
+    } finally {
+      proc.kill();
+      await proc.exited;
+      await rm(home, { recursive: true, force: true });
+    }
+  }
+
+  test("an unwritable cwd: a default screenshot lands in <os.tmpdir()>/bowser-mcp, reported absolute", async () => {
+    const root = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-cwd-")));
+    const locked = join(root, "locked");
+    const tmpDir = join(root, "tmp");
+    await mkdir(locked);
+    await mkdir(tmpDir);
+    chmodSync(locked, 0o555);
+    try {
+      const res = await callIn(locked, tmpDir, {});
+      expect(res.isError).toBeFalsy();
+      const expected = join(tmpDir, "bowser-mcp", "screenshot-m37.png");
+      expect(JSON.parse(res.text)).toEqual({ ok: true, filename: expected });
+      expect(existsSync(expected)).toBe(true);
+    } finally {
+      chmodSync(locked, 0o755);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("cwd /: the same directory", async () => {
+    const tmpDir = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-root-")));
+    try {
+      const res = await callIn("/", tmpDir, {});
+      expect(JSON.parse(res.text)).toEqual({ ok: true, filename: join(tmpDir, "bowser-mcp", "screenshot-m37.png") });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a writable cwd is kept, and an absolute path is used as given", async () => {
+    const root = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-keep-")));
+    try {
+      const rel = await callIn(root, root, { filename: "shot.png" });
+      expect(JSON.parse(rel.text)).toEqual({ ok: true, filename: join(root, "shot.png") });
+      const target = join(root, "abs", "given.png");
+      const abs = await callIn("/", root, { filename: target });
+      expect(JSON.parse(abs.text)).toEqual({ ok: true, filename: target });
+      expect(existsSync(target)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

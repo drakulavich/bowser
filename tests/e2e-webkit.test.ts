@@ -33,6 +33,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
   let origHome: string | undefined;
   let server: { stop: () => void } | undefined;
   let base: string;
+  let port: number;
 
   const session = "wk";
   const ctx: CommandContext = { session, json: true };
@@ -54,6 +55,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
     });
     server = { stop: () => s.stop(true) };
     base = s.url.toString(); // ends with "/"
+    port = s.port!;
   });
 
   afterAll(async () => {
@@ -219,6 +221,18 @@ runOrSkip("e2e: WebKit agent loop", () => {
     expect(gone.url).toBe(base);
     await waitForEval("document.title", "Kitchen Sink");
   }, 90_000);
+
+  // F15: WebKit read `localhost:<port>` as a scheme and timed out, and
+  // failed `127.0.0.1:<port>` with "The URL can't be shown".
+  test("goto without a scheme: localhost and 127.0.0.1 get http://", async () => {
+    for (const host of ["localhost", "127.0.0.1"]) {
+      const out = JSON.parse(await cmdGoto(ctx, `${host}:${port}/two`)) as { url: string };
+      expect(out.url).toBe(`http://${host}:${port}/two`);
+      await waitForEval("document.title", "Page Two");
+      await cmdGoto(ctx, base);
+      await waitForEval("document.title", "Kitchen Sink");
+    }
+  }, 60_000);
 
   test("localStorage round-trip", async () => {
     await cmdLocalStorageSet(ctx, "k1", "v1");

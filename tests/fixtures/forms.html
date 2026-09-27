@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Forms</title>
+</head>
+<body>
+  <main>
+    <h1>Forms</h1>
+    <select id="color" aria-label="Color">
+      <option value="r">Red</option>
+      <option value="g">Green</option>
+      <option value="b">Blue</option>
+      <option value="Blue">Navy</option>
+    </select>
+    <input id="ro" aria-label="Read only" readonly value="ro" />
+    <input id="dis" aria-label="Disabled" disabled value="dis" />
+    <fieldset disabled>
+      <input id="fs" aria-label="In fieldset" value="fs" />
+    </fieldset>
+    <textarea id="rota" aria-label="Read only notes" readonly>notes</textarea>
+    <input id="d" type="date" aria-label="Date" />
+    <input id="t" type="time" aria-label="Time" />
+    <input id="c" type="color" aria-label="Colour" value="#000000" />
+    <input id="n" type="number" aria-label="Quantity" />
+    <input id="name" type="text" aria-label="Name" />
+  </main>
+  <script>
+    // Every input and change event, as "<type>:<id>", so a test can tell
+    // that a refused command fired none.
+    window.log = [];
+    for (const type of ["input", "change"]) {
+      document.addEventListener(type, (e) => window.log.push(type + ":" + e.target.id), true);
+    }
+  </script>
+</body>
+</html>

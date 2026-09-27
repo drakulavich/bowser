@@ -552,6 +552,12 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
 // replaces window.alert/confirm/prompt with functions that answer at once:
 // the one-shot answer if set, then cleared, else dismissed; an accepted prompt with no text gets its
 // default. Each answer is logged as a DialogReport for the daemon to read.
+// Only the engine's own functions are replaced (their source says
+// [native code]): a page that defined its own keeps it (P1 F24). Every
+// same-origin child frame reachable through window.frames gets the shim too,
+// sharing the top window's answer and log (P1 F25); a cross-origin frame
+// throws on access and is skipped. A frame is walked on every evaluation, so
+// one that loaded since the last op gets the shim then.
 // The shim, its answer and its log live on window, so a new document has
 // none. A document the back-forward cache restores keeps its shim, so the
 // answer is also dropped twice over: by the page on pagehide, and by `drop`
@@ -561,33 +567,51 @@ function dialogShim(drop: boolean): string {
   return String.raw`(() => {
   const KEY = Symbol.for('bowser.dialogs');
   let shim = window[KEY];
-  if (!shim) {
+  const fresh = !shim;
+  if (fresh) {
     shim = { answer: null, log: [] };
     Object.defineProperty(window, KEY, { value: shim });
-    const str = (v) => v === undefined ? '' : String(v);
-    const answer = (type, message, defaultValue) => {
-      const given = shim.answer;
-      shim.answer = null;
-      const accept = given ? given.accept : false;
-      const d = { type, message: str(message) };
-      if (type === 'prompt') d.defaultValue = str(defaultValue);
-      d.state = accept ? 'accepted' : 'dismissed';
-      let reply = accept;
-      if (type === 'prompt') {
-        reply = accept ? (typeof given.text === 'string' ? given.text : d.defaultValue) : null;
-        if (accept) d.answer = reply;
-      }
-      if (!given) d.unanswered = true;
-      shim.log.push(d);
-      return reply;
-    };
-    window.alert = function alert(message) { answer('alert', message); };
-    window.confirm = function confirm(message) { return answer('confirm', message); };
-    window.prompt = function prompt(message, defaultValue) { return answer('prompt', message, defaultValue); };
     // Leaving the document (a link, a form, history.back() in a handler)
     // drops the answer, so a cached copy of it comes back without one.
     window.addEventListener('pagehide', () => { shim.answer = null; });
   }
+  const str = (v) => v === undefined ? '' : String(v);
+  const answer = (type, message, defaultValue) => {
+    const given = shim.answer;
+    shim.answer = null;
+    const accept = given ? given.accept : false;
+    const d = { type, message: str(message) };
+    if (type === 'prompt') d.defaultValue = str(defaultValue);
+    d.state = accept ? 'accepted' : 'dismissed';
+    let reply = accept;
+    if (type === 'prompt') {
+      reply = accept ? (typeof given.text === 'string' ? given.text : d.defaultValue) : null;
+      if (accept) d.answer = reply;
+    }
+    if (!given) d.unanswered = true;
+    shim.log.push(d);
+    return reply;
+  };
+  const native = (fn) => {
+    try { return /\[native code\]/.test(Function.prototype.toString.call(fn)); } catch (e) { return false; }
+  };
+  const install = (w) => {
+    if (w !== window) Object.defineProperty(w, KEY, { value: shim });
+    if (native(w.alert)) w.alert = function alert(message) { answer('alert', message); };
+    if (native(w.confirm)) w.confirm = function confirm(message) { return answer('confirm', message); };
+    if (native(w.prompt)) w.prompt = function prompt(message, defaultValue) { return answer('prompt', message, defaultValue); };
+  };
+  if (fresh) install(window);
+  const walk = (w) => {
+    for (let i = 0; i < w.length; i++) {
+      try {
+        const f = w[i];
+        if (!f[KEY]) install(f);
+        walk(f);
+      } catch (e) {}
+    }
+  };
+  walk(window);
   if (${JSON.stringify(drop)}) shim.answer = null;
   return shim;
 })()`;
@@ -668,13 +692,21 @@ export function hoverScript(selector: string): string {
       })()`;
 }
 
+/** Selects the first option, in document order, whose value or label is the
+ *  text: playwright's selectOption rule. Answers false, touching nothing and
+ *  firing no event, when no option matches: assigning an unknown value would
+ *  deselect every option. */
 export function selectScript(selector: string, value: string): string {
   return `(() => {
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('select: element not found');
-        el.value = ${JSON.stringify(value)};
+        const want = ${JSON.stringify(value)};
+        const opt = Array.from(el.options).find((o) => o.value === want || o.label === want);
+        if (!opt) return false;
+        el.selectedIndex = opt.index;
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
       })()`;
 }
 
@@ -686,15 +718,45 @@ export function setCheckedScript(selector: string, checked: boolean): string {
       })()`;
 }
 
-/** Empties the element `fill` is about to type into, like playwright's fill:
- *  an input/textarea's value, or a contenteditable element's content, with the
- *  caret put back inside it (the text node the click placed it in is gone). */
-export function clearForFillScript(selector: string): string {
-  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return;
+/** The inputs whose value `fill` sets in the page, as playwright does: the
+ *  native type enters nothing into them. */
+export const FILL_SET_TYPES = ["date", "time", "datetime-local", "month", "week", "color"];
+
+/** What `fillScript` found: `type` means the caller types the text now;
+ *  `set` means the page took it; the rest are refusals, value untouched. */
+export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "rejected";
+
+/** Readies the element `fill` has just clicked, and answers
+ *  `{ outcome: FillOutcome, type }` with the input's type (or ""):
+ *  - a disabled (fieldset included) or read-only element is refused;
+ *  - on type=number, text Number() reads as NaN is refused, as playwright does;
+ *  - a date-like input (FILL_SET_TYPES) gets the trimmed text as its value,
+ *    and `input` and `change`; a value the input does not keep is put back
+ *    and refused;
+ *  - anything else is emptied, like playwright's fill: an input/textarea's
+ *    value, or a contenteditable element's content, with the caret put back
+ *    inside it (the text node the click placed it in is gone).
+ *  The only value read is a date-like input's, never a password field's. */
+export function fillScript(selector: string, value: string): string {
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
+    const type = el instanceof HTMLInputElement ? el.type : '';
+    if (el.matches(':disabled')) return { outcome: 'disabled', type };
+    if (el.readOnly === true) return { outcome: 'readonly', type };
+    const text = ${JSON.stringify(value)};
+    if (type === 'number' && Number.isNaN(Number(text.trim()))) return { outcome: 'nan', type };
+    if (${JSON.stringify(FILL_SET_TYPES)}.includes(type)) {
+      const v = text.trim(), prev = el.value;
+      el.value = v;
+      if (el.value !== v) { el.value = prev; return { outcome: 'rejected', type }; }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { outcome: 'set', type };
+    }
     if ('value' in el) el.value = '';
     else if (el.isContentEditable) { el.textContent = ''; el.focus(); getSelection().collapse(el, 0); }
-    else return;
-    el.dispatchEvent(new Event('input', { bubbles: true })); })()`;
+    else return { outcome: 'type', type };
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return { outcome: 'type', type }; })()`;
 }
 
 export type StorageArea = "localStorage" | "sessionStorage";

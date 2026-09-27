@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import type { Command } from "../cli/registry.ts";
 import { pidPath, socketPath } from "../daemon/client.ts";
+import { isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
@@ -20,13 +21,47 @@ function assertNavigated(requested: string, finalUrl: string): void {
   }
 }
 
+/** Hosts that serve plain HTTP by default: a scheme-less URL for one of
+ *  them gets `http://`, every other host `https://`. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Add a scheme to a URL typed without one, as playwright-cli does:
+ *  `example.com` → `https://example.com`, `localhost:3000/x` →
+ *  `http://localhost:3000/x`. A URL has no scheme when `new URL()` rejects it,
+ *  or when it starts with `host:port`, which `new URL()` would read as a
+ *  scheme (WebKit then times out on `localhost:3000`). Any URL with a real
+ *  scheme passes through unchanged. Unlike playwright-cli, `127.0.0.1` gets
+ *  `http://`: its `https://` only fails. */
+export function normalizeUrl(url: string): string {
+  if (!url || (URL.canParse(url) && !startsWithHostPort(url))) return url;
+  let host = "";
+  try {
+    host = new URL(`http://${url}`).hostname;
+  } catch {
+    // Not a URL even with a scheme: https:// it is, and the navigation says why.
+  }
+  return `${LOCAL_HOSTS.has(host) ? "http" : "https"}://${url}`;
+}
+
+/** `localhost:3000`, `example.com:8080/x`, `[::1]:3000`: a host and a numeric
+ *  port, then the end, a path, a query or a fragment. The host must be
+ *  `localhost`, bracketed IPv6, or contain a dot, so a real scheme with a
+ *  number after it (`tel:5551234`) is left alone. */
+function startsWithHostPort(url: string): boolean {
+  const m = /^(\[[^\]]*\]|[^/:?#]+):\d+(?:[/?#]|$)/.exec(url);
+  if (!m) return false;
+  const host = m[1]!.toLowerCase();
+  return host === "localhost" || host.startsWith("[") || host.includes(".");
+}
+
 export interface OpenOptions {
   persistent?: boolean;
   /** Profile directory, relative to the cwd; implies `persistent` and wins over it. */
   profile?: string;
 }
 
-export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptions = {}): Promise<string> {
+export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOptions = {}): Promise<string> {
+  const url = typed === undefined ? undefined : normalizeUrl(typed);
   // The parser accepts `--profile=`; treating it as absent would quietly
   // start an ephemeral session the caller believes is persistent.
   if (opts.profile !== undefined && !opts.profile.trim()) {
@@ -56,11 +91,12 @@ export async function cmdOpen(ctx: CommandContext, url?: string, opts: OpenOptio
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
     return replyPage(ctx, c, { ok: true, url: state.url, title: state.title }, text);
-  }, { profile });
+  }, { profile, reopen: true });
 }
 
-export async function cmdGoto(ctx: CommandContext, url: string): Promise<string> {
-  if (!url) throw new Error("usage: bowser goto <url>");
+export async function cmdGoto(ctx: CommandContext, typed: string): Promise<string> {
+  if (!typed) throw new Error("usage: bowser goto <url>");
+  const url = normalizeUrl(typed);
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withPageClient(ctx, async (c) => {
     await c.request("navigate", [url]);
@@ -88,9 +124,10 @@ export async function cmdHistory(
 export async function cmdClose(
   ctx: CommandContext,
   opts: { name?: string; all?: boolean } = {},
+  proc: ProcessOps = realProcess,
 ): Promise<string> {
-  if (opts.all) return closeAll(ctx);
-  return closeOne(ctx, opts.name ?? ctx.session);
+  if (opts.all) return closeAll(ctx, proc);
+  return closeOne(ctx, opts.name ?? ctx.session, proc);
 }
 
 /** The three process facts `close` needs, injectable so the paths that decide
@@ -103,55 +140,8 @@ export interface ProcessOps {
   graceMs: number;
 }
 
-/** True when `pid` is one of our daemons for `session`. Nothing here signals a
- *  pid without asking this first: pids are reused, and killing a stranger's
- *  process because a stale file named it would be far worse than leaking one of
- *  ours. The session must be a whole argument, not a substring, so the daemon
- *  for 'abc' cannot answer for 'ab'; the daemon runs either as
- *  `bun .../daemon/main.ts <session>` or, compiled, as `bowser --daemon
- *  <session>`, so one of those two markers must be present too. */
-export function looksLikeOurDaemon(command: string, session: string): boolean {
-  const line = command.trim();
-  // The session is the daemon's last argument and the marker comes right
-  // before it. `sessionDir` keeps whitespace out of session names, so the
-  // display line `ps` prints splits cleanly into words.
-  const words = line.split(/\s+/);
-  if (words.at(-1) !== session) return false;
-  const marker = words.at(-2) ?? "";
-  // Match the executable by name, not by path: the path changes across
-  // upgrades (a Homebrew Cellar path carries the version), and `close` must
-  // still recognise a daemon the previous binary started. Release assets are
-  // named `bowser-macos-arm64` and the like, so a `bowser-` or `bowser.`
-  // prefix counts too; `not-bowser-helper` does not.
-  const exe = words[0]?.split("/").pop() ?? "";
-  if (/^bowser([-.]|$)/.test(exe)) return marker === "--daemon";
-  return exe === "bun" && marker.endsWith("/src/daemon/main.ts");
-}
-
-async function isOurDaemon(pid: number, session: string): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(["ps", "-o", "command=", "-p", String(pid)], {
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    // A pid that no longer exists prints nothing, which no session name matches.
-    return looksLikeOurDaemon(await new Response(proc.stdout).text(), session);
-  } catch {
-    return false;
-  }
-}
-
 const realProcess: ProcessOps = {
-  alive(pid) {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (e) {
-      // EPERM means the process exists and is someone else's — alive, and the
-      // ownership check is what decides whether we may touch it.
-      return (e as { code?: string }).code === "EPERM";
-    }
-  },
+  alive: isAlive,
   ours: isOurDaemon,
   term(pid) {
     try {
@@ -273,7 +263,11 @@ async function closeLegacy(name: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
-async function closeAll(ctx: CommandContext): Promise<string> {
+/** Close every session, trying each whatever the others do. A session it
+ *  could not close fails the command with the reason a single `close` of it
+ *  gives, which is a runtime error (exit 2); the sessions it did close are
+ *  listed in the same message (F31). */
+async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> {
   let names: string[] = [];
   try {
     const entries = await readdir(sessionsRoot(), { withFileTypes: true });
@@ -285,21 +279,21 @@ async function closeAll(ctx: CommandContext): Promise<string> {
   const failed: string[] = [];
   for (const name of names) {
     try {
-      await (isValidSessionName(name) ? closeOne(ctx, name) : closeLegacy(name));
+      await (isValidSessionName(name) ? closeOne(ctx, name, proc) : closeLegacy(name));
       closed.push(name);
-    } catch {
-      failed.push(name); // best-effort: keep closing the rest
+    } catch (err) {
+      failed.push(`- ${name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  if (ctx.json) return JSON.stringify({ ok: failed.length === 0, closed, failed });
-  if (closed.length === 0 && failed.length === 0) return "no sessions to close";
-  const parts: string[] = [];
-  if (closed.length > 0) {
-    const word = closed.length === 1 ? "session" : "sessions";
-    parts.push(`closed ${closed.length} ${word}: ${closed.join(", ")}`);
+  const done = closed.length > 0
+    ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}`
+    : "";
+  if (failed.length > 0) {
+    const word = failed.length === 1 ? "session" : "sessions";
+    throw new Error(`close --all: ${done ? `${done}; ` : ""}failed ${failed.length} ${word}:\n${failed.join("\n")}`);
   }
-  if (failed.length > 0) parts.push(`failed: ${failed.join(", ")}`);
-  return parts.join("; ");
+  if (ctx.json) return JSON.stringify({ ok: true, closed, failed: [] });
+  return done || "no sessions to close";
 }
 
 /** A session is live when its daemon answers. The socket file alone is not

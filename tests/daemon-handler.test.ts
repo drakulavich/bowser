@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser } from "../src/browser.ts";
 import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
-import { IS_URGENT, type DaemonRequest, type DaemonResponse } from "../src/daemon/protocol.ts";
+import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport } from "../src/daemon/protocol.ts";
 import { createSerializer } from "../src/serialize.ts";
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
@@ -23,7 +23,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     type: rec("type", undefined),
     press: rec("press", undefined),
     hover: rec("hover", undefined),
-    select: rec("select", undefined),
+    select: rec("select", true),
     setChecked: rec("setChecked", undefined),
     screenshot: rec("screenshot", Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64")),
     resize: rec("resize", undefined),
@@ -466,7 +466,9 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
   const engine = () => {
     const hide: Array<() => void> = [];
     return {
-      alert: () => undefined, confirm: () => false, prompt: () => null,
+      // Bound, so Function.prototype.toString says [native code], as it
+      // does for the engine's own functions.
+      alert: (() => undefined).bind(null), confirm: (() => false).bind(null), prompt: (() => null).bind(null),
       addEventListener: (type: string, fn: () => void) => { if (type === "pagehide") hide.push(fn); },
       leave: () => { if (pagehide) hide.forEach((fn) => fn()); },
     } as Record<string | symbol, unknown>;
@@ -490,7 +492,20 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
   /** The current document, and bringing an earlier one back, as history does. */
   const window = () => win;
   const restore = (w: typeof win) => go(w);
-  return Object.assign(b, { load, page, window, restore });
+  /** Add a child frame to the current document: a same-origin one the page
+   *  can reach, or a cross-origin one whose every property read throws. */
+  const addFrame = (crossOrigin = false) => {
+    const f = crossOrigin
+      ? new Proxy({}, { get: () => { throw new Error("SecurityError: cross-origin"); } }) as typeof win
+      : engine();
+    const n = (win.length as number | undefined) ?? 0;
+    win[n] = f;
+    win.length = n + 1;
+    return f;
+  };
+  /** A call a frame's own code makes on its window. */
+  const inFrame = <T>(f: typeof win, name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (f[name] as (...a: unknown[]) => T)(...a);
+  return Object.assign(b, { load, page, window, restore, addFrame, inFrame });
 }
 
 describe("dialogs on webkit: the page shim answers them", () => {
@@ -602,12 +617,16 @@ describe("dialogs on webkit: the page shim answers them", () => {
     expect((await h(rep("press", ["Enter"]))).dialogs).toEqual([{ type: "alert", message: "hi", state: "dismissed", unanswered: true }]);
   });
 
-  test("no extra page call where the op already evaluates: an eval is one call, a click after it is the click and one read", async () => {
+  test("page calls per op: an eval is one; a native action or a navigation is one read before it and one after", async () => {
     const b = webkitBrowser();
     const h = createHandler(b);
     await h(rep("evaluate", ["1"]));
+    expect(b.calls.map(([n]) => n)).toEqual(["evaluate"]);
     await h(rep("click", ["#go"]));
-    expect(b.calls.map(([n]) => n)).toEqual(["evaluate", "click", "evaluate"]);
+    expect(b.calls.map(([n]) => n)).toEqual(["evaluate", "evaluate", "click", "evaluate"]);
+    b.calls.length = 0;
+    await h(rep("reload"));
+    expect(b.calls.map(([n]) => n)).toEqual(["evaluate", "reload", "evaluate"]);
   });
 
   test("an eval that throws after a dialog keeps its error and reports the dialog with it, and the next op does not replay it", async () => {
@@ -643,5 +662,126 @@ describe("dialogs on webkit: the page shim answers them", () => {
     b.page("confirm", "later");
     expect(await h(req("evaluate", ["2"]))).toEqual({ id: 7, ok: true, result: 2 });
     expect((await h(rep("evaluate", ["3"]))).dialogs).toEqual([{ type: "confirm", message: "later", state: "dismissed", unanswered: true }]);
+  });
+});
+
+// F23: a dialog logged between commands is read before an op that may leave
+// the document, so that op reports it. P1 spec, Task 3.
+describe("a dialog logged before an op that leaves the document is reported by that op", () => {
+  const TIMER: DialogReport = { type: "confirm", message: "timer", state: "dismissed", unanswered: true };
+  type Leave = { op: DaemonRequest["op"]; args: unknown[]; method: keyof Browser };
+  const cases: Leave[] = [
+    { op: "navigate", args: ["https://x/two"], method: "navigate" },
+    { op: "reload", args: [], method: "reload" },
+    { op: "back", args: [], method: "back" },
+    { op: "forward", args: [], method: "forward" },
+    { op: "press", args: ["Enter"], method: "press" },
+    { op: "click", args: ["a"], method: "click" },
+    { op: "type", args: ["x"], method: "type" },
+    { op: "hover", args: ["a"], method: "hover" },
+    { op: "select", args: ["#s", "b"], method: "select" },
+    { op: "check", args: ["#c"], method: "setChecked" },
+    { op: "uncheck", args: ["#c"], method: "setChecked" },
+  ];
+  for (const { op, args, method } of cases) {
+    test(`${op}`, async () => {
+      const b = webkitBrowser();
+      const h = createHandler(b);
+      await h(rep("evaluate", ["1"]));
+      b.page("confirm", "timer"); // a timer, between commands
+      (b as unknown as Record<string, unknown>)[method] = async () => { b.load(); return true; };
+      expect((await h(rep(op, args))).dialogs).toEqual([TIMER]);
+    });
+  }
+
+  test("a report read before the page left does not come back when back restores it from the cache", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    await h(rep("evaluate", ["1"]));
+    b.page("confirm", "timer");
+    const first = b.window();
+    b.press = async () => { b.load(); }; // Enter submits the form
+    expect((await h(rep("press", ["Enter"]))).dialogs).toEqual([TIMER]);
+    b.back = async () => { b.restore(first); };
+    expect((await h(rep("back"))).dialogs).toBeUndefined();
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toBeUndefined();
+  });
+
+  test("a page that cannot evaluate reports nothing, and the navigation still runs", async () => {
+    const b = fakeBrowser({ evaluate: async () => { throw new Error("busy"); } });
+    const h = createHandler(b);
+    expect(await h(rep("reload"))).toEqual({ id: 7, ok: true });
+    expect(actions(b).map(([n]) => n)).toEqual(["reload"]);
+  });
+});
+
+// F24: the shim replaces only the engine's own alert/confirm/prompt.
+describe("a page's own alert, confirm or prompt is left alone", () => {
+  test("a page-defined confirm runs and nothing is reported", async () => {
+    const b = webkitBrowser();
+    b.window().confirm = (m: string) => "custom:" + m;
+    const h = createHandler(b);
+    expect(await h(rep("evaluate", ["window.confirm('really')"]))).toEqual({ id: 7, ok: true, result: "custom:really" });
+  });
+
+  test("the ones the page did not define are still shimmed", async () => {
+    const b = webkitBrowser();
+    b.window().alert = () => "page alert";
+    const h = createHandler(b);
+    expect(await h(rep("evaluate", ["[window.alert('a'), window.confirm('c')]"]))).toEqual({
+      id: 7, ok: true, result: ["page alert", false], dialogs: [{ type: "confirm", message: "c", state: "dismissed", unanswered: true }],
+    });
+  });
+});
+
+// F25: same-origin frames get the shim too, and share the top window's answer.
+describe("dialogs in same-origin frames", () => {
+  test("a frame's confirm is reported and takes the prepared answer, which is then spent", async () => {
+    const b = webkitBrowser();
+    const frame = b.addFrame();
+    const h = createHandler(b);
+    await h(rep("dialog-answer", [true]));
+    const got: unknown[] = [];
+    b.click = async () => { got.push(b.inFrame(frame, "confirm", "frame")); };
+    expect((await h(rep("click", ["#via"]))).dialogs).toEqual([{ type: "confirm", message: "frame", state: "accepted" }]);
+    b.click = async () => { got.push(b.page("confirm", "top")); };
+    expect((await h(rep("click", ["#top"]))).dialogs).toEqual([{ type: "confirm", message: "top", state: "dismissed", unanswered: true }]);
+    expect(got).toEqual([true, false]);
+  });
+
+  test("a frame of a frame is reached, and a frame added later gets the shim on the next op", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    await h(rep("evaluate", ["1"]));
+    const child = b.addFrame();
+    child[0] = engine2(child);
+    await h(rep("evaluate", ["1"]));
+    b.inFrame(child[0] as Record<string | symbol, unknown>, "alert", "deep");
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "alert", message: "deep", state: "dismissed", unanswered: true }]);
+
+    function engine2(parent: Record<string | symbol, unknown>) {
+      parent.length = 1;
+      return { alert: (() => undefined).bind(null), confirm: (() => false).bind(null), prompt: (() => null).bind(null) } as Record<string | symbol, unknown>;
+    }
+  });
+
+  test("a cross-origin frame is skipped, and the frames after it are still shimmed", async () => {
+    const b = webkitBrowser();
+    b.addFrame(true);
+    const same = b.addFrame();
+    const h = createHandler(b);
+    await h(rep("evaluate", ["1"]));
+    b.inFrame(same, "confirm", "after");
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "confirm", message: "after", state: "dismissed", unanswered: true }]);
+  });
+
+  test("a frame's own confirm is left alone", async () => {
+    const b = webkitBrowser();
+    const frame = b.addFrame();
+    frame.confirm = () => "frame's own";
+    const h = createHandler(b);
+    await h(rep("evaluate", ["1"]));
+    expect(b.inFrame<string>(frame, "confirm", "x")).toBe("frame's own");
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toBeUndefined();
   });
 });

@@ -1,7 +1,7 @@
 // --help is generated from the registry. These pin the parts an agent reads:
 // every command appears exactly once, with its argument shape and summary.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -146,7 +146,7 @@ describe("per-command help", () => {
     expect((await run(["close", "-x", "-h"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
     expect(seen.connects).toBe(0);
     await expect(run(["close", "--bogus"], base)).rejects.toThrow("unknown flag: --bogus");
-    await expect(run(["fill", "e1", "--", "--bogus", "--help"], base)).rejects.toThrow("no open page");
+    await expect(run(["fill", "e1", "--", "--bogus"], base)).rejects.toThrow("no open page");
   });
 
   // -h as a string flag's separate value is that value, as before per-command
@@ -161,7 +161,7 @@ describe("per-command help", () => {
     const cwd = process.cwd();
     process.chdir(tmp);
     try {
-      expect(await run(["-s", "snap", "snapshot", "--filename", "-h"], { connect: async () => c })).toBe("wrote -h");
+      expect(await run(["-s", "snap", "snapshot", "--filename", "-h"], { connect: async () => c })).toBe(`wrote ${join(realpathSync(tmp), "-h")}`);
       expect(await Bun.file(join(tmp, "-h")).text()).toContain('link "Home" [ref=e1]');
     } finally {
       process.chdir(cwd);

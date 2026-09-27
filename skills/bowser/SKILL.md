@@ -34,14 +34,14 @@ Do **not** use for static HTTP fetches.
 | Command | Purpose |
 | --- | --- |
 | `bowser open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies/localStorage/IndexedDB in `~/.bowser/profiles/<session>/` across `close`; `--profile=dir` uses `dir` (implies `--persistent`). `close` keeps the profile; `rm -rf` it to delete. One running session per profile. |
-| `bowser goto <url>` | Navigate within current session |
+| `bowser goto <url>` | Navigate within current session. `open` and `goto` add a missing scheme: `http://` for `localhost`, `127.0.0.1`, `[::1]` (`localhost:3000/x`), `https://` otherwise (`example.com`); a URL with a scheme is used as typed |
 | `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `bowser click <ref>` | Click an element by ref |
-| `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin` |
+| `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin`. Refuses a disabled or readonly field (exit 1). Sets `date`/`time`/`datetime-local`/`month`/`week`/`color` inputs directly (`fill e9 2024-01-02`); a value they do not keep, or text on `type=number`, fails with exit 1 |
 | `bowser type <text>` | Type into focused element. Prints `typed N characters` (`typed 1 character` for one), never the text; `--json` gives `{"ok":true,"length":N}` |
 | `bowser press <key>` | Press a keyboard key |
 | `bowser hover <ref>` | Hover an element |
-| `bowser select <ref> <value>` | Choose a `<select>` option |
+| `bowser select <ref> <value>` | Choose a `<select>` option by value or label (the first match in document order); no match fails with exit 1 and changes nothing |
 | `bowser check <ref>` / `uncheck <ref>` | Toggle a checkbox/radio |
 | `bowser dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next dialog, before the action (a prompt gets `text`); without one it is dismissed |
 | `bowser screenshot [--filename=f]` | Full-page screenshot (PNG) |
@@ -49,7 +49,7 @@ Do **not** use for static HTTP fetches.
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser list` | Enumerate sessions whose daemon is running |
 | `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides) |
-| `bowser close --all` | Close every open session |
+| `bowser close --all` | Close every open session; if one fails, the rest are still closed and it exits 2 naming each failure with its reason |
 | `bowser localstorage-list` | List `localStorage` entries (`key=value` lines, or JSON) |
 | `bowser localstorage-get <key>` | Read a `localStorage` value |
 | `bowser localstorage-set <key> <value>` | Write a `localStorage` entry |
@@ -70,6 +70,10 @@ Do **not** use for static HTTP fetches.
 
 `bowser <command> --help` prints that command's usage and flags without running it, so it is safe on
 `close` or `open`. After `--`, `--help` is plain text: `bowser fill e1 -- --help` types it.
+
+Quote any argument with spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. An extra word
+fails the command with `usage: too many arguments for '<cmd>': expected <n>, received <m>` (exit 1),
+words after `--` included.
 
 ## Snapshot Format
 
@@ -124,7 +128,15 @@ The answer covers one dialog and is dropped when the page navigates. The action 
 
 `dismissed (run dialog-accept before the action to accept it)` means no answer was set. To accept it, run `dialog-accept` and repeat the action. This is where bowser differs from `playwright-cli`: running `dialog-accept` *after* the action does not answer the dialog that action opened. It prepares the next one.
 
-A dialog the page opens while it loads, before bowser has acted on it, is dismissed and not reported. A dialog whose handler then leaves the page (`if (confirm(…)) location = …`) is answered but not reported. Check where the page went instead. A dialog opened through a reference the page saved while loading (`const c = window.confirm`) is also dismissed and not reported, and your prepared answer stays set for the next dialog.
+A dialog in a same-origin iframe is reported like the page's own and takes your prepared answer. A dialog a timer opens between commands is reported by the next command that prints dialogs, even one that leaves the page (`reload`, `goto`, `go-back`, `press Enter` on a form). If the page defines its own `window.confirm` (an in-page modal, a test stub), bowser leaves it alone: it runs, and nothing is reported. A function the page made with `.bind()` from the browser's own (`confirm.bind(window)`) looks native to bowser: it is replaced, and the dialog is reported.
+
+These are dismissed and not reported, and your prepared answer stays set for the next dialog:
+
+- a dialog the page opens while it loads, before bowser has acted on it;
+- a dialog in a cross-origin iframe, or in an iframe that loaded after your last command;
+- a dialog opened through a reference the page saved while loading (`const c = window.confirm`), including a page wrapper that calls it (`window.confirm = m => c(m)`).
+
+A dialog whose handler then leaves the page (`if (confirm(…)) location = …`) is answered but not reported. Check where the page went instead.
 
 ## Rules for the Agent
 
@@ -159,11 +171,16 @@ bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only t
 
 ## Troubleshooting
 
-- **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). Full-page only; element-bounded screenshots are not yet supported.
+- **`screenshot`** — screenshots work and are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). The reply names the absolute path written, as `snapshot --filename`'s does. Full-page only; element-bounded screenshots are not yet supported.
+- **MCP file paths** — `bowser mcp` resolves relative paths against its working directory, or against `$TMPDIR/bowser-mcp` when started from `/` or an unwritable directory. Use the absolute path in the reply.
+- **"session '<name>' is not open (its browser exited)"** — the session's browser crashed or was killed; its page and refs are gone. Run `bowser open <url>` (add `--persistent` again for a persistent session) to start it anew, or `bowser close` to clear it. Only `open` and `close` work on such a session.
 - **`BOWSER_OP_TIMEOUT_MS`** — per-command timeout in ms (default `30000`; `0` disables), counted from when the daemon receives the command, including time spent waiting behind a timed-out one. Set it higher if a slow page causes timeout errors. If a timed-out command is still running 2 s later (or after the budget, if that is under 2 s), the daemon reloads the page once to free the browser; if a command still fails with `waiting for '<op>', which timed out and is still running`, run `bowser close` and reopen.
 - **"ref 'eN' not found in the current page snapshot"** — the element behind the ref is gone: the page re-rendered, navigated or reloaded since that snapshot. Run `bowser snapshot` and use the new refs.
 - **"ref 'eN' not found in last snapshot"** — the ref was never in the last snapshot. Run `bowser snapshot`.
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
+- **"ref 'eN' has no option \"…\""** — `select` found no option with that value or label. Read the options in the snapshot and pass one of them.
+- **"ref 'eN' is not an editable element (disabled)"** or `(readonly)` — the page does not let that field be edited now; enable it first (e.g. fill the field that unlocks it) or pick another.
+- **"did not accept the value for input[type=date]"** or **"needs a number"** — use the input's own format: `YYYY-MM-DD` for `date`, `HH:MM` for `time`, `#rrggbb` (lowercase) for `color`, digits for `number`.
 - **"no open page"** — call `bowser open <url>` first.
 - **Click times out** — element not actionable (overlay, animating). Re-snapshot.
 - **`state-save` / `state-load` round-trip a Playwright `storageState`** — `state-save <file>` dumps the current origin's localStorage; `state-load <file>` restores it. The JSON is interchangeable with Playwright's `storageState`. Because the daemon holds one page, load only restores localStorage for origins matching the current page (others are reported skipped) — navigate to an origin first, then `state-load`, to restore its localStorage. sessionStorage is not persisted (matching Playwright).

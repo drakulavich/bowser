@@ -2,15 +2,18 @@
 // daemon that goes away mid-request.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ensureSessionDir } from "../src/state.ts";
+import { ensureSessionDir, saveState } from "../src/state.ts";
 
 import { reportFailure } from "../src/cli.ts";
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
+import { claimSession } from "../src/daemon/pidfile.ts";
+import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 
 describe("socketPath", () => {
   test("resolves under process.env.HOME at call time", () => {
@@ -112,6 +115,57 @@ describe("connectOrSpawn on a platform without WebKit", () => {
       expect(Date.now() - started).toBeLessThan(2000);
     });
   }
+});
+
+// F28: a session whose browser exited refuses every command but `open` and
+// `close`, instead of quietly starting a new, empty browser. A session that
+// never ran a daemon still starts one on its first command.
+describe("connectOrSpawn after the session's browser exited (F28)", () => {
+  let tmp: string;
+  let origHome: string | undefined;
+
+  beforeAll(async () => {
+    origHome = process.env.HOME;
+    tmp = await mkdtemp(join(tmpdir(), "bowser-crashed-"));
+    process.env.HOME = tmp;
+  });
+
+  afterAll(async () => {
+    if (origHome !== undefined) process.env.HOME = origHome;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const crashed = async (session: string): Promise<void> => {
+    // What a dead daemon leaves: state.json, a pidfile naming no process, a socket file.
+    await saveState({ name: session, url: "http://x/", title: "", refs: [], updatedAt: Date.now() });
+    await Bun.write(pidPath(session), "99999");
+    await Bun.write(socketPath(session), "");
+  };
+
+  test("refuses, as a user error, and starts nothing", async () => {
+    const session = "crashed";
+    await crashed(session);
+    const started = Date.now();
+    // platform: a spawn attempt would fail with its own message, not this one.
+    const err = await connectOrSpawn(session, { platform: "linux" }).then(() => undefined, (e: unknown) => e);
+    expect((err as Error).message).toBe("session 'crashed' is not open (its browser exited); run 'bowser open'");
+    expect(reportFailure(err).code).toBe(1);
+    expect((await Bun.file(pidPath(session)).text()).trim()).toBe("99999");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test("open (reopen) still starts a daemon there", async () => {
+    const session = "crashed-open";
+    await crashed(session);
+    // Past the refusal, the spawn path's own platform check answers.
+    await expect(connectOrSpawn(session, { platform: "linux", reopen: true })).rejects.toThrow("bowser requires macOS (WebKit)");
+  });
+
+  test("a session that never ran a daemon still starts one", async () => {
+    const session = "never-ran";
+    await ensureSessionDir(session);
+    await expect(connectOrSpawn(session, { platform: "linux" })).rejects.toThrow("bowser requires macOS (WebKit)");
+  });
 });
 
 // A daemon can hold a connectable socket and never answer — stopped, or blocked
@@ -242,5 +296,109 @@ describe("daemon goes away mid-request", () => {
     } finally {
       server.stop(true);
     }
+  });
+});
+
+// F29: the claim a starting daemon makes on its session's pidfile, driven
+// through claimSession by helper processes, with no browser. Each helper
+// shows in `ps` as one of our daemons, so a winner that stays alive holds
+// the session for the others.
+describe("session claim (F29)", () => {
+  const HELPER = join(import.meta.dir, "helpers", "claim-session.ts");
+  let dir: string;
+  const spawned: Array<ReturnType<typeof Bun.spawn>> = [];
+  let n = 0;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "bowser-claim-"));
+  });
+
+  afterAll(async () => {
+    for (const p of spawned) p.kill("SIGKILL");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const fresh = (content?: string): { pidFile: string; session: string } => {
+    const session = `claim${n++}-${process.pid}`;
+    const pidFile = join(dir, `${session}.pid`);
+    if (content !== undefined) writeFileSync(pidFile, content);
+    return { pidFile, session };
+  };
+
+  /** A newcomer, paused at `pauseAt` until released. */
+  const newcomer = (pidFile: string, session: string, pauseAt = "-") => {
+    const p = Bun.spawn([process.execPath, HELPER, pidFile, pauseAt, "/x/src/daemon/main.ts", session], {
+      stdin: "ignore", stdout: "pipe", stderr: "inherit",
+    });
+    spawned.push(p);
+    const said = (async () => {
+      const { value } = await p.stdout.getReader().read();
+      return new TextDecoder().decode(value).trim();
+    })();
+    return {
+      proc: p,
+      said,
+      paused: () => waitFor(() => existsSync(`${pidFile}.paused-${p.pid}`), 5000),
+      release: () => writeFileSync(`${pidFile}.release-${p.pid}`, ""),
+    };
+  };
+
+  /** A process `ps` shows as our daemon for `session`: a live holder. */
+  const liveHolder = async (session: string) => {
+    const p = Bun.spawn([process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session], {
+      stdin: "ignore", stdout: "ignore", stderr: "ignore",
+    });
+    spawned.push(p);
+    await waitFor(async () => (await daemonPids(session)).includes(p.pid));
+    return p;
+  };
+
+  test("a pidfile that is empty is never removed: no claim is ever written empty", async () => {
+    const { pidFile, session } = fresh("");
+    expect(await claimSession(pidFile, session)).toBe(false);
+    expect(existsSync(pidFile)).toBe(true);
+    expect(await Bun.file(pidFile).text()).toBe("");
+  });
+
+  test("a pidfile naming a live daemon of ours is never removed", async () => {
+    const { pidFile, session } = fresh();
+    const holder = await liveHolder(session);
+    writeFileSync(pidFile, String(holder.pid));
+    expect(await claimSession(pidFile, session)).toBe(false);
+    expect(await Bun.file(pidFile).text()).toBe(String(holder.pid));
+  });
+
+  test("a stale pidfile (dead pid) is removed and claimed", async () => {
+    const { pidFile, session } = fresh("99999");
+    const a = newcomer(pidFile, session);
+    expect(await a.said).toBe("won");
+    expect(await Bun.file(pidFile).text()).toBe(String(a.proc.pid));
+  });
+
+  // Two newcomers read the same stale pid; A removes it and claims before B
+  // removes. B must re-read under the lock and leave A's claim alone.
+  test("a newcomer that read a stale pid leaves the claim made since then alone", async () => {
+    const { pidFile, session } = fresh("99999");
+    const b = newcomer(pidFile, session, "stale-read");
+    expect(await b.paused()).toBe(true);
+    const a = newcomer(pidFile, session);
+    expect(await a.said).toBe("won");
+    b.release();
+    expect(await b.said).toBe("lost");
+    expect(await Bun.file(pidFile).text()).toBe(String(a.proc.pid));
+  });
+
+  // B holds the removal lock, has re-read the stale pid and is about to
+  // remove it. A, reading the same stale pid, must not remove and claim in
+  // the meantime: B's removal would then take A's claim.
+  test("a newcomer does not remove a stale pidfile while another is removing it", async () => {
+    const { pidFile, session } = fresh("99999");
+    const b = newcomer(pidFile, session, "rechecked");
+    expect(await b.paused()).toBe(true);
+    const a = newcomer(pidFile, session);
+    expect(await a.said).toBe("lost");
+    b.release();
+    expect(await b.said).toBe("won");
+    expect(await Bun.file(pidFile).text()).toBe(String(b.proc.pid));
   });
 });

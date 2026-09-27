@@ -42,8 +42,9 @@ On another platform, any command that would start a session fails with the error
 Screenshots are written as PNG files. `bowser screenshot --filename out.png` writes
 to `out.png` (relative paths resolve against your current directory); without
 `--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
-if that file already exists. Captures are full-page (element-bounded screenshots are
-not supported yet).
+if that file already exists. The reply names the absolute path written (`wrote /…/out.png`,
+`{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. Captures are
+full-page (element-bounded screenshots are not supported yet).
 
 ## Quickstart
 
@@ -57,7 +58,9 @@ bowser screenshot --filename=shot.png    # capture
 bowser close                             # end session
 ```
 
-Each session runs one persistent browser process (spawned lazily on first command, addressed over a Unix socket). Commands attach, run, and detach — so typed text, modals, dynamic DOM, cookies, and auth all survive across invocations. Session state lives under `~/.bowser/sessions/<name>/`.
+Each session runs one persistent browser process (spawned lazily on first command, addressed over a Unix socket). Commands attach, run, and detach — so typed text, modals, dynamic DOM, cookies, and auth all survive across invocations. Session state lives under `~/.bowser/sessions/<name>/`. Several commands started at once on a new session still share one browser.
+
+If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1), instead of quietly starting an empty browser. `bowser open` (with `--persistent` again, for a persistent session) starts it anew; `bowser close` clears it. A session that never ran a browser still starts one on its first command.
 
 ### Multiple sessions
 
@@ -105,7 +108,17 @@ The command that caused the dialog reports it under `### Modal state`. With `--j
 **Differences from `playwright-cli`:**
 
 - In `playwright-cli`, the dialog stays open and `dialog-accept` answers it *after* the action. In bowser, `dialog-accept` after the action prepares the *next* dialog. It does not answer the one already reported.
-- WebKit has no dialog events, so bowser replaces `window.alert`/`confirm`/`prompt` in the page before it acts there. A dialog the page opens while loading, before bowser's first command on that document, is dismissed by WebKit and not reported. A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page. A dialog opened through a reference the page saved at load time (`const c = window.confirm`) is dismissed by WebKit and not reported, and a prepared answer stays set until the next dialog bowser sees or a navigation. `beforeunload` is not handled.
+- WebKit has no dialog events, so bowser replaces `window.alert`/`confirm`/`prompt` in the page, and in every same-origin iframe it can reach, before it acts there. A dialog in such an iframe is reported like the page's own and takes the prepared answer. A dialog that fires between commands (a timer) is reported by the next command that prints dialogs, even when that command leaves the page (`reload`, `goto`, `open`, `go-back`, `press Enter` on a form).
+- A function the page defined itself (`window.confirm = m => …`) is left alone and runs, as in `playwright-cli`; its calls are not dialogs and are not reported.
+- A page function made with `.bind()` from the browser's own (`window.confirm = confirm.bind(window)`) looks native to bowser: the shim replaces it, and the dialog is reported.
+- Not reported, and dismissed by WebKit:
+  - a dialog the page opens while loading, before bowser's first command on that document;
+  - a dialog in a cross-origin iframe, or in an iframe that loaded after bowser's last command;
+  - a dialog opened through a reference the page saved at load time (`const c = window.confirm`), including a page wrapper around it (`window.confirm = m => c(m)`).
+
+  In each of these cases a prepared answer stays set until the next dialog bowser sees or a navigation.
+- A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page.
+- `beforeunload` is not handled.
 
 ### Snapshot output
 
@@ -152,14 +165,14 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | Command | Description |
 | --- | --- |
 | `open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies, `localStorage` and IndexedDB in `~/.bowser/profiles/<session>/` across `close` and restarts; `--profile=dir` keeps them in `dir` instead (implies `--persistent`). See [Persistent profiles](#persistent-profiles). |
-| `goto <url>` | Navigate within current session |
+| `goto <url>` | Navigate within current session. For `open` and `goto` alike, a URL without a scheme gets one, as in `playwright-cli`: `http://` for `localhost`, `127.0.0.1` and `[::1]` (`localhost:3000/x` → `http://localhost:3000/x`), `https://` for any other host (`example.com` → `https://example.com`). A URL with a scheme (`http:`, `file:`, `about:`, `data:`, …) is used as typed. Unlike `playwright-cli`, `127.0.0.1` gets `http://`, not `https://`. |
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
 | `click <ref>` | Click an element |
-| `fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type. `--stdin` reads the text from piped input and drops one trailing newline, so a secret never appears in the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed, with or without `--stdin`: `filled e4 (textbox "Password")`, and `--json` answers `{"ok":true,"ref":"e4"}`. `--stdin` is not offered over MCP. |
+| `fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type. `--stdin` reads the text from piped input and drops one trailing newline, so a secret never appears in the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed, with or without `--stdin`: `filled e4 (textbox "Password")`, and `--json` answers `{"ok":true,"ref":"e4"}`. `--stdin` is not offered over MCP. A disabled (a disabled `<fieldset>` included) or `readonly` field fails with `ref 'eN' is not an editable element (disabled)` or `(readonly)`, exit 1, value untouched; `playwright-cli` waits out its timeout. A `date`, `time`, `datetime-local`, `month`, `week` or `color` input gets the value set directly, as `playwright-cli` does (`fill e9 2024-01-02`); one it does not keep fails with `ref 'eN' did not accept the value for input[type=<type>]`. On `type=number`, text that is not a number fails with `ref 'eN' needs a number (input[type=number])`. Both exit 1 and leave the value as it was; no error repeats the text. |
 | `type <text>` | Type into focused element. The text is never echoed: it prints `typed N characters` (`typed 1 character` for one), counting code points, and `--json` answers `{"ok":true,"length":N}`. For `fill` and `type` alike, a browser error that quotes the text is replaced by `<command>: the browser's error message was withheld because it contained the entered text`; a dialog message the page shows is page content and is printed as is |
 | `press <key>` | Press a keyboard key |
 | `hover <ref>` | Hover an element |
-| `select <ref> <value>` | Choose a `<select>` option |
+| `select <ref> <value>` | Choose a `<select>` option: the first, in document order, whose value or label is `<value>` (`select e3 Red` picks `<option value="r">Red</option>`). With no such option it fails at once with `ref 'eN' has no option "<value>"` (exit 1) and the select keeps its value; `playwright-cli` waits out its timeout |
 | `check <ref>` / `uncheck <ref>` | Toggle a checkbox |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
 | `screenshot [--filename=f]` | Full-page screenshot (PNG) |
@@ -167,7 +180,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
 | `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped. |
-| `close --all` | Close every open session |
+| `close --all` | Close every open session. If one cannot be closed, it still tries the rest, then fails (exit 2) naming each such session with its reason and listing the ones it closed |
 | `localstorage-list` | List all `localStorage` entries (`key=value` per line, or JSON with `--json`) |
 | `localstorage-get <key>` | Read a `localStorage` value |
 | `localstorage-set <key> <value>` | Write a `localStorage` entry |
@@ -190,6 +203,12 @@ Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
 flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text
 like any other argument.
 
+A command given more arguments than it takes fails before it runs, with
+`usage: too many arguments for '<cmd>': expected <n>, received <m>` and exit code 1. Quote an
+argument that has spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. Words after `--`
+count too, so `fill e1 -- a b` is too many. `bowser mcp` with any extra word fails the same way and
+does not start the server.
+
 ## MCP bridge
 
 `bowser mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing every browser command as an MCP tool — so MCP clients (Claude Desktop, etc.) can drive the browser without shelling out. Each tool maps 1:1 to a CLI command and takes an optional `session` argument; outputs are the same JSON as `--json` mode.
@@ -206,6 +225,7 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 
 Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
+- Relative file paths (`screenshot`, `snapshot` `filename`, `state-save`, `state-load`) resolve against the server's working directory. If the client starts it from `/` or another directory it cannot write, the server uses `<os.tmpdir()>/bowser-mcp` instead (`$TMPDIR/bowser-mcp`). Replies name the absolute path written. An absolute path is used as given.
 - The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
 - `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).

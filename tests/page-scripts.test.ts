@@ -3,7 +3,7 @@
 // string. These pin that for every builder that takes user input.
 import { describe, expect, test } from "bun:test";
 import {
-  clearForFillScript, hoverScript, runCodeScript, selectScript, setCheckedScript,
+  fillScript, hoverScript, runCodeScript, selectScript, setCheckedScript,
   storageDeleteScript, storageGetScript, storageListScript, storageRestoreScript, storageSetScript,
   storageScript,
 } from "../src/page-scripts.ts";
@@ -13,10 +13,11 @@ const quoted = JSON.stringify(nasty);
 
 describe("page scripts quote their inputs", () => {
   test("selector builders embed JSON.stringify(selector)", () => {
-    for (const s of [hoverScript(nasty), selectScript(nasty, "v"), setCheckedScript(nasty, true), clearForFillScript(nasty)]) {
+    for (const s of [hoverScript(nasty), selectScript(nasty, "v"), setCheckedScript(nasty, true), fillScript(nasty, "v")]) {
       expect(s).toContain(`document.querySelector(${quoted})`);
     }
-    expect(selectScript("#s", nasty)).toContain(`el.value = ${quoted};`);
+    expect(selectScript("#s", nasty)).toContain(`const want = ${quoted};`);
+    expect(fillScript("#s", nasty)).toContain(`const text = ${quoted};`);
   });
 
   test("storage builders embed JSON.stringify(key) and wrap in the area's try/catch", () => {

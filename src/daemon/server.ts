@@ -26,6 +26,7 @@ import {
   type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type Op, type PageState, type ResultOf,
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
+import { claimSession } from "./pidfile.ts";
 import { dialogAnswerScript, dialogSyncScript, withDialogShim } from "../page-scripts.ts";
 
 /** What the daemon knows that the page cannot be asked for. `url` and `title`
@@ -269,9 +270,12 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
 
   /** `run`, with the page shim that answers dialogs. It must be in the page
    *  before an op acts there, and its log is read after. An eval carries
-   *  both in its own expression, so it costs no extra page call; a native
-   *  action costs one read after it, and one install before it only after a
-   *  navigation. */
+   *  both in its own expression, so it costs no extra page call. An op that
+   *  may leave the document (every ACTS and NAVIGATES op) costs one read
+   *  before it and one after: a dialog a timer opened since the last op is
+   *  in the log of the document the op may leave, and the log leaves with
+   *  it. The reads are page evaluates inside the daemon, not socket round
+   *  trips (~0.07 ms each on WebKit, measured). */
   async function runShimmed(req: DaemonRequest): Promise<DaemonResponse> {
     if (req.op === "evaluate") {
       const drop = !shimmed;
@@ -289,11 +293,14 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
       return r?.value === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result: r.value };
     }
     if (!ACTS.has(req.op) && !NAVIGATES.has(req.op)) return run(req);
+    // Before: an action installs the shim if the page lacks it; either op
+    // reads the log of a page that has it. A navigating op on a page with no
+    // shim has no log to read.
+    if (ACTS.has(req.op) || shimmed) await sync();
     // A navigating op leaves this document, so the sync after it drops the
     // page's answer: a document the back-forward cache restores still has
     // its shim and answer. Not left to the navigation callback alone.
     if (NAVIGATES.has(req.op)) shimmed = false;
-    if (ACTS.has(req.op) && !shimmed) await sync();
     const res = await run(req);
     await sync();
     return res;
@@ -328,22 +335,29 @@ const ACTS: ReadonlySet<Op> = new Set<Op>(["click", "type", "press", "hover", "s
 /** The ops that navigate the page themselves. */
 const NAVIGATES: ReadonlySet<Op> = new Set<Op>(["navigate", "reload", "back", "forward"]);
 
-export async function startDaemon(session: string, profile?: string): Promise<void> {
-  const sock = socketPath(session);
-  // Clean up any stale socket file.
-  try {
-    await unlink(sock);
-  } catch {}
-
-  // Record the pid so `close` can confirm this process died rather than
-  // assuming it. Removed on the way out — a pidfile outliving its process is
-  // the same stale state this exists to detect. An exit handler catches every
-  // path out, not just `shutdown`, so it must be synchronous.
+/** Start the session's daemon. Resolves false, having touched nothing, when
+ *  another daemon of ours already holds the session: the caller then exits.
+ *  Resolves true once this daemon is listening. */
+export async function startDaemon(session: string, profile?: string): Promise<boolean> {
+  // Claim the session before anything else (F29). A pidfile is the claim: it
+  // is created exclusively, so of several daemons racing for one session only
+  // one gets past here, and a loser leaves the winner's socket and pidfile
+  // alone. `close` also reads it to confirm this process died rather than
+  // assuming it.
   const pidFile = pidPath(session);
-  await Bun.write(pidFile, String(process.pid));
+  if (!(await claimSession(pidFile, session))) return false;
+  // Removed on the way out — a pidfile outliving its process is the stale
+  // state the claim has to clear. An exit handler catches every path out,
+  // not just `shutdown`, so it must be synchronous.
   process.on("exit", () => {
     removePidFileIfOwned(pidFile, process.pid);
   });
+
+  // The session is ours, so a socket file left here is stale.
+  const sock = socketPath(session);
+  try {
+    await unlink(sock);
+  } catch {}
 
   const browser: Browser = await openBrowser({ profile });
   const state: DaemonState = profile ? { profile } : {};
@@ -397,4 +411,5 @@ export async function startDaemon(session: string, profile?: string): Promise<vo
   const keepalive = setInterval(() => {}, 60_000);
   // Clean up if the event loop does settle.
   process.on("beforeExit", () => clearInterval(keepalive));
+  return true;
 }

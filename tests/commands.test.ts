@@ -2,20 +2,21 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import { findCommand } from "../src/cli/registry.ts";
+import { COMMANDS, findCommand } from "../src/cli/registry.ts";
 import { reportFailure, run } from "../src/cli.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
-import { pidPath } from "../src/daemon/client.ts";
+import { pidPath, type ConnectOptions } from "../src/daemon/client.ts";
+import { looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "../src/commands/interaction.ts";
 import {
-  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, looksLikeOurDaemon,
+  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen,
   type ProcessOps,
 } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
@@ -27,7 +28,7 @@ import {
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
-import { clearForFillScript, resolveRefScript } from "../src/page-scripts.ts";
+import { fillScript, resolveRefScript } from "../src/page-scripts.ts";
 
 /** An evaluate handler that answers the ref-resolve script the way the page
  *  would: the element's fresh selector, or null when it is gone. Any other
@@ -89,6 +90,27 @@ describe("open", () => {
     const out = await cmdOpen({ ...ctx({ json: true }), connect: async () => c }, "https://x");
     expect(JSON.parse(out)).toEqual({ ok: true, url: "https://x", title: "Fake https://x" });
   });
+});
+
+// F28: only `open` may start a daemon on a session whose browser exited;
+// connectOrSpawn refuses the rest. `close` never spawns at all.
+describe("which commands may replace a browser that exited", () => {
+  for (const [argv, reopen] of [
+    [["open", "https://x"], true],
+    [["open"], true],
+    [["goto", "https://x"], false],
+    [["eval", "1"], false],
+    [["reload"], false],
+  ] as const) {
+    test(`${argv.join(" ")}: reopen ${reopen}`, async () => {
+      const seen: Array<ConnectOptions | undefined> = [];
+      await run([...argv], {
+        connect: async (_s, opts) => { seen.push(opts); return fakeClient({}); },
+      });
+      expect(seen.length).toBeGreaterThan(0);
+      expect(Boolean(seen[0]?.reopen)).toBe(reopen);
+    });
+  }
 });
 
 describe("open --persistent / --profile", () => {
@@ -260,6 +282,103 @@ describe("goto", () => {
   });
 });
 
+// F4 (docs/superpowers/specs/2026-09-27-p1-fixes-design.md): a word past a
+// command's declared positionals is an error, not silently dropped.
+describe("too many arguments", () => {
+  /** A context whose every daemon connection is counted, and refused. */
+  function counting() {
+    const seen = { connects: 0 };
+    const base: Partial<CommandContext> = {
+      connect: async () => {
+        seen.connects++;
+        throw new Error("an arity error must not connect to a daemon");
+      },
+      readStdin: async () => {
+        throw new Error("an arity error must not read stdin");
+      },
+    };
+    return { seen, base };
+  }
+
+  for (const c of COMMANDS) {
+    const n = c.positional.length;
+    test(`${c.name} with ${n + 1} positionals fails with usage:, connects to nothing, exits 1`, async () => {
+      const { seen, base } = counting();
+      const words = Array.from({ length: n + 1 }, (_, i) => `w${i}`);
+      const err = await run(["-s", session, c.name, ...words], base).then(
+        () => { throw new Error("expected a failure"); },
+        (e: unknown) => e,
+      );
+      expect((err as Error).message).toBe(
+        `usage: too many arguments for '${c.name}': expected ${n}, received ${n + 1}`,
+      );
+      expect(seen.connects).toBe(0);
+      expect(reportFailure(err).code).toBe(1);
+    });
+  }
+
+  test("words after -- still count: fill e1 -- a b is too many", async () => {
+    const { seen, base } = counting();
+    await expect(run(["-s", session, "fill", "e1", "--", "a", "b"], base)).rejects.toThrow(
+      "usage: too many arguments for 'fill': expected 2, received 3",
+    );
+    expect(seen.connects).toBe(0);
+  });
+
+  test("the declared count still runs: eval with one expression reaches the daemon", async () => {
+    const c = fakeClient({ evaluate: () => 2 });
+    expect(await run(["-s", session, "eval", "1 + 1"], { connect: async () => c })).toContain("2");
+  });
+
+  // The entry starts the MCP server before run() would see the word, so it
+  // is spawned as the CLI runs, like the F1 help test.
+  test("bowser mcp extra fails with usage: and exit 1, starting no server", async () => {
+    const proc = Bun.spawn({
+      cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp", "extra"],
+      env: { ...process.env, HOME: tmp },
+      // A pipe held open: a started MCP server would wait on it forever.
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const timer = setTimeout(() => proc.kill(), 5_000);
+    const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    clearTimeout(timer);
+    expect(stderr.trim()).toBe("bowser: usage: too many arguments for 'mcp': expected 0, received 1");
+    expect(code).toBe(1);
+  }, 15_000);
+});
+
+// F15: a URL without a scheme gets one before the daemon sees it.
+describe("URL normalization in open and goto", () => {
+  const table: Array<[string, string]> = [
+    ["example.com", "https://example.com"],
+    ["example.com/path?q=1", "https://example.com/path?q=1"],
+    ["example.com:8080", "https://example.com:8080"],
+    ["localhost:3000/x", "http://localhost:3000/x"],
+    ["localhost", "http://localhost"],
+    ["127.0.0.1:3000", "http://127.0.0.1:3000"],
+    ["[::1]:3000/a", "http://[::1]:3000/a"],
+    ["http://example.com/", "http://example.com/"],
+    ["https://localhost:3000/", "https://localhost:3000/"],
+    ["about:blank", "about:blank"],
+    ["data:text/html,<p>hi</p>", "data:text/html,<p>hi</p>"],
+    ["file:///tmp/x.html", "file:///tmp/x.html"],
+    ["mailto:someone@example.com", "mailto:someone@example.com"],
+    ["tel:5551234", "tel:5551234"],
+  ];
+  for (const cmd of ["open", "goto"] as const) {
+    for (const [typed, sent] of table) {
+      test(`${cmd} ${typed} navigates to ${sent} and replies with it`, async () => {
+        const c = fakeClient({});
+        const out = await run(["-s", session, cmd, typed], { connect: async () => c });
+        expect(c.calls.filter(([op]) => op === "navigate")).toEqual([["navigate", [sent]]]);
+        expect(out).toContain(sent);
+      });
+    }
+  }
+});
+
 describe("open (assertNavigated guard)", () => {
   test("open errors when a real URL ends on about:blank", async () => {
     const c = fakeClient({ state: () => ({ url: "about:blank", title: "" }) });
@@ -295,6 +414,19 @@ describe("snapshot", () => {
     const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { filename: file });
     expect(out).toBe(`wrote ${file}`);
     expect(await Bun.file(file).text()).toBe(yaml + "\n");
+  });
+  test("--filename with a relative path writes under the cwd and reports the absolute path (F37)", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const c = fakeClient({ evaluate: () => snap });
+      const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, { filename: "snap-rel.md" });
+      const abs = join(realpathSync(tmp), "snap-rel.md");
+      expect(out).toBe(`wrote ${abs}`);
+      expect(await Bun.file(abs).text()).toBe(yaml + "\n");
+    } finally {
+      process.chdir(origCwd);
+    }
   });
   test("--json prints { snapshot: <tree> } only", async () => {
     const c = fakeClient({ evaluate: () => snap });
@@ -442,8 +574,8 @@ describe("close", () => {
     await mkdir(legacy, { recursive: true });
     await Bun.write(join(legacy, "pid"), String(process.pid));
     try {
-      const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
-      expect(out).toContain("failed: team one");
+      const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+      await expect(call).rejects.toThrow(`- team one: close: pid ${process.pid} recorded for legacy session "team one" is running`);
       expect(existsSync(legacy)).toBe(true);
     } finally {
       await rm(legacy, { recursive: true, force: true }); // or every later --all sees it fail
@@ -455,11 +587,39 @@ describe("close", () => {
     await mkdir(legacy, { recursive: true });
     await Bun.write(join(legacy, "sock"), "");
     try {
-      const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
-      expect(out).toContain("failed: old session");
+      const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+      await expect(call).rejects.toThrow('- old session: close: legacy session "old session" has no pidfile but still has a socket');
       expect(existsSync(legacy)).toBe(true);
     } finally {
       await rm(legacy, { recursive: true, force: true });
+    }
+  });
+
+  // F31: a session --all could not close fails the command, exit 2, as a
+  // single `close` of it does; the rest are still tried and listed.
+  test("--all with a session that fails: tries every session, names the reason, exits 2", async () => {
+    await saveState({ name: "ok31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+    await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+    await ensureSessionDir("stale31");
+    await Bun.write(pidPath("stale31"), "4242");
+    const proc = procOps({ alive: (pid) => pid === 4242 });
+    try {
+      for (const json of [false, true]) {
+        if (!existsSync(sessionDir("zz31"))) await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+        const err = await cmdClose({ ...ctx({ json }), connect: async () => fakeClient({}) }, { all: true }, proc)
+          .then(() => undefined, (e: unknown) => e);
+        const msg = (err as Error).message;
+        // Under --json too: an error is plain text on stderr, like every other.
+        expect(msg).toContain("- stale31: close: pid 4242 recorded for session 'stale31' is running but does not look like a bowser daemon");
+        // Other tests' sessions share this HOME, so only ours are checked.
+        expect(msg).toMatch(/^close --all: closed \d+ sessions?: [^\n]*\bzz31\b/);
+        if (!json) expect(msg).toMatch(/^close --all: closed [^\n]*\bok31\b/);
+        expect(reportFailure(err).code).toBe(2);
+        expect(existsSync(sessionDir("zz31"))).toBe(false);
+        expect(existsSync(sessionDir("stale31"))).toBe(true);
+      }
+    } finally {
+      await rm(sessionDir("stale31"), { recursive: true, force: true }); // or every later --all fails
     }
   });
 
@@ -670,6 +830,79 @@ describe("fill", () => {
     const ops = c.calls.map((cl) => cl[0]);
     expect(ops).toEqual(["evaluate", "click", "evaluate", "type"]);
   });
+
+  // F13, F14: the page script fill already sends reports what it found; the
+  // command refuses or skips the typing from that answer alone.
+  const SECRET = "tomorrow-S3cr3t";
+  const answering = (answer: unknown) => {
+    const resolve = resolving({ e2: "input" });
+    return (expr: string): unknown => expr === resolveRefScript("e2") ? resolve(expr) : answer;
+  };
+  const fillWith = async (answer: unknown, text = SECRET) => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({ evaluate: answering(answer) });
+    const result = await cmdFill({ ...ctx(), connect: async () => c }, "e2", text).then(
+      (out) => ({ out, err: undefined }),
+      (err: Error) => ({ out: undefined, err }),
+    );
+    return { ...result, ops: c.calls.map((cl) => cl[0]) };
+  };
+
+  for (const why of ["disabled", "readonly"] as const) {
+    test(`a ${why} element is refused before typing, exit 1`, async () => {
+      const { err, ops } = await fillWith({ outcome: why, type: "text" });
+      expect(err?.message).toBe(`ref 'e2' is not an editable element (${why})`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(ops).toEqual(["evaluate", "click", "evaluate"]);
+    });
+  }
+
+  test("text that is not a number is refused on type=number, exit 1, without the text", async () => {
+    const { err, ops } = await fillWith({ outcome: "nan", type: "number" });
+    expect(err?.message).toBe("ref 'e2' needs a number (input[type=number])");
+    expect(reportFailure(err).code).toBe(1);
+    expect(ops).not.toContain("type");
+  });
+
+  test("a value a date-like input does not keep is refused, exit 1, without the text", async () => {
+    const { err, ops } = await fillWith({ outcome: "rejected", type: "date" });
+    expect(err?.message).toBe("ref 'e2' did not accept the value for input[type=date]");
+    expect(err?.message).not.toContain(SECRET);
+    expect(reportFailure(err).code).toBe(1);
+    expect(ops).not.toContain("type");
+  });
+
+  test("a value the page set itself is not typed again", async () => {
+    const { out, ops } = await fillWith({ outcome: "set", type: "date" }, "2024-01-02");
+    expect(out).toBe('filled e2 (textbox "Email")');
+    expect(ops).toEqual(["evaluate", "click", "evaluate"]);
+  });
+
+  test("the page script carries the text, and its failure does not echo it", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e2", selector: "input", role: "textbox", name: "Email", tag: "input" }],
+      updatedAt: Date.now(),
+    });
+    const resolve = resolving({ e2: "input" });
+    const c = fakeClient({
+      evaluate: (expr) => {
+        if (expr === resolveRefScript("e2")) return resolve(expr);
+        throw new Error(`evaluate failed: ${expr}`);
+      },
+    });
+    const err = await cmdFill({ ...ctx(), connect: async () => c }, "e2", SECRET).catch((e: Error) => e);
+    expect(c.calls).toContainEqual(["evaluate", [fillScript("input", SECRET)]]);
+    expect((err as Error).message).not.toContain(SECRET);
+  });
 });
 
 describe("type", () => {
@@ -747,6 +980,21 @@ describe("select", () => {
     const c = fakeClient({ evaluate: resolving({ e3: "select" }) });
     await cmdSelect({ ...ctx(), connect: async () => c }, "e3", "red");
     expect(c.calls).toContainEqual(["select", ["select", "red"]]);
+  });
+
+  // F12: the page answers false when no option's value or label is the text.
+  test("no matching option fails at once with exit 1", async () => {
+    await saveState({
+      name: session,
+      url: "https://x",
+      title: "X",
+      refs: [{ id: "e3", selector: "select", role: "combobox", name: "Color", tag: "select" }],
+      updatedAt: Date.now(),
+    });
+    const c = fakeClient({ evaluate: resolving({ e3: "select" }), select: () => false });
+    const err = await cmdSelect({ ...ctx(), connect: async () => c }, "e3", "nosuch").catch((e: Error) => e);
+    expect((err as Error).message).toBe(`ref 'e3' has no option "nosuch"`);
+    expect(reportFailure(err).code).toBe(1);
   });
 });
 
@@ -928,7 +1176,7 @@ describe("ref commands resolve the ref in the live page first", () => {
   test("fill clears the fresh selector", async () => {
     const c = fakeClient({ evaluate: resolving({ e2: "fresh-e2" }) });
     await cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi");
-    expect(c.calls).toContainEqual(["evaluate", [clearForFillScript("fresh-e2")]]);
+    expect(c.calls).toContainEqual(["evaluate", [fillScript("fresh-e2", "hi")]]);
   });
 
   test("the resolve script embeds the ref with JSON.stringify", () => {
@@ -956,8 +1204,22 @@ describe("screenshot", () => {
       const session = "shotdefault";
       const c = fakeClient({ screenshot: () => PNG_B64 });
       const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
-      expect(out).toBe("wrote screenshot-shotdefault.png");
+      // The absolute path it wrote (F37): a relative one says nothing to a
+      // caller that does not know this process's cwd.
+      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotdefault.png")}`);
       expect(await Bun.file(join(tmp, "screenshot-shotdefault.png")).exists()).toBe(true);
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  test("--json reports the absolute path, for a relative --filename too (F37)", async () => {
+    const origCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      const out = await cmdScreenshot({ ...ctx({ json: true }), connect: async () => c }, { filename: "rel-shot.png" });
+      expect(JSON.parse(out)).toEqual({ ok: true, filename: join(realpathSync(tmp), "rel-shot.png") });
     } finally {
       process.chdir(origCwd);
     }
@@ -971,7 +1233,7 @@ describe("screenshot", () => {
       await Bun.write(join(tmp, "screenshot-shotinc.png"), "existing");
       const c = fakeClient({ screenshot: () => PNG_B64 });
       const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
-      expect(out).toBe("wrote screenshot-shotinc-1.png");
+      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotinc-1.png")}`);
       expect(await Bun.file(join(tmp, "screenshot-shotinc-1.png")).exists()).toBe(true);
     } finally {
       process.chdir(origCwd);
