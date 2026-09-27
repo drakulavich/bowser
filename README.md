@@ -11,7 +11,7 @@ Built on [`Bun.WebView`](https://bun.com/docs/runtime/webview) (new in Bun 1.3.1
 
 What sets it apart from `playwright-cli`:
 
-- **Bun-native.** Single static binary via `bun build --compile`. Fast cold start. No Node / npm / Playwright install dance.
+- **Bun-native.** Runs on Bun, no Node or Playwright install.
 - **Token-efficient.** Capabilities are shell commands, not MCP tool schemas. A skill description of a few hundred tokens covers the whole API.
 - **Persistent sessions.** Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
@@ -20,7 +20,7 @@ What sets it apart from `playwright-cli`:
 bowser runs on macOS only (it needs WebKit, which `Bun.WebView` provides only there).
 
 ```bash
-# From npm (requires Bun ≥ 1.3.12 on your PATH)
+# From npm
 npm install -g @drakulavich/bowser-cli
 
 # ...or directly from source
@@ -30,10 +30,13 @@ bun install
 bun link                     # exposes `bowser` on $PATH
 ```
 
-Prebuilt single-file binaries for macOS (arm64/x64) are also attached to every GitHub Release — see
-[Releases](https://github.com/drakulavich/bowser/releases).
+Bun ≥ 1.4.2 must be on your `PATH`: the npm package runs `src/cli.ts` with the `bun` it finds there.
+npm does not enforce that, so on an older Bun a command that would start a session fails with the
+error "bowser requires Bun >=1.4.2 (found <version>)" (exit 1).
 
-Requires Bun ≥ 1.3.12 for the npm/source install.
+bowser is distributed only through npm and from source; releases no longer attach binaries. If you
+used a release binary, run `bowser close --all` with it, delete it, then
+`npm i -g @drakulavich/bowser-cli`.
 
 On another platform, any command that would start a session fails with the error "bowser requires macOS (WebKit)" (exit 1).
 
@@ -259,20 +262,6 @@ BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub sea
 - `tests/e2e-webkit.test.ts` — every command driven on WebKit, with page state read back via `eval` after each one.
 - `tests/e2e-compat.test.ts` — diffs bowser against `playwright-cli` on the todo flow, asserting bowser's refs are a subset of playwright-cli's tree; skips without playwright-cli's WebKit installed.
 - `tests/e2e-search.test.ts` — live web: search GitHub for OpenClaw, find the repo link, type into the search box and press Enter.
-
-## Build a single binary
-
-```bash
-bun build src/cli.ts --compile --outfile dist/bowser
-./dist/bowser open https://example.com
-```
-
-Build for a specific Mac:
-
-```bash
-bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile dist/bowser-macos-arm64
-bun build src/cli.ts --compile --target=bun-darwin-x64   --outfile dist/bowser-macos-x64
-```
 
 ## Roadmap
 

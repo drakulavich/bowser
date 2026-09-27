@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### BREAKING: no release binaries; install through npm or from source
+
+A release binary is ad-hoc signed with no Team ID, so Gatekeeper rejects it, and a downloaded copy
+(with `com.apple.quarantine` set) hung on `--help` with no output.
+
+- **Releases no longer build or attach binaries.** A GitHub Release carries its notes and no
+  assets. bowser installs with `npm install -g @drakulavich/bowser-cli`, or from source.
+- **Migrating from a binary:** run `bowser close --all` with the old binary, delete it, then
+  `npm i -g @drakulavich/bowser-cli`. `close` still recognises a daemon an old binary started.
+- **The npm package needs Bun ≥ 1.4.2 on `PATH`.** npm does not enforce `engines.bun`, so a
+  command that would start a session on an older Bun, or on one without `Bun.WebView`, now fails
+  at once with `bowser requires Bun >=1.4.2 (found <version>)` (exit 1) instead of `did not start
+  in time`. The floor is read from `engines.bun`.
+- The hidden `--daemon` entry and the `build` script are gone. The daemon always runs as
+  `bun <package>/src/daemon/main.ts <session>`.
+
 ## [0.7.0] — 2026-09-27
 
 ### Changed: extra arguments are an error
