@@ -377,6 +377,16 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
         const alt = el.getAttribute('alt') || '';
         return alt.trim() ? alt : (el.getAttribute('title') || '');
       }
+      // An <svg>, or an element inside one, is named by its first child SVG
+      // <title>, read like an aria-labelledby target (playwright's rule).
+      if (tag === 'SVG' || el.ownerSVGElement) {
+        o.visited.add(el);
+        for (let c = el.firstElementChild; c; c = c.nextElementSibling) {
+          if (tagOf(c) === 'TITLE' && c.ownerSVGElement) {
+            return textAlt(c, Object.assign({}, child, { embedded: true, labelledBy: true, hiddenOk: nameHidden(c) }));
+          }
+        }
+      }
     }
     const summary = tag === 'SUMMARY' && role !== 'presentation' && role !== 'none';
     if (CONTENT_ROLES.includes(role) || (o.mode === 'descendant' && DESCENDANT_CONTENT_ROLES.includes(role)) || summary || o.embedded) {
