@@ -21,7 +21,7 @@ need a new term, add it here first.
 | **Command** | One verb in the public surface (the ~25 rows of README.md's reference table), e.g. `open`, `snapshot`, `click`, `cookie-clear`. |
 | **`--session` / `-s`** | The global flag selecting which Session a Command targets; defaults to the implicit session. |
 | **`--json`** | The global flag switching a Command's output to machine-readable JSON on stdout. |
-| **Exit code** | Process status from the CLI: **0** success, **1** user error (usage, unknown command, missing/unknown ref, no open page), **2** runtime error (`src/cli.ts` `import.meta.main`). |
+| **Exit code** | Process status from the CLI: **0** success, **1** user error (usage, unknown command, missing/unknown ref, no open page), **2** runtime error. A user error is one thrown as `UserError` (`src/errors.ts`); `reportFailure` in `src/cli.ts` reads the class, never the message. |
 | **install** | `bowser install` downloads and caches a Chromium build (`chrome-headless-shell`) under `~/.bowser/chromium/`; never auto-runs. |
 | **eval / run-code** | Scripting Commands that execute JavaScript in the page (`eval`) or a code block (`run-code`) via the Daemon. |
 | **SKILL.md** | `skills/bowser/SKILL.md` — the agent-facing skill description that documents the command surface in a few hundred tokens. |

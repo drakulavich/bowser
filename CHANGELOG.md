@@ -16,6 +16,10 @@ All notable changes to this project are documented here. This project follows
   `snapshot` on the old page until the new one arrived. They now wait for it, as `click` and
   `press` do. `hover` and `type` wait the same way. Each of these that does not navigate now
   takes about 100 ms longer. (#51)
+- **A page error exits 2, whatever its text.** `eval` (or `run-code`) of a page that throws
+  `usage: …`, `ref 'e1' not found …` or `no open page …` exited 1, as if the command line were
+  wrong, because the exit code was read from the message. The code is now set where bowser raises
+  the error: its own user errors exit 1, everything else exits 2. No message text changed. (#51)
 
 ## [0.8.0] — 2026-09-27
 
