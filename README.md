@@ -54,8 +54,9 @@ Screenshots are written as PNG files. `bowser screenshot --filename out.png` wri
 to `out.png` (relative paths resolve against your current directory); without
 `--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
 if that file already exists. The reply names the absolute path written (`wrote /…/out.png`,
-`{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. Captures are
-full-page (element-bounded screenshots are not supported yet).
+`{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. A capture is the
+viewport, as in `playwright-cli` without `--full-page`: bowser has no full-page or
+element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `resize` to capture more.
 
 ## Quickstart
 
@@ -70,6 +71,8 @@ bowser close                             # end session
 ```
 
 Each session runs one persistent browser process (spawned lazily on first command, addressed over a Unix socket). Commands attach, run, and detach — so typed text, modals, dynamic DOM, cookies, and auth all survive across invocations. Session state lives under `~/.bowser/sessions/<name>/`. Several commands started at once on a new session still share one browser.
+
+If the page's web process crashes, WebKit relaunches it and reloads the page once. That reload looks like the page reloading itself, so bowser does not report it: page state is gone, and old refs fail with `not found in the current page snapshot`. If the process dies again, WebKit does not reload the page, and every page command fails with `the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'` (exit 2). bowser does not reload it for you; `reload`, `goto` or `open <url>` recover it.
 
 If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1), instead of quietly starting an empty browser. `bowser open` (with `--persistent` again, for a persistent session) starts it anew; `bowser close` clears it. A session that never ran a browser still starts one on its first command.
 
@@ -184,9 +187,9 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `press <key>` | Press a keyboard key. `Tab` moves focus to the next field, as the browser's own Tab does, and types nothing |
 | `hover <ref>` | Hover an element |
 | `select <ref> <value>` | Choose a `<select>` option: the first, in document order, whose value or label is `<value>` (`select e3 Red` picks `<option value="r">Red</option>`). With no such option it fails at once with `ref 'eN' has no option "<value>"` (exit 1) and the select keeps its value; `playwright-cli` waits out its timeout |
-| `check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox or radio button. A disabled one fails like `click`. `uncheck` on a checked radio fails with `ref 'eN' is a radio button; select another option in its group to uncheck it`, exit 1; on an unchecked one it succeeds and does nothing |
+| `check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox or radio button. A disabled one fails like `click`. `uncheck` on a checked radio fails with `ref 'eN' is a radio button; select another option in its group to uncheck it`, exit 1; on an unchecked one it succeeds and does nothing. An `aria-checked="mixed"` checkbox is unchecked for `check` (one click, as in `playwright-cli`) and checked for `uncheck`, which clicks it until it reads `false` (`playwright-cli` leaves it mixed) |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
-| `screenshot [--filename=f]` | Full-page screenshot (PNG) |
+| `screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
 | `resize <width> <height>` | Set the viewport size in pixels |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
@@ -203,7 +206,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `sessionstorage-delete <key>` | Remove a `sessionStorage` entry |
 | `sessionstorage-clear` | Clear all `sessionStorage` entries |
 | `eval <expression>` | Evaluate a JS expression in the current page; prints the result |
-| `run-code <code>` | Run multi-statement JS in the current page; wrap in an IIFE, use `return` to produce a value |
+| `run-code <code>` | Run JavaScript in the current page and print the result. One expression is evaluated as one (`run-code "(() => { return 5 })()"` prints `5`); any other code is the body of an async function, so use `return` for the result, and `await` works (`run-code "await new Promise(r => setTimeout(r, 100)); return document.title"`). Unlike `playwright-cli`'s `run-code`, which calls a function with a Playwright `page` in Node, it runs in the page: a result that is a function, such as `async page => …`, fails with `run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return` (exit 1) |
 | `state-save <file>` | Save the current origin's localStorage to a Playwright-compatible `storageState` JSON file. Its `cookies` array is always empty: bowser has no cookie access (use `open --persistent` to keep logins). |
 | `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. |
 | `mcp` | Run a Model Context Protocol stdio server exposing every command above as an MCP tool. |

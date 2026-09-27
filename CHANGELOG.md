@@ -65,6 +65,31 @@ with no report).
   uncheck it` (exit 1), as `playwright-cli` does. On an unchecked radio it succeeds and does
   nothing. `check` and `uncheck` read `aria-checked` on an element that is not an `<input>`, so
   `check` on an `aria-checked="true"` checkbox no longer clicks it off.
+- **`uncheck` unchecks an `aria-checked="mixed"` checkbox.** It read mixed as unchecked, clicked
+  nothing and reported success. Mixed now counts as checked for `uncheck`, which clicks until the
+  element reads `false` (twice for the usual mixed → true → false cycle). `check` on mixed clicks
+  once, as `playwright-cli` does. `playwright-cli`'s `uncheck` leaves a mixed checkbox as it is.
+- **An SVG `<title>` names the SVG.** A link or button whose only content is an
+  `<svg><title>Logo</title>…</svg>` printed with no name (`link [ref=e2]`); it now prints
+  `link "Logo"`, with `img "Logo"` inside, as `playwright-cli` does. An `<svg>` or an element
+  inside one takes its first child `<title>`, after `aria-labelledby` and `aria-label`.
+- **`screenshot` is documented as the viewport.** The docs, `--help` and the MCP tool said
+  full-page; `Bun.WebView` captures the viewport only, which is also `playwright-cli`'s default.
+  The behaviour is unchanged. The summary now reads "Save a PNG screenshot of the viewport".
+- **`run-code` prints what the code gives.** The code was the body of a plain function, so the
+  documented IIFE form (`(() => { return 5 })()`) and `async page => …` printed an empty line, and
+  `await` was a syntax error. Code that is one expression is now evaluated as one and prints its
+  value; other code is the body of an async function, where `return` gives the result and `await`
+  works. A result that is a function, such as a `playwright-cli` snippet `async page => …`, fails
+  with `run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use
+  return` (exit 1). `run-code` runs in the page, unlike `playwright-cli`'s, which runs Playwright
+  code in Node.
+- **A crashed page is reported.** After the page's web process died a second time, every page
+  command failed with `JavaScript execution returned a result of an unsupported type` (exit 2). It
+  now fails with `the page crashed (its web process exited); run 'bowser reload' or 'bowser goto
+  <url>'` (exit 2). The page is not reloaded for you; `reload`, `goto` and `open <url>` recover it.
+  The first crash is still not reported: WebKit reloads the page, which nothing tells apart from a
+  page reloading itself.
 
 ## [0.7.0] — 2026-09-27
 

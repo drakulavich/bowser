@@ -85,7 +85,7 @@ export interface Browser {
   select(selector: string, value: string): Promise<boolean>;
   /** false: `uncheck` of a checked radio, refused in the page (F20). */
   setChecked(selector: string, checked: boolean): Promise<boolean>;
-  screenshot(): Promise<string>; // base64-encoded PNG (full page)
+  screenshot(): Promise<string>; // base64-encoded PNG of the viewport
   resize(width: number, height: number): Promise<void>;
   back(): Promise<void>;
   forward(): Promise<void>;
@@ -293,8 +293,8 @@ export function wrapView(view: ViewLike, timing: NavTiming = NAV_TIMING, profile
     select: async (selector, value) => (await evaluate(selectScript(selector, value))) === true,
     setChecked: async (selector, checked) => (await evaluate(setCheckedScript(selector, checked))) !== false,
     screenshot: async () => {
-      // Bun.WebView.screenshot() returns a Blob (image/png) for the full page.
-      // Element-bounded screenshots are not supported in v1.
+      // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
+      // takes no full-page option. Element-bounded screenshots are not supported.
       const data = await view.screenshot?.();
       if (!data) throw new Error("screenshot: not supported by this Bun.WebView");
       const bytes = await pngBytesFrom(data);

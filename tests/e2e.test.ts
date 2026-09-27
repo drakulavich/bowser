@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { isLikelyPng } from "../src/browser.ts";
 import { cmdClick } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
 
@@ -77,6 +78,22 @@ runOrSkip("e2e: real browser", () => {
     const bytes = new Uint8Array(await Bun.file(file).arrayBuffer());
     expect(isLikelyPng(bytes)).toBe(true);
     expect(bytes.length).toBeGreaterThan(1000); // a real capture, not a stub
+  }, 30_000);
+
+  // Spec F17: Bun.WebView captures the viewport, as playwright-cli does by
+  // default; the docs say so. A 3000x5000 CSS px page gives a PNG the size
+  // of the viewport (at the display's scale), not of the page.
+  test("screenshot of a tall page captures the viewport only", async () => {
+    const tall = `<html><body style="margin:0"><div style="width:3000px;height:5000px;background:linear-gradient(red,blue)"></div></body></html>`;
+    await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(tall)}`);
+    const file = join(tmp, "e2e-tall.png");
+    await cmdScreenshot({ session, json: false }, { filename: file });
+    const png = new DataView(await Bun.file(file).arrayBuffer());
+    // IHDR: width and height, big-endian, at bytes 16 and 20.
+    const [w, h] = [png.getUint32(16), png.getUint32(20)];
+    const [vw, vh, dpr] = JSON.parse(await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])")) as number[];
+    expect([w, h]).toEqual([Math.round(vw! * dpr!), Math.round(vh! * dpr!)]);
+    expect(h).toBeLessThan(5000 * dpr!);
   }, 30_000);
 
   test("a >8 KB snapshot response survives the socket (backpressure)", async () => {
