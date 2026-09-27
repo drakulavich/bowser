@@ -108,6 +108,8 @@ export interface Browser {
    *  uses it to drop the page's one-shot dialog answer. One listener; a
    *  second call replaces the first. */
   watchNavigation(on: () => void): void;
+  /** Whether the oven-sh/bun#44134 workaround opened its second view. */
+  readonly kickerOpened: boolean;
 }
 
 /** Open a WebKit Bun.WebView. Bun throws off macOS; the CLI refuses to
@@ -127,14 +129,14 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`--persistent: the browser refused profile ${opts.profile}: ${msg}`);
   }
-  const kicker = new Bun.WebView({ backend: "webkit", width: KICKER_SIZE, height: KICKER_SIZE });
   // The real Bun.WebView satisfies ViewLike structurally; no cast needed here.
-  return wrapView(view, NAV_TIMING, opts.profile, STORAGE_COMMIT_WAIT_MS, kicker);
+  return wrapView(view, NAV_TIMING, opts.profile, STORAGE_COMMIT_WAIT_MS, { open: openKicker });
 }
 
 // ---------------------------------------------------------------------------
 // Workaround for oven-sh/bun#44134 (bowser #63). Remove this block, the
-// kicker in openBrowser and wrapView's `guard` calls once Bun is fixed.
+// `stalls` argument openBrowser passes and wrapView's `guard` calls once Bun
+// is fixed.
 //
 // Bun 1.4.2's WebView host writes each reply frame with one writev on a Unix
 // socket whose send buffer is 8192 bytes. When a frame is larger, the host
@@ -148,11 +150,16 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
 // frame is small, its bytes go through shared memory. One message sent just
 // after navigate() did not help: the stall starts when the page lands.
 //
-// So while any call on the view is pending, the host gets a message every
-// KICK_MS. It can't come through the main view: each of its reply slots
-// (navigate, evaluate, screenshot, input) takes one call at a time, and
-// bowser's own calls hold them. The messages go to a second 1x1 view that
-// nothing else uses, at the cost of one more WebContent process (~25 MB).
+// So when a call on the view has been pending for STALL_MS, the host gets a
+// message every KICK_MS until nothing is pending. It can't come through the
+// main view: each of its reply slots (navigate, evaluate, screenshot, input)
+// takes one call at a time, and bowser's own calls hold them. The messages go
+// to a second 1x1 view that nothing else uses. It costs one more WebContent
+// process (~25 MB), so it is opened on the first call that stays pending
+// STALL_MS, not before, and kept for the session. Measured under load: a
+// fresh one released every stuck navigate 54-90 ms after it was opened (20 of
+// 20), while long-URL navigations that did not stall took 116 ms at most and
+// a new view's first navigate 348 ms at most. A slow server opens it too.
 // A kick's own reply could queue behind a tail that stalls again, leaving its
 // slot busy; the next tick then sends a same-size resize, which uses another
 // slot. That was never seen (in 1000 navigations no kick took over 74 ms),
@@ -165,19 +172,40 @@ export interface Kicker {
   resize(width: number, height: number): Promise<void>;
   close?(): void;
 }
+/** How wrapView gets a kicker: `open` is called at most once, when a call
+ *  has been pending `afterMs` (default STALL_MS). */
+export interface StallKick {
+  open: () => Kicker;
+  afterMs?: number;
+}
 const KICKER_SIZE = 1;
 const KICK_MS = 100;
+const STALL_MS = 1000;
 
-/** `guard(p)` kicks the host every KICK_MS until `p` and every other guarded
- *  call has settled, and answers what `p` answered. Without a kicker it is
- *  the identity. */
-function stallGuard(kicker: Kicker | undefined) {
+function openKicker(): Kicker {
+  return new Bun.WebView({ backend: "webkit", width: KICKER_SIZE, height: KICKER_SIZE });
+}
+
+/** `guard(p)` answers what `p` answered. Once guarded calls have been pending
+ *  for afterMs without a break, it opens the kicker and kicks the host every
+ *  KICK_MS until none is pending. Without `stalls` it is the identity. */
+function stallGuard(stalls: StallKick | undefined) {
+  const afterMs = stalls?.afterMs ?? STALL_MS;
+  let kicker: Kicker | undefined;
   let pending = 0;
+  let since = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
   let evaluating = false;
   let resizing = false;
   const kick = () => {
-    if (!kicker) return;
+    if (!kicker) {
+      if (!stalls || Date.now() - since < afterMs) return;
+      try {
+        kicker = stalls.open();
+      } catch {
+        return;
+      }
+    }
     if (!evaluating) {
       evaluating = true;
       kicker.evaluate(NO_OP).catch(() => {}).finally(() => { evaluating = false; });
@@ -188,12 +216,16 @@ function stallGuard(kicker: Kicker | undefined) {
   };
   return {
     guard<T>(p: Promise<T>): Promise<T> {
-      if (!kicker) return p;
-      if (pending++ === 0) timer = setInterval(kick, KICK_MS);
+      if (!stalls) return p;
+      if (pending++ === 0) {
+        since = Date.now();
+        timer = setInterval(kick, KICK_MS);
+      }
       return p.finally(() => {
         if (--pending === 0) clearInterval(timer);
       });
     },
+    get opened() { return kicker !== undefined; },
     close() {
       clearInterval(timer);
       kicker?.close?.();
@@ -359,11 +391,11 @@ export function wrapView(
   timing: NavTiming = NAV_TIMING,
   profile?: string,
   commitWaitMs = STORAGE_COMMIT_WAIT_MS,
-  kicker?: Kicker,
+  stalls?: StallKick,
 ): Browser {
   let navigated: () => void = () => {};
-  const stalls = stallGuard(kicker);
-  const { guard } = stalls;
+  const stall = stallGuard(stalls);
+  const { guard } = stall;
   // One evaluate at a time per view: WebKit throws ERR_INVALID_STATE for a
   // second while one is pending. The daemon's serializer runs one op at a
   // time, but inside an op the watch may stop waiting for a slow page read
@@ -433,7 +465,7 @@ export function wrapView(
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
       view.close?.();
-      stalls.close();
+      stall.close();
     },
     // Measured on WebKit (Bun 1.4.2): a native reload() frees an evaluate
     // stuck on a promise that never settles (it rejects "no longer
@@ -447,6 +479,7 @@ export function wrapView(
     // alone and never evaluate(): an evaluate would queue behind the stuck
     // one (wrapView's queue) and never run, and so would RELOAD's fallback.
     interrupt: () => guard(nav.interrupt()),
+    get kickerOpened() { return stall.opened; },
     watchNavigation(on) {
       navigated = on;
     },

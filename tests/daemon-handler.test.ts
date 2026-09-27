@@ -34,6 +34,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     close: rec("close", undefined),
     interrupt: rec("interrupt", undefined),
     watchNavigation: () => {},
+    kickerOpened: false,
     ...over,
   };
   return b;

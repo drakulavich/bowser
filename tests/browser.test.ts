@@ -96,11 +96,16 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   }
   const within = <T>(p: Promise<T>, ms: number) =>
     Promise.race([p.then(() => "settled", () => "rejected"), Bun.sleep(ms).then(() => "pending")]);
+  /** How wrapView gets the kicker: opened on demand, counted. */
+  function lazy(k: ReturnType<typeof fakeKicker>, afterMs = 150) {
+    const stalls = { opens: 0, afterMs, open: () => { stalls.opens++; return k; } };
+    return stalls;
+  }
 
   test("a navigate whose reply stalls settles", async () => {
     const host = fakeHost();
     const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
-    const b = wrapView(v, fast, undefined, 0, fakeKicker(host));
+    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)));
     expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("settled");
     expect(b.url).toBe("data:text/html,long");
   });
@@ -108,7 +113,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   test("its failure still reaches the caller", async () => {
     const host = fakeHost();
     const v = fakeView({ navigate: () => new Promise<void>((_, no) => { host.message(); host.stall(() => no(new Error("nav failed"))); }) });
-    const b = wrapView(v, fast, undefined, 0, fakeKicker(host));
+    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)));
     expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("rejected");
   });
 
@@ -117,7 +122,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   test("an evaluate whose reply stalls settles, with its result", async () => {
     const host = fakeHost();
     const v = fakeView({ evaluate: (expr) => new Promise((r) => { host.message(); host.stall(() => r(`long ${expr}`)); }) });
-    const b = wrapView(v, fast, undefined, 0, fakeKicker(host));
+    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)));
     expect(await within(b.realUrl(), 1000)).toBe("settled");
     expect(await b.evaluate("x")).toBe("long x");
   });
@@ -125,7 +130,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   test("a navigation an action started lands although its event stalls", async () => {
     const host = fakeHost();
     const v = fakeView({ click: async () => { host.message(); v.loading = true; host.stall(() => v.land("https://x/next")); } });
-    const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, fakeKicker(host));
+    const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, lazy(fakeKicker(host)));
     const t0 = Date.now();
     await b.click("a");
     expect(Date.now() - t0).toBeLessThan(1000);
@@ -139,7 +144,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
       navigate: () => new Promise<void>((r) => { host.message(); host.stall(() => host.stall(r)); }),
     });
     const k = fakeKicker(host, { evaluate: true });
-    const b = wrapView(v, fast, undefined, 0, k);
+    const b = wrapView(v, fast, undefined, 0, lazy(k));
     expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("settled");
     expect(k.calls).toContain("resize 1x1");
   });
@@ -147,12 +152,47 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   test("kicks only while a call is pending, and close closes the kicker", async () => {
     const host = fakeHost();
     const k = fakeKicker(host);
-    const b = wrapView(fakeView({ navigate: () => Bun.sleep(250) }), fast, undefined, 0, k);
+    const b = wrapView(fakeView({ navigate: () => Bun.sleep(400) }), fast, undefined, 0, lazy(k));
     await b.navigate("https://slow/");
     const kicks = k.calls.length;
     expect(kicks).toBeGreaterThan(0);
     await Bun.sleep(250);
     expect(k.calls.length).toBe(kicks);
+    await b.close();
+    expect(k.closed).toBe(true);
+  });
+
+  // The owner's call: a session that never meets the bug does not pay for
+  // the second view (a WebContent process, ~25 MB).
+  test("calls that answer within afterMs open no kicker", async () => {
+    const host = fakeHost();
+    const stalls = lazy(fakeKicker(host));
+    const v = fakeView({ navigate: async (url) => { await Bun.sleep(50); v.land(url); } });
+    const b = wrapView(v, fast, undefined, 0, stalls);
+    await b.navigate("https://x/a");
+    await b.evaluate("1");
+    await b.click("a");
+    await b.screenshot().catch(() => {});
+    await Bun.sleep(300);
+    await b.close();
+    expect(stalls.opens).toBe(0);
+    expect(b.kickerOpened).toBe(false);
+  });
+
+  test("a stalled call opens the kicker after afterMs, and the session keeps it", async () => {
+    const host = fakeHost();
+    const k = fakeKicker(host);
+    const stalls = lazy(k, 300);
+    const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
+    const b = wrapView(v, fast, undefined, 0, stalls);
+    const first = b.navigate("data:text/html,long-1");
+    await Bun.sleep(200);
+    expect(stalls.opens).toBe(0);
+    expect(await within(first, 1000)).toBe("settled");
+    expect(b.kickerOpened).toBe(true);
+    expect(await within(b.navigate("data:text/html,long-2"), 1000)).toBe("settled");
+    expect(stalls.opens).toBe(1);
+    expect(k.closed).toBe(false);
     await b.close();
     expect(k.closed).toBe(true);
   });
