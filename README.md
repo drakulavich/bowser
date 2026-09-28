@@ -247,7 +247,7 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
 - Relative file paths (`screenshot`, `snapshot` `filename`, `state-save`, `state-load`) resolve against the server's working directory. If the client starts it from `/` or another directory it cannot write, the server uses `<os.tmpdir()>/bowser-mcp` instead (`$TMPDIR/bowser-mcp`). Replies name the absolute path written. An absolute path is used as given.
-- The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies. It speaks MCP `2025-06-18` and `2024-11-05`: `initialize` answers with the client's version when it is one of these, and with `2025-06-18` otherwise.
+- The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies. It speaks MCP `2025-11-25`, `2025-06-18` and `2024-11-05`: `initialize` answers with the client's version when it is one of these, and with `2025-11-25` otherwise. The stateless `2026-07-28` revision is not implemented; its `server/discover` probe gets `-32601 Method not found`, on which a client falls back to `initialize`.
 - `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
 - A JSON-RPC batch (an array) or a line that is not a JSON object gets one `-32600 Invalid Request` error with `id: null`; nothing in a batch runs. MCP `2025-06-18` has no batching.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).

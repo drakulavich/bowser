@@ -543,21 +543,29 @@ describe("MCP fill and type errors never carry the entered text", () => {
 
 // F39: the server answers with a version it supports: the client's when it is
 // one, else the latest. 2025-03-26 is not one: it requires batches (F40).
+// 2026-07-28 is not one either: it drops the initialize handshake.
 describe("MCP server: initialize negotiates the protocol version", () => {
   const init = (protocolVersion?: unknown) =>
     JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: protocolVersion === undefined ? {} : { protocolVersion } });
-  for (const v of ["2025-06-18", "2024-11-05"]) {
+  for (const v of ["2025-11-25", "2025-06-18", "2024-11-05"]) {
     test(`a supported version (${v}) is echoed`, async () => {
       const [res] = await serve([init(v)]);
       expect(res.result.protocolVersion).toBe(v);
     });
   }
-  for (const v of ["1999-bogus", "2025-03-26", "2025-11-25", "", 42, undefined]) {
-    test(`${JSON.stringify(v)} gets the latest supported version, 2025-06-18`, async () => {
+  for (const v of ["1999-bogus", "2025-03-26", "2026-07-28", "", 42, undefined]) {
+    test(`${JSON.stringify(v)} gets the latest supported version, 2025-11-25`, async () => {
       const [res] = await serve([init(v)]);
-      expect(res.result.protocolVersion).toBe("2025-06-18");
+      expect(res.result.protocolVersion).toBe("2025-11-25");
     });
   }
+
+  // The stateless 2026-07-28 revision is not implemented. Its client probes
+  // with server/discover and falls back to initialize on -32601.
+  test("server/discover is an unknown method (-32601), so a 2026 client falls back", async () => {
+    const [res] = await serve([JSON.stringify({ jsonrpc: "2.0", id: 9, method: "server/discover", params: {} })]);
+    expect(res).toEqual({ jsonrpc: "2.0", id: 9, error: { code: -32601, message: "Method not found: server/discover" } });
+  });
 });
 
 // F40: a line that is not a request object gets -32600 with id null; before,

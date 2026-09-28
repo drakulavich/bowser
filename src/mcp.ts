@@ -28,8 +28,10 @@ const VERSION = (pkg as { version: string }).version;
 /** The protocol versions this server speaks, newest first (F39). `initialize`
  *  echoes the client's version when it is listed, and answers the first entry
  *  otherwise. 2025-03-26 is left out: it requires JSON-RPC batches, which
- *  this server refuses (F40). */
-export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2024-11-05"] as const;
+ *  this server refuses (F40). The stateless 2026-07-28 revision is not
+ *  implemented: its client probes with `server/discover`, gets -32601 like
+ *  any unknown method, and falls back to `initialize`. */
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] as const;
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */

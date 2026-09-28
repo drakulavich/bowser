@@ -79,8 +79,10 @@ All notable changes to this project are documented here. This project follows
 
 - **MCP `initialize` answers with a protocol version bowser supports.** It echoed whatever the
   client sent, `"1999-bogus"` included. It now answers the client's version when it is
-  `2025-06-18` or `2024-11-05`, and `2025-06-18` otherwise, as the MCP lifecycle requires.
-  `2025-03-26` is not offered: it requires JSON-RPC batches, which bowser does not take. (F39)
+  `2025-11-25`, `2025-06-18` or `2024-11-05`, and `2025-11-25` otherwise, as the MCP lifecycle
+  requires. `2025-03-26` is not offered: it requires JSON-RPC batches, which bowser does not take.
+  The stateless `2026-07-28` revision is not implemented: its `server/discover` probe gets
+  `-32601`, and the client falls back to `initialize`. (F39)
 
 - **An MCP batch or a non-object message gets an error instead of silence.** An array, a number, a
   string or `null` was taken for a notification and got no reply, so a client that sent a batch
