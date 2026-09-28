@@ -3,13 +3,12 @@
 import { readFile, readdir, rm, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
-import type { Command } from "../cli/registry.ts";
 import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
 import { isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
-import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext } from "./context.ts";
+import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's

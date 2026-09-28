@@ -3,7 +3,7 @@
 // positionals and flags), then the summary in a column. A usage longer than
 // the column wraps onto its own line with the summary on the next.
 
-import type { Command } from "./registry.ts";
+import type { Command } from "../commands/context.ts";
 
 const HEADER = "bowser — drop-in playwright-cli alternative for AI agents";
 const GLOBAL = `Global flags:

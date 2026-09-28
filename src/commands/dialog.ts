@@ -3,8 +3,7 @@
 // it opens, so the answer is set before the action, not after it (unlike
 // playwright-cli).
 
-import type { Command } from "../cli/registry.ts";
-import { replyPage, withPageClient, type CommandContext } from "./context.ts";
+import { replyPage, withPageClient, type CommandContext, type Command } from "./context.ts";
 
 export async function cmdDialog(ctx: CommandContext, accept: boolean, text?: string): Promise<string> {
   return withPageClient(ctx, async (c) => {
