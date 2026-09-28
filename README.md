@@ -57,6 +57,9 @@ if that file already exists. The reply names the absolute path written (`wrote /
 `{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. A capture is the
 viewport, as in `playwright-cli` without `--full-page`: bowser has no full-page or
 element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `resize` to capture more.
+WebKit cannot capture a viewport whose pixels fill 4 GiB. On a Retina display (pixel ratio 2)
+that is reached only near `resize`'s maximum: `resize 16384 16384` cannot be captured,
+`resize 16384 16383` can. `screenshot` then fails with exit code 1 and names the size to resize to.
 
 ## Quickstart
 

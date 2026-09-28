@@ -10,7 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { isLikelyPng, openBrowser } from "../src/browser.ts";
-import { cmdClick } from "../src/commands/interaction.ts";
+import { cmdClick, cmdResize } from "../src/commands/interaction.ts";
+import { reportFailure } from "../src/cli.ts";
+import { UserError } from "../src/errors.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -96,6 +98,27 @@ runOrSkip("e2e: real browser", () => {
     expect([w, h]).toEqual([Math.round(vw! * dpr!), Math.round(vh! * dpr!)]);
     expect(h).toBeLessThan(5000 * dpr!);
   }, 30_000);
+
+  // #69: at the largest viewport resize accepts, WebKit's capture fails with
+  // "An unknown error occurred" (exit 2). screenshot names the limit and a
+  // size that fits instead, and exits 1.
+  test("screenshot of a viewport too large to capture says what to resize to", async () => {
+    await cmdOpen({ session, json: false }, dataUrl);
+    await cmdResize({ session, json: false }, "16384", "16384");
+    try {
+      const [, , dpr] = JSON.parse(await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])")) as number[];
+      // Only a display at pixel ratio 2 reaches the limit through resize: at
+      // ratio 1, 16384x16384 is 1 GiB of pixels, and capturing that is slow
+      // and not what this test is about. Not measured at ratio 1 (#69).
+      if (dpr! < 2) return;
+      const err = await cmdScreenshot({ session, json: false }, { filename: join(tmp, "e2e-huge.png") }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UserError);
+      expect((err as Error).message).toContain("run 'bowser resize 16384 16383' or smaller");
+      expect(reportFailure(err).code).toBe(1);
+    } finally {
+      await cmdResize({ session, json: false }, "800", "600");
+    }
+  }, 60_000);
 
   test("a >8 KB snapshot response survives the socket (backpressure)", async () => {
     // 500 buttons: each is one ref'd line, so the tree is well over 8 KB.

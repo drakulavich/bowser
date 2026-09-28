@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`screenshot` of a viewport too large to capture says what to do.** After
+  `resize 16384 16384` on a Retina display, `screenshot` failed with "An unknown error occurred"
+  and exit code 2. WebKit refuses a capture whose pixels fill 4 GiB (32768x32768 pixels at pixel
+  ratio 2), and `Bun.WebView` has no option to capture at a lower scale. `screenshot` now fails
+  with exit code 1 and names the size that fits: `run 'bowser resize 16384 16383' or smaller`.
+  `resize`'s limits are unchanged: every size it accepts works for everything but a screenshot,
+  and at pixel ratio 1 no size it accepts should reach the limit (by the same arithmetic; not
+  measured). (#69)
+
 ## [0.9.0] — 2026-09-28
 
 ### Changed

@@ -2,7 +2,8 @@
 
 import { resolve } from "node:path";
 import { str } from "../cli/parser.ts";
-import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
+import { READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.ts";
+import type { DaemonConnection } from "../daemon/protocol.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
 import { dialogsJson, modalState, reply, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
@@ -64,6 +65,35 @@ export async function nextAvailablePath(
   }
 }
 
+/** The tallest viewport, in CSS pixels, that WebKit still captures at this
+ *  width. WebKit refuses a capture whose pixel buffer reaches 4 GiB (2^30
+ *  pixels at 4 bytes each), with rows padded to 32 pixels, and says only
+ *  "An unknown error occurred" (#69). Measured on Bun 1.4.2 at pixel ratio
+ *  2, one fresh view per probe: at height 16384 the widest capture is 16368
+ *  and 16369 fails; at width 16384 the tallest is 16383. No Bun.WebView
+ *  option lowers the scale, so a larger viewport cannot be captured. */
+export function maxCaptureHeight(width: number, dpr: number): number {
+  const rowPixels = Math.ceil((width * dpr) / 32) * 32;
+  return Math.floor(Math.floor((2 ** 30 - 1) / rowPixels) / dpr);
+}
+
+/** The error to show instead of a failed capture's, when the viewport is
+ *  past WebKit's capture limit; undefined when it is not, or when the page
+ *  does not answer. */
+async function tooLargeToCapture(c: DaemonConnection): Promise<UserError | undefined> {
+  try {
+    const [width, height, dpr] = (await c.request("evaluate", [READ_VIEWPORT])) as [number, number, number];
+    const maxHeight = maxCaptureHeight(width, dpr);
+    if (height <= maxHeight) return undefined;
+    return new UserError(
+      `screenshot: WebKit cannot capture a ${width}x${height} viewport at pixel ratio ${dpr} (its pixels would fill 4 GiB); ` +
+      `run 'bowser resize ${width} ${maxHeight}' or smaller`,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 export async function cmdScreenshot(
   ctx: CommandContext,
   opts: { filename?: string } = {},
@@ -78,7 +108,11 @@ export async function cmdScreenshot(
   // shipped back over the socket — so we hand it an absolute target path.
   const abs = resolve(process.cwd(), filename);
   return withClient(ctx, async (c) => {
-    await c.request("screenshot", [abs]);
+    try {
+      await c.request("screenshot", [abs]);
+    } catch (err) {
+      throw (await tooLargeToCapture(c)) ?? err;
+    }
     // The absolute path, for the same reason as snapshot --filename.
     return reply(ctx, { ok: true, filename: abs }, `wrote ${abs}`);
   });

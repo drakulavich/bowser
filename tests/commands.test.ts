@@ -30,7 +30,8 @@ import {
 import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
 import { longHome } from "./helpers/long-home.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
-import { fillScript, resolveRefScript, runCodeScript, storageSetScript } from "../src/page-scripts.ts";
+import { fillScript, READ_VIEWPORT, resolveRefScript, runCodeScript, storageSetScript } from "../src/page-scripts.ts";
+import { UserError } from "../src/errors.ts";
 import { usageOf } from "../src/cli/help.ts";
 
 /** An evaluate handler that answers the ref-resolve script the way the page
@@ -1385,6 +1386,40 @@ describe("ref commands resolve the ref in the live page first", () => {
 describe("screenshot", () => {
   const PNG_B64 =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  // #69: WebKit refuses to capture a viewport whose pixel buffer reaches
+  // 4 GiB, and says only "An unknown error occurred". 16384x16384 at pixel
+  // ratio 2 is 32768x32768 pixels; the tallest capture at that width is
+  // 16383 (measured, Bun 1.4.2).
+  const failingCapture = () => { throw new Error("An unknown error occurred"); };
+  const viewport = (w: number, h: number, dpr: number) => (expr: string) =>
+    expr === READ_VIEWPORT ? [w, h, dpr] : undefined;
+
+  test("a viewport too large to capture is a UserError naming the size that fits (#69)", async () => {
+    const c = fakeClient({ screenshot: failingCapture, evaluate: viewport(16384, 16384, 2) });
+    const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, "big.png") })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UserError);
+    expect((err as Error).message).toBe(
+      "screenshot: WebKit cannot capture a 16384x16384 viewport at pixel ratio 2 (its pixels would fill 4 GiB); " +
+      "run 'bowser resize 16384 16383' or smaller",
+    );
+    expect(reportFailure(err).code).toBe(1);
+  });
+
+  test("a failed capture of a viewport that fits keeps its own error (#69)", async () => {
+    const c = fakeClient({ screenshot: failingCapture, evaluate: viewport(800, 600, 2) });
+    const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, "small.png") })
+      .catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(UserError);
+    expect((err as Error).message).toBe("An unknown error occurred");
+  });
+
+  test("a capture that works does not read the viewport (#69)", async () => {
+    const c = fakeClient({ screenshot: () => PNG_B64 });
+    await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, "ok.png") });
+    expect(c.calls.map(([op]) => op)).not.toContain("evaluate");
+  });
 
   test("--filename decodes the base64 and writes a real PNG at the given path", async () => {
     const tmpFile = join(tmp, `shot-${Date.now()}.png`);
