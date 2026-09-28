@@ -102,8 +102,9 @@ export interface Browser {
   forward(): Promise<void>;
   reload(): Promise<void>;
   close(): Promise<void>;
-  /** Try to free the view from a call that overran its budget: reload the
-   *  committed page. Resolves when the reload lands, or after settleMs. */
+  /** Try to free the view from a call that overran its budget: reload a
+   *  committed page or leave the initial document. Waits for the native call
+   *  to settle, then for a landing up to settleMs. */
   interrupt(): Promise<void>;
   /** Call `on` when a navigation starts and again when it lands. The daemon
    *  uses it to drop the page's one-shot dialog answer. One listener; a
@@ -384,7 +385,8 @@ function navigationWatch(
       await awaitNavigation(before, wasLoading);
       return result;
     },
-    /** Reload the committed page to free a stuck call; see Browser.interrupt. */
+    /** Reload the committed page, or leave the initial document, to free a
+     *  stuck call; see Browser.interrupt. */
     async interrupt(): Promise<void> {
       const before = landed;
       try {
@@ -397,7 +399,7 @@ function navigationWatch(
           // The call goes to the view, not wrapView's queue: if an evaluate
           // is pending WebKit refuses this one at once, where the queue
           // would run it later over whatever page is there then.
-          await Promise.race([view.evaluate(LEAVE_INITIAL_DOCUMENT), sleep(timing.settleMs)]);
+          await view.evaluate(LEAVE_INITIAL_DOCUMENT);
         } else if (typeof view.reload === "function") {
           await view.reload();
         } else {
