@@ -28,6 +28,11 @@ All notable changes to this project are documented here. This project follows
   refuses a new navigation while one is pending. Every later command then failed at its budget
   until `close`. Recovery now has such a page leave for `about:blank`, which cancels the stuck
   navigation; the next `goto` works once recovery has run. (#48)
+- **An `eval` that never settles in a fresh session no longer leaves the session stuck.** Before
+  the first page, recovery left the initial page with a script, but WebKit refuses a second
+  script while the stuck one is pending, so nothing freed it and every later command failed until
+  `close`. Recovery now falls back to navigating to `about:blank`, which frees the stuck `eval`
+  about 3 s later; the session then answers on `about:blank`. (#67)
 
 ## [0.8.2] — 2026-09-27
 
