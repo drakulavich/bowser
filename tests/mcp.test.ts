@@ -187,6 +187,31 @@ describe("handleMcpRequest — tools/call", () => {
     expect(res.result.content[0].text).toContain("no open page");
   });
 
+  // F38: MCP outputs are the --json JSON, for snapshot with a filename too.
+  test("snapshot with a filename answers {ok, filename}, and the file holds the text", async () => {
+    // snapshot saves the session's refs: keep them out of the real ~/.bowser.
+    const dir = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-snap-")));
+    const prevHome = process.env.HOME;
+    process.env.HOME = dir;
+    try {
+      const file = join(dir, "snap.md");
+      const snap = { url: "https://x", title: "X", tree: [{ role: "button", name: "Go", ref: "e1", children: [] }], refs: [] };
+      const connect = async () => fakeClient({ evaluate: () => snap });
+      const deps: McpDeps = { run: (argv) => run(argv, { connect }), version: "9.9.9" };
+      const res: any = await handleMcpRequest(
+        { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "snapshot", arguments: { session: "m38", filename: file } } },
+        deps,
+      );
+      expect(res.result.isError).toBeFalsy();
+      expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, filename: file });
+      expect(await Bun.file(file).text()).toStartWith("### Page\n- Page URL: https://x\n");
+      expect(existsSync(join(dir, ".bowser", "sessions", "m38", "state.json"))).toBe(true);
+    } finally {
+      process.env.HOME = prevHome;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("a failed tool call's error text carries the dialogs the command answered", async () => {
     const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
     const connect = async () => fakeClient({ evaluate: () => { throw new Error("Error: boom"); } }, { dialogs: [dismissed] });

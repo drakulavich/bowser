@@ -168,7 +168,7 @@ An action on a ref whose element is gone (removed by a re-render, or from before
 
 ### JSON output for agent pipelines
 
-`--json snapshot` prints `{"snapshot": "<tree>"}`: the tree text alone, without the `### Page` wrapper.
+`--json snapshot` prints `{"snapshot": "<tree>"}`: the tree text alone, without the `### Page` wrapper. `snapshot --filename=f` writes the `### Page` text to `f`, with or without `--json`, and answers `wrote /…/f` (`{"ok":true,"filename":"/…/f"}` under `--json`, with `"dialogs"` when a dialog was answered).
 
 ```bash
 bowser --json snapshot | jq -r .snapshot | grep 'button'

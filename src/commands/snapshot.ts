@@ -25,18 +25,20 @@ export async function cmdSnapshot(
     // Dialogs the daemon answered since the last command that printed them
     // (a page timer's, say). Nothing is blocked, so the tree renders too.
     const dialogs = dialogsJson(c);
-    const out = ctx.json
-      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...(dialogs.length ? { dialogs } : {}) }, null, 2)
-      : renderPage(snap, depth, modalState(c));
+    const withDialogs = dialogs.length ? { dialogs } : {};
     if (opts.filename) {
-      // The file holds exactly what stdout would: the text plus the CLI's
-      // newline. Reported by its absolute path: a caller that does not know
-      // this process's cwd (an MCP client) could not find it otherwise.
+      // The file always holds the text form, with its Modal state lines, plus
+      // the CLI's newline; --json changes only the reply, which has
+      // screenshot's shape (F38). Reported by its absolute path: a caller
+      // that does not know this process's cwd (an MCP client) could not find
+      // it otherwise.
       const abs = resolve(opts.filename);
-      await Bun.write(abs, out + "\n");
-      return `wrote ${abs}`;
+      await Bun.write(abs, renderPage(snap, depth, modalState(c)) + "\n");
+      return reply(ctx, { ok: true, filename: abs, ...withDialogs }, `wrote ${abs}`);
     }
-    return out;
+    return ctx.json
+      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...withDialogs }, null, 2)
+      : renderPage(snap, depth, modalState(c));
   });
 }
 

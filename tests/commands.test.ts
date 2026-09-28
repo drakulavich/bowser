@@ -477,6 +477,26 @@ describe("snapshot", () => {
     const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, {});
     expect(JSON.parse(out)).toEqual({ snapshot: '- link "Home" [ref=e1]:\n  - /url: /' });
   });
+  // F38: the reply has screenshot's shape, and the file is always the text.
+  test("--json --filename answers {ok, filename}; the file holds the ### Page text", async () => {
+    const file = join(tmp, `snap-json-${Date.now()}.md`);
+    const c = fakeClient({ evaluate: () => snap });
+    const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, { filename: file });
+    expect(JSON.parse(out)).toEqual({ ok: true, filename: file });
+    expect(await Bun.file(file).text()).toBe(yaml + "\n");
+  });
+  test("--json --filename: the dialogs go in the reply, the Modal state lines in the file", async () => {
+    const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
+    const file = join(tmp, `snap-json-dlg-${Date.now()}.md`);
+    const c = fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] });
+    const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, { filename: file });
+    expect(JSON.parse(out)).toEqual({
+      ok: true, filename: file, dialogs: [{ type: "confirm", message: "sure?", state: "dismissed" }],
+    });
+    expect(await Bun.file(file).text()).toContain(
+      '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)\n### Snapshot',
+    );
+  });
 });
 
 describe("close", () => {

@@ -67,6 +67,10 @@ All notable changes to this project are documented here. This project follows
 - **A session name over 255 characters is a usage error.** It used to reach `mkdir` and fail with
   a raw `ENAMETOOLONG` and exit 2. It now fails with the session-name usage message, which gives
   the limit, and exit 1. Every name that worked still works. (F35)
+- **`snapshot --filename` under `--json` and over MCP answers JSON.** It printed the plain
+  `wrote /…/f` and wrote the `{"snapshot": …}` JSON to the file. It now answers
+  `{"ok":true,"filename":"/…/f"}`, as `screenshot` does (with `"dialogs"` when a dialog was
+  answered), and the file always holds the `### Page` text, Modal state lines included. (F38)
 
 ## [0.8.2] — 2026-09-27
 
