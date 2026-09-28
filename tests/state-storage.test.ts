@@ -100,6 +100,20 @@ describe("state-save", () => {
     expect(JSON.parse(out)).toEqual({ ok: true, file, origins: 1 });
   });
 
+  // F33: WebKit refuses a localStorage read on about:blank ("The operation
+  // is insecure"); playwright-cli writes an empty file there.
+  test("on about:blank writes an empty file without reading localStorage", async () => {
+    const c = fakeClient({
+      state: () => ({ url: "about:blank", title: "" }),
+      evaluate: () => { throw new Error("Error: localStorage: The operation is insecure."); },
+    });
+    const file = tmpFile();
+    const out = await cmdStateSave({ ...ctx({ json: true }), connect: async () => c }, file);
+    expect(JSON.parse(out)).toEqual({ ok: true, file, origins: 0 });
+    expect(await Bun.file(file).json()).toEqual({ cookies: [], origins: [] });
+    expect(ops(c)).toEqual(["state"]);
+  });
+
   test("requires a file argument", async () => {
     const c = fakeClient({});
     await expect(cmdStateSave({ ...ctx(), connect: async () => c }, "")).rejects.toThrow(/usage: bowser state-save/);

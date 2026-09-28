@@ -33,9 +33,13 @@ interface StorageState {
   origins: StorageStateOrigin[];
 }
 
+/** The page's origin, or null when it has none to store under: an unparsable
+ *  URL, or an opaque origin (about:blank, data:), whose `origin` is the
+ *  string "null". */
 function pageOrigin(url: string): string | null {
   try {
-    return new URL(url).origin;
+    const origin = new URL(url).origin;
+    return origin === "null" ? null : origin;
   } catch {
     return null;
   }
@@ -85,9 +89,12 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
   return withClient(ctx, async (c) => {
     const state = await c.request("state");
     const origin = pageOrigin(state.url);
-    const entries = (await c.request("evaluate", [
-      storageListScript("localStorage"),
-    ])) as Record<string, string> | null;
+    // No origin, no localStorage to read: WebKit refuses the read on
+    // about:blank ("The operation is insecure"), and playwright-cli writes an
+    // empty file there (F33).
+    const entries = origin
+      ? ((await c.request("evaluate", [storageListScript("localStorage")])) as Record<string, string> | null)
+      : null;
     const local = entries ?? {};
     const origins: StorageStateOrigin[] = [];
     if (origin && Object.keys(local).length > 0) {

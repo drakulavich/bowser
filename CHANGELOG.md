@@ -60,6 +60,10 @@ All notable changes to this project are documented here. This project follows
   `resize 16385 100` failed in the daemon with `The value of "width" is out of range` and exit 2.
   It now fails before connecting, with `usage: bowser resize <width> <height> (each 1 to 16384)`
   and exit 1. `playwright-cli` has no such limit; the limit is `Bun.WebView`'s. (F22)
+- **`state-save` before the first page writes an empty file.** On `about:blank` WebKit refuses
+  to read localStorage, so `state-save` failed with `localStorage: The operation is insecure.`
+  and exit 2, and wrote nothing. It now writes `{"cookies": [], "origins": []}`, as
+  `playwright-cli` does. (F33)
 
 ## [0.8.2] — 2026-09-27
 
