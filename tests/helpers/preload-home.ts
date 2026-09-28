@@ -7,6 +7,7 @@
 // The real home stays reachable only by name, BOWSER_TEST_REAL_HOME, for a
 // tool that needs it (playwright-cli keeps its browsers there).
 
+import { afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,4 +17,5 @@ if (process.env.BOWSER_TEST_REAL_HOME === undefined && process.env.HOME) {
 }
 const home = mkdtempSync(join(tmpdir(), "bowser-test-home-"));
 process.env.HOME = home;
-process.on("exit", () => rmSync(home, { recursive: true, force: true }));
+// A global hook: `bun test` exits without running process "exit" listeners.
+afterAll(() => rmSync(home, { recursive: true, force: true }));
