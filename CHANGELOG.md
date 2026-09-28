@@ -87,6 +87,14 @@ All notable changes to this project are documented here. This project follows
   waited forever for its ids. Such a line now gets one `-32600 Invalid Request` with `id: null`,
   as JSON-RPC requires; nothing in a batch runs. (F40)
 
+- **MCP tool arguments of the wrong type are refused, not converted or dropped.** `session: 42`
+  ran on the `default` session, an object went to the page as `"[object Object]"`,
+  `persistent: "false"` or `1` was dropped without a word, and an unknown key was ignored. Each
+  argument is now checked against the tool's input schema, and a wrong one gets an `isError`
+  result such as `usage: argument 'session' of 'eval' must be a non-empty string, got number`,
+  without running anything, as MCP's SEP-1303 asks. A finite number is still taken where the
+  schema says string, so `resize {width: 800, height: 600}` keeps working. (F42)
+
 ## [0.8.2] — 2026-09-27
 
 ### Fixed

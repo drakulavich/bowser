@@ -232,6 +232,8 @@ is empty, and `bowser localstorage-set k ""` stores an empty string.
 
 `bowser mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing every browser command as an MCP tool — so MCP clients (Claude Desktop, etc.) can drive the browser without shelling out. Each tool maps 1:1 to a CLI command and takes an optional `session` argument; outputs are the same JSON as `--json` mode.
 
+Arguments are checked against the tool's input schema. A wrong type (`session: 42`, an object where a string belongs, `persistent: "false"`) or a key the tool does not have is refused with an `isError` result starting `usage:`, and nothing runs. Where the schema says string, a finite number is also taken (`resize {width: 800, height: 600}`), and `null` is the same as leaving the argument out.
+
 Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 
 ```json

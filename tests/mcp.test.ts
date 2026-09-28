@@ -588,3 +588,67 @@ describe("MCP server: a batch or a non-object message is an invalid request", ()
     expect(ran).toBe(false);
   });
 });
+
+// F42: tool arguments are checked against the tool's own inputSchema, and a
+// wrong one is an isError usage result the model can correct (SEP-1303).
+// Before, `session: 42` ran on "default", an object went to the page as
+// "[object Object]", `persistent: "false"` or `1` was silently dropped, and an
+// unknown key was ignored. A finite number is taken where the schema says
+// string, so `resize {width: 800}` keeps working.
+describe("MCP server: tool arguments are checked against the tool's schema", () => {
+  /** Send one tools/call line; return the result and the argv run got, if any. */
+  async function callLine(line: string): Promise<{ result: any; argv: string[] | null }> {
+    let argv: string[] | null = null;
+    const deps: McpDeps = { run: async (a) => { argv = a; return '{"ok":true}'; }, version: "9.9.9" };
+    const [res] = await serve([line], deps);
+    return { result: res.result, argv };
+  }
+  const call = (name: string, args: unknown) =>
+    callLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }));
+
+  const refused: Array<[string, string, unknown, RegExp]> = [
+    ["a number session", "eval", { session: 42, expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got number$/],
+    ["an empty session", "eval", { session: "", expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got ""$/],
+    ["an object positional", "eval", { expression: { a: 1 } }, /^usage: argument 'expression' of 'eval' must be a string or a number, got object$/],
+    ["an array positional", "goto", { url: ["https://e.com"] }, /^usage: argument 'url' of 'goto' must be a string or a number, got array$/],
+    ["a boolean positional", "eval", { expression: true }, /^usage: argument 'expression' of 'eval' must be a string or a number, got boolean$/],
+    ["an object string flag", "snapshot", { filename: {} }, /^usage: argument 'filename' of 'snapshot' must be a string or a number, got object$/],
+    ["a string boolean flag", "open", { session: "s", persistent: "false" }, /^usage: argument 'persistent' of 'open' must be true or false, got string$/],
+    ["a number boolean flag", "open", { session: "s", persistent: 1 }, /^usage: argument 'persistent' of 'open' must be true or false, got number$/],
+    ["an unknown key", "eval", { expression: "1", bogus: 1 }, /^usage: unknown argument 'bogus' for 'eval'$/],
+    ["an array of arguments", "eval", ["1"], /^usage: the arguments of 'eval' must be an object, got array$/],
+    ["a string of arguments", "eval", "1", /^usage: the arguments of 'eval' must be an object, got string$/],
+  ];
+  for (const [what, tool, args, message] of refused) {
+    test(`${what} is an isError usage result, and nothing runs`, async () => {
+      const { result, argv } = await call(tool, args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(message);
+      expect(argv).toBeNull();
+    });
+  }
+
+  test("a number too large to be finite (1e400 parses to Infinity) is refused", async () => {
+    const line = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"resize","arguments":{"width":1e400,"height":600}}}';
+    const { result, argv } = await callLine(line);
+    expect(result.content[0].text).toBe("usage: argument 'width' of 'resize' must be a string or a number, got number");
+    expect(argv).toBeNull();
+  });
+
+  const accepted: Array<[string, string, unknown, string[]]> = [
+    ["numbers for string positionals", "resize", { width: 800, height: 600 }, ["--json", "resize", "--", "800", "600"]],
+    ["a number for a string flag", "snapshot", { depth: 1 }, ["--json", "snapshot", "--depth=1"]],
+    ["true for a boolean flag", "open", { persistent: true }, ["--json", "open", "--persistent"]],
+    ["false for a boolean flag, which adds nothing", "open", { persistent: false }, ["--json", "open"]],
+    ["null for an optional argument, which is left out", "open", { url: null, session: null }, ["--json", "open"]],
+    ["an empty string positional", "select", { ref: "e3", value: "" }, ["--json", "select", "--", "e3", ""]],
+    ["no arguments at all", "list", undefined, ["--json", "list"]],
+  ];
+  for (const [what, tool, args, expected] of accepted) {
+    test(`${what} is accepted`, async () => {
+      const { result, argv } = await call(tool, args);
+      expect(result.isError).toBeFalsy();
+      expect(argv).toEqual(expected);
+    });
+  }
+});
