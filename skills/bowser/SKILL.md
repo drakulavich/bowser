@@ -66,7 +66,7 @@ Do **not** use for static HTTP fetches.
 | `bowser state-load <file>` | Restore localStorage from a `storageState` file; cookies in it are skipped. A bad file names the wrong field and exits 1 |
 | `bowser mcp` | Run a Model Context Protocol stdio server exposing every command as an MCP tool |
 
-**Global flags:** `-s=<name>` / `--session=<name>` (default `default`; letters, digits, `.`, `_`, `-`, at most 255 characters), `--json`, `-h`/`--help`.
+**Global flags:** `-s=<name>` / `--session=<name>` (default `default`; letters, digits, `.`, `_`, `-`, at most 255 characters, fewer under a very long `HOME`), `--json`, `-h`/`--help`.
 
 `bowser <command> --help` prints that command's usage and flags without running it, so it is safe on
 `close` or `open`. After `--`, `--help` is plain text: `bowser fill e1 -- --help` types it.

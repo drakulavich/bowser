@@ -211,7 +211,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. A missing, invalid or wrongly shaped file (`storageState.origins: expected array, got object`) restores nothing and exits 1. |
 | `mcp` | Run a Model Context Protocol stdio server exposing every command above as an MCP tool. |
 
-Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`. A session name uses letters, digits, `.`, `_` and `-`, does not start with `.` or `-`, and is at most 255 characters.
+Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`. A session name uses letters, digits, `.`, `_` and `-`, and does not start with `.` or `-`. It is at most 255 characters, or fewer under a very long `HOME`: `<HOME>/.bowser/sessions/<name>/pid.<pid>.tmp` must fit Bun's 1016-character path limit. A longer name is a usage error that gives the limit.
 
 `bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
 flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text

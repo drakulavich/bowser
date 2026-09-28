@@ -27,7 +27,8 @@ import {
   cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
   cmdSessionStorageList, cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
-import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
+import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
+import { longHome } from "./helpers/long-home.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 import { fillScript, resolveRefScript, runCodeScript, storageSetScript } from "../src/page-scripts.ts";
 import { usageOf } from "../src/cli/help.ts";
@@ -629,6 +630,27 @@ describe("close", () => {
     expect(out).toContain(" m11-1 m12-2");
     expect(out).not.toContain("failed");
     expect(existsSync(legacy)).toBe(false);
+  });
+
+  // F35: a directory whose name is now too long for this HOME (left by an
+  // older bowser, whose daemon could not claim it) is still listed as dead,
+  // and close and close --all still remove it.
+  test("close, list and close --all handle a directory whose name is too long for this HOME", async () => {
+    const prevHome = process.env.HOME;
+    process.env.HOME = await longHome(tmp, 900);
+    try {
+      const name = "n".repeat(maxSessionNameLength() + 5);
+      const dir = join(sessionsRoot(), name);
+      await mkdir(dir);
+      expect(await cmdList({ ...ctx({ json: true }), connect: unreachable })).toBe("[]");
+      expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`closed session '${name}'`);
+      expect(existsSync(dir)).toBe(false);
+      await mkdir(dir);
+      expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe(`closed 1 session: ${name}`);
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      process.env.HOME = prevHome;
+    }
   });
 
   test("--all keeps a legacy directory whose recorded pid is alive", async () => {

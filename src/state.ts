@@ -50,12 +50,39 @@ export function profileDir(name: string): string {
   return join(profilesRoot(), name);
 }
 
-/** APFS's NAME_MAX. The name is ASCII, so characters are bytes; a longer
- *  one failed in mkdir with a raw ENAMETOOLONG (F35). */
-const MAX_SESSION_NAME = 255;
-
 export function isValidSessionName(name: string): boolean {
-  return name.length <= MAX_SESSION_NAME && /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name);
+  return /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name);
+}
+
+/** APFS's NAME_MAX. The name is ASCII, so characters are bytes. */
+const NAME_MAX = 255;
+/** The longest path Bun opens or binds. Measured on macOS, Bun 1.4.2: both
+ *  `writeFileSync` and listening on a Unix socket fail at 1017 characters. Bun
+ *  binds a socket through its directory, so the 104-byte `sun_path` limits
+ *  only the socket's own name (`sock`), not the whole path. */
+const BUN_PATH_MAX = 1016;
+/** The longest entry a session directory gets: the daemon's pidfile claim,
+ *  `pid.<pid>.tmp`, with a pid of at most 5 digits (macOS's PID_MAX 99999). */
+const LONGEST_ENTRY = "pid.99999.tmp";
+
+/** The longest session name a session can be created under, for this HOME.
+ *  Past it, mkdir failed with ENAMETOOLONG, or the daemon died claiming its
+ *  pidfile and `open` said only "did not start in time" (F35). */
+export function maxSessionNameLength(): number {
+  const byPath = BUN_PATH_MAX - sessionsRoot().length - "/".length - `/${LONGEST_ENTRY}`.length;
+  return Math.min(NAME_MAX, byPath);
+}
+
+/** Refuses a name too long to create a session under. Only where a session
+ *  is created: `close` must still remove a directory an older bowser left
+ *  with such a name, so `sessionDir` does not check it. */
+export function checkNewSessionName(name: string): void {
+  const max = maxSessionNameLength();
+  if (name.length > max) {
+    throw new UserError(
+      `usage: session name is too long for this HOME: at most ${max} characters under ${sessionsRoot()}, got ${name.length}`,
+    );
+  }
 }
 
 /** Every filesystem path for a session goes through here, so this is where a
@@ -67,7 +94,7 @@ export function isValidSessionName(name: string): boolean {
 export function sessionDir(name: string): string {
   if (!isValidSessionName(name)) {
     throw new UserError(
-      `usage: session name may use only letters, digits, '.', '_' and '-', must not start with '.' or '-', and must be at most ${MAX_SESSION_NAME} characters, got ${JSON.stringify(name)}`,
+      `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got ${JSON.stringify(name)}`,
     );
   }
   return join(sessionsRoot(), name);
@@ -75,6 +102,7 @@ export function sessionDir(name: string): string {
 
 export async function ensureSessionDir(name: string): Promise<string> {
   const dir = sessionDir(name);
+  checkNewSessionName(name);
   await mkdir(dir, { recursive: true });
   return dir;
 }

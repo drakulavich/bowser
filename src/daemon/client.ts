@@ -7,7 +7,7 @@ import { join } from "node:path";
 import pkg from "../../package.json";
 import { withTimeout } from "../serialize.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
-import { sessionDir, statePath } from "../state.ts";
+import { checkNewSessionName, sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 import { UserError } from "../errors.ts";
 
@@ -246,6 +246,9 @@ export async function connectOrSpawn(
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.
     if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new UserError(browserExited(session));
+    // Before the spawn guards: a daemon under a name too long for this HOME
+    // would die claiming its pidfile, seen only as "did not start in time" (F35).
+    checkNewSessionName(session);
     // The one platform check. The daemon opens its WebView before it opens its
     // socket, so off macOS it would die unseen, and the caller would get only
     // the "did not start in time" timeout below. Refuse with the real reason.

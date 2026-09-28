@@ -1,8 +1,13 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { profileDir, resolveRef, sessionDir, sessionsRoot, type Ref, type SessionState } from "../src/state.ts";
+import { UserError } from "../src/errors.ts";
+import {
+  ensureSessionDir, maxSessionNameLength, profileDir, resolveRef, sessionDir, sessionsRoot, type Ref, type SessionState,
+} from "../src/state.ts";
+import { longHomePath } from "./helpers/long-home.ts";
 
 const state: SessionState = {
   name: "t",
@@ -44,10 +49,11 @@ describe("sessionDir rejects a name that is not one path segment", () => {
   test("an ordinary name still resolves under the sessions root", () => {
     expect(sessionDir("s1")).toBe(join(sessionsRoot(), "s1"));
   });
-  // F35: a name longer than APFS's NAME_MAX failed in mkdir with ENAMETOOLONG.
-  test("a 256-character name is refused; 255 is the longest accepted", () => {
-    expect(() => sessionDir("s".repeat(256))).toThrow(/at most 255 characters/);
-    expect(sessionDir("s".repeat(255))).toBe(join(sessionsRoot(), "s".repeat(255)));
+  // F35: sessionDir only keeps the name inside the root; the length is
+  // checked where a session is created, so close can still remove an old
+  // directory whose name is now too long.
+  test("a name too long to create a session still resolves", () => {
+    expect(sessionDir("s".repeat(300))).toBe(join(sessionsRoot(), "s".repeat(300)));
   });
 });
 
@@ -118,5 +124,44 @@ describe("state roundtrip (real fs)", () => {
   test("loadState returns null for missing session", async () => {
     const { loadState } = await import("../src/state.ts");
     expect(await loadState("does-not-exist")).toBeNull();
+  });
+});
+
+// F35: a name longer than the file-name limit failed in mkdir, and one whose
+// session directory is too long for Bun's 1016-byte path limit failed in the
+// daemon's pidfile claim (`<dir>/pid.<pid>.tmp`), as "did not start in time".
+describe("the longest session name for this HOME (F35)", () => {
+  let prevHome: string | undefined;
+  beforeEach(() => { prevHome = process.env.HOME; });
+  afterEach(() => { process.env.HOME = prevHome; });
+
+  test("a short HOME: 255, the file-name limit", () => {
+    process.env.HOME = "/Users/someone";
+    expect(maxSessionNameLength()).toBe(255);
+  });
+
+  test("a long HOME: the pidfile claim's path must fit 1016 bytes", () => {
+    process.env.HOME = longHomePath("/tmp/x", 900);
+    expect(sessionsRoot().length).toBe(900);
+    // <root>/<name>/pid.99999.tmp is at most 1016 characters.
+    expect(maxSessionNameLength()).toBe(1016 - 900 - "/".length - "/pid.99999.tmp".length);
+  });
+
+  test("ensureSessionDir refuses one character past it, naming the limit and HOME", async () => {
+    const home = await mkdtemp(join(tmpdir(), "bowser-f35-"));
+    try {
+      process.env.HOME = longHomePath(home, 900);
+      const max = maxSessionNameLength();
+      const err = await ensureSessionDir("n".repeat(max + 1)).catch((e) => e);
+      expect(err).toBeInstanceOf(UserError);
+      expect(err.message).toBe(
+        `usage: session name is too long for this HOME: at most ${max} characters under ${sessionsRoot()}, got ${max + 1}`,
+      );
+      expect(existsSync(sessionsRoot())).toBe(false);
+      await ensureSessionDir("n".repeat(max));
+      expect(existsSync(join(sessionsRoot(), "n".repeat(max)))).toBe(true);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

@@ -64,9 +64,14 @@ All notable changes to this project are documented here. This project follows
   to read localStorage, so `state-save` failed with `localStorage: The operation is insecure.`
   and exit 2, and wrote nothing. It now writes `{"cookies": [], "origins": []}`, as
   `playwright-cli` does. (F33)
-- **A session name over 255 characters is a usage error.** It used to reach `mkdir` and fail with
-  a raw `ENAMETOOLONG` and exit 2. It now fails with the session-name usage message, which gives
-  the limit, and exit 1. Every name that worked still works. (F35)
+- **A session name too long for this `HOME` is a usage error.** A name over 255 characters failed
+  in `mkdir` with a raw `ENAMETOOLONG` (exit 2). Under a very long `HOME` a shorter name could fail
+  too: its daemon died claiming `<session dir>/pid.<pid>.tmp`, which must fit Bun's 1016-character
+  path limit, and `open` reported only "did not start in time". Creating a session now checks the
+  name first and fails with `usage: session name is too long for this HOME: at most N characters
+  under <sessions root>, got M` (exit 1), before any daemon starts. `close`, `close --all` and
+  `list` still handle an existing directory with such a name. Every name that worked still works.
+  (F35)
 - **`snapshot --filename` under `--json` and over MCP answers JSON.** It printed the plain
   `wrote /…/f` and wrote the `{"snapshot": …}` JSON to the file. It now answers
   `{"ok":true,"filename":"/…/f"}`, as `screenshot` does (with `"dialogs"` when a dialog was

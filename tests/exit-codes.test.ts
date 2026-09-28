@@ -14,7 +14,7 @@ import { readStdin, type CommandContext } from "../src/commands/context.ts";
 import { connectOrSpawn, pidPath } from "../src/daemon/client.ts";
 import { toArgv } from "../src/mcp.ts";
 import { resolveRefScript } from "../src/page-scripts.ts";
-import { saveState } from "../src/state.ts";
+import { maxSessionNameLength, saveState, sessionsRoot } from "../src/state.ts";
 import { fakeClient, type FakeHandlers } from "./helpers/fake-client.ts";
 
 let tmp: string;
@@ -89,8 +89,7 @@ const USER_ERRORS: Case[] = [
   { argv: ["snapshot", "-Z"], stderr: "unknown flag: -Z" },
   { argv: ["eval", "1", "2"], stderr: "usage: too many arguments for 'eval': expected 1, received 2" },
   { argv: ["mcp"], stderr: "usage: run 'bowser mcp' as a top-level subcommand" },
-  { argv: ["--session=../x", "open"], stderr: `usage: session name may use only letters, digits, '.', '_' and '-', must not start with '.' or '-', and must be at most 255 characters, got "../x"` },
-  { argv: [`--session=${"y".repeat(256)}`, "open"], stderr: `usage: session name may use only letters, digits, '.', '_' and '-', must not start with '.' or '-', and must be at most 255 characters, got "${"y".repeat(256)}"` },
+  { argv: ["--session=../x", "open"], stderr: `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got "../x"` },
   { argv: ["--session=nopage", "click", "e1"], stderr: "no open page. Run 'bowser open <url>' first." },
   { argv: ["click", "@e1"], stderr: "expected a ref like 'e1', got '@e1'. Run 'bowser snapshot' first." },
   { argv: ["click", "e9"], stderr: "ref 'e9' not found in last snapshot of session 'codes'. Run 'bowser snapshot' to refresh." },
@@ -173,6 +172,29 @@ describe("user errors raised outside a command's run", () => {
   test("an MCP call that passes a CLI-only flag", async () => {
     expect(await code(() => toArgv(findCommand("fill")!, { ref: "e2", stdin: true }))).toEqual({
       stderr: "bowser: usage: --stdin is not available over MCP",
+      code: 1,
+    });
+  });
+
+  // F35: one character past the longest name for this HOME, refused before
+  // anything connects or spawns.
+  test("open with a session name too long for this HOME", async () => {
+    const name = "y".repeat(maxSessionNameLength() + 1);
+    let connects = 0;
+    const err = await run([`--session=${name}`, "open"], { connect: async () => { connects++; return fakeClient({}); } }).catch((e) => e);
+    expect(await code(Promise.reject(err))).toEqual({
+      stderr: `bowser: usage: session name is too long for this HOME: at most ${maxSessionNameLength()} characters under ${sessionsRoot()}, got ${name.length}`,
+      code: 1,
+    });
+    expect(connects).toBe(0);
+  });
+
+  // platform: "linux": had the check come after the spawn guards, this would
+  // report "requires macOS" instead.
+  test("connectOrSpawn with a session name too long for this HOME", async () => {
+    const name = "y".repeat(maxSessionNameLength() + 1);
+    expect(await code(connectOrSpawn(name, { platform: "linux" }))).toEqual({
+      stderr: `bowser: usage: session name is too long for this HOME: at most ${maxSessionNameLength()} characters under ${sessionsRoot()}, got ${name.length}`,
       code: 1,
     });
   });
