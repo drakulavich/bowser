@@ -64,6 +64,9 @@ All notable changes to this project are documented here. This project follows
   to read localStorage, so `state-save` failed with `localStorage: The operation is insecure.`
   and exit 2, and wrote nothing. It now writes `{"cookies": [], "origins": []}`, as
   `playwright-cli` does. (F33)
+- **A session name over 255 characters is a usage error.** It used to reach `mkdir` and fail with
+  a raw `ENAMETOOLONG` and exit 2. It now fails with the session-name usage message, which gives
+  the limit, and exit 1. Every name that worked still works. (F35)
 
 ## [0.8.2] — 2026-09-27
 

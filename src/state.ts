@@ -50,8 +50,12 @@ export function profileDir(name: string): string {
   return join(profilesRoot(), name);
 }
 
+/** APFS's NAME_MAX. The name is ASCII, so characters are bytes; a longer
+ *  one failed in mkdir with a raw ENAMETOOLONG (F35). */
+const MAX_SESSION_NAME = 255;
+
 export function isValidSessionName(name: string): boolean {
-  return /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name);
+  return name.length <= MAX_SESSION_NAME && /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name);
 }
 
 /** Every filesystem path for a session goes through here, so this is where a
@@ -63,7 +67,7 @@ export function isValidSessionName(name: string): boolean {
 export function sessionDir(name: string): string {
   if (!isValidSessionName(name)) {
     throw new UserError(
-      `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got ${JSON.stringify(name)}`,
+      `usage: session name may use only letters, digits, '.', '_' and '-', must not start with '.' or '-', and must be at most ${MAX_SESSION_NAME} characters, got ${JSON.stringify(name)}`,
     );
   }
   return join(sessionsRoot(), name);

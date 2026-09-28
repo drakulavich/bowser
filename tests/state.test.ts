@@ -44,6 +44,11 @@ describe("sessionDir rejects a name that is not one path segment", () => {
   test("an ordinary name still resolves under the sessions root", () => {
     expect(sessionDir("s1")).toBe(join(sessionsRoot(), "s1"));
   });
+  // F35: a name longer than APFS's NAME_MAX failed in mkdir with ENAMETOOLONG.
+  test("a 256-character name is refused; 255 is the longest accepted", () => {
+    expect(() => sessionDir("s".repeat(256))).toThrow(/at most 255 characters/);
+    expect(sessionDir("s".repeat(255))).toBe(join(sessionsRoot(), "s".repeat(255)));
+  });
 });
 
 // Tests redirect HOME in beforeAll, after src is imported. A path captured at
