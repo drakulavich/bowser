@@ -4,6 +4,7 @@
 
 import type { Command } from "../cli/registry.ts";
 import { fillScript, type FillOutcome } from "../page-scripts.ts";
+import type { KeyModifier } from "../daemon/protocol.ts";
 import type { Ref } from "../state.ts";
 import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext } from "./context.ts";
 import { UserError } from "../errors.ts";
@@ -117,11 +118,48 @@ export async function cmdType(ctx: CommandContext, text: string): Promise<string
   });
 }
 
-export async function cmdPress(ctx: CommandContext, key: string): Promise<string> {
-  if (!key) throw new UserError("usage: bowser press <key>");
+/** The named keys Bun.WebView can press (Bun 1.4.2); any other key must be
+ *  one character. */
+const NAMED_KEYS = [
+  "Enter", "Tab", "Space", "Backspace", "Delete", "Escape",
+  "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown",
+];
+/** playwright-cli's modifier names, case and all. bowser runs on macOS
+ *  only, so ControlOrMeta is Meta. */
+const MODIFIERS: Record<string, KeyModifier> = {
+  Shift: "Shift", Control: "Control", Alt: "Alt", Meta: "Meta", ControlOrMeta: "Meta",
+};
+
+/** Splits playwright-cli's `Modifier+…+Key` (#55). The key is the last word,
+ *  so `Shift++` is Shift with `+`. */
+function parseKey(input: string): { key: string; modifiers: KeyModifier[] } {
+  const parts = input.split("+");
+  // A trailing "+" key splits into two empty words: `+` gives ["", ""].
+  if (parts.length > 1 && parts.at(-1) === "" && parts.at(-2) === "") parts.splice(-2, 2, "+");
+  const key = parts.pop()!;
+  const modifiers: KeyModifier[] = [];
+  for (const word of parts) {
+    const m = MODIFIERS[word];
+    if (!m) {
+      throw new UserError(`usage: bowser press: unknown modifier '${word}' in '${input}'; use Shift, Control, Alt, Meta or ControlOrMeta`);
+    }
+    if (modifiers.includes(m)) throw new UserError(`usage: bowser press: modifier '${word}' repeated in '${input}'`);
+    modifiers.push(m);
+  }
+  if ([...key].length !== 1 && !NAMED_KEYS.includes(key)) {
+    throw new UserError(
+      `usage: bowser press: WebKit cannot press '${key}'; use one character or ${NAMED_KEYS.slice(0, -1).join(", ")} or ${NAMED_KEYS.at(-1)}`,
+    );
+  }
+  return { key, modifiers };
+}
+
+export async function cmdPress(ctx: CommandContext, input: string): Promise<string> {
+  if (!input) throw new UserError("usage: bowser press <key>");
+  const { key, modifiers } = parseKey(input);
   return withPageClient(ctx, async (c) => {
-    await c.request("press", [key]);
-    return replyPage(ctx, c, { ok: true, key }, `pressed ${key}`);
+    await c.request("press", modifiers.length ? [key, modifiers] : [key]);
+    return replyPage(ctx, c, { ok: true, key: input }, `pressed ${input}`);
   });
 }
 
@@ -209,7 +247,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "press",
-    summary: "Press a key (e.g. Enter, Tab)",
+    summary: "Press a key or a combination (e.g. Enter, Tab, Shift+Tab, Meta+a)",
     positional: [{ name: "key", required: true }],
     flags: [],
     run: (ctx, a) => cmdPress(ctx, a.positional[0] ?? ""),

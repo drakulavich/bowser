@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
 import { ACTS, createHandler } from "../src/daemon/server.ts";
 import type { Op } from "../src/daemon/protocol.ts";
-import { NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
+import { KEY_WATCH, keyCommandScript, NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -22,7 +22,7 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     evaluate: async (expr) => { calls.push(["evaluate", [expr]]); return undefined; },
     click: async (s) => { calls.push(["click", [s]]); },
     type: async (t) => { calls.push(["type", [t]]); },
-    press: async (k) => { calls.push(["press", [k]]); },
+    press: async (k, o) => { calls.push(["press", o ? [k, o] : [k]]); },
     resize: async (w, h) => { calls.push(["resize", [w, h]]); },
     goBack: async () => { calls.push(["goBack", []]); },
     goForward: async () => { calls.push(["goForward", []]); },
@@ -237,6 +237,49 @@ describe("wrapView navigation watch", () => {
     await b.press("Enter");
     await b.press("t");
     expect(v.calls.filter(([op]) => op === "press")).toEqual([["press", ["\t"]], ["press", ["Enter"]], ["press", ["t"]]]);
+  });
+
+  // #55: WebKit gets a modifier with the key, and Tab stays the tab character.
+  test("press with modifiers passes them to the view", async () => {
+    const v = fakeView();
+    const b = wrapView(v, fast);
+    await b.press("Tab", ["Shift"]);
+    await b.press("ArrowLeft", ["Meta"]);
+    expect(v.calls.filter(([op]) => op === "press")).toEqual([
+      ["press", ["\t", { modifiers: ["Shift"] }]],
+      ["press", ["ArrowLeft", { modifiers: ["Meta"] }]],
+    ]);
+  });
+
+  // #55: Bun.WebView sends Meta+A/Z as key events only; macOS runs them as
+  // menu commands, which WebKit never sees. bowser runs the command itself,
+  // unless the page cancelled the keydown (measured on WebKit, Bun 1.4.2).
+  for (const [key, mods, command] of [
+    ["a", ["Meta"], "selectAll"],
+    ["A", ["Meta"], "selectAll"],
+    ["z", ["Meta"], "undo"],
+    ["z", ["Shift", "Meta"], "redo"],
+  ] as const) {
+    test(`${mods.join("+")}+${key} runs ${command} after the key, when the page let the keydown through`, async () => {
+      const v = fakeView();
+      const b = wrapView(v, fast);
+      await b.press(key, [...mods]);
+      const seen = v.calls.filter(([op, args]) => op === "press" || (op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT));
+      expect(seen).toEqual([
+        ["evaluate", [KEY_WATCH]],
+        ["press", [key, { modifiers: [...mods] }]],
+        ["evaluate", [keyCommandScript(command)]],
+      ]);
+    });
+  }
+
+  test("other combinations run no command: Control+a, Shift+Meta+a, Meta+c", async () => {
+    const v = fakeView();
+    const b = wrapView(v, fast);
+    await b.press("a", ["Control"]);
+    await b.press("a", ["Shift", "Meta"]);
+    await b.press("c", ["Meta"]);
+    expect(v.calls.filter(([op, args]) => op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT)).toEqual([]);
   });
 
   test("press Tab still goes through the watch", async () => {

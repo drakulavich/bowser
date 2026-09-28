@@ -25,6 +25,7 @@
     <div id="ariaon" role="checkbox" aria-checked="true" tabindex="0">AriaOn</div>
     <div id="ariamixed" role="checkbox" aria-checked="mixed" tabindex="0">AriaMixed</div>
     <div id="ariaradio" role="radio" aria-checked="true" tabindex="0">AriaRadio</div>
+    <input id="guard" aria-label="Guard" />
   </main>
   <script>
     // Every click and keydown, as "click:<id>" and "keydown:<key>:<trusted>",
@@ -39,6 +40,8 @@
       }
     }, true);
     document.addEventListener("keydown", (e) => window.log.push("keydown:" + e.key + ":" + e.isTrusted), true);
+    // A page shortcut that takes Meta+A for itself: the browser's select-all must not run.
+    document.getElementById("guard").addEventListener("keydown", (e) => { if (e.metaKey && e.key === "a") e.preventDefault(); });
   </script>
 </body>
 </html>

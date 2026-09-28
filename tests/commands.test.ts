@@ -988,6 +988,47 @@ describe("press", () => {
     await cmdPress({ ...ctx(), connect: async () => c }, "Enter");
     expect(c.calls).toContainEqual(["press", ["Enter"]]);
   });
+
+  // #55: playwright-cli's key combinations. The key goes to the daemon with
+  // its modifiers, ControlOrMeta as Meta (bowser runs on macOS only).
+  for (const [input, sent] of [
+    ["Shift+Tab", ["Tab", ["Shift"]]],
+    ["Control+a", ["a", ["Control"]]],
+    ["Meta+ArrowLeft", ["ArrowLeft", ["Meta"]]],
+    ["ControlOrMeta+a", ["a", ["Meta"]]],
+    ["Shift+Meta+z", ["z", ["Shift", "Meta"]]],
+    ["Control+Alt+Shift+Meta+Tab", ["Tab", ["Control", "Alt", "Shift", "Meta"]]],
+    ["Shift++", ["+", ["Shift"]]],
+    ["+", ["+"]],
+    ["Enter", ["Enter"]],
+  ] as const) {
+    test(`${input} is sent as ${JSON.stringify(sent)}`, async () => {
+      const c = fakeClient({});
+      const out = await cmdPress({ ...ctx(), connect: async () => c }, input);
+      expect(c.calls.filter(([op]) => op === "press")).toEqual([["press", sent as unknown as unknown[]]]);
+      expect(out).toContain(`pressed ${input}`);
+    });
+  }
+
+  for (const [input, message] of [
+    ["shift+Tab", `usage: bowser press: unknown modifier 'shift' in 'shift+Tab'; use Shift, Control, Alt, Meta or ControlOrMeta`],
+    ["Cmd+a", `usage: bowser press: unknown modifier 'Cmd' in 'Cmd+a'; use Shift, Control, Alt, Meta or ControlOrMeta`],
+    ["Shift+Shift+a", `usage: bowser press: modifier 'Shift' repeated in 'Shift+Shift+a'`],
+    ["F1", `usage: bowser press: WebKit cannot press 'F1'; use one character or Enter, Tab, Space, Backspace, Delete, Escape, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, PageUp or PageDown`],
+    ["Shift", `usage: bowser press: WebKit cannot press 'Shift'; use one character or Enter, Tab, Space, Backspace, Delete, Escape, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, PageUp or PageDown`],
+    ["Control+", `usage: bowser press: WebKit cannot press ''; use one character or Enter, Tab, Space, Backspace, Delete, Escape, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, PageUp or PageDown`],
+  ] as const) {
+    test(`${input} is a usage error that reaches no daemon`, async () => {
+      let connects = 0;
+      const err = await cmdPress({ ...ctx(), connect: async () => { connects++; return fakeClient({}); } }, input).then(
+        () => { throw new Error("expected a failure"); },
+        (e: unknown) => e as Error,
+      );
+      expect(err.message).toBe(message);
+      expect(reportFailure(err).code).toBe(1);
+      expect(connects).toBe(0);
+    });
+  }
 });
 
 describe("hover", () => {

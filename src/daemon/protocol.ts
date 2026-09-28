@@ -6,6 +6,10 @@
 // Wire format is unchanged from before this file existed: newline-delimited
 // JSON, requests `{ id, op, args }`, responses `{ id, ok, result | error }`.
 
+/** A modifier held for `press`: Bun.WebView's names, which are also
+ *  playwright-cli's (ControlOrMeta is resolved before it gets here). */
+export type KeyModifier = "Shift" | "Control" | "Alt" | "Meta";
+
 /** A dialog the page opened. Only a prompt has a `defaultValue`. */
 export interface DialogState {
   type: "alert" | "confirm" | "prompt";
@@ -46,7 +50,7 @@ export interface DaemonOps {
   evaluate:         { args: [expr: string];                              result: unknown };
   click:            { args: [selector: string];                          result: void };
   type:             { args: [text: string];                              result: void };
-  press:            { args: [key: string];                               result: void };
+  press:            { args: [key: string, modifiers?: KeyModifier[]];    result: void };
   hover:            { args: [selector: string];                          result: void };
   select:           { args: [selector: string, value: string];           result: boolean };
   check:            { args: [selector: string];                          result: void };

@@ -13,6 +13,15 @@ All notable changes to this project are documented here. This project follows
   (`usage: bowser select <ref> <value>`) and exit code 1, like `playwright-cli`. An explicitly
   empty argument (`select e3 ""`, `fill e2 ""`, `localstorage-set k ""`) still runs, as it does
   in `playwright-cli`. (#60)
+- **`press` takes key combinations, as `playwright-cli` does.** `bowser press Shift+Tab` used to
+  fail with "must be a virtual key name". `press` now takes `Modifier+…+Key` with `Shift`,
+  `Control`, `Alt`, `Meta` and `ControlOrMeta` (`Meta` on macOS). Measured on WebKit: `Shift+Tab`
+  moves focus back, `Meta+a` selects all, `Meta+z`/`Shift+Meta+z` undo and redo, `Control+a` and
+  `Meta+ArrowLeft` move to the line start, `Alt+Backspace` deletes a word. `Bun.WebView` sends
+  `Meta+a`/`Meta+z` as bare key events, so bowser runs the select-all, undo or redo itself unless
+  the page cancelled the keydown. A key WebKit cannot press (`F1`, `Shift` alone, `KeyA`) and an
+  unknown modifier (`shift`, `Cmd`) now fail with `usage:` and exit 1 instead of exit 2.
+  `Meta+c`/`x`/`v` fire the keydown but do not touch the clipboard. (#55)
 
 ## [0.8.2] — 2026-09-27
 

@@ -17,7 +17,7 @@ import { join } from "node:path";
 
 import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
-import { cmdCheck, cmdClick, cmdPress, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdPress, cmdSelect, cmdType, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -101,6 +101,70 @@ runOrSkip("e2e: actions on WebKit", () => {
       expect(await js("a.value")).toBe(`"x"`);
       await cmdPress(ctx, "Backspace");
       expect(await js("[document.activeElement.id, a.value]")).toBe(`["a",""]`);
+    });
+  });
+
+  // #55: playwright-cli's key combinations, read back from the page. The
+  // expected results are what playwright-cli 0.1.13 does on WebKit, macOS.
+  describe("#55: press with modifiers", () => {
+    /** Focuses `id` with "hello world" in it and the caret after "hel". */
+    const caret = (id: string) =>
+      js(`(() => { const el = document.getElementById(${JSON.stringify(id)}); el.value = "hello world"; el.focus(); el.setSelectionRange(3, 3); return 1; })()`);
+    const where = () => js("[document.activeElement.id, document.activeElement.selectionStart, document.activeElement.selectionEnd, document.activeElement.value]");
+
+    test("Shift+Tab moves focus back to the previous field", async () => {
+      await cmdClick(ctx, await ref("B"));
+      await cmdPress(ctx, "Shift+Tab");
+      expect(await js("[document.activeElement.id, a.value, b.value]")).toBe(`["a","",""]`);
+      expect(await log()).toContain("keydown:Tab:true");
+    });
+
+    for (const combo of ["Meta+a", "ControlOrMeta+a"]) {
+      test(`${combo} selects all the text in the field; the next key replaces it`, async () => {
+        await caret("a");
+        await cmdPress(ctx, combo);
+        expect(await where()).toBe(`["a",0,11,"hello world"]`);
+        await cmdPress(ctx, "x");
+        expect(await where()).toBe(`["a",1,1,"x"]`);
+      });
+    }
+
+    test("Meta+a leaves the selection alone when the page cancels the keydown", async () => {
+      await caret("guard");
+      await cmdPress(ctx, "Meta+a");
+      expect(await where()).toBe(`["guard",3,3,"hello world"]`);
+    });
+
+    test("Control+a moves the caret to the start of the line, as on macOS", async () => {
+      await caret("a");
+      await cmdPress(ctx, "Control+a");
+      expect(await where()).toBe(`["a",0,0,"hello world"]`);
+    });
+
+    test("Meta+ArrowLeft and Shift+Meta+ArrowRight move and extend the selection", async () => {
+      await caret("a");
+      await cmdPress(ctx, "Meta+ArrowRight");
+      expect(await where()).toBe(`["a",11,11,"hello world"]`);
+      await cmdPress(ctx, "Meta+ArrowLeft");
+      await cmdPress(ctx, "Shift+Meta+ArrowRight");
+      expect(await where()).toBe(`["a",0,11,"hello world"]`);
+    });
+
+    test("Alt+Backspace deletes the word before the caret", async () => {
+      await caret("a");
+      await cmdPress(ctx, "Meta+ArrowRight");
+      await cmdPress(ctx, "Alt+Backspace");
+      expect(await where()).toBe(`["a",6,6,"hello "]`);
+    });
+
+    test("Meta+z undoes typing and Shift+Meta+z redoes it", async () => {
+      await caret("a");
+      await cmdType(ctx, "XYZ");
+      expect(await where()).toBe(`["a",6,6,"helXYZlo world"]`);
+      await cmdPress(ctx, "Meta+z");
+      expect(await js("a.value")).toBe(`"hello world"`);
+      await cmdPress(ctx, "Shift+Meta+z");
+      expect(await js("a.value")).toBe(`"helXYZlo world"`);
     });
   });
 

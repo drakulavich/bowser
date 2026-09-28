@@ -2,9 +2,10 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
-  hoverScript, selectScript, setCheckedScript,
+  KEY_WATCH, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  hoverScript, keyCommandScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
+import type { KeyModifier } from "./daemon/protocol.ts";
 
 export interface BrowserOptions {
   width?: number;
@@ -32,7 +33,7 @@ export interface ViewLike {
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
   type(text: string): Promise<void>;
-  press(key: string): Promise<void>;
+  press(key: string, options?: { modifiers: KeyModifier[] }): Promise<void>;
   resize(width: number, height: number): Promise<void>;
   screenshot?(): Promise<Blob | string>;
   reload?(): Promise<void>;
@@ -89,7 +90,7 @@ export interface Browser {
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
   type(text: string): Promise<void>;
-  press(key: string): Promise<void>;
+  press(key: string, modifiers?: KeyModifier[]): Promise<void>;
   hover(selector: string): Promise<void>;
   /** False when no option's value or label is `value`; nothing changed. */
   select(selector: string, value: string): Promise<boolean>;
@@ -256,6 +257,20 @@ function pressKey(key: string): string {
   return key === "Tab" ? "\t" : key;
 }
 
+/** The editing command macOS runs for a menu shortcut, which Bun.WebView
+ *  delivers as a bare key event (#55; Playwright's macEditingCommands has
+ *  the same three). The modifiers must match exactly: Shift+Meta+a is not
+ *  select-all. Meta+C/X/V are left alone: a page script cannot reach the
+ *  clipboard (execCommand("copy") answers false). */
+function menuCommand(key: string, modifiers: KeyModifier[]): "selectAll" | "undo" | "redo" | undefined {
+  const mods = [...modifiers].sort().join("+");
+  const k = key.toLowerCase();
+  if (mods === "Meta" && k === "a") return "selectAll";
+  if (mods === "Meta" && k === "z") return "undo";
+  if (mods === "Meta+Shift" && k === "z") return "redo";
+  return undefined;
+}
+
 /** Bun.WebView resolves click()/press()/goBack() when the input is delivered,
  *  ~30 ms before the page it triggers commits (measured on WebKit, local
  *  pages). `state` right after `click` therefore reported the old URL. The
@@ -420,7 +435,12 @@ export function wrapView(
     evaluate: (expr) => evaluate(expr),
     click: (selector) => guard(nav.act(() => view.click(selector))),
     type: (text) => guard(nav.act(() => view.type(text))),
-    press: (key) => guard(nav.act(() => view.press(pressKey(key)))),
+    press: (key, modifiers = []) => guard(nav.act(async () => {
+      const command = menuCommand(key, modifiers);
+      if (command) await evaluate(KEY_WATCH);
+      await view.press(pressKey(key), modifiers.length ? { modifiers } : undefined);
+      if (command) await evaluate(keyCommandScript(command));
+    })),
     // A page's change or mouse handler can navigate, so the page-script
     // actions go through the watch too (#51: a select whose onchange set
     // location.href left the next snapshot on the old page).
