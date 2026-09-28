@@ -169,7 +169,7 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
 // ---------------------------------------------------------------------------
 
 /** What the kicker needs: two calls on separate reply slots. */
-export interface Kicker {
+interface Kicker {
   evaluate(expr: string): Promise<unknown>;
   resize(width: number, height: number): Promise<void>;
   close?(): void;
@@ -242,11 +242,11 @@ export interface NavTiming {
   /** Cap on waiting for a navigation that did begin. */
   settleMs: number;
 }
-export const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
+const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 
 /** How long `close` waits, after leaving a persistent profile's page, for
  *  WebKit to commit localStorage: twice its 500 ms transaction window. */
-export const STORAGE_COMMIT_WAIT_MS = 1000;
+const STORAGE_COMMIT_WAIT_MS = 1000;
 
 /** The key `view.press` is given for a key name (F11). Bun maps a named key to
  *  a WebKit editing command where one exists, and "Tab" becomes "insert tab":

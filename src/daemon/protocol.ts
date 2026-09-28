@@ -11,7 +11,7 @@
 export type KeyModifier = "Shift" | "Control" | "Alt" | "Meta";
 
 /** A dialog the page opened. Only a prompt has a `defaultValue`. */
-export interface DialogState {
+interface DialogState {
   type: "alert" | "confirm" | "prompt";
   message: string;
   defaultValue?: string;
@@ -38,7 +38,7 @@ export interface PageState {
   profile?: string;
 }
 
-export interface DaemonOps {
+interface DaemonOps {
   /** Answers the daemon's bowser version (package.json). Every daemon
    *  through 0.7 answered "pong"; the client refuses both kinds (F2). */
   ping:             { args: [];                                          result: string;               urgent: true };
@@ -70,7 +70,7 @@ export type ArgsOf<O extends Op> = DaemonOps[O]["args"];
 export type ResultOf<O extends Op> = DaemonOps[O]["result"];
 
 /** Ops that must not queue behind a wedged operation. */
-export type UrgentOp = { [O in Op]: DaemonOps[O] extends { urgent: true } ? O : never }[Op];
+type UrgentOp = { [O in Op]: DaemonOps[O] extends { urgent: true } ? O : never }[Op];
 
 // The runtime mirror of the `urgent: true` markers. `satisfies` makes a
 // missing entry a compile error, so an op cannot be

@@ -168,7 +168,7 @@ export class DaemonNotAnswering extends Error {
  *  and restarting it quietly would drop its page (F2). A user error (exit 1).
  *  `answer` is what it said to `ping`: its version, or "pong" from every
  *  daemon before the version was sent. */
-export function otherVersion(session: string, answer: unknown): string {
+function otherVersion(session: string, answer: unknown): string {
   const v = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer) ? answer : "an older version";
   return `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`;
 }
@@ -184,16 +184,16 @@ function checked(client: DaemonClient, session: string, answer: unknown, opts: C
 /** Why a command refuses a session whose daemon ran and is gone: its page,
  *  refs and, for `--persistent`, its store went with it, and a new daemon
  *  started quietly would be an empty in-memory browser. A user error (exit 1). */
-export function browserExited(session: string): string {
+function browserExited(session: string): string {
   return `session '${session}' is not open (its browser exited); run 'bowser open'`;
 }
 
 /** Why bowser cannot start a daemon off macOS: its only engine is WebKit's
  *  Bun.WebView, which throws on other platforms. A user error (exit 1). */
-export const REQUIRES_MACOS = "bowser requires macOS (WebKit)";
+const REQUIRES_MACOS = "bowser requires macOS (WebKit)";
 
 /** What the Bun guard looks at in the running Bun. */
-export interface BunRuntime {
+interface BunRuntime {
   version: string;
   webView: boolean;
 }
@@ -202,7 +202,7 @@ export interface BunRuntime {
  *  npm does not enforce `engines.bun`, and on such a Bun the daemon would die
  *  unseen. A user error (exit 1). The floor is read from package.json, so the
  *  message follows it. */
-export function unsupportedBun(runtime: BunRuntime): string | undefined {
+function unsupportedBun(runtime: BunRuntime): string | undefined {
   const floor = pkg.engines.bun;
   if (runtime.webView && Bun.semver.satisfies(runtime.version, floor)) return undefined;
   return `bowser requires Bun ${floor} (found ${runtime.version})`;

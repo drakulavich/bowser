@@ -40,7 +40,7 @@ export function sessionsRoot(): string {
 /** Root of `open --persistent` profiles. Beside the sessions root, never
  *  inside a session directory: `close` deletes that one, and the profile must
  *  outlive it. Call-time for the same reason as sessionsRoot(). */
-export function profilesRoot(): string {
+function profilesRoot(): string {
   return join(process.env.HOME || homedir(), ".bowser", "profiles");
 }
 

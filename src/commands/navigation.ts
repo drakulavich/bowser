@@ -32,7 +32,7 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
  *  scheme (WebKit then times out on `localhost:3000`). Any URL with a real
  *  scheme passes through unchanged. Unlike playwright-cli, `127.0.0.1` gets
  *  `http://`: its `https://` only fails. */
-export function normalizeUrl(url: string): string {
+function normalizeUrl(url: string): string {
   if (!url || (URL.canParse(url) && !startsWithHostPort(url))) return url;
   let host = "";
   try {
