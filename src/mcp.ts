@@ -309,7 +309,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
 
   function schedule(id: unknown, params: unknown): void {
     const prepared = prepareToolCall(id, params);
-    if ("reply" in prepared) return send(prepared.reply);
+    if ("reply" in prepared) { void send(prepared.reply); return; }
     const { argv, session } = prepared;
     const token = { cancelled: false };
     inFlight.set(id, token);
@@ -337,7 +337,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     try {
       req = JSON.parse(line);
     } catch {
-      return send(jsonRpcError(null, -32700, "Parse error"));
+      { void send(jsonRpcError(null, -32700, "Parse error")); return; }
     }
     const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
     const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
