@@ -11,8 +11,6 @@ import { join } from "node:path";
 import { reportFailure, run } from "../src/cli.ts";
 import { findCommand } from "../src/cli/registry.ts";
 import { readStdin, type CommandContext } from "../src/commands/context.ts";
-import { cmdSelect } from "../src/commands/interaction.ts";
-import { cmdLocalStorageSet } from "../src/commands/web-storage.ts";
 import { connectOrSpawn, pidPath } from "../src/daemon/client.ts";
 import { toArgv } from "../src/mcp.ts";
 import { resolveRefScript } from "../src/page-scripts.ts";
@@ -122,6 +120,9 @@ const USER_ERRORS: Case[] = [
   { argv: ["localstorage-get", ""], stderr: "usage: bowser localstorage-get <key>" },
   { argv: ["sessionstorage-set", ""], stderr: "usage: bowser sessionstorage-set <key> <value>" },
   { argv: ["sessionstorage-delete", ""], stderr: "usage: bowser sessionstorage-delete <key>" },
+  // #60: a missing required positional, refused by run() from the registry.
+  { argv: ["select", "e3"], stderr: "usage: bowser select <ref> <value>" },
+  { argv: ["localstorage-set", "k"], stderr: "usage: bowser localstorage-set <key> <value>" },
 ];
 
 // Runtime errors: the page, the daemon or the file system failed, not the
@@ -157,14 +158,6 @@ describe("user errors raised outside a command's run", () => {
       return reportFailure(err);
     }
   };
-
-  // run() passes "" for a missing positional, so only a direct call reaches these.
-  test("select and localstorage-set with no value", async () => {
-    const ctx: CommandContext = { session: "codes", json: false, connect: async () => fakeClient() };
-    const missing = undefined as unknown as string;
-    expect(await code(cmdSelect(ctx, "e3", missing))).toEqual({ stderr: "bowser: usage: bowser select <ref> <value>", code: 1 });
-    expect(await code(cmdLocalStorageSet(ctx, "k", missing))).toEqual({ stderr: "bowser: usage: bowser localstorage-set <key> <value>", code: 1 });
-  });
 
   test("fill --stdin from a terminal", async () => {
     expect(await code(readStdin({ isTTY: true }, async () => "x"))).toEqual({

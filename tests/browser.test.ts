@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
 import { ACTS, createHandler } from "../src/daemon/server.ts";
 import type { Op } from "../src/daemon/protocol.ts";
-import { NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
+import { KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -22,7 +22,7 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     evaluate: async (expr) => { calls.push(["evaluate", [expr]]); return undefined; },
     click: async (s) => { calls.push(["click", [s]]); },
     type: async (t) => { calls.push(["type", [t]]); },
-    press: async (k) => { calls.push(["press", [k]]); },
+    press: async (k, o) => { calls.push(["press", o ? [k, o] : [k]]); },
     resize: async (w, h) => { calls.push(["resize", [w, h]]); },
     goBack: async () => { calls.push(["goBack", []]); },
     goForward: async () => { calls.push(["goForward", []]); },
@@ -237,6 +237,49 @@ describe("wrapView navigation watch", () => {
     await b.press("Enter");
     await b.press("t");
     expect(v.calls.filter(([op]) => op === "press")).toEqual([["press", ["\t"]], ["press", ["Enter"]], ["press", ["t"]]]);
+  });
+
+  // #55: WebKit gets a modifier with the key, and Tab stays the tab character.
+  test("press with modifiers passes them to the view", async () => {
+    const v = fakeView();
+    const b = wrapView(v, fast);
+    await b.press("Tab", ["Shift"]);
+    await b.press("ArrowLeft", ["Meta"]);
+    expect(v.calls.filter(([op]) => op === "press")).toEqual([
+      ["press", ["\t", { modifiers: ["Shift"] }]],
+      ["press", ["ArrowLeft", { modifiers: ["Meta"] }]],
+    ]);
+  });
+
+  // #55: Bun.WebView sends Meta+A/Z as key events only; macOS runs them as
+  // menu commands, which WebKit never sees. bowser runs the command itself,
+  // unless the page cancelled the keydown (measured on WebKit, Bun 1.4.2).
+  for (const [key, mods, command] of [
+    ["a", ["Meta"], "selectAll"],
+    ["A", ["Meta"], "selectAll"],
+    ["z", ["Meta"], "undo"],
+    ["z", ["Shift", "Meta"], "redo"],
+  ] as const) {
+    test(`${mods.join("+")}+${key} runs ${command} after the key, when the page let the keydown through`, async () => {
+      const v = fakeView();
+      const b = wrapView(v, fast);
+      await b.press(key, [...mods]);
+      const seen = v.calls.filter(([op, args]) => op === "press" || (op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT));
+      expect(seen).toEqual([
+        ["evaluate", [KEY_WATCH]],
+        ["press", [key, { modifiers: [...mods] }]],
+        ["evaluate", [keyCommandScript(command)]],
+      ]);
+    });
+  }
+
+  test("other combinations run no command: Control+a, Shift+Meta+a, Meta+c", async () => {
+    const v = fakeView();
+    const b = wrapView(v, fast);
+    await b.press("a", ["Control"]);
+    await b.press("a", ["Shift", "Meta"]);
+    await b.press("c", ["Meta"]);
+    expect(v.calls.filter(([op, args]) => op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT)).toEqual([]);
   });
 
   test("press Tab still goes through the watch", async () => {
@@ -471,6 +514,34 @@ describe("wrapView interrupt", () => {
     const t0 = Date.now();
     await b.interrupt();
     expect(Date.now() - t0).toBeGreaterThanOrEqual(55);
+  });
+
+  // #48, measured on WebKit (Bun 1.4.2): before the first commit (url "")
+  // reload() does nothing and navigate() is refused while one is pending;
+  // the initial document still runs a script, and leaving it cancels the
+  // stuck navigation (-999).
+  test("before anything committed, the page leaves for about:blank instead of reloading", async () => {
+    const v = fakeView({
+      reload: async () => { v.calls.push(["reload", []]); },
+      evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); v.onNavigationFailed?.(new Error("-999")); return 1; },
+    });
+    v.url = "";
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    await b.interrupt();
+    expect(Date.now() - t0).toBeLessThan(30);
+    expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]]]);
+  });
+
+  test("before anything committed, an evaluate still pending (refused by WebKit) ends the interrupt", async () => {
+    const v = fakeView({
+      evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); throw new Error("Invalid state: an evaluate() is already pending"); },
+    });
+    v.url = "";
+    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+    const t0 = Date.now();
+    await b.interrupt();
+    expect(Date.now() - t0).toBeLessThan(30);
   });
 
   test("without a native reload it does nothing", async () => {

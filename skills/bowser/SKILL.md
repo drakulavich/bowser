@@ -39,7 +39,7 @@ Do **not** use for static HTTP fetches.
 | `bowser click <ref>` | Click an element by ref. A `[disabled]` one fails at once with exit 1 and is not clicked |
 | `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin`. Refuses a disabled or readonly field (exit 1). Sets `date`/`time`/`datetime-local`/`month`/`week`/`color` inputs directly (`fill e9 2024-01-02`); a value they do not keep, or text on `type=number`, fails with exit 1 |
 | `bowser type <text>` | Type into focused element. Prints `typed N characters` (`typed 1 character` for one), never the text; `--json` gives `{"ok":true,"length":N}` |
-| `bowser press <key>` | Press a keyboard key. `Tab` moves focus to the next field |
+| `bowser press <key>` | Press a keyboard key or a combination: `Tab` moves focus to the next field, `Shift+Tab` back; `Meta+a` selects all (macOS keys: `Control+a` goes to the line start). Modifiers: `Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`. No `F1`–`F12`, lone modifiers or key codes (`KeyA`): those fail with `usage:`. `Meta+c/x/v` do not reach the clipboard |
 | `bowser hover <ref>` | Hover an element |
 | `bowser select <ref> <value>` | Choose a `<select>` option by value or label (the first match in document order); no match fails with exit 1 and changes nothing |
 | `bowser check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox/radio. A `[disabled]` one fails (exit 1); `uncheck` on a checked radio fails (exit 1): select another option in its group. `aria-checked="mixed"` counts as unchecked for `check`, checked for `uncheck` |
@@ -73,7 +73,8 @@ Do **not** use for static HTTP fetches.
 
 Quote any argument with spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. An extra word
 fails the command with `usage: too many arguments for '<cmd>': expected <n>, received <m>` (exit 1),
-words after `--` included.
+words after `--` included. A missing argument fails with the command's usage line
+(`usage: bowser select <ref> <value>`, exit 1); an empty one (`""`) is a value.
 
 ## Snapshot Format
 

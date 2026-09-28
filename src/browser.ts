@@ -2,9 +2,10 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
-  hoverScript, selectScript, setCheckedScript,
+  KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  hoverScript, keyCommandScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
+import type { KeyModifier } from "./daemon/protocol.ts";
 
 export interface BrowserOptions {
   width?: number;
@@ -32,7 +33,7 @@ export interface ViewLike {
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
   type(text: string): Promise<void>;
-  press(key: string): Promise<void>;
+  press(key: string, options?: { modifiers: KeyModifier[] }): Promise<void>;
   resize(width: number, height: number): Promise<void>;
   screenshot?(): Promise<Blob | string>;
   reload?(): Promise<void>;
@@ -89,7 +90,7 @@ export interface Browser {
   evaluate(expr: string): Promise<unknown>;
   click(selector: string): Promise<void>;
   type(text: string): Promise<void>;
-  press(key: string): Promise<void>;
+  press(key: string, modifiers?: KeyModifier[]): Promise<void>;
   hover(selector: string): Promise<void>;
   /** False when no option's value or label is `value`; nothing changed. */
   select(selector: string, value: string): Promise<boolean>;
@@ -101,8 +102,9 @@ export interface Browser {
   forward(): Promise<void>;
   reload(): Promise<void>;
   close(): Promise<void>;
-  /** Try to free the view from a call that overran its budget: reload the
-   *  committed page. Resolves when the reload lands, or after settleMs. */
+  /** Try to free the view from a call that overran its budget: reload a
+   *  committed page or leave the initial document. Waits for the native call
+   *  to settle, then for a landing up to settleMs. */
   interrupt(): Promise<void>;
   /** Call `on` when a navigation starts and again when it lands. The daemon
    *  uses it to drop the page's one-shot dialog answer. One listener; a
@@ -256,6 +258,20 @@ function pressKey(key: string): string {
   return key === "Tab" ? "\t" : key;
 }
 
+/** The editing command macOS runs for a menu shortcut, which Bun.WebView
+ *  delivers as a bare key event (#55; Playwright's macEditingCommands has
+ *  the same three). The modifiers must match exactly: Shift+Meta+a is not
+ *  select-all. Meta+C/X/V are left alone: a page script cannot reach the
+ *  clipboard (execCommand("copy") answers false). */
+function menuCommand(key: string, modifiers: KeyModifier[]): "selectAll" | "undo" | "redo" | undefined {
+  const mods = [...modifiers].sort().join("+");
+  const k = key.toLowerCase();
+  if (mods === "Meta" && k === "a") return "selectAll";
+  if (mods === "Meta" && k === "z") return "undo";
+  if (mods === "Meta+Shift" && k === "z") return "redo";
+  return undefined;
+}
+
 /** Bun.WebView resolves click()/press()/goBack() when the input is delivered,
  *  ~30 ms before the page it triggers commits (measured on WebKit, local
  *  pages). `state` right after `click` therefore reported the old URL. The
@@ -369,12 +385,26 @@ function navigationWatch(
       await awaitNavigation(before, wasLoading);
       return result;
     },
-    /** Reload the committed page to free a stuck call; see Browser.interrupt. */
+    /** Reload the committed page, or leave the initial document, to free a
+     *  stuck call; see Browser.interrupt. */
     async interrupt(): Promise<void> {
-      if (typeof view.reload !== "function") return;
       const before = landed;
       try {
-        await view.reload();
+        if (view.url === "") {
+          // Nothing has committed yet: a first navigation from the initial
+          // document is stuck. reload() has no page to reload and does
+          // nothing, and navigate() is refused while one is pending
+          // (measured, Bun 1.4.2). The initial document still runs a
+          // script, and leaving it cancels the navigation with -999 (#48).
+          // The call goes to the view, not wrapView's queue: if an evaluate
+          // is pending WebKit refuses this one at once, where the queue
+          // would run it later over whatever page is there then.
+          await view.evaluate(LEAVE_INITIAL_DOCUMENT);
+        } else if (typeof view.reload === "function") {
+          await view.reload();
+        } else {
+          return;
+        }
       } catch {
         return;
       }
@@ -420,7 +450,12 @@ export function wrapView(
     evaluate: (expr) => evaluate(expr),
     click: (selector) => guard(nav.act(() => view.click(selector))),
     type: (text) => guard(nav.act(() => view.type(text))),
-    press: (key) => guard(nav.act(() => view.press(pressKey(key)))),
+    press: (key, modifiers = []) => guard(nav.act(async () => {
+      const command = menuCommand(key, modifiers);
+      if (command) await evaluate(KEY_WATCH);
+      await view.press(pressKey(key), modifiers.length ? { modifiers } : undefined);
+      if (command) await evaluate(keyCommandScript(command));
+    })),
     // A page's change or mouse handler can navigate, so the page-script
     // actions go through the watch too (#51: a select whose onchange set
     // location.href left the next snapshot on the old page).
@@ -476,8 +511,11 @@ export function wrapView(
     // that call by design, and nothing else that touches the view: the
     // daemon's serializer holds every other queued op until the stuck one
     // settles and this has landed. That is why it uses the native reload()
-    // alone and never evaluate(): an evaluate would queue behind the stuck
-    // one (wrapView's queue) and never run, and so would RELOAD's fallback.
+    // and never wrapView's evaluate(): an evaluate would queue behind the
+    // stuck one and never run, and so would RELOAD's fallback. The one
+    // exception is a view where nothing has committed, where reload() does
+    // nothing: it asks the view directly, which WebKit refuses at once
+    // while another evaluate is pending (#48).
     interrupt: () => guard(nav.interrupt()),
     get kickerOpened() { return stall.opened; },
     watchNavigation(on) {

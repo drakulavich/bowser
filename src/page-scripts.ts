@@ -671,6 +671,9 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
 export const RELOAD = "location.reload()";
+/** Recovery before the first commit (#48): the initial empty document
+ *  leaves itself, which cancels a navigation stuck there. */
+export const LEAVE_INITIAL_DOCUMENT = "location.replace('about:blank')";
 /** Evaluated in browser.ts's kicker view, never in the page (oven-sh/bun#44134). */
 export const NO_OP = "0";
 
@@ -701,6 +704,27 @@ export const NAV_ARM = String.raw`(() => {
   s.count = 0;
 })()`;
 export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
+
+// `press Meta+a` and friends (#55). Bun.WebView sends Meta+A/Z to WebKit as
+// key events only; on macOS those shortcuts are menu commands, which the page
+// never gets (measured, Bun 1.4.2). KEY_WATCH keeps the next keydown, seen
+// first in the capture phase; keyCommandScript then runs the editing command
+// the menu would, unless a page handler cancelled that keydown. It is the
+// same table and the same cancel rule as Playwright's WebKit on macOS.
+export const KEY_WATCH = String.raw`(() => {
+  const KEY = Symbol.for('bowser.key');
+  window[KEY] = null;
+  addEventListener('keydown', (e) => { window[KEY] = e; }, { capture: true, once: true });
+})()`;
+
+export function keyCommandScript(command: "selectAll" | "undo" | "redo"): string {
+  return `(() => {
+  const KEY = Symbol.for('bowser.key');
+  const e = window[KEY];
+  window[KEY] = null;
+  if (e && !e.defaultPrevented) document.execCommand(${JSON.stringify(command)});
+})()`;
+}
 
 export function hoverScript(selector: string): string {
   return `(() => {

@@ -46,7 +46,6 @@ async function storageSet(
   value: string,
 ): Promise<string> {
   if (!key) throw new UserError(`usage: bowser ${command} <key> <value>`);
-  if (value === undefined) throw new UserError(`usage: bowser ${command} <key> <value>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [
       storageSetScript(area, key, value),

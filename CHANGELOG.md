@@ -3,6 +3,32 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A missing required argument is a usage error for every command.** `bowser select e3` and
+  `bowser localstorage-set k` used to run with an empty value, because the missing word reached
+  the command as `""`. They now fail before connecting, with the command's usage line
+  (`usage: bowser select <ref> <value>`) and exit code 1, like `playwright-cli`. An explicitly
+  empty argument (`select e3 ""`, `fill e2 ""`, `localstorage-set k ""`) still runs, as it does
+  in `playwright-cli`. (#60)
+- **`press` takes key combinations, as `playwright-cli` does.** `bowser press Shift+Tab` used to
+  fail with "must be a virtual key name". `press` now takes `Modifier+…+Key` with `Shift`,
+  `Control`, `Alt`, `Meta` and `ControlOrMeta` (`Meta` on macOS). Measured on WebKit: `Shift+Tab`
+  moves focus back, `Meta+a` selects all, `Meta+z`/`Shift+Meta+z` undo and redo, `Control+a` and
+  `Meta+ArrowLeft` move to the line start, `Alt+Backspace` deletes a word. `Bun.WebView` sends
+  `Meta+a`/`Meta+z` as bare key events, so bowser runs the select-all, undo or redo itself unless
+  the page cancelled the keydown. A key WebKit cannot press (`F1`, `Shift` alone, `KeyA`) and an
+  unknown modifier (`shift`, `Cmd`) now fail with `usage:` and exit 1 instead of exit 2.
+  `Meta+c`/`x`/`v` fire the keydown but do not touch the clipboard. (#55)
+- **A first `goto` whose server never answers no longer leaves the session stuck.** In a session
+  that had not loaded a page yet, the recovery after a timeout reloaded the page, but WebKit has
+  nothing to reload before the first page commits, so the reload did nothing; and `Bun.WebView`
+  refuses a new navigation while one is pending. Every later command then failed at its budget
+  until `close`. Recovery now has such a page leave for `about:blank`, which cancels the stuck
+  navigation; the next `goto` works once recovery has run. (#48)
+
 ## [0.8.2] — 2026-09-27
 
 ### Fixed

@@ -29,7 +29,8 @@ import {
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
-import { fillScript, resolveRefScript, runCodeScript } from "../src/page-scripts.ts";
+import { fillScript, resolveRefScript, runCodeScript, storageSetScript } from "../src/page-scripts.ts";
+import { usageOf } from "../src/cli/help.ts";
 
 /** An evaluate handler that answers the ref-resolve script the way the page
  *  would: the element's fresh selector, or null when it is gone. Any other
@@ -319,6 +320,46 @@ describe("too many arguments", () => {
       expect(reportFailure(err).code).toBe(1);
     });
   }
+
+  // #60: a missing required positional is a usage error before the command
+  // runs. run() used to pass "" for it, so `select e3` and
+  // `localstorage-set k` reached the daemon with an empty value.
+  for (const c of COMMANDS) {
+    const required = c.positional.filter((p) => p.required).length;
+    if (required === 0) continue;
+    test(`${c.name} with ${required - 1} positionals fails with its usage, connects to nothing, exits 1`, async () => {
+      const { seen, base } = counting();
+      const words = Array.from({ length: required - 1 }, (_, i) => `w${i}`);
+      const err = await run(["-s", session, c.name, ...words], base).then(
+        () => { throw new Error("expected a failure"); },
+        (e: unknown) => e,
+      );
+      expect((err as Error).message).toBe(`usage: bowser ${usageOf(c)}`);
+      expect(seen.connects).toBe(0);
+      expect(reportFailure(err).code).toBe(1);
+    });
+  }
+
+  test("select e3 and localstorage-set k name their usage", async () => {
+    const { base } = counting();
+    await expect(run(["-s", session, "select", "e3"], base)).rejects.toThrow("usage: bowser select <ref> <value>");
+    await expect(run(["-s", session, "localstorage-set", "k"], base)).rejects.toThrow(
+      "usage: bowser localstorage-set <key> <value>",
+    );
+  });
+
+  // An empty word is a value, as in playwright-cli (measured, 0.1.13):
+  // `select e2 ""`, `fill e3 ""` and `localstorage-set k ""` all run there.
+  test("an explicitly empty value still runs: select, fill, localstorage-set", async () => {
+    await seedRefs();
+    const c = fakeClient({ evaluate: resolving({ e2: "input", e3: "select" }), select: () => true });
+    const base = { connect: async () => c };
+    expect(await run(["select", "e3", ""], base)).toContain(`selected e3 -> ""`);
+    expect(c.calls).toContainEqual(["select", ["select", ""]]);
+    expect(await run(["fill", "e2", ""], base)).toContain("filled e2");
+    expect(await run(["-s", session, "localstorage-set", "k", ""], base)).toContain("set k");
+    expect(c.calls).toContainEqual(["evaluate", [storageSetScript("localStorage", "k", "")]]);
+  });
 
   test("words after -- still count: fill e1 -- a b is too many", async () => {
     const { seen, base } = counting();
@@ -947,6 +988,47 @@ describe("press", () => {
     await cmdPress({ ...ctx(), connect: async () => c }, "Enter");
     expect(c.calls).toContainEqual(["press", ["Enter"]]);
   });
+
+  // #55: playwright-cli's key combinations. The key goes to the daemon with
+  // its modifiers, ControlOrMeta as Meta (bowser runs on macOS only).
+  for (const [input, sent] of [
+    ["Shift+Tab", ["Tab", ["Shift"]]],
+    ["Control+a", ["a", ["Control"]]],
+    ["Meta+ArrowLeft", ["ArrowLeft", ["Meta"]]],
+    ["ControlOrMeta+a", ["a", ["Meta"]]],
+    ["Shift+Meta+z", ["z", ["Shift", "Meta"]]],
+    ["Control+Alt+Shift+Meta+Tab", ["Tab", ["Control", "Alt", "Shift", "Meta"]]],
+    ["Shift++", ["+", ["Shift"]]],
+    ["+", ["+"]],
+    ["Enter", ["Enter"]],
+  ] as const) {
+    test(`${input} is sent as ${JSON.stringify(sent)}`, async () => {
+      const c = fakeClient({});
+      const out = await cmdPress({ ...ctx(), connect: async () => c }, input);
+      expect(c.calls.filter(([op]) => op === "press")).toEqual([["press", sent as unknown as unknown[]]]);
+      expect(out).toContain(`pressed ${input}`);
+    });
+  }
+
+  for (const [input, message] of [
+    ["shift+Tab", `usage: bowser press: unknown modifier 'shift' in 'shift+Tab'; use Shift, Control, Alt, Meta or ControlOrMeta`],
+    ["Cmd+a", `usage: bowser press: unknown modifier 'Cmd' in 'Cmd+a'; use Shift, Control, Alt, Meta or ControlOrMeta`],
+    ["Shift+Shift+a", `usage: bowser press: modifier 'Shift' repeated in 'Shift+Shift+a'`],
+    ["F1", `usage: bowser press: WebKit cannot press 'F1'; use one character or Enter, Tab, Space, Backspace, Delete, Escape, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, PageUp or PageDown`],
+    ["Shift", `usage: bowser press: WebKit cannot press 'Shift'; use one character or Enter, Tab, Space, Backspace, Delete, Escape, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, PageUp or PageDown`],
+    ["Control+", `usage: bowser press: WebKit cannot press ''; use one character or Enter, Tab, Space, Backspace, Delete, Escape, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Home, End, PageUp or PageDown`],
+  ] as const) {
+    test(`${input} is a usage error that reaches no daemon`, async () => {
+      let connects = 0;
+      const err = await cmdPress({ ...ctx(), connect: async () => { connects++; return fakeClient({}); } }, input).then(
+        () => { throw new Error("expected a failure"); },
+        (e: unknown) => e as Error,
+      );
+      expect(err.message).toBe(message);
+      expect(reportFailure(err).code).toBe(1);
+      expect(connects).toBe(0);
+    });
+  }
 });
 
 describe("hover", () => {
