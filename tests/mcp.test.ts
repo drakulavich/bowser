@@ -4,7 +4,7 @@
 // exercise the full request/response surface with NO real stdio or daemon.
 
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -659,4 +659,45 @@ describe("MCP server: tool arguments are checked against the tool's schema", () 
       expect(argv).toEqual(expected);
     });
   }
+});
+
+// F41: a client that stops reading is gone. The server's next write failed
+// with EPIPE, which crashed it (exit 1, a stack trace on stderr), and a call
+// queued behind the running one still ran after the client had left. It now
+// exits 0 at the first failed write, before a queued call starts.
+describe("bowser mcp exits when its client is gone", () => {
+  const HELPER = join(import.meta.dir, "helpers", "mcp-fake-daemon.ts");
+
+  test("stdout closed during a call: exit 0, no EPIPE trace, the queued call never runs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bowser-mcp-epipe-"));
+    const log = join(dir, "eval.log");
+    const proc = Bun.spawn([process.execPath, HELPER], {
+      env: { ...process.env, HOME: dir, MCP_FAKE_EVAL_LOG: log, MCP_FAKE_EVAL_MS: "500" },
+      stdin: "pipe", stdout: "pipe", stderr: "pipe",
+    });
+    const ran = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
+    try {
+      const call = (id: number, expression: string) =>
+        proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "eval", arguments: { session: "gone", expression } } }) + "\n");
+      call(1, "first");
+      call(2, "queued");
+      proc.stdin.flush();
+      const deadline = Date.now() + 5000;
+      while (ran().length === 0 && Date.now() < deadline) await Bun.sleep(10);
+      expect(ran()).toEqual(["first"]);
+      // The client leaves: it closes its end of the server's stdout, then stdin.
+      await proc.stdout.cancel();
+      proc.stdin.end();
+      const code = await Promise.race([proc.exited, Bun.sleep(5000).then(() => "still running")]);
+      expect(code).toBe(0);
+      // Give a queued call that was (wrongly) started time to reach the page.
+      await Bun.sleep(100);
+      expect(ran()).toEqual(["first"]);
+      expect(await new Response(proc.stderr).text()).not.toContain("EPIPE");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

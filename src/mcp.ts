@@ -390,8 +390,24 @@ function useWritableCwd(): void {
 export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string }): Promise<void> {
   useWritableCwd();
   const d: McpDeps = { run: deps.run, version: deps.version ?? VERSION };
+  // F41: a failed stdout write means the client has stopped reading, so no
+  // answer can reach it. Exit 0 at once: an EPIPE left unhandled crashed the
+  // server with a stack trace, and a call queued behind the running one still
+  // ran for no one. A daemon op already running finishes in its daemon, as a
+  // cancelled call's does. Bun reports the EPIPE as an 'error' event on
+  // stdout; a synchronous throw is handled the same way.
+  const clientGone = (e: unknown): never => {
+    if ((e as { code?: unknown } | null)?.code === "EPIPE") process.exit(0);
+    console.error(`bowser mcp: stdout failed: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  };
+  process.stdout.on("error", clientGone);
   const server = createMcpServer(d, (line) => {
-    process.stdout.write(line);
+    try {
+      process.stdout.write(line);
+    } catch (e) {
+      clientGone(e);
+    }
   });
   const decoder = new TextDecoder();
   let buf = "";

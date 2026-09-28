@@ -97,6 +97,12 @@ All notable changes to this project are documented here. This project follows
   without running anything, as MCP's SEP-1303 asks. A finite number is still taken where the
   schema says string, so `resize {width: 800, height: 600}` keeps working. (F42)
 
+- **`bowser mcp` exits quietly when its client goes away.** A client that closed its end of the
+  server's stdout crashed the server at the next response, with an `EPIPE` stack trace and exit
+  1, and a call queued behind the running one still ran for no one. The server now exits 0 at the
+  first failed write, before a queued call starts; a browser operation already running finishes
+  in its daemon, as a cancelled call's does. (F41)
+
 ## [0.8.2] — 2026-09-27
 
 ### Fixed

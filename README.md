@@ -251,6 +251,7 @@ Notes:
 - `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
 - A JSON-RPC batch (an array) or a line that is not a JSON object gets one `-32600 Invalid Request` error with `id: null`; nothing in a batch runs. MCP `2025-06-18` has no batching.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
+- The server exits when stdin closes and every running call has answered. A client that stops reading stdout is gone: the server exits 0 at its next response, and calls still queued never run. A browser operation already running finishes in its daemon.
 - `notifications/cancelled` drops the call: one still queued behind its session never runs, and a running one finishes but its result is discarded. Either way no response is sent for it, per the MCP spec. A browser operation that has already started is **not** undone — a cancelled `click` may still have clicked, and the session's next call waits for it to finish.
 
 ## How it works
