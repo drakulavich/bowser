@@ -6,7 +6,7 @@ Every line below traces to a real failure that no test or type check catches. Wh
 
 ## Checking a change
 
-- `bun test` skips every browser test and does not type-check. Before calling a daemon, browser or page-script change done, also run `bun run typecheck` and `BOWSER_E2E=1 bun test`. (PR #23, PR #46)
+- `bun test` skips every browser test and does not type-check or lint. Before calling a change done, run `bun run check`; for a daemon, browser or page-script change, also `BOWSER_E2E=1 bun test`. (PR #23, PR #46)
 
 ## Code traps
 
