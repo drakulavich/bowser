@@ -63,4 +63,14 @@ describe("maxCaptureHeight", () => {
   test("at pixel ratio 1 every resize size fits (the model's prediction; not measured, no ratio-1 display)", () => {
     expect(maxCaptureHeight(16384, 1)).toBeGreaterThanOrEqual(16384);
   });
+  test("fractional pixel ratio keeps a capturable rounded height", () => {
+    expect(maxCaptureHeight(16384, 1.99995)).toBeGreaterThanOrEqual(16384);
+  });
+  test("fractional physical width rounds before rows are padded", () => {
+    const height = maxCaptureHeight(16, 2.01);
+    const maxPixelHeight = Math.floor((2 ** 30 - 1) / 32);
+    expect(Math.round(16 * 2.01)).toBe(32);
+    expect(Math.round(height * 2.01)).toBeLessThanOrEqual(maxPixelHeight);
+    expect(Math.round((height + 1) * 2.01)).toBeGreaterThan(maxPixelHeight);
+  });
 });

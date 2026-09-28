@@ -73,8 +73,15 @@ export async function nextAvailablePath(
  *  and 16369 fails; at width 16384 the tallest is 16383. No Bun.WebView
  *  option lowers the scale, so a larger viewport cannot be captured. */
 export function maxCaptureHeight(width: number, dpr: number): number {
-  const rowPixels = Math.ceil((width * dpr) / 32) * 32;
-  return Math.floor(Math.floor((2 ** 30 - 1) / rowPixels) / dpr);
+  // WebKit rounds CSS dimensions to device pixels before padding each row.
+  const rowPixels = Math.ceil(Math.round(width * dpr) / 32) * 32;
+  const maxPixelHeight = Math.floor((2 ** 30 - 1) / rowPixels);
+  let height = Math.floor(maxPixelHeight / dpr);
+  // Keep the suggested CSS height aligned with the same nearest-pixel
+  // rounding: floor(maxPixelHeight / dpr) can reject one capturable pixel.
+  while (Math.round((height + 1) * dpr) <= maxPixelHeight) height++;
+  while (Math.round(height * dpr) > maxPixelHeight) height--;
+  return height;
 }
 
 /** The error to show instead of a failed capture's, when the viewport is
