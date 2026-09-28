@@ -344,3 +344,5 @@ I reproduced 8 of them myself (ET-04, ET-11, ET-18, ET-21, ET-27, ET-28, and ET-
 | H | ET-07, ET-13, ET-14, ET-19, ET-23, ET-24, ET-27, ET-28 | Papercuts: messages, unbounded dialog reports, an orphaned daemon, `--version`, `close` of an unknown session. |
 
 **Suggested order:** A, then D (small, P1, contained), then B and C (need a design), then E, F, G and H.
+
+**Issues filed:** A #75, D #76, B #77, C #78, E #79, F #80, G #81, H #82.
