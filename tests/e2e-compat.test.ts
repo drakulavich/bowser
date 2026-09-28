@@ -32,9 +32,13 @@ import { loadState } from "../src/state.ts";
 const E2E = process.env.BOWSER_E2E === "1";
 const PW = Bun.which("playwright-cli");
 
+/** The real home: the test preload moves HOME to a temporary directory, and
+ *  playwright-cli's browsers live under the real one. */
+const REAL_HOME = process.env.BOWSER_TEST_REAL_HOME ?? homedir();
+
 /** playwright-cli keeps browsers under ~/Library/Caches/ms-playwright/<name>-<build>. */
 function playwrightHasWebkit(): boolean {
-  const dir = join(homedir(), "Library", "Caches", "ms-playwright");
+  const dir = join(REAL_HOME, "Library", "Caches", "ms-playwright");
   try {
     return existsSync(dir) && readdirSync(dir).some((d) => d.startsWith("webkit"));
   } catch {
@@ -94,7 +98,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
       cwd: tmp,
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, HOME: origHome ?? process.env.HOME! },
+      env: { ...process.env, HOME: REAL_HOME },
     });
     const [out, err, code] = await Promise.all([
       new Response(p.stdout).text(),
