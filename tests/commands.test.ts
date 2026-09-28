@@ -1439,11 +1439,19 @@ describe("resize", () => {
     ["-1", "600"],
     ["800", "12.5"],
     ["wide", "600"],
-  ])("rejects invalid dimensions (%p, %p)", async (w, h) => {
+    ["16385", "100"],
+    ["100", "100000"],
+  ])("rejects invalid dimensions (%p, %p) before any daemon request", async (w, h) => {
     const c = fakeClient({});
     await expect(
       cmdResize({ ...ctx(), connect: async () => c }, w, h),
-    ).rejects.toThrow(/usage: bowser resize/);
+    ).rejects.toThrow("usage: bowser resize <width> <height> (each 1 to 16384)");
+    expect(c.calls).toEqual([]);
+  });
+
+  test("accepts WebKit's largest side, 16384 (F22)", async () => {
+    const c = fakeClient({});
+    expect(await cmdResize({ ...ctx(), connect: async () => c }, "16384", "16384")).toBe("resized 16384x16384");
   });
 });
 

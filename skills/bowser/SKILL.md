@@ -45,7 +45,7 @@ Do **not** use for static HTTP fetches.
 | `bowser check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox/radio. A `[disabled]` one fails (exit 1); `uncheck` on a checked radio fails (exit 1): select another option in its group. `aria-checked="mixed"` counts as unchecked for `check`, checked for `uncheck` |
 | `bowser dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next dialog, before the action (a prompt gets `text`); without one it is dismissed |
 | `bowser screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
-| `bowser resize <width> <height>` | Set the viewport size in pixels |
+| `bowser resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser list` | Enumerate sessions whose daemon is running |
 | `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides). Ends a daemon of another bowser version too. Exits 2 and keeps the session when it cannot confirm the browser stopped |

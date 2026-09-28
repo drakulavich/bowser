@@ -107,7 +107,9 @@ const USER_ERRORS: Case[] = [
   { argv: ["select", "e3", "z"], handlers: { evaluate: () => "select", select: () => false }, stderr: `ref 'e3' has no option "z"` },
   { argv: ["uncheck", "e4"], handlers: { evaluate: resolvesThen(undefined), uncheck: () => false }, stderr: "ref 'e4' is a radio button; select another option in its group to uncheck it" },
   { argv: ["press", ""], stderr: "usage: bowser press <key>" },
-  { argv: ["resize", "0", "10"], stderr: "usage: bowser resize <width> <height>" },
+  { argv: ["resize", "0", "10"], stderr: "usage: bowser resize <width> <height> (each 1 to 16384)" },
+  // F22: Bun.WebView refuses a side over 16384.
+  { argv: ["resize", "16385", "100"], stderr: "usage: bowser resize <width> <height> (each 1 to 16384)" },
   { argv: ["eval", ""], stderr: "usage: bowser eval <expression>" },
   { argv: ["run-code", ""], stderr: "usage: bowser run-code <code>" },
   { argv: ["run-code", "async page => 1"], handlers: { evaluate: () => ({ fn: true }) }, stderr: "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return" },

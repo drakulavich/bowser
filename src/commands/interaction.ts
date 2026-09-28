@@ -199,6 +199,11 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   });
 }
 
+/** The largest side `Bun.WebView` accepts. Measured on WebKit, Bun 1.4.2:
+ *  `resize 16385 100` failed in the daemon with `The value of "width" is out
+ *  of range. It must be >= 1 and <= 16384` (F22). */
+const MAX_VIEWPORT_SIDE = 16384;
+
 export async function cmdResize(
   ctx: CommandContext,
   widthArg: string,
@@ -206,12 +211,10 @@ export async function cmdResize(
 ): Promise<string> {
   const width = Number(widthArg);
   const height = Number(heightArg);
-  if (
-    !widthArg || !heightArg ||
-    !Number.isInteger(width) || !Number.isInteger(height) ||
-    width <= 0 || height <= 0
-  ) {
-    throw new UserError("usage: bowser resize <width> <height>");
+  // Number("") is 0, so an empty argument fails the lower bound.
+  const side = (n: number) => Number.isInteger(n) && n >= 1 && n <= MAX_VIEWPORT_SIDE;
+  if (!side(width) || !side(height)) {
+    throw new UserError(`usage: bowser resize <width> <height> (each 1 to ${MAX_VIEWPORT_SIDE})`);
   }
   return withClient(ctx, async (c) => {
     await c.request("resize", [width, height]);

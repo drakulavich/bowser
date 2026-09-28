@@ -190,7 +190,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox or radio button. A disabled one fails like `click`. `uncheck` on a checked radio fails with `ref 'eN' is a radio button; select another option in its group to uncheck it`, exit 1; on an unchecked one it succeeds and does nothing. An `aria-checked="mixed"` checkbox is unchecked for `check` (one click, as in `playwright-cli`) and checked for `uncheck`, which clicks it until it reads `false` (`playwright-cli` leaves it mixed) |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
 | `screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
-| `resize <width> <height>` | Set the viewport size in pixels |
+| `resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 (`Bun.WebView`'s limit) |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
 | `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped, including a daemon from bowser 0.5 or older that does not answer: it wrote no pidfile, so `close` exits 2 and keeps the session until you end the process yourself (the error says how). |

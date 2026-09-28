@@ -56,6 +56,10 @@ All notable changes to this project are documented here. This project follows
   file now fails before anything is restored, with `playwright-cli`'s wording:
   `state-load: storageState.origins[0].localStorage[0].value: expected string, got undefined`.
   (F5)
+- **`resize` over 16384 is a usage error.** `Bun.WebView` refuses a side over 16384, so
+  `resize 16385 100` failed in the daemon with `The value of "width" is out of range` and exit 2.
+  It now fails before connecting, with `usage: bowser resize <width> <height> (each 1 to 16384)`
+  and exit 1. `playwright-cli` has no such limit; the limit is `Bun.WebView`'s. (F22)
 
 ## [0.8.2] — 2026-09-27
 
