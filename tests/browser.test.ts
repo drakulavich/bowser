@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
 import { ACTS, createHandler } from "../src/daemon/server.ts";
 import type { Op } from "../src/daemon/protocol.ts";
-import { KEY_WATCH, keyCommandScript, NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
+import { KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -514,6 +514,34 @@ describe("wrapView interrupt", () => {
     const t0 = Date.now();
     await b.interrupt();
     expect(Date.now() - t0).toBeGreaterThanOrEqual(55);
+  });
+
+  // #48, measured on WebKit (Bun 1.4.2): before the first commit (url "")
+  // reload() does nothing and navigate() is refused while one is pending;
+  // the initial document still runs a script, and leaving it cancels the
+  // stuck navigation (-999).
+  test("before anything committed, the page leaves for about:blank instead of reloading", async () => {
+    const v = fakeView({
+      reload: async () => { v.calls.push(["reload", []]); },
+      evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); v.onNavigationFailed?.(new Error("-999")); return 1; },
+    });
+    v.url = "";
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    await b.interrupt();
+    expect(Date.now() - t0).toBeLessThan(30);
+    expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]]]);
+  });
+
+  test("before anything committed, an evaluate still pending (refused by WebKit) ends the interrupt", async () => {
+    const v = fakeView({
+      evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); throw new Error("Invalid state: an evaluate() is already pending"); },
+    });
+    v.url = "";
+    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+    const t0 = Date.now();
+    await b.interrupt();
+    expect(Date.now() - t0).toBeLessThan(30);
   });
 
   test("without a native reload it does nothing", async () => {

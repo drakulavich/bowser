@@ -671,6 +671,9 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
 export const RELOAD = "location.reload()";
+/** Recovery before the first commit (#48): the initial empty document
+ *  leaves itself, which cancels a navigation stuck there. */
+export const LEAVE_INITIAL_DOCUMENT = "location.replace('about:blank')";
 /** Evaluated in browser.ts's kicker view, never in the page (oven-sh/bun#44134). */
 export const NO_OP = "0";
 

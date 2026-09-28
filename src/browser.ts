@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  KEY_WATCH, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
   hoverScript, keyCommandScript, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
@@ -386,10 +386,23 @@ function navigationWatch(
     },
     /** Reload the committed page to free a stuck call; see Browser.interrupt. */
     async interrupt(): Promise<void> {
-      if (typeof view.reload !== "function") return;
       const before = landed;
       try {
-        await view.reload();
+        if (view.url === "") {
+          // Nothing has committed yet: a first navigation from the initial
+          // document is stuck. reload() has no page to reload and does
+          // nothing, and navigate() is refused while one is pending
+          // (measured, Bun 1.4.2). The initial document still runs a
+          // script, and leaving it cancels the navigation with -999 (#48).
+          // The call goes to the view, not wrapView's queue: if an evaluate
+          // is pending WebKit refuses this one at once, where the queue
+          // would run it later over whatever page is there then.
+          await Promise.race([view.evaluate(LEAVE_INITIAL_DOCUMENT), sleep(timing.settleMs)]);
+        } else if (typeof view.reload === "function") {
+          await view.reload();
+        } else {
+          return;
+        }
       } catch {
         return;
       }
@@ -496,8 +509,11 @@ export function wrapView(
     // that call by design, and nothing else that touches the view: the
     // daemon's serializer holds every other queued op until the stuck one
     // settles and this has landed. That is why it uses the native reload()
-    // alone and never evaluate(): an evaluate would queue behind the stuck
-    // one (wrapView's queue) and never run, and so would RELOAD's fallback.
+    // and never wrapView's evaluate(): an evaluate would queue behind the
+    // stuck one and never run, and so would RELOAD's fallback. The one
+    // exception is a view where nothing has committed, where reload() does
+    // nothing: it asks the view directly, which WebKit refuses at once
+    // while another evaluate is pending (#48).
     interrupt: () => guard(nav.interrupt()),
     get kickerOpened() { return stall.opened; },
     watchNavigation(on) {

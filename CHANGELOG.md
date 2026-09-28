@@ -22,6 +22,12 @@ All notable changes to this project are documented here. This project follows
   the page cancelled the keydown. A key WebKit cannot press (`F1`, `Shift` alone, `KeyA`) and an
   unknown modifier (`shift`, `Cmd`) now fail with `usage:` and exit 1 instead of exit 2.
   `Meta+c`/`x`/`v` fire the keydown but do not touch the clipboard. (#55)
+- **A first `goto` whose server never answers no longer leaves the session stuck.** In a session
+  that had not loaded a page yet, the recovery after a timeout reloaded the page, but WebKit has
+  nothing to reload before the first page commits, so the reload did nothing; and `Bun.WebView`
+  refuses a new navigation while one is pending. Every later command then failed at its budget
+  until `close`. Recovery now has such a page leave for `about:blank`, which cancels the stuck
+  navigation; the next `goto` works once recovery has run. (#48)
 
 ## [0.8.2] — 2026-09-27
 

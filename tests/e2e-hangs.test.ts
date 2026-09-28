@@ -246,4 +246,35 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(5000);
   }, 30_000);
+
+  // #48: from a fresh session nothing has committed yet (the view's url is
+  // ""), so reload() has no page to reload and does nothing, and WebKit
+  // refuses navigate() while one is pending. Before the fix every later
+  // command failed at its budget until `close`.
+  test("#48: after a first goto from about:blank whose server never answers, recovery frees the session", async () => {
+    const budget = 1000;
+    process.env.BOWSER_OP_TIMEOUT_MS = String(budget);
+    const ctx: CommandContext = { session: "hangfirst", json: false };
+    sessions.push(ctx.session);
+    await cmdOpen(ctx);
+
+    const stuck = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/never`));
+    expect(stuck.error).toBe(`'goto' timed out after ${budget}ms (in its 'navigate' step)`);
+
+    // Recovery runs a grace (the budget) after the timeout; each attempt
+    // until then fails within its own budget.
+    let landed: string | undefined;
+    const deadline = performance.now() + 10_000;
+    while (landed === undefined && performance.now() < deadline) {
+      const attempt = await timed(async () => { landed = await cmdGoto(ctx, `${base}/`); });
+      expect(attempt.ms).toBeLessThan(budget + 1000);
+      if (attempt.error) await Bun.sleep(200);
+    }
+    expect(landed).toContain(`${base}/`);
+    expect(await cmdEval(ctx, "location.href")).toBe(`${base}/`);
+
+    const close = await timed(() => cmdClose(ctx));
+    expect(close.error).toBeUndefined();
+    expect(close.ms).toBeLessThan(5000);
+  }, 30_000);
 });
