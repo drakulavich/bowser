@@ -73,4 +73,9 @@ describe("maxCaptureHeight", () => {
     expect(Math.round(height * 2.01)).toBeLessThanOrEqual(maxPixelHeight);
     expect(Math.round((height + 1) * 2.01)).toBeGreaterThan(maxPixelHeight);
   });
+  test("an invalid pixel ratio predicts no limit", () => {
+    expect(maxCaptureHeight(100, 0)).toBe(Number.POSITIVE_INFINITY);
+    expect(maxCaptureHeight(100, -1)).toBe(Number.POSITIVE_INFINITY);
+    expect(maxCaptureHeight(100, Number.NaN)).toBe(Number.POSITIVE_INFINITY);
+  });
 });
