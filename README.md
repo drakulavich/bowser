@@ -208,7 +208,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `run-code <code>` | Run JavaScript in the current page and print the result. One expression is evaluated as one (`run-code "(() => { return 5 })()"` prints `5`); any other code is the body of an async function, so use `return` for the result, and `await` works (`run-code "await new Promise(r => setTimeout(r, 100)); return document.title"`). Unlike `playwright-cli`'s `run-code`, which calls a function with a Playwright `page` in Node, it runs in the page: a result that is a function, such as `async page => …`, fails with `run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return` (exit 1) |
 | `state-save <file>` | Save the current origin's localStorage to a Playwright-compatible `storageState` JSON file. Its `cookies` array is always empty: bowser has no cookie access (use `open --persistent` to keep logins). |
-| `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. |
+| `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. A missing, invalid or wrongly shaped file (`storageState.origins: expected array, got object`) restores nothing and exits 1. |
 | `mcp` | Run a Model Context Protocol stdio server exposing every command above as an MCP tool. |
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.

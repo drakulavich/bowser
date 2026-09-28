@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdStateLoad, cmdStateSave } from "../src/commands/storage-state.ts";
 import { saveState } from "../src/state.ts";
+import { UserError } from "../src/errors.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 
 let tmp: string;
@@ -196,5 +197,52 @@ describe("state-load", () => {
   test("errors clearly when the file is missing", async () => {
     const c = fakeClient({});
     await expect(cmdStateLoad({ ...ctx(), connect: async () => c }, join(tmp, "does-not-exist.json"))).rejects.toThrow(/file not found/);
+  });
+});
+
+// F5: the file's shape is checked before any daemon request, with
+// playwright-cli's wording, and a bad file is the user's error (exit 1).
+describe("state-load checks the file's shape", () => {
+  const cases: Array<[string, unknown, string]> = [
+    ["origins is an object", { origins: {} }, "storageState.origins: expected array, got object"],
+    ["the top level is null", null, "storageState: expected object, got null"],
+    ["the top level is a string", "x", "storageState: expected object, got string"],
+    ["cookies is a string", { cookies: "nope" }, "storageState.cookies: expected array, got string"],
+    ["an origin is a number", { origins: [5] }, "storageState.origins[0]: expected object, got number"],
+    ["an origin has no origin string", { origins: [{ localStorage: [] }] }, "storageState.origins[0].origin: expected string, got undefined"],
+    ["localStorage is an object", { origins: [{ origin: "https://example.com", localStorage: {} }] }, "storageState.origins[0].localStorage: expected array, got object"],
+    ["an entry has no value", { origins: [{ origin: "https://example.com", localStorage: [{ name: "n1" }] }] }, "storageState.origins[0].localStorage[0].value: expected string, got undefined"],
+    ["an entry's value is a number", { origins: [{ origin: "https://example.com", localStorage: [{ name: "n2", value: 5 }] }] }, "storageState.origins[0].localStorage[0].value: expected string, got number"],
+    ["an entry's name is null", { origins: [{ origin: "https://example.com", localStorage: [{ name: null, value: "v" }] }] }, "storageState.origins[0].localStorage[0].name: expected string, got null"],
+    ["an entry is an array", { origins: [{ origin: "https://example.com", localStorage: [["k", "v"]] }] }, "storageState.origins[0].localStorage[0]: expected object, got array"],
+  ];
+  for (const [label, content, message] of cases) {
+    test(`${label}: refused with the field, nothing sent to the daemon`, async () => {
+      const file = tmpFile();
+      await Bun.write(file, JSON.stringify(content));
+      const c = fakeClient({ state: () => ({ url: "https://example.com/", title: "t" }) });
+      const err = await cmdStateLoad({ ...ctx(), connect: async () => c }, file).catch((e) => e);
+      expect(err).toBeInstanceOf(UserError);
+      expect(err.message).toBe(`state-load: ${message}`);
+      expect(c.calls).toEqual([]);
+    });
+  }
+
+  test("a top-level array is accepted, as playwright-cli does", async () => {
+    const file = tmpFile();
+    await Bun.write(file, "[]");
+    const c = fakeClient({ state: () => ({ url: "https://example.com/", title: "t" }) });
+    expect(await cmdStateLoad({ ...ctx(), connect: async () => c }, file)).toBe(`loaded ${file} (0 origin(s))`);
+  });
+
+  test("a missing file and invalid JSON are user errors too", async () => {
+    const c = fakeClient({});
+    const missing = await cmdStateLoad({ ...ctx(), connect: async () => c }, join(tmp, "nope.json")).catch((e) => e);
+    expect(missing).toBeInstanceOf(UserError);
+    const bad = tmpFile();
+    await Bun.write(bad, "{not json");
+    const invalid = await cmdStateLoad({ ...ctx(), connect: async () => c }, bad).catch((e) => e);
+    expect(invalid).toBeInstanceOf(UserError);
+    expect(invalid.message).toBe(`state-load: invalid JSON in ${bad}`);
   });
 });

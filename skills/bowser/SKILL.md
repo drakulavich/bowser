@@ -63,7 +63,7 @@ Do **not** use for static HTTP fetches.
 | `bowser eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `bowser run-code <code>` | Run JavaScript **in the page** (not Playwright code, unlike `playwright-cli`'s). One expression is evaluated as one (`"(() => { return 5 })()"` prints `5`); other code is an async function body: `return` the result, `await` works. A function result such as `async page => …` fails (exit 1) |
 | `bowser state-save <file>` | Save localStorage to a Playwright `storageState` JSON file (`cookies` is always empty) |
-| `bowser state-load <file>` | Restore localStorage from a `storageState` file; cookies in it are skipped |
+| `bowser state-load <file>` | Restore localStorage from a `storageState` file; cookies in it are skipped. A bad file names the wrong field and exits 1 |
 | `bowser mcp` | Run a Model Context Protocol stdio server exposing every command as an MCP tool |
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.

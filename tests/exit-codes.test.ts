@@ -117,6 +117,8 @@ const USER_ERRORS: Case[] = [
   { argv: ["goto", ""], stderr: "usage: bowser goto <url>" },
   { argv: ["state-save", ""], stderr: "usage: bowser state-save <file>" },
   { argv: ["state-load", ""], stderr: "usage: bowser state-load <file>" },
+  // F5: every problem with the file is the user's.
+  { argv: ["state-load", "/nonexistent/bowser-state.json"], stderr: "state-load: file not found: /nonexistent/bowser-state.json" },
   { argv: ["localstorage-get", ""], stderr: "usage: bowser localstorage-get <key>" },
   { argv: ["sessionstorage-set", ""], stderr: "usage: bowser sessionstorage-set <key> <value>" },
   { argv: ["sessionstorage-delete", ""], stderr: "usage: bowser sessionstorage-delete <key>" },
@@ -130,7 +132,6 @@ const USER_ERRORS: Case[] = [
 const RUNTIME_ERRORS: Case[] = [
   { argv: ["eval", "x"], handlers: { evaluate: () => { throw new Error("usage: from the page"); } }, stderr: "usage: from the page" },
   { argv: ["click", "e1"], handlers: { evaluate: () => "button", click: () => { throw new Error("ref 'e1' not found by the daemon"); } }, stderr: "ref 'e1' not found by the daemon" },
-  { argv: ["state-load", "/nonexistent/bowser-state.json"], stderr: "state-load: file not found: /nonexistent/bowser-state.json" },
   { argv: ["open", "https://x/"], handlers: { state: () => ({ url: "about:blank", title: "" }) }, stderr: "navigate: page did not load https://x/ (ended on about:blank)" },
 ];
 

@@ -5,6 +5,12 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Every `state-load` file error exits 1.** A missing file and invalid JSON exited 2, as a
+  runtime error; they are the user's input to fix, like a bad flag, so they now exit 1, as does
+  the new shape check. (F5)
+
 ### Fixed
 
 - **A missing required argument is a usage error for every command.** `bowser select e3` and
@@ -43,6 +49,13 @@ All notable changes to this project are documented here. This project follows
   agent's shell tool waited for it forever. Its output now goes to
   `~/.bowser/sessions/<session>/daemon.log`, and a daemon that does not start in time names that
   file in the error. (F6)
+- **`state-load` checks the file's shape and names the field that is wrong.** A file whose
+  `origins` was an object, or whose top level was `null`, failed with an engine message
+  (`{} is not iterable`); one with `"cookies": "nope"`, a `localStorage` object or an entry with
+  no `value` reported "loaded" and restored nothing, or stored the string `"undefined"`. Such a
+  file now fails before anything is restored, with `playwright-cli`'s wording:
+  `state-load: storageState.origins[0].localStorage[0].value: expected string, got undefined`.
+  (F5)
 
 ## [0.8.2] — 2026-09-27
 
