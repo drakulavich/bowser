@@ -1,6 +1,7 @@
 // Client side of the daemon protocol: connect to a session's Unix socket (or
 // spawn the daemon first), send typed requests, match replies by id.
 
+import { closeSync, openSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import pkg from "../../package.json";
@@ -274,7 +275,8 @@ export async function connectOrSpawn(
     const hint = opts.profile
       ? ` with --persistent profile ${opts.profile}; the browser may not support a persistent profile here`
       : "";
-    throw new Error(`daemon for session '${session}' did not start in time${hint}`);
+    const log = process.env.BOWSER_DAEMON_DEBUG === "1" ? `; its output is in ${daemonLogPath(session)}` : "";
+    throw new Error(`daemon for session '${session}' did not start in time${hint}${log}`);
   }
   // Checked outside the try: its refusal must not fall into the spawn path.
   return checked(client, session, answer, opts);
@@ -307,10 +309,13 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
 
   const cmd = daemonCommand(session);
 
-  // When BOWSER_DAEMON_DEBUG is set, let the daemon's stdio through so spawn
-  // failures are diagnosable.
+  // When BOWSER_DAEMON_DEBUG is set, the daemon's stdout and stderr go to
+  // daemon.log in the session directory, so spawn failures are diagnosable.
+  // Never to our own descriptors: the daemon outlives this process and would
+  // hold the caller's pipe open, so `bowser … | cat` never saw EOF (F6).
+  // Appended, so a daemon that loses the session claim keeps the winner's log.
   const debug = process.env.BOWSER_DAEMON_DEBUG === "1";
-  const stdio: "ignore" | "inherit" = debug ? "inherit" : "ignore";
+  const stdio: "ignore" | number = debug ? openSync(daemonLogPath(session), "a") : "ignore";
 
   const proc = Bun.spawn({
     cmd,
@@ -332,6 +337,14 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
   // (the runner force-exits); tests/e2e-spawn-exit.test.ts runs the CLI as its
   // own process and fails without it.
   proc.unref();
+  // The child has its own copy of the descriptor.
+  if (typeof stdio === "number") closeSync(stdio);
+}
+
+/** Where a daemon spawned with BOWSER_DAEMON_DEBUG=1 writes its stdout and
+ *  stderr. `close` deletes it with the session directory. */
+export function daemonLogPath(session: string): string {
+  return join(sessionDir(session), "daemon.log");
 }
 
 /** The daemon's environment: ours, with the profile set or cleared so a stale

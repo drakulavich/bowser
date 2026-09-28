@@ -261,7 +261,7 @@ Notes:
 | Variable | Effect |
 | --- | --- |
 | `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser (in a session that has not loaded a page yet, where a reload does nothing, it leaves the blank page instead). The daemon reads it once, when the session starts: to change it, `close` the session and `open` it again with the new value. A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2). |
-| `BOWSER_DAEMON_DEBUG` | `1` lets the session daemon's stdout and stderr through to the terminal, for debugging a daemon that fails to start. |
+| `BOWSER_DAEMON_DEBUG` | `1` writes the output of a session daemon that this command starts to `~/.bowser/sessions/<session>/daemon.log`, for debugging a daemon that fails to start. `close` deletes it with the session directory. |
 
 ## Tests
 

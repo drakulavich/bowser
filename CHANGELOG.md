@@ -38,6 +38,11 @@ All notable changes to this project are documented here. This project follows
   if bowser had written them. Each report is now rebuilt from `type` (`alert`, `confirm` or
   `prompt`; any other entry is dropped), `message`, `state`, and `defaultValue`, `answer` and
   `unanswered` when they have the documented type. (F27)
+- **`BOWSER_DAEMON_DEBUG=1` no longer hangs a command whose output is piped.** The daemon got the
+  caller's stdout and stderr, and since it runs until `close`, `bowser open … | cat`, `$(…)` and an
+  agent's shell tool waited for it forever. Its output now goes to
+  `~/.bowser/sessions/<session>/daemon.log`, and a daemon that does not start in time names that
+  file in the error. (F6)
 
 ## [0.8.2] — 2026-09-27
 
