@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type { CommandContext } from "../src/commands/context.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdStateSave } from "../src/commands/storage-state.ts";
+import { killDaemons } from "./helpers/daemons.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
@@ -30,6 +31,7 @@ runOrSkip("e2e: state-save on about:blank", () => {
 
   afterAll(async () => {
     try { await cmdClose(ctx); } catch {}
+    await killDaemons(ctx.session);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });

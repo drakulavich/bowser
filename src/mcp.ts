@@ -294,14 +294,14 @@ export interface McpServer {
  *  STDOUT: each response goes out as one `write(JSON + "\n")` call. A stream
  *  keeps the chunks of separate write() calls whole and in call order, so
  *  concurrent responses never interleave within a line. */
-export function createMcpServer(deps: McpDeps, write: (line: string) => void): McpServer {
+export function createMcpServer(deps: McpDeps, write: (line: string) => void | Promise<void>): McpServer {
   const chains = new Map<string, Promise<void>>();
   const inFlight = new Map<unknown, { cancelled: boolean }>();
   const running = new Set<Promise<void>>();
 
-  const send = (res: object) => {
+  const send = async (res: object): Promise<void> => {
     try {
-      write(JSON.stringify(res) + "\n");
+      await write(JSON.stringify(res) + "\n");
     } catch (e) {
       console.error(`bowser mcp: could not write a response: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -318,7 +318,10 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void): M
       .then(async () => {
         if (token.cancelled) return;
         const res = await runToolCall(id, argv, deps);
-        if (!token.cancelled) send(res);
+        // Keep this session's chain behind stdout completion. If the peer
+        // closed its pipe, the write callback reports EPIPE before a queued
+        // command can start and cause another side effect.
+        if (!token.cancelled) await send(res);
       })
       .finally(() => {
         if (inFlight.get(id) === token) inFlight.delete(id);
@@ -403,11 +406,18 @@ export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string
   };
   process.stdout.on("error", clientGone);
   const server = createMcpServer(d, (line) => {
-    try {
-      process.stdout.write(line);
-    } catch (e) {
-      clientGone(e);
-    }
+    return new Promise<void>((resolve, reject) => {
+      try {
+        process.stdout.write(line, (e) => {
+          if ((e as { code?: unknown } | null)?.code === "EPIPE") clientGone(e);
+          if (e) reject(e);
+          else resolve();
+        });
+      } catch (e) {
+        if ((e as { code?: unknown } | null)?.code === "EPIPE") clientGone(e);
+        reject(e);
+      }
+    });
   });
   const decoder = new TextDecoder();
   let buf = "";

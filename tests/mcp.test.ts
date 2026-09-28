@@ -37,7 +37,7 @@ const okRun = (out = '{"ok":true}'): McpDeps => ({
  *  once every accepted call has finished. */
 async function serve(lines: string[], deps: McpDeps = okRun()): Promise<any[]> {
   const writes: string[] = [];
-  const server = createMcpServer(deps, (line) => writes.push(line));
+  const server = createMcpServer(deps, (line) => { writes.push(line); });
   for (const line of lines) server.accept(line);
   await server.idle();
   await new Promise((r) => setTimeout(r, 0));

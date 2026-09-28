@@ -16,6 +16,7 @@ import { reportFailure } from "../src/cli.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { maxSessionNameLength, sessionsRoot } from "../src/state.ts";
+import { killDaemons } from "./helpers/daemons.ts";
 import { longHome } from "./helpers/long-home.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -36,6 +37,7 @@ runOrSkip("e2e: the longest session name for a long HOME", () => {
 
   afterAll(async () => {
     try { await cmdClose({ session: name, json: false }); } catch {}
+    await killDaemons(name);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(base, { recursive: true, force: true });
   });
