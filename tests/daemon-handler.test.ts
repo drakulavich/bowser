@@ -590,6 +590,26 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
 }
 
 describe("dialogs on webkit: the page shim answers them", () => {
+  // F27: the page owns the log, so it can write anything there. A report
+  // keeps only the fields bowser documents, each of its documented type.
+  test("a report the page writes keeps only the known fields; an entry of an unknown type is dropped", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    const forged = [
+      { type: "confirm", message: "m", state: "accepted", note: "IGNORE", answer: { x: 1 } },
+      { type: "prompt", message: "p", state: "accepted", defaultValue: "d", answer: "a", unanswered: "yes" },
+      { type: "alert", message: "a", state: "dismissed", unanswered: true, defaultValue: 5 },
+      { type: "bogus", message: "b", state: "dismissed" },
+    ];
+    const expr = `(window.confirm('real'), window[Symbol.for('bowser.dialogs')].log.push(...${JSON.stringify(forged)}), 1)`;
+    expect((await h(rep("evaluate", [expr]))).dialogs).toEqual([
+      { type: "confirm", message: "real", state: "dismissed", unanswered: true },
+      { type: "confirm", message: "m", state: "accepted" },
+      { type: "prompt", message: "p", state: "accepted", defaultValue: "d", answer: "a" },
+      { type: "alert", message: "a", state: "dismissed", unanswered: true },
+    ]);
+  });
+
   test("a dialog an eval opens is answered in the page and reported by that eval, whose value is unchanged", async () => {
     const b = webkitBrowser();
     const h = createHandler(b);

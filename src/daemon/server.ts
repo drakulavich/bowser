@@ -24,7 +24,7 @@ import { createSerializer, type Serializer } from "../serialize.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
   IS_URGENT,
-  type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type Op, type PageState, type ResultOf,
+  type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type DialogState, type Op, type PageState, type ResultOf,
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
 import { claimSession } from "./pidfile.ts";
@@ -336,13 +336,22 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
   }
 
   /** Queue the dialogs the page shim logged. The page wrote them, so only
-   *  entries shaped like a report are kept. */
+   *  entries shaped like a report are kept, rebuilt from the known fields
+   *  (F27): anything else the page added never reaches the reply. */
   function take(log: unknown): void {
     if (!Array.isArray(log)) return;
     for (const d of log) {
-      if (typeof d?.type === "string" && typeof d.message === "string" && (d.state === "accepted" || d.state === "dismissed")) {
-        (state.dialogs ??= []).push(d as DialogReport);
-      }
+      if (!DIALOG_TYPES.has(d?.type) || typeof d.message !== "string" || (d.state !== "accepted" && d.state !== "dismissed")) continue;
+      // In the shim's key order, which --json prints.
+      const report: DialogReport = {
+        type: d.type,
+        message: d.message,
+        ...(typeof d.defaultValue === "string" ? { defaultValue: d.defaultValue } : {}),
+        state: d.state,
+        ...(typeof d.answer === "string" ? { answer: d.answer } : {}),
+        ...(d.unanswered === true ? { unanswered: true as const } : {}),
+      };
+      (state.dialogs ??= []).push(report);
     }
   }
 }
@@ -353,6 +362,9 @@ export const ACTS: ReadonlySet<Op> = new Set<Op>(["click", "type", "press", "hov
 
 /** The ops that navigate the page themselves. */
 const NAVIGATES: ReadonlySet<Op> = new Set<Op>(["navigate", "reload", "back", "forward"]);
+
+/** The dialog types a report may name (DialogState's union). */
+const DIALOG_TYPES: ReadonlySet<unknown> = new Set<DialogState["type"]>(["alert", "confirm", "prompt"]);
 
 /** Start the session's daemon. Resolves false, having touched nothing, when
  *  another daemon of ours already holds the session: the caller then exits.

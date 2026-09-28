@@ -33,6 +33,11 @@ All notable changes to this project are documented here. This project follows
   script while the stuck one is pending, so nothing freed it and every later command failed until
   `close`. Recovery now falls back to navigating to `about:blank`, which frees the stuck `eval`
   about 3 s later; the session then answers on `about:blank`. (#67)
+- **`--json` dialog reports carry only bowser's own fields.** A page can write to the log the
+  dialog shim keeps, and its extra keys (`"note": …`, an object `answer`) came out in the reply as
+  if bowser had written them. Each report is now rebuilt from `type` (`alert`, `confirm` or
+  `prompt`; any other entry is dropped), `message`, `state`, and `defaultValue`, `answer` and
+  `unanswered` when they have the documented type. (F27)
 
 ## [0.8.2] — 2026-09-27
 
