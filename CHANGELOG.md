@@ -82,6 +82,11 @@ All notable changes to this project are documented here. This project follows
   `2025-06-18` or `2024-11-05`, and `2025-06-18` otherwise, as the MCP lifecycle requires.
   `2025-03-26` is not offered: it requires JSON-RPC batches, which bowser does not take. (F39)
 
+- **An MCP batch or a non-object message gets an error instead of silence.** An array, a number, a
+  string or `null` was taken for a notification and got no reply, so a client that sent a batch
+  waited forever for its ids. Such a line now gets one `-32600 Invalid Request` with `id: null`,
+  as JSON-RPC requires; nothing in a batch runs. (F40)
+
 ## [0.8.2] — 2026-09-27
 
 ### Fixed

@@ -181,8 +181,14 @@ async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
 /** Process one parsed JSON-RPC message. Returns the response object, or null for
  *  notifications (no id) — which get no reply per JSON-RPC. */
 export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<object | null> {
-  const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
-  const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
+  // F40: a batch (MCP 2025-06-18 has none) or a non-object is not a Request
+  // object; JSON-RPC answers it with -32600 and id null, once for a whole
+  // batch. Taking it for a notification left a client waiting forever.
+  if (typeof req !== "object" || req === null || Array.isArray(req)) {
+    return jsonRpcError(null, -32600, "Invalid Request");
+  }
+  const r = req as { id?: unknown; method?: string; params?: unknown };
+  const hasId = r.id !== null && r.id !== undefined;
   // No id → notification (or unaddressable). Per JSON-RPC, send no response.
   if (!hasId) return null;
 

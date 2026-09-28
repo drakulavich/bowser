@@ -559,3 +559,32 @@ describe("MCP server: initialize negotiates the protocol version", () => {
     });
   }
 });
+
+// F40: a line that is not a request object gets -32600 with id null; before,
+// it was taken for a notification and got nothing, and a client waiting on an
+// id inside a batch hung. One error for a whole batch, whose calls never run.
+describe("MCP server: a batch or a non-object message is an invalid request", () => {
+  const INVALID = { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
+  const cases: Array<[string, string]> = [
+    ["a batch array", JSON.stringify([{ jsonrpc: "2.0", id: 6, method: "ping" }, { jsonrpc: "2.0", id: 7, method: "ping" }])],
+    ["an empty array", "[]"],
+    ["a number", "123"],
+    ["a string", '"str"'],
+    ["null", "null"],
+    ["true", "true"],
+  ];
+  for (const [what, line] of cases) {
+    test(`${what} gets one -32600 with id null`, async () => {
+      expect(await serve([line])).toEqual([INVALID]);
+    });
+  }
+
+  test("a batched tools/call never runs, and the next line is still answered", async () => {
+    let ran = false;
+    const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
+    const batch = JSON.stringify([{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list", arguments: {} } }]);
+    const res = await serve([batch, JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" })], deps);
+    expect(res).toEqual([INVALID, { jsonrpc: "2.0", id: 2, result: {} }]);
+    expect(ran).toBe(false);
+  });
+});
