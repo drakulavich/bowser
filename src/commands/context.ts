@@ -1,6 +1,7 @@
 // What every command shares: the context the CLI builds, the daemon
 // connection with its close, the empty session state, and ref lookup.
 
+import type { FlagSpec } from "../cli/parser.ts";
 import { connectOrSpawn, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
@@ -18,6 +19,29 @@ export interface CommandContext {
    *  tests inject a fake. `bowser mcp` never reaches it: the flag is not in
    *  its schema and toArgv puts every client value after `--`. */
   readStdin?: () => Promise<string>;
+}
+
+interface Positional {
+  name: string;
+  required: boolean;
+  /** Required in the MCP tool schema even though optional on the CLI: fill's
+   *  <text>, which the CLI can replace with --stdin and MCP cannot. */
+  mcpRequired?: true;
+}
+interface CommandArgs { positional: string[]; flags: Record<string, string | boolean> }
+
+export interface Command {
+  name: string;
+  /** One line, imperative, no trailing period. Feeds `--help` and the MCP tool description. */
+  summary: string;
+  positional: Positional[];
+  flags: FlagSpec[];
+  /** The MCP tool description, when `summary` names something MCP does not
+   *  offer (a flag marked `mcp: false`). Same rules as `summary`. */
+  mcpSummary?: string;
+  /** Omit from `bowser mcp`. Replaces MCP_EXCLUDED. */
+  mcp?: false;
+  run(ctx: CommandContext, args: CommandArgs): Promise<string>;
 }
 
 /** All of standard input as UTF-8. A terminal is refused rather than read:

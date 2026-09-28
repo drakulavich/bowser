@@ -11,7 +11,7 @@
 // in that order. Every downstream consumer looks commands up by name
 // (findCommand, parser.ts's `find`), so the grouping is cosmetic.
 
-import type { CommandContext } from "../commands/context.ts";
+import type { Command } from "../commands/context.ts";
 import { COMMANDS as DIALOG } from "../commands/dialog.ts";
 import { COMMANDS as INTERACTION } from "../commands/interaction.ts";
 import { COMMANDS as NAVIGATION } from "../commands/navigation.ts";
@@ -19,31 +19,8 @@ import { COMMANDS as SCRIPTING } from "../commands/scripting.ts";
 import { COMMANDS as SNAPSHOT } from "../commands/snapshot.ts";
 import { COMMANDS as STORAGE_STATE } from "../commands/storage-state.ts";
 import { COMMANDS as WEB_STORAGE } from "../commands/web-storage.ts";
-import type { FlagSpec, Schemas } from "./parser.ts";
+import type { Schemas } from "./parser.ts";
 import { UserError } from "../errors.ts";
-
-export interface Positional {
-  name: string;
-  required: boolean;
-  /** Required in the MCP tool schema even though optional on the CLI: fill's
-   *  <text>, which the CLI can replace with --stdin and MCP cannot. */
-  mcpRequired?: true;
-}
-export interface CommandArgs { positional: string[]; flags: Record<string, string | boolean> }
-
-export interface Command {
-  name: string;
-  /** One line, imperative, no trailing period. Feeds `--help` and the MCP tool description. */
-  summary: string;
-  positional: Positional[];
-  flags: FlagSpec[];
-  /** The MCP tool description, when `summary` names something MCP does not
-   *  offer (a flag marked `mcp: false`). Same rules as `summary`. */
-  mcpSummary?: string;
-  /** Omit from `bowser mcp`. Replaces MCP_EXCLUDED. */
-  mcp?: false;
-  run(ctx: CommandContext, args: CommandArgs): Promise<string>;
-}
 
 /** `mcp` has no implementation module — it is a long-lived server intercepted
  *  at the import.meta.main entry layer (it never returns a string), so it

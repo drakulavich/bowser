@@ -2,11 +2,10 @@
 // uncheck, resize. Ref-taking commands find their target with loadRef, check
 // its kind, then act on the liveSelector the page returns for it.
 
-import type { Command } from "../cli/registry.ts";
 import { fillScript, type FillOutcome } from "../page-scripts.ts";
 import type { KeyModifier } from "../daemon/protocol.ts";
 import type { Ref } from "../state.ts";
-import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext } from "./context.ts";
+import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 // Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so

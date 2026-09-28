@@ -90,7 +90,7 @@ export interface Lane {
  *  so the op it waits for has always timed out first. */
 /** How long a timed-out op may still settle on its own before `recover`
  *  reloads the page under it (capped by the budget). */
-export const RECOVERY_GRACE_MS = 2000;
+const RECOVERY_GRACE_MS = 2000;
 
 export function dispatch(req: DaemonRequest, lane: Lane): void {
   if (IS_URGENT.has(req.op)) {

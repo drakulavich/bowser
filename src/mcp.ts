@@ -26,7 +26,7 @@ import { UserError } from "./errors.ts";
 const VERSION = (pkg as { version: string }).version;
 
 /** Protocol version advertised when the client doesn't request a known one. */
-export const MCP_PROTOCOL_VERSION = "2025-06-18";
+const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */

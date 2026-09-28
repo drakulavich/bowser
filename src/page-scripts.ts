@@ -782,7 +782,7 @@ export function setCheckedScript(selector: string, checked: boolean): string {
 
 /** The inputs whose value `fill` sets in the page, as playwright does: the
  *  native type enters nothing into them. */
-export const FILL_SET_TYPES = ["date", "time", "datetime-local", "month", "week", "color"];
+const FILL_SET_TYPES = ["date", "time", "datetime-local", "month", "week", "color"];
 
 /** What `fillScript` found: `type` means the caller types the text now;
  *  `set` means the page took it; the rest are refusals, value untouched. */

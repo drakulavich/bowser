@@ -3,11 +3,10 @@
 // session. Values are always strings — that's the Storage API surface, no
 // JSON encoding is implied.
 
-import type { Command } from "../cli/registry.ts";
 import {
   storageClearScript, storageDeleteScript, storageGetScript, storageListScript, storageSetScript,
 } from "../page-scripts.ts";
-import { reply, withClient, type CommandContext } from "./context.ts";
+import { reply, withClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 async function storageList(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {

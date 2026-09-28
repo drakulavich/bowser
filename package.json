@@ -9,7 +9,9 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome ci && knip --include files,exports,types",
+    "check": "bun run typecheck && bun run lint && bun run test"
   },
   "engines": {
     "bun": ">=1.4.2"
@@ -49,7 +51,9 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/bun": "latest",
+    "knip": "^6.38.0",
     "typescript": "7.0.2"
   }
 }

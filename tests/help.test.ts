@@ -6,7 +6,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { COMMANDS, SCHEMAS, type Command } from "../src/cli/registry.ts";
+import type { Command } from "../src/commands/context.ts";
+import { COMMANDS, SCHEMAS } from "../src/cli/registry.ts";
 import { helpRequested } from "../src/cli/parser.ts";
 import { renderHelp, usageOf } from "../src/cli/help.ts";
 import { run } from "../src/cli.ts";

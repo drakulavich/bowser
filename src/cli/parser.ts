@@ -1,6 +1,6 @@
 import { UserError } from "../errors.ts";
 
-export type FlagKind = "string" | "boolean";
+type FlagKind = "string" | "boolean";
 
 export interface FlagSpec {
   name: string;

@@ -18,9 +18,8 @@
 // ---------------------------------------------------------------------------
 
 import { resolve } from "node:path";
-import type { Command } from "../cli/registry.ts";
 import { storageListScript, storageRestoreScript } from "../page-scripts.ts";
-import { reply, withClient, type CommandContext } from "./context.ts";
+import { reply, withClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 interface StorageStateOrigin {

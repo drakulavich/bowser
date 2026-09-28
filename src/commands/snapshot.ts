@@ -1,12 +1,11 @@
 // Reading the page: the aria snapshot and the screenshot.
 
 import { resolve } from "node:path";
-import type { Command } from "../cli/registry.ts";
 import { str } from "../cli/parser.ts";
 import { SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { saveState } from "../state.ts";
-import { dialogsJson, modalState, reply, withClient, withPageClient, type CommandContext } from "./context.ts";
+import { dialogsJson, modalState, reply, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 export async function cmdSnapshot(

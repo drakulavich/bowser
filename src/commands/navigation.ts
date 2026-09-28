@@ -3,13 +3,12 @@
 import { readFile, readdir, rm, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
-import type { Command } from "../cli/registry.ts";
 import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
 import { isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
-import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext } from "./context.ts";
+import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
@@ -33,7 +32,7 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
  *  scheme (WebKit then times out on `localhost:3000`). Any URL with a real
  *  scheme passes through unchanged. Unlike playwright-cli, `127.0.0.1` gets
  *  `http://`: its `https://` only fails. */
-export function normalizeUrl(url: string): string {
+function normalizeUrl(url: string): string {
   if (!url || (URL.canParse(url) && !startsWithHostPort(url))) return url;
   let host = "";
   try {

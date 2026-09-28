@@ -1,9 +1,8 @@
 // Evaluate commands — run a JS expression or code block in the current page.
 // Both use the existing `evaluate` daemon op; no new daemon op is needed.
 
-import type { Command } from "../cli/registry.ts";
 import { runCodeScript } from "../page-scripts.ts";
-import { replyPage, withPageClient, type CommandContext } from "./context.ts";
+import { replyPage, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 function formatEvalResult(result: unknown): string {
