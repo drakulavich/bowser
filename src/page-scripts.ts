@@ -671,6 +671,9 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
 export const RELOAD = "location.reload()";
+/** The viewport in CSS pixels and the pixel ratio: what a failed
+ *  screenshot checks against WebKit's capture limit (#69). */
+export const READ_VIEWPORT = "[innerWidth, innerHeight, devicePixelRatio]";
 /** Recovery before the first commit (#48): the initial empty document
  *  leaves itself, which cancels a navigation stuck there. */
 export const LEAVE_INITIAL_DOCUMENT = "location.replace('about:blank')";
