@@ -77,6 +77,11 @@ All notable changes to this project are documented here. This project follows
   `{"ok":true,"filename":"/…/f"}`, as `screenshot` does (with `"dialogs"` when a dialog was
   answered), and the file always holds the `### Page` text, Modal state lines included. (F38)
 
+- **MCP `initialize` answers with a protocol version bowser supports.** It echoed whatever the
+  client sent, `"1999-bogus"` included. It now answers the client's version when it is
+  `2025-06-18` or `2024-11-05`, and `2025-06-18` otherwise, as the MCP lifecycle requires.
+  `2025-03-26` is not offered: it requires JSON-RPC batches, which bowser does not take. (F39)
+
 ## [0.8.2] — 2026-09-27
 
 ### Fixed

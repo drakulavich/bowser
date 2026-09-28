@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import {
   buildTools,
+  createMcpServer,
   toArgv,
   handleMcpRequest,
   handleMcpLine,
@@ -31,6 +32,17 @@ const okRun = (out = '{"ok":true}'): McpDeps => ({
   run: async () => out,
   version: "9.9.9",
 });
+
+/** Feed raw lines to the server loop and return every response it wrote,
+ *  once every accepted call has finished. */
+async function serve(lines: string[], deps: McpDeps = okRun()): Promise<any[]> {
+  const writes: string[] = [];
+  const server = createMcpServer(deps, (line) => writes.push(line));
+  for (const line of lines) server.accept(line);
+  await server.idle();
+  await new Promise((r) => setTimeout(r, 0));
+  return writes.map((w) => JSON.parse(w));
+}
 
 function schema(name: string) {
   const s = SCHEMAS.commands.find((c) => c.name === name);
@@ -525,6 +537,25 @@ describe("MCP fill and type errors never carry the entered text", () => {
     });
     test(`the ${tool} tool's isError text passes an error without the text through`, async () => {
       expect(await call(tool, args, "failed: boom")).toBe("failed: boom");
+    });
+  }
+});
+
+// F39: the server answers with a version it supports: the client's when it is
+// one, else the latest. 2025-03-26 is not one: it requires batches (F40).
+describe("MCP server: initialize negotiates the protocol version", () => {
+  const init = (protocolVersion?: unknown) =>
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: protocolVersion === undefined ? {} : { protocolVersion } });
+  for (const v of ["2025-06-18", "2024-11-05"]) {
+    test(`a supported version (${v}) is echoed`, async () => {
+      const [res] = await serve([init(v)]);
+      expect(res.result.protocolVersion).toBe(v);
+    });
+  }
+  for (const v of ["1999-bogus", "2025-03-26", "2025-11-25", "", 42, undefined]) {
+    test(`${JSON.stringify(v)} gets the latest supported version, 2025-06-18`, async () => {
+      const [res] = await serve([init(v)]);
+      expect(res.result.protocolVersion).toBe("2025-06-18");
     });
   }
 });

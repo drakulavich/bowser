@@ -25,8 +25,11 @@ import { UserError } from "./errors.ts";
 
 const VERSION = (pkg as { version: string }).version;
 
-/** Protocol version advertised when the client doesn't request a known one. */
-const MCP_PROTOCOL_VERSION = "2025-06-18";
+/** The protocol versions this server speaks, newest first (F39). `initialize`
+ *  echoes the client's version when it is listed, and answers the first entry
+ *  otherwise. 2025-03-26 is left out: it requires JSON-RPC batches, which
+ *  this server refuses (F40). */
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2024-11-05"] as const;
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */
@@ -186,7 +189,7 @@ export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<obj
   switch (r.method) {
     case "initialize": {
       const requested = (r.params as { protocolVersion?: unknown } | undefined)?.protocolVersion;
-      const protocolVersion = typeof requested === "string" && requested ? requested : MCP_PROTOCOL_VERSION;
+      const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ?? SUPPORTED_PROTOCOL_VERSIONS[0];
       return jsonRpcResult(r.id, {
         protocolVersion,
         capabilities: { tools: {} },

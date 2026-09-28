@@ -245,7 +245,7 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
 - Relative file paths (`screenshot`, `snapshot` `filename`, `state-save`, `state-load`) resolve against the server's working directory. If the client starts it from `/` or another directory it cannot write, the server uses `<os.tmpdir()>/bowser-mcp` instead (`$TMPDIR/bowser-mcp`). Replies name the absolute path written. An absolute path is used as given.
-- The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
+- The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies. It speaks MCP `2025-06-18` and `2024-11-05`: `initialize` answers with the client's version when it is one of these, and with `2025-06-18` otherwise.
 - `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
 - `notifications/cancelled` drops the call: one still queued behind its session never runs, and a running one finishes but its result is discarded. Either way no response is sent for it, per the MCP spec. A browser operation that has already started is **not** undone — a cancelled `click` may still have clicked, and the session's next call waits for it to finish.
