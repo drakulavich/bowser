@@ -1,6 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
-  "root": true,
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
     "includes": [
       "src/**",
@@ -14,7 +13,6 @@
     "enabled": false
   },
   "linter": {
-    "enabled": true,
     "rules": {
       "preset": "none",
       "suspicious": {
