@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A missing required argument is a usage error for every command.** `bowser select e3` and
+  `bowser localstorage-set k` used to run with an empty value, because the missing word reached
+  the command as `""`. They now fail before connecting, with the command's usage line
+  (`usage: bowser select <ref> <value>`) and exit code 1, like `playwright-cli`. An explicitly
+  empty argument (`select e3 ""`, `fill e2 ""`, `localstorage-set k ""`) still runs, as it does
+  in `playwright-cli`. (#60)
+
 ## [0.8.2] — 2026-09-27
 
 ### Fixed

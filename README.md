@@ -223,6 +223,11 @@ argument that has spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`.
 count too, so `fill e1 -- a b` is too many. `bowser mcp` with any extra word fails the same way and
 does not start the server.
 
+A command given fewer arguments than it requires fails the same way, with its usage line:
+`bowser select e3` fails with `usage: bowser select <ref> <value>` and exit code 1. An empty
+argument is a value, as in `playwright-cli`: `bowser select e3 ""` selects the option whose value
+is empty, and `bowser localstorage-set k ""` stores an empty string.
+
 ## MCP bridge
 
 `bowser mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing every browser command as an MCP tool — so MCP clients (Claude Desktop, etc.) can drive the browser without shelling out. Each tool maps 1:1 to a CLI command and takes an optional `session` argument; outputs are the same JSON as `--json` mode.

@@ -73,7 +73,8 @@ Do **not** use for static HTTP fetches.
 
 Quote any argument with spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. An extra word
 fails the command with `usage: too many arguments for '<cmd>': expected <n>, received <m>` (exit 1),
-words after `--` included.
+words after `--` included. A missing argument fails with the command's usage line
+(`usage: bowser select <ref> <value>`, exit 1); an empty one (`""`) is a value.
 
 ## Snapshot Format
 

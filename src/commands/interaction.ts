@@ -134,7 +134,6 @@ export async function cmdHover(ctx: CommandContext, ref: string): Promise<string
 }
 
 export async function cmdSelect(ctx: CommandContext, ref: string, value: string): Promise<string> {
-  if (value === undefined) throw new UserError("usage: bowser select <ref> <value>");
   const { target } = await loadRef(ctx.session, ref);
   requireKind("select", ref, target);
   return withPageClient(ctx, async (c) => {

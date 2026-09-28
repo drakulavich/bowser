@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { renderCommandHelp, renderHelp } from "./cli/help.ts";
+import { renderCommandHelp, renderHelp, usageOf } from "./cli/help.ts";
 import { helpRequested, parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { failedModalState, type CommandContext } from "./commands/context.ts";
@@ -23,6 +23,13 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
     throw new UserError(
       `usage: too many arguments for '${command.name}': expected ${declared}, received ${args.positional.length}`,
     );
+  }
+  // A missing required positional is refused here too (#60): the commands
+  // used to see "" for it, so `select e3` selected the empty value. An empty
+  // word (`select e3 ""`) is a value, as in playwright-cli. Required
+  // positionals come first in every command.
+  if (args.positional.length < command.positional.filter((p) => p.required).length) {
+    throw new UserError(`usage: bowser ${usageOf(command)}`);
   }
   const ctx: CommandContext = { ...base, session: args.session, json: args.json, command: command.name };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
