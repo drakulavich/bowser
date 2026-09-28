@@ -14,7 +14,7 @@ import { readStdin, type CommandContext } from "../src/commands/context.ts";
 import { connectOrSpawn, pidPath } from "../src/daemon/client.ts";
 import { toArgv } from "../src/mcp.ts";
 import { resolveRefScript } from "../src/page-scripts.ts";
-import { saveState } from "../src/state.ts";
+import { maxSessionNameLength, saveState, sessionsRoot } from "../src/state.ts";
 import { fakeClient, type FakeHandlers } from "./helpers/fake-client.ts";
 
 let tmp: string;
@@ -107,7 +107,9 @@ const USER_ERRORS: Case[] = [
   { argv: ["select", "e3", "z"], handlers: { evaluate: () => "select", select: () => false }, stderr: `ref 'e3' has no option "z"` },
   { argv: ["uncheck", "e4"], handlers: { evaluate: resolvesThen(undefined), uncheck: () => false }, stderr: "ref 'e4' is a radio button; select another option in its group to uncheck it" },
   { argv: ["press", ""], stderr: "usage: bowser press <key>" },
-  { argv: ["resize", "0", "10"], stderr: "usage: bowser resize <width> <height>" },
+  { argv: ["resize", "0", "10"], stderr: "usage: bowser resize <width> <height> (each 1 to 16384)" },
+  // F22: Bun.WebView refuses a side over 16384.
+  { argv: ["resize", "16385", "100"], stderr: "usage: bowser resize <width> <height> (each 1 to 16384)" },
   { argv: ["eval", ""], stderr: "usage: bowser eval <expression>" },
   { argv: ["run-code", ""], stderr: "usage: bowser run-code <code>" },
   { argv: ["run-code", "async page => 1"], handlers: { evaluate: () => ({ fn: true }) }, stderr: "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return" },
@@ -117,6 +119,8 @@ const USER_ERRORS: Case[] = [
   { argv: ["goto", ""], stderr: "usage: bowser goto <url>" },
   { argv: ["state-save", ""], stderr: "usage: bowser state-save <file>" },
   { argv: ["state-load", ""], stderr: "usage: bowser state-load <file>" },
+  // F5: every problem with the file is the user's.
+  { argv: ["state-load", "/nonexistent/bowser-state.json"], stderr: "state-load: file not found: /nonexistent/bowser-state.json" },
   { argv: ["localstorage-get", ""], stderr: "usage: bowser localstorage-get <key>" },
   { argv: ["sessionstorage-set", ""], stderr: "usage: bowser sessionstorage-set <key> <value>" },
   { argv: ["sessionstorage-delete", ""], stderr: "usage: bowser sessionstorage-delete <key>" },
@@ -130,7 +134,6 @@ const USER_ERRORS: Case[] = [
 const RUNTIME_ERRORS: Case[] = [
   { argv: ["eval", "x"], handlers: { evaluate: () => { throw new Error("usage: from the page"); } }, stderr: "usage: from the page" },
   { argv: ["click", "e1"], handlers: { evaluate: () => "button", click: () => { throw new Error("ref 'e1' not found by the daemon"); } }, stderr: "ref 'e1' not found by the daemon" },
-  { argv: ["state-load", "/nonexistent/bowser-state.json"], stderr: "state-load: file not found: /nonexistent/bowser-state.json" },
   { argv: ["open", "https://x/"], handlers: { state: () => ({ url: "about:blank", title: "" }) }, stderr: "navigate: page did not load https://x/ (ended on about:blank)" },
 ];
 
@@ -169,6 +172,29 @@ describe("user errors raised outside a command's run", () => {
   test("an MCP call that passes a CLI-only flag", async () => {
     expect(await code(() => toArgv(findCommand("fill")!, { ref: "e2", stdin: true }))).toEqual({
       stderr: "bowser: usage: --stdin is not available over MCP",
+      code: 1,
+    });
+  });
+
+  // F35: one character past the longest name for this HOME, refused before
+  // anything connects or spawns.
+  test("open with a session name too long for this HOME", async () => {
+    const name = "y".repeat(maxSessionNameLength() + 1);
+    let connects = 0;
+    const err = await run([`--session=${name}`, "open"], { connect: async () => { connects++; return fakeClient({}); } }).catch((e) => e);
+    expect(await code(Promise.reject(err))).toEqual({
+      stderr: `bowser: usage: session name is too long for this HOME: at most ${maxSessionNameLength()} characters under ${sessionsRoot()}, got ${name.length}`,
+      code: 1,
+    });
+    expect(connects).toBe(0);
+  });
+
+  // platform: "linux": had the check come after the spawn guards, this would
+  // report "requires macOS" instead.
+  test("connectOrSpawn with a session name too long for this HOME", async () => {
+    const name = "y".repeat(maxSessionNameLength() + 1);
+    expect(await code(connectOrSpawn(name, { platform: "linux" }))).toEqual({
+      stderr: `bowser: usage: session name is too long for this HOME: at most ${maxSessionNameLength()} characters under ${sessionsRoot()}, got ${name.length}`,
       code: 1,
     });
   });

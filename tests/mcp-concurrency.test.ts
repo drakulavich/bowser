@@ -29,7 +29,7 @@ function harness() {
         started.push({ session, expr, release: (out) => resolve(out ?? `{"result":${JSON.stringify(expr)}}`) });
       }),
   };
-  const server = createMcpServer(deps, (line) => writes.push(line));
+  const server = createMcpServer(deps, (line) => { writes.push(line); });
   const send = (msg: object) => server.accept(JSON.stringify(msg));
   const call = (id: number, expr: string, session?: string) =>
     send({

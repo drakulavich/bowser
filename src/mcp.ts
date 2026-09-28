@@ -25,8 +25,13 @@ import { UserError } from "./errors.ts";
 
 const VERSION = (pkg as { version: string }).version;
 
-/** Protocol version advertised when the client doesn't request a known one. */
-const MCP_PROTOCOL_VERSION = "2025-06-18";
+/** The protocol versions this server speaks, newest first (F39). `initialize`
+ *  echoes the client's version when it is listed, and answers the first entry
+ *  otherwise. 2025-03-26 is left out: it requires JSON-RPC batches, which
+ *  this server refuses (F40). The stateless 2026-07-28 revision is not
+ *  implemented: its client probes with `server/discover`, gets -32601 like
+ *  any unknown method, and falls back to `initialize`. */
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] as const;
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */
@@ -81,35 +86,77 @@ export function buildTools(): McpTool[] {
   return tools;
 }
 
+/** How a refused argument is named in a usage error. */
+function kindOf(v: unknown): string {
+  if (Array.isArray(v)) return "array";
+  if (v === "") return '""';
+  return typeof v;
+}
+
+/** A string, or a finite number taken as its string: the schema says string
+ *  for `width` or `depth`, and models send numbers there (F42). */
+function stringArg(schema: CommandSchema, key: string, v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  throw new UserError(`usage: argument '${key}' of '${schema.name}' must be a string or a number, got ${kindOf(v)}`);
+}
+
 /** Reconstruct a CLI argv from structured MCP tool arguments so the call routes
  *  through the existing run() dispatcher. Shape:
  *  [--session <s>] --json <name> <flags…> [-- <positionals…>]
  *  The `--` keeps a value such as "--json" or "--stdin" a positional: it is
- *  data from the client, never a flag. */
+ *  data from the client, never a flag.
+ *
+ *  Each value must have its inputSchema type, or this throws a `usage:`
+ *  UserError (F42): nothing is converted or dropped. `null` is the same as
+ *  leaving an argument out. Unknown keys are prepareToolCall's check. */
 export function toArgv(schema: CommandSchema, args: Record<string, unknown>): string[] {
   const argv: string[] = [];
   const session = args.session;
-  if (typeof session === "string" && session.length > 0) argv.push("--session", session);
+  if (session !== undefined && session !== null) {
+    if (typeof session !== "string" || session === "") {
+      throw new UserError(`usage: argument 'session' of '${schema.name}' must be a non-empty string, got ${kindOf(session)}`);
+    }
+    argv.push("--session", session);
+  }
   argv.push("--json", schema.name);
   const positionals: string[] = [];
   for (const p of schema.positional) {
     const v = args[p.name];
     // Stop at the first gap so a missing positional can't shift later ones.
     if (v === undefined || v === null) break;
-    positionals.push(String(v));
+    positionals.push(stringArg(schema, p.name, v));
   }
   for (const f of schema.flags) {
     const v = args[f.name];
     if (v === undefined || v === null) continue;
     if (f.mcp === false) throw new UserError(`usage: --${f.name} is not available over MCP`);
     if (f.kind === "boolean") {
-      if (v === true || v === "true") argv.push(`--${f.name}`);
+      if (typeof v !== "boolean") {
+        throw new UserError(`usage: argument '${f.name}' of '${schema.name}' must be true or false, got ${kindOf(v)}`);
+      }
+      if (v) argv.push(`--${f.name}`);
     } else {
-      argv.push(`--${f.name}=${String(v)}`);
+      argv.push(`--${f.name}=${stringArg(schema, f.name, v)}`);
     }
   }
   if (positionals.length > 0) argv.push("--", ...positionals);
   return argv;
+}
+
+/** The tool's arguments as an object, refusing a key the tool does not have,
+ *  as the CLI refuses an extra word (F4, F42). A flag MCP does not offer
+ *  (`stdin`) passes here, for toArgv's clearer message. */
+function toolArguments(schema: CommandSchema, raw: unknown): Record<string, unknown> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new UserError(`usage: the arguments of '${schema.name}' must be an object, got ${kindOf(raw)}`);
+  }
+  const known = new Set(["session", ...schema.positional.map((p) => p.name), ...schema.flags.map((f) => f.name)]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) throw new UserError(`usage: unknown argument '${key}' for '${schema.name}'`);
+  }
+  return raw as Record<string, unknown>;
 }
 
 function jsonRpcResult(id: unknown, result: unknown) {
@@ -127,21 +174,21 @@ function toolResult(id: unknown, text: string, isError?: boolean) {
 }
 
 /** A tools/call split in two: `reply` when it is answered without running
- *  anything (unknown tool, a flag MCP does not offer), otherwise the argv to
+ *  anything (unknown tool, an argument the tool refuses), otherwise the argv to
  *  run and the session it runs in. */
 type PreparedCall =
   | { reply: object }
   | { argv: string[]; session: string | null };
 
 function prepareToolCall(id: unknown, params: unknown): PreparedCall {
-  const p = (params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
+  const p = (params ?? {}) as { name?: string; arguments?: unknown };
   const name = p.name;
   const cmd = name ? findCommand(name) : undefined;
   const schema = cmd && cmd.mcp !== false ? cmd : undefined;
   if (!schema) return { reply: toolResult(id, `unknown tool: ${name}`, true) };
   let argv: string[];
   try {
-    argv = toArgv(schema, p.arguments ?? {});
+    argv = toArgv(schema, toolArguments(schema, p.arguments));
   } catch (e) {
     return { reply: toolResult(id, e instanceof Error ? e.message : String(e), true) };
   }
@@ -178,15 +225,21 @@ async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
 /** Process one parsed JSON-RPC message. Returns the response object, or null for
  *  notifications (no id) — which get no reply per JSON-RPC. */
 export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<object | null> {
-  const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
-  const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
+  // F40: a batch (MCP 2025-06-18 has none) or a non-object is not a Request
+  // object; JSON-RPC answers it with -32600 and id null, once for a whole
+  // batch. Taking it for a notification left a client waiting forever.
+  if (typeof req !== "object" || req === null || Array.isArray(req)) {
+    return jsonRpcError(null, -32600, "Invalid Request");
+  }
+  const r = req as { id?: unknown; method?: string; params?: unknown };
+  const hasId = r.id !== null && r.id !== undefined;
   // No id → notification (or unaddressable). Per JSON-RPC, send no response.
   if (!hasId) return null;
 
   switch (r.method) {
     case "initialize": {
       const requested = (r.params as { protocolVersion?: unknown } | undefined)?.protocolVersion;
-      const protocolVersion = typeof requested === "string" && requested ? requested : MCP_PROTOCOL_VERSION;
+      const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ?? SUPPORTED_PROTOCOL_VERSIONS[0];
       return jsonRpcResult(r.id, {
         protocolVersion,
         capabilities: { tools: {} },
@@ -241,14 +294,14 @@ export interface McpServer {
  *  STDOUT: each response goes out as one `write(JSON + "\n")` call. A stream
  *  keeps the chunks of separate write() calls whole and in call order, so
  *  concurrent responses never interleave within a line. */
-export function createMcpServer(deps: McpDeps, write: (line: string) => void): McpServer {
+export function createMcpServer(deps: McpDeps, write: (line: string) => void | Promise<void>): McpServer {
   const chains = new Map<string, Promise<void>>();
   const inFlight = new Map<unknown, { cancelled: boolean }>();
   const running = new Set<Promise<void>>();
 
-  const send = (res: object) => {
+  const send = async (res: object): Promise<void> => {
     try {
-      write(JSON.stringify(res) + "\n");
+      await write(JSON.stringify(res) + "\n");
     } catch (e) {
       console.error(`bowser mcp: could not write a response: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -256,7 +309,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void): M
 
   function schedule(id: unknown, params: unknown): void {
     const prepared = prepareToolCall(id, params);
-    if ("reply" in prepared) return send(prepared.reply);
+    if ("reply" in prepared) { void send(prepared.reply); return; }
     const { argv, session } = prepared;
     const token = { cancelled: false };
     inFlight.set(id, token);
@@ -265,7 +318,10 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void): M
       .then(async () => {
         if (token.cancelled) return;
         const res = await runToolCall(id, argv, deps);
-        if (!token.cancelled) send(res);
+        // Keep this session's chain behind stdout completion. If the peer
+        // closed its pipe, the write callback reports EPIPE before a queued
+        // command can start and cause another side effect.
+        if (!token.cancelled) await send(res);
       })
       .finally(() => {
         if (inFlight.get(id) === token) inFlight.delete(id);
@@ -281,7 +337,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void): M
     try {
       req = JSON.parse(line);
     } catch {
-      return send(jsonRpcError(null, -32700, "Parse error"));
+      { void send(jsonRpcError(null, -32700, "Parse error")); return; }
     }
     const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
     const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
@@ -337,8 +393,31 @@ function useWritableCwd(): void {
 export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string }): Promise<void> {
   useWritableCwd();
   const d: McpDeps = { run: deps.run, version: deps.version ?? VERSION };
+  // F41: a failed stdout write means the client has stopped reading, so no
+  // answer can reach it. Exit 0 at once: an EPIPE left unhandled crashed the
+  // server with a stack trace, and a call queued behind the running one still
+  // ran for no one. A daemon op already running finishes in its daemon, as a
+  // cancelled call's does. Bun reports the EPIPE as an 'error' event on
+  // stdout; a synchronous throw is handled the same way.
+  const clientGone = (e: unknown): never => {
+    if ((e as { code?: unknown } | null)?.code === "EPIPE") process.exit(0);
+    console.error(`bowser mcp: stdout failed: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  };
+  process.stdout.on("error", clientGone);
   const server = createMcpServer(d, (line) => {
-    process.stdout.write(line);
+    return new Promise<void>((resolve, reject) => {
+      try {
+        process.stdout.write(line, (e) => {
+          if ((e as { code?: unknown } | null)?.code === "EPIPE") clientGone(e);
+          if (e) reject(e);
+          else resolve();
+        });
+      } catch (e) {
+        if ((e as { code?: unknown } | null)?.code === "EPIPE") clientGone(e);
+        reject(e);
+      }
+    });
   });
   const decoder = new TextDecoder();
   let buf = "";

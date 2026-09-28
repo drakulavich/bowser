@@ -168,7 +168,7 @@ An action on a ref whose element is gone (removed by a re-render, or from before
 
 ### JSON output for agent pipelines
 
-`--json snapshot` prints `{"snapshot": "<tree>"}`: the tree text alone, without the `### Page` wrapper.
+`--json snapshot` prints `{"snapshot": "<tree>"}`: the tree text alone, without the `### Page` wrapper. `snapshot --filename=f` writes the `### Page` text to `f`, with or without `--json`, and answers `wrote /…/f` (`{"ok":true,"filename":"/…/f"}` under `--json`, with `"dialogs"` when a dialog was answered).
 
 ```bash
 bowser --json snapshot | jq -r .snapshot | grep 'button'
@@ -190,7 +190,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox or radio button. A disabled one fails like `click`. `uncheck` on a checked radio fails with `ref 'eN' is a radio button; select another option in its group to uncheck it`, exit 1; on an unchecked one it succeeds and does nothing. An `aria-checked="mixed"` checkbox is unchecked for `check` (one click, as in `playwright-cli`) and checked for `uncheck`, which clicks it until it reads `false` (`playwright-cli` leaves it mixed) |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
 | `screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
-| `resize <width> <height>` | Set the viewport size in pixels |
+| `resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 (`Bun.WebView`'s limit) |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |
 | `close [name]` | End a session and remove its directory (defaults to `--session`; positional name overrides). Fails if the browser process cannot be confirmed stopped, including a daemon from bowser 0.5 or older that does not answer: it wrote no pidfile, so `close` exits 2 and keeps the session until you end the process yourself (the error says how). |
@@ -207,11 +207,11 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `sessionstorage-clear` | Clear all `sessionStorage` entries |
 | `eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `run-code <code>` | Run JavaScript in the current page and print the result. One expression is evaluated as one (`run-code "(() => { return 5 })()"` prints `5`); any other code is the body of an async function, so use `return` for the result, and `await` works (`run-code "await new Promise(r => setTimeout(r, 100)); return document.title"`). Unlike `playwright-cli`'s `run-code`, which calls a function with a Playwright `page` in Node, it runs in the page: a result that is a function, such as `async page => …`, fails with `run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return` (exit 1) |
-| `state-save <file>` | Save the current origin's localStorage to a Playwright-compatible `storageState` JSON file. Its `cookies` array is always empty: bowser has no cookie access (use `open --persistent` to keep logins). |
-| `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. |
+| `state-save <file>` | Save the current origin's localStorage to a Playwright-compatible `storageState` JSON file. Its `cookies` array is always empty: bowser has no cookie access (use `open --persistent` to keep logins). A page with no origin (`about:blank`) saves no origins. |
+| `state-load <file>` | Restore localStorage from a `storageState` file. It restores origins matching the current page and reports the others skipped. Cookies in the file are skipped, with one line on stderr. A missing, invalid or wrongly shaped file (`storageState.origins: expected array, got object`) restores nothing and exits 1. |
 | `mcp` | Run a Model Context Protocol stdio server exposing every command above as an MCP tool. |
 
-Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`.
+Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`. A session name uses letters, digits, `.`, `_` and `-`, and does not start with `.` or `-`. It is at most 255 characters, or fewer under a very long `HOME`: `<HOME>/.bowser/sessions/<name>/pid.<pid>.tmp` must fit Bun's 1016-character path limit. A longer name is a usage error that gives the limit.
 
 `bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
 flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text
@@ -232,6 +232,8 @@ is empty, and `bowser localstorage-set k ""` stores an empty string.
 
 `bowser mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, exposing every browser command as an MCP tool — so MCP clients (Claude Desktop, etc.) can drive the browser without shelling out. Each tool maps 1:1 to a CLI command and takes an optional `session` argument; outputs are the same JSON as `--json` mode.
 
+Arguments are checked against the tool's input schema. A wrong type (`session: 42`, an object where a string belongs, `persistent: "false"`) or a key the tool does not have is refused with an `isError` result starting `usage:`, and nothing runs. Where the schema says string, a finite number is also taken (`resize {width: 800, height: 600}`), and `null` is the same as leaving the argument out.
+
 Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 
 ```json
@@ -245,9 +247,11 @@ Register it in an MCP client config (e.g. `claude_desktop_config.json`):
 Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
 - Relative file paths (`screenshot`, `snapshot` `filename`, `state-save`, `state-load`) resolve against the server's working directory. If the client starts it from `/` or another directory it cannot write, the server uses `<os.tmpdir()>/bowser-mcp` instead (`$TMPDIR/bowser-mcp`). Replies name the absolute path written. An absolute path is used as given.
-- The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies.
+- The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies. It speaks MCP `2025-11-25`, `2025-06-18` and `2024-11-05`: `initialize` answers with the client's version when it is one of these, and with `2025-11-25` otherwise. The stateless `2026-07-28` revision is not implemented; its `server/discover` probe gets `-32601 Method not found`, on which a client falls back to `initialize`.
 - `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
+- A JSON-RPC batch (an array) or a line that is not a JSON object gets one `-32600 Invalid Request` error with `id: null`; nothing in a batch runs. MCP `2025-06-18` has no batching.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
+- The server exits when stdin closes and every running call has answered. A client that stops reading stdout is gone: the server exits 0 at its next response, and calls still queued never run. A browser operation already running finishes in its daemon.
 - `notifications/cancelled` drops the call: one still queued behind its session never runs, and a running one finishes but its result is discarded. Either way no response is sent for it, per the MCP spec. A browser operation that has already started is **not** undone — a cancelled `click` may still have clicked, and the session's next call waits for it to finish.
 
 ## How it works
@@ -261,7 +265,7 @@ Notes:
 | Variable | Effect |
 | --- | --- |
 | `BOWSER_OP_TIMEOUT_MS` | Per-operation timeout in milliseconds (default `30000`; `0` disables). Counted from when the daemon receives the command, including time spent queued behind another one, so a wedged browser makes every command exit with a timeout error instead of blocking forever. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser (in a session that has not loaded a page yet, where a reload does nothing, it leaves the blank page instead). The daemon reads it once, when the session starts: to change it, `close` the session and `open` it again with the new value. A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2). |
-| `BOWSER_DAEMON_DEBUG` | `1` lets the session daemon's stdout and stderr through to the terminal, for debugging a daemon that fails to start. |
+| `BOWSER_DAEMON_DEBUG` | `1` writes the output of a session daemon that this command starts to `~/.bowser/sessions/<session>/daemon.log`, for debugging a daemon that fails to start. `close` deletes it with the session directory. |
 
 ## Tests
 

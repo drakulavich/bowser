@@ -27,7 +27,8 @@ import {
   cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
   cmdSessionStorageList, cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
-import { ensureSessionDir, saveState, loadState, sessionDir } from "../src/state.ts";
+import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
+import { longHome } from "./helpers/long-home.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 import { fillScript, resolveRefScript, runCodeScript, storageSetScript } from "../src/page-scripts.ts";
 import { usageOf } from "../src/cli/help.ts";
@@ -477,6 +478,26 @@ describe("snapshot", () => {
     const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, {});
     expect(JSON.parse(out)).toEqual({ snapshot: '- link "Home" [ref=e1]:\n  - /url: /' });
   });
+  // F38: the reply has screenshot's shape, and the file is always the text.
+  test("--json --filename answers {ok, filename}; the file holds the ### Page text", async () => {
+    const file = join(tmp, `snap-json-${Date.now()}.md`);
+    const c = fakeClient({ evaluate: () => snap });
+    const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, { filename: file });
+    expect(JSON.parse(out)).toEqual({ ok: true, filename: file });
+    expect(await Bun.file(file).text()).toBe(yaml + "\n");
+  });
+  test("--json --filename: the dialogs go in the reply, the Modal state lines in the file", async () => {
+    const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
+    const file = join(tmp, `snap-json-dlg-${Date.now()}.md`);
+    const c = fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] });
+    const out = await cmdSnapshot({ ...ctx({ json: true }), connect: async () => c }, { filename: file });
+    expect(JSON.parse(out)).toEqual({
+      ok: true, filename: file, dialogs: [{ type: "confirm", message: "sure?", state: "dismissed" }],
+    });
+    expect(await Bun.file(file).text()).toContain(
+      '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)\n### Snapshot',
+    );
+  });
 });
 
 describe("close", () => {
@@ -609,6 +630,27 @@ describe("close", () => {
     expect(out).toContain(" m11-1 m12-2");
     expect(out).not.toContain("failed");
     expect(existsSync(legacy)).toBe(false);
+  });
+
+  // F35: a directory whose name is now too long for this HOME (left by an
+  // older bowser, whose daemon could not claim it) is still listed as dead,
+  // and close and close --all still remove it.
+  test("close, list and close --all handle a directory whose name is too long for this HOME", async () => {
+    const prevHome = process.env.HOME;
+    process.env.HOME = await longHome(tmp, 900);
+    try {
+      const name = "n".repeat(maxSessionNameLength() + 5);
+      const dir = join(sessionsRoot(), name);
+      await mkdir(dir);
+      expect(await cmdList({ ...ctx({ json: true }), connect: unreachable })).toBe("[]");
+      expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`closed session '${name}'`);
+      expect(existsSync(dir)).toBe(false);
+      await mkdir(dir);
+      expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe(`closed 1 session: ${name}`);
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      process.env.HOME = prevHome;
+    }
   });
 
   test("--all keeps a legacy directory whose recorded pid is alive", async () => {
@@ -1439,11 +1481,19 @@ describe("resize", () => {
     ["-1", "600"],
     ["800", "12.5"],
     ["wide", "600"],
-  ])("rejects invalid dimensions (%p, %p)", async (w, h) => {
+    ["16385", "100"],
+    ["100", "100000"],
+  ])("rejects invalid dimensions (%p, %p) before any daemon request", async (w, h) => {
     const c = fakeClient({});
     await expect(
       cmdResize({ ...ctx(), connect: async () => c }, w, h),
-    ).rejects.toThrow(/usage: bowser resize/);
+    ).rejects.toThrow("usage: bowser resize <width> <height> (each 1 to 16384)");
+    expect(c.calls).toEqual([]);
+  });
+
+  test("accepts WebKit's largest side, 16384 (F22)", async () => {
+    const c = fakeClient({});
+    expect(await cmdResize({ ...ctx(), connect: async () => c }, "16384", "16384")).toBe("resized 16384x16384");
   });
 });
 

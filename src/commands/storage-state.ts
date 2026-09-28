@@ -33,12 +33,54 @@ interface StorageState {
   origins: StorageStateOrigin[];
 }
 
+/** The page's origin, or null when it has none to store under: an unparsable
+ *  URL, or an opaque origin (about:blank, data:), whose `origin` is the
+ *  string "null". */
 function pageOrigin(url: string): string | null {
   try {
-    return new URL(url).origin;
+    const origin = new URL(url).origin;
+    return origin === "null" ? null : origin;
   } catch {
     return null;
   }
+}
+
+/** The JSON type name playwright-cli prints: `null` and `array` apart from `object`. */
+function typeOf(v: unknown): string {
+  return v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+}
+
+/** Checks a parsed storageState file with playwright-cli's rules and wording
+ *  (F5), so a bad file names its field instead of failing in the page or
+ *  loading nothing. Cookie entries are only counted, so they are not checked.
+ *  A top-level array passes, as in playwright-cli. */
+function checkStorageState(v: unknown): StorageState {
+  const fail = (path: string, type: string, value: unknown): never => {
+    throw new UserError(`state-load: ${path}: expected ${type}, got ${typeOf(value)}`);
+  };
+  const want = (path: string, value: unknown, type: "object" | "array" | "string") => {
+    if (typeOf(value) !== type) fail(path, type, value);
+  };
+  if (typeof v !== "object" || v === null) fail("storageState", "object", v);
+  const s = v as Record<string, unknown>;
+  if (s.cookies !== undefined) want("storageState.cookies", s.cookies, "array");
+  if (s.origins !== undefined) {
+    want("storageState.origins", s.origins, "array");
+    (s.origins as unknown[]).forEach((o, i) => {
+      const at = `storageState.origins[${i}]`;
+      want(at, o, "object");
+      const origin = o as Record<string, unknown>;
+      want(`${at}.origin`, origin.origin, "string");
+      want(`${at}.localStorage`, origin.localStorage, "array");
+      (origin.localStorage as unknown[]).forEach((e, j) => {
+        want(`${at}.localStorage[${j}]`, e, "object");
+        const entry = e as Record<string, unknown>;
+        want(`${at}.localStorage[${j}].name`, entry.name, "string");
+        want(`${at}.localStorage[${j}].value`, entry.value, "string");
+      });
+    });
+  }
+  return s as unknown as StorageState;
 }
 
 export async function cmdStateSave(ctx: CommandContext, file: string): Promise<string> {
@@ -47,9 +89,12 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
   return withClient(ctx, async (c) => {
     const state = await c.request("state");
     const origin = pageOrigin(state.url);
-    const entries = (await c.request("evaluate", [
-      storageListScript("localStorage"),
-    ])) as Record<string, string> | null;
+    // No origin, no localStorage to read: WebKit refuses the read on
+    // about:blank ("The operation is insecure"), and playwright-cli writes an
+    // empty file there (F33).
+    const entries = origin
+      ? ((await c.request("evaluate", [storageListScript("localStorage")])) as Record<string, string> | null)
+      : null;
     const local = entries ?? {};
     const origins: StorageStateOrigin[] = [];
     if (origin && Object.keys(local).length > 0) {
@@ -69,13 +114,15 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
   if (!file) throw new UserError("usage: bowser state-load <file>");
   const target = resolve(file);
   const f = Bun.file(target);
-  if (!(await f.exists())) throw new Error(`state-load: file not found: ${target}`);
-  let parsed: StorageState;
+  // Every problem with the file is the user's to fix: exit 1 (F5).
+  if (!(await f.exists())) throw new UserError(`state-load: file not found: ${target}`);
+  let json: unknown;
   try {
-    parsed = (await f.json()) as StorageState;
+    json = await f.json();
   } catch {
-    throw new Error(`state-load: invalid JSON in ${target}`);
+    throw new UserError(`state-load: invalid JSON in ${target}`);
   }
+  const parsed = checkStorageState(json);
   const cookiesSkipped = Array.isArray(parsed.cookies) ? parsed.cookies.length : 0;
   const origins = parsed.origins ?? [];
 

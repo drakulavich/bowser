@@ -5,6 +5,12 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Every `state-load` file error exits 1.** A missing file and invalid JSON exited 2, as a
+  runtime error; they are the user's input to fix, like a bad flag, so they now exit 1, as does
+  the new shape check. (F5)
+
 ### Fixed
 
 - **A missing required argument is a usage error for every command.** `bowser select e3` and
@@ -28,6 +34,74 @@ All notable changes to this project are documented here. This project follows
   refuses a new navigation while one is pending. Every later command then failed at its budget
   until `close`. Recovery now has such a page leave for `about:blank`, which cancels the stuck
   navigation; the next `goto` works once recovery has run. (#48)
+- **An `eval` that never settles in a fresh session no longer leaves the session stuck.** Before
+  the first page, recovery left the initial page with a script, but WebKit refuses a second
+  script while the stuck one is pending, so nothing freed it and every later command failed until
+  `close`. Recovery now falls back to navigating to `about:blank`, which frees the stuck `eval`
+  about 3 s later; the session then answers on `about:blank`. (#67)
+- **`--json` dialog reports carry only bowser's own fields.** A page can write to the log the
+  dialog shim keeps, and its extra keys (`"note": …`, an object `answer`) came out in the reply as
+  if bowser had written them. Each report is now rebuilt from `type` (`alert`, `confirm` or
+  `prompt`; any other entry is dropped), `message`, `state`, and `defaultValue`, `answer` and
+  `unanswered` when they have the documented type. (F27)
+- **`BOWSER_DAEMON_DEBUG=1` no longer hangs a command whose output is piped.** The daemon got the
+  caller's stdout and stderr, and since it runs until `close`, `bowser open … | cat`, `$(…)` and an
+  agent's shell tool waited for it forever. Its output now goes to
+  `~/.bowser/sessions/<session>/daemon.log`, and a daemon that does not start in time names that
+  file in the error. (F6)
+- **`state-load` checks the file's shape and names the field that is wrong.** A file whose
+  `origins` was an object, or whose top level was `null`, failed with an engine message
+  (`{} is not iterable`); one with `"cookies": "nope"`, a `localStorage` object or an entry with
+  no `value` reported "loaded" and restored nothing, or stored the string `"undefined"`. Such a
+  file now fails before anything is restored, with `playwright-cli`'s wording:
+  `state-load: storageState.origins[0].localStorage[0].value: expected string, got undefined`.
+  (F5)
+- **`resize` over 16384 is a usage error.** `Bun.WebView` refuses a side over 16384, so
+  `resize 16385 100` failed in the daemon with `The value of "width" is out of range` and exit 2.
+  It now fails before connecting, with `usage: bowser resize <width> <height> (each 1 to 16384)`
+  and exit 1. `playwright-cli` has no such limit; the limit is `Bun.WebView`'s. (F22)
+- **`state-save` before the first page writes an empty file.** On `about:blank` WebKit refuses
+  to read localStorage, so `state-save` failed with `localStorage: The operation is insecure.`
+  and exit 2, and wrote nothing. It now writes `{"cookies": [], "origins": []}`, as
+  `playwright-cli` does. (F33)
+- **A session name too long for this `HOME` is a usage error.** A name over 255 characters failed
+  in `mkdir` with a raw `ENAMETOOLONG` (exit 2). Under a very long `HOME` a shorter name could fail
+  too: its daemon died claiming `<session dir>/pid.<pid>.tmp`, which must fit Bun's 1016-character
+  path limit, and `open` reported only "did not start in time". Creating a session now checks the
+  name first and fails with `usage: session name is too long for this HOME: at most N characters
+  under <sessions root>, got M` (exit 1), before any daemon starts. `close`, `close --all` and
+  `list` still handle an existing directory with such a name. Every name that worked still works.
+  (F35)
+- **`snapshot --filename` under `--json` and over MCP answers JSON.** It printed the plain
+  `wrote /…/f` and wrote the `{"snapshot": …}` JSON to the file. It now answers
+  `{"ok":true,"filename":"/…/f"}`, as `screenshot` does (with `"dialogs"` when a dialog was
+  answered), and the file always holds the `### Page` text, Modal state lines included. (F38)
+
+- **MCP `initialize` answers with a protocol version bowser supports.** It echoed whatever the
+  client sent, `"1999-bogus"` included. It now answers the client's version when it is
+  `2025-11-25`, `2025-06-18` or `2024-11-05`, and `2025-11-25` otherwise, as the MCP lifecycle
+  requires. `2025-03-26` is not offered: it requires JSON-RPC batches, which bowser does not take.
+  The stateless `2026-07-28` revision is not implemented: its `server/discover` probe gets
+  `-32601`, and the client falls back to `initialize`. (F39)
+
+- **An MCP batch or a non-object message gets an error instead of silence.** An array, a number, a
+  string or `null` was taken for a notification and got no reply, so a client that sent a batch
+  waited forever for its ids. Such a line now gets one `-32600 Invalid Request` with `id: null`,
+  as JSON-RPC requires; nothing in a batch runs. (F40)
+
+- **MCP tool arguments of the wrong type are refused, not converted or dropped.** `session: 42`
+  ran on the `default` session, an object went to the page as `"[object Object]"`,
+  `persistent: "false"` or `1` was dropped without a word, and an unknown key was ignored. Each
+  argument is now checked against the tool's input schema, and a wrong one gets an `isError`
+  result such as `usage: argument 'session' of 'eval' must be a non-empty string, got number`,
+  without running anything, as MCP's SEP-1303 asks. A finite number is still taken where the
+  schema says string, so `resize {width: 800, height: 600}` keeps working. (F42)
+
+- **`bowser mcp` exits quietly when its client goes away.** A client that closed its end of the
+  server's stdout crashed the server at the next response, with an `EPIPE` stack trace and exit
+  1, and a call queued behind the running one still ran for no one. The server now exits 0 at the
+  first failed write, before a queued call starts; a browser operation already running finishes
+  in its daemon, as a cancelled call's does. (F41)
 
 ## [0.8.2] — 2026-09-27
 

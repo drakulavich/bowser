@@ -11,7 +11,7 @@
 export type KeyModifier = "Shift" | "Control" | "Alt" | "Meta";
 
 /** A dialog the page opened. Only a prompt has a `defaultValue`. */
-interface DialogState {
+export interface DialogState {
   type: "alert" | "confirm" | "prompt";
   message: string;
   defaultValue?: string;

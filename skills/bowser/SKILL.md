@@ -35,7 +35,7 @@ Do **not** use for static HTTP fetches.
 | --- | --- |
 | `bowser open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies/localStorage/IndexedDB in `~/.bowser/profiles/<session>/` across `close`; `--profile=dir` uses `dir` (implies `--persistent`). `close` keeps the profile; `rm -rf` it to delete. One running session per profile. |
 | `bowser goto <url>` | Navigate within current session. `open` and `goto` add a missing scheme: `http://` for `localhost`, `127.0.0.1`, `[::1]` (`localhost:3000/x`), `https://` otherwise (`example.com`); a URL with a scheme is used as typed |
-| `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
+| `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited); `--filename` writes the `### Page` text to `f` and answers with its absolute path |
 | `bowser click <ref>` | Click an element by ref. A `[disabled]` one fails at once with exit 1 and is not clicked |
 | `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin`. Refuses a disabled or readonly field (exit 1). Sets `date`/`time`/`datetime-local`/`month`/`week`/`color` inputs directly (`fill e9 2024-01-02`); a value they do not keep, or text on `type=number`, fails with exit 1 |
 | `bowser type <text>` | Type into focused element. Prints `typed N characters` (`typed 1 character` for one), never the text; `--json` gives `{"ok":true,"length":N}` |
@@ -45,7 +45,7 @@ Do **not** use for static HTTP fetches.
 | `bowser check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox/radio. A `[disabled]` one fails (exit 1); `uncheck` on a checked radio fails (exit 1): select another option in its group. `aria-checked="mixed"` counts as unchecked for `check`, checked for `uncheck` |
 | `bowser dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next dialog, before the action (a prompt gets `text`); without one it is dismissed |
 | `bowser screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
-| `bowser resize <width> <height>` | Set the viewport size in pixels |
+| `bowser resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser list` | Enumerate sessions whose daemon is running |
 | `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides). Ends a daemon of another bowser version too. Exits 2 and keeps the session when it cannot confirm the browser stopped |
@@ -63,10 +63,10 @@ Do **not** use for static HTTP fetches.
 | `bowser eval <expression>` | Evaluate a JS expression in the current page; prints the result |
 | `bowser run-code <code>` | Run JavaScript **in the page** (not Playwright code, unlike `playwright-cli`'s). One expression is evaluated as one (`"(() => { return 5 })()"` prints `5`); other code is an async function body: `return` the result, `await` works. A function result such as `async page => …` fails (exit 1) |
 | `bowser state-save <file>` | Save localStorage to a Playwright `storageState` JSON file (`cookies` is always empty) |
-| `bowser state-load <file>` | Restore localStorage from a `storageState` file; cookies in it are skipped |
+| `bowser state-load <file>` | Restore localStorage from a `storageState` file; cookies in it are skipped. A bad file names the wrong field and exits 1 |
 | `bowser mcp` | Run a Model Context Protocol stdio server exposing every command as an MCP tool |
 
-**Global flags:** `-s=<name>` / `--session=<name>` (default `default`), `--json`, `-h`/`--help`.
+**Global flags:** `-s=<name>` / `--session=<name>` (default `default`; letters, digits, `.`, `_`, `-`, at most 255 characters, fewer under a very long `HOME`), `--json`, `-h`/`--help`.
 
 `bowser <command> --help` prints that command's usage and flags without running it, so it is safe on
 `close` or `open`. After `--`, `--help` is plain text: `bowser fill e1 -- --help` types it.

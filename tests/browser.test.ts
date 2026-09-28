@@ -533,14 +533,54 @@ describe("wrapView interrupt", () => {
     expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]]]);
   });
 
-  test("before anything committed, an evaluate still pending (refused by WebKit) ends the interrupt", async () => {
+  // #67, measured on a bare WebView (Bun 1.4.2): with an evaluate pending on
+  // the initial document, WebKit refuses a second evaluate at once, reload()
+  // does nothing, and navigate("about:blank") frees the stuck one (~3.2 s).
+  test("before anything committed, an evaluate refused because one is pending falls back to navigating to about:blank", async () => {
     const v = fakeView({
+      reload: async () => { v.calls.push(["reload", []]); },
       evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); throw new Error("Invalid state: an evaluate() is already pending"); },
     });
     v.url = "";
     const b = wrapView(v, { graceMs: 20, settleMs: 60 });
     const t0 = Date.now();
     await b.interrupt();
+    expect(Date.now() - t0).toBeLessThan(30);
+    expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]], ["navigate", ["about:blank"]]]);
+  });
+
+  test("the about:blank fallback is awaited until it settles", async () => {
+    let settled = 0;
+    const v = fakeView({
+      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
+      navigate: async () => { await Bun.sleep(40); settled = Date.now(); },
+    });
+    v.url = "";
+    await wrapView(v, { graceMs: 20, settleMs: 300 }).interrupt();
+    expect(settled).toBeGreaterThan(0);
+  });
+
+  test("an about:blank fallback that never settles ends the interrupt at settleMs", async () => {
+    const v = fakeView({
+      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
+      navigate: () => new Promise<void>(() => {}),
+    });
+    v.url = "";
+    const t0 = Date.now();
+    await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt();
+    const ms = Date.now() - t0;
+    expect(ms).toBeGreaterThanOrEqual(55);
+    expect(ms).toBeLessThan(200);
+  });
+
+  test("an about:blank fallback that is refused ends the interrupt", async () => {
+    const v = fakeView({
+      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
+      navigate: async () => { throw new Error("Invalid state: a navigation is already pending"); },
+    });
+    v.url = "";
+    const t0 = Date.now();
+    await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt();
     expect(Date.now() - t0).toBeLessThan(30);
   });
 

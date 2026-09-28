@@ -4,13 +4,14 @@
 // exercise the full request/response surface with NO real stdio or daemon.
 
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   buildTools,
+  createMcpServer,
   toArgv,
   handleMcpRequest,
   handleMcpLine,
@@ -31,6 +32,17 @@ const okRun = (out = '{"ok":true}'): McpDeps => ({
   run: async () => out,
   version: "9.9.9",
 });
+
+/** Feed raw lines to the server loop and return every response it wrote,
+ *  once every accepted call has finished. */
+async function serve(lines: string[], deps: McpDeps = okRun()): Promise<any[]> {
+  const writes: string[] = [];
+  const server = createMcpServer(deps, (line) => { writes.push(line); });
+  for (const line of lines) server.accept(line);
+  await server.idle();
+  await new Promise((r) => setTimeout(r, 0));
+  return writes.map((w) => JSON.parse(w));
+}
 
 function schema(name: string) {
   const s = SCHEMAS.commands.find((c) => c.name === name);
@@ -185,6 +197,31 @@ describe("handleMcpRequest — tools/call", () => {
     expect(res.error).toBeUndefined();
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("no open page");
+  });
+
+  // F38: MCP outputs are the --json JSON, for snapshot with a filename too.
+  test("snapshot with a filename answers {ok, filename}, and the file holds the text", async () => {
+    // snapshot saves the session's refs: keep them out of the real ~/.bowser.
+    const dir = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-snap-")));
+    const prevHome = process.env.HOME;
+    process.env.HOME = dir;
+    try {
+      const file = join(dir, "snap.md");
+      const snap = { url: "https://x", title: "X", tree: [{ role: "button", name: "Go", ref: "e1", children: [] }], refs: [] };
+      const connect = async () => fakeClient({ evaluate: () => snap });
+      const deps: McpDeps = { run: (argv) => run(argv, { connect }), version: "9.9.9" };
+      const res: any = await handleMcpRequest(
+        { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "snapshot", arguments: { session: "m38", filename: file } } },
+        deps,
+      );
+      expect(res.result.isError).toBeFalsy();
+      expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, filename: file });
+      expect(await Bun.file(file).text()).toStartWith("### Page\n- Page URL: https://x\n");
+      expect(existsSync(join(dir, ".bowser", "sessions", "m38", "state.json"))).toBe(true);
+    } finally {
+      process.env.HOME = prevHome;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("a failed tool call's error text carries the dialogs the command answered", async () => {
@@ -502,4 +539,165 @@ describe("MCP fill and type errors never carry the entered text", () => {
       expect(await call(tool, args, "failed: boom")).toBe("failed: boom");
     });
   }
+});
+
+// F39: the server answers with a version it supports: the client's when it is
+// one, else the latest. 2025-03-26 is not one: it requires batches (F40).
+// 2026-07-28 is not one either: it drops the initialize handshake.
+describe("MCP server: initialize negotiates the protocol version", () => {
+  const init = (protocolVersion?: unknown) =>
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: protocolVersion === undefined ? {} : { protocolVersion } });
+  for (const v of ["2025-11-25", "2025-06-18", "2024-11-05"]) {
+    test(`a supported version (${v}) is echoed`, async () => {
+      const [res] = await serve([init(v)]);
+      expect(res.result.protocolVersion).toBe(v);
+    });
+  }
+  for (const v of ["1999-bogus", "2025-03-26", "2026-07-28", "", 42, undefined]) {
+    test(`${JSON.stringify(v)} gets the latest supported version, 2025-11-25`, async () => {
+      const [res] = await serve([init(v)]);
+      expect(res.result.protocolVersion).toBe("2025-11-25");
+    });
+  }
+
+  // The stateless 2026-07-28 revision is not implemented. Its client probes
+  // with server/discover and falls back to initialize on -32601.
+  test("server/discover is an unknown method (-32601), so a 2026 client falls back", async () => {
+    const [res] = await serve([JSON.stringify({ jsonrpc: "2.0", id: 9, method: "server/discover", params: {} })]);
+    expect(res).toEqual({ jsonrpc: "2.0", id: 9, error: { code: -32601, message: "Method not found: server/discover" } });
+  });
+});
+
+// F40: a line that is not a request object gets -32600 with id null; before,
+// it was taken for a notification and got nothing, and a client waiting on an
+// id inside a batch hung. One error for a whole batch, whose calls never run.
+describe("MCP server: a batch or a non-object message is an invalid request", () => {
+  const INVALID = { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
+  const cases: Array<[string, string]> = [
+    ["a batch array", JSON.stringify([{ jsonrpc: "2.0", id: 6, method: "ping" }, { jsonrpc: "2.0", id: 7, method: "ping" }])],
+    ["an empty array", "[]"],
+    ["a number", "123"],
+    ["a string", '"str"'],
+    ["null", "null"],
+    ["true", "true"],
+  ];
+  for (const [what, line] of cases) {
+    test(`${what} gets one -32600 with id null`, async () => {
+      expect(await serve([line])).toEqual([INVALID]);
+    });
+  }
+
+  test("a batched tools/call never runs, and the next line is still answered", async () => {
+    let ran = false;
+    const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
+    const batch = JSON.stringify([{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list", arguments: {} } }]);
+    const res = await serve([batch, JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" })], deps);
+    expect(res).toEqual([INVALID, { jsonrpc: "2.0", id: 2, result: {} }]);
+    expect(ran).toBe(false);
+  });
+});
+
+// F42: tool arguments are checked against the tool's own inputSchema, and a
+// wrong one is an isError usage result the model can correct (SEP-1303).
+// Before, `session: 42` ran on "default", an object went to the page as
+// "[object Object]", `persistent: "false"` or `1` was silently dropped, and an
+// unknown key was ignored. A finite number is taken where the schema says
+// string, so `resize {width: 800}` keeps working.
+describe("MCP server: tool arguments are checked against the tool's schema", () => {
+  /** Send one tools/call line; return the result and the argv run got, if any. */
+  async function callLine(line: string): Promise<{ result: any; argv: string[] | null }> {
+    let argv: string[] | null = null;
+    const deps: McpDeps = { run: async (a) => { argv = a; return '{"ok":true}'; }, version: "9.9.9" };
+    const [res] = await serve([line], deps);
+    return { result: res.result, argv };
+  }
+  const call = (name: string, args: unknown) =>
+    callLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }));
+
+  const refused: Array<[string, string, unknown, RegExp]> = [
+    ["a number session", "eval", { session: 42, expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got number$/],
+    ["an empty session", "eval", { session: "", expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got ""$/],
+    ["an object positional", "eval", { expression: { a: 1 } }, /^usage: argument 'expression' of 'eval' must be a string or a number, got object$/],
+    ["an array positional", "goto", { url: ["https://e.com"] }, /^usage: argument 'url' of 'goto' must be a string or a number, got array$/],
+    ["a boolean positional", "eval", { expression: true }, /^usage: argument 'expression' of 'eval' must be a string or a number, got boolean$/],
+    ["an object string flag", "snapshot", { filename: {} }, /^usage: argument 'filename' of 'snapshot' must be a string or a number, got object$/],
+    ["a string boolean flag", "open", { session: "s", persistent: "false" }, /^usage: argument 'persistent' of 'open' must be true or false, got string$/],
+    ["a number boolean flag", "open", { session: "s", persistent: 1 }, /^usage: argument 'persistent' of 'open' must be true or false, got number$/],
+    ["an unknown key", "eval", { expression: "1", bogus: 1 }, /^usage: unknown argument 'bogus' for 'eval'$/],
+    ["an array of arguments", "eval", ["1"], /^usage: the arguments of 'eval' must be an object, got array$/],
+    ["a string of arguments", "eval", "1", /^usage: the arguments of 'eval' must be an object, got string$/],
+  ];
+  for (const [what, tool, args, message] of refused) {
+    test(`${what} is an isError usage result, and nothing runs`, async () => {
+      const { result, argv } = await call(tool, args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(message);
+      expect(argv).toBeNull();
+    });
+  }
+
+  test("a number too large to be finite (1e400 parses to Infinity) is refused", async () => {
+    const line = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"resize","arguments":{"width":1e400,"height":600}}}';
+    const { result, argv } = await callLine(line);
+    expect(result.content[0].text).toBe("usage: argument 'width' of 'resize' must be a string or a number, got number");
+    expect(argv).toBeNull();
+  });
+
+  const accepted: Array<[string, string, unknown, string[]]> = [
+    ["numbers for string positionals", "resize", { width: 800, height: 600 }, ["--json", "resize", "--", "800", "600"]],
+    ["a number for a string flag", "snapshot", { depth: 1 }, ["--json", "snapshot", "--depth=1"]],
+    ["true for a boolean flag", "open", { persistent: true }, ["--json", "open", "--persistent"]],
+    ["false for a boolean flag, which adds nothing", "open", { persistent: false }, ["--json", "open"]],
+    ["null for an optional argument, which is left out", "open", { url: null, session: null }, ["--json", "open"]],
+    ["an empty string positional", "select", { ref: "e3", value: "" }, ["--json", "select", "--", "e3", ""]],
+    ["no arguments at all", "list", undefined, ["--json", "list"]],
+  ];
+  for (const [what, tool, args, expected] of accepted) {
+    test(`${what} is accepted`, async () => {
+      const { result, argv } = await call(tool, args);
+      expect(result.isError).toBeFalsy();
+      expect(argv).toEqual(expected);
+    });
+  }
+});
+
+// F41: a client that stops reading is gone. The server's next write failed
+// with EPIPE, which crashed it (exit 1, a stack trace on stderr), and a call
+// queued behind the running one still ran after the client had left. It now
+// exits 0 at the first failed write, before a queued call starts.
+describe("bowser mcp exits when its client is gone", () => {
+  const HELPER = join(import.meta.dir, "helpers", "mcp-fake-daemon.ts");
+
+  test("stdout closed during a call: exit 0, no EPIPE trace, the queued call never runs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bowser-mcp-epipe-"));
+    const log = join(dir, "eval.log");
+    const proc = Bun.spawn([process.execPath, HELPER], {
+      env: { ...process.env, HOME: dir, MCP_FAKE_EVAL_LOG: log, MCP_FAKE_EVAL_MS: "500" },
+      stdin: "pipe", stdout: "pipe", stderr: "pipe",
+    });
+    const ran = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
+    try {
+      const call = (id: number, expression: string) =>
+        proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "eval", arguments: { session: "gone", expression } } }) + "\n");
+      call(1, "first");
+      call(2, "queued");
+      proc.stdin.flush();
+      const deadline = Date.now() + 5000;
+      while (ran().length === 0 && Date.now() < deadline) await Bun.sleep(10);
+      expect(ran()).toEqual(["first"]);
+      // The client leaves: it closes its end of the server's stdout, then stdin.
+      await proc.stdout.cancel();
+      proc.stdin.end();
+      const code = await Promise.race([proc.exited, Bun.sleep(5000).then(() => "still running")]);
+      expect(code).toBe(0);
+      // Give a queued call that was (wrongly) started time to reach the page.
+      await Bun.sleep(100);
+      expect(ran()).toEqual(["first"]);
+      expect(await new Response(proc.stderr).text()).not.toContain("EPIPE");
+    } finally {
+      proc.kill();
+      await proc.exited;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

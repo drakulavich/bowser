@@ -277,4 +277,37 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(5000);
   }, 30_000);
+
+  // #67: from a fresh session (url "") recovery's location.replace is itself
+  // an evaluate, and WebKit refuses it while the stuck one is pending; reload()
+  // has no page. Before the fix every later command failed in the queue until
+  // `close` (still stuck at 90 s, measured). navigate("about:blank") frees the
+  // stuck evaluate ~3.2 s after it runs (measured on a bare WebView).
+  test("#67: after an eval that never settles in a fresh session, recovery frees the session", async () => {
+    const budget = 1000;
+    process.env.BOWSER_OP_TIMEOUT_MS = String(budget);
+    const ctx: CommandContext = { session: "hangfresh", json: false };
+    sessions.push(ctx.session);
+    await cmdOpen(ctx);
+
+    const stuck = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
+    expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
+
+    // Recovery runs a grace (the budget) after the timeout, and the stuck
+    // evaluate is freed ~3.2 s after that. Each attempt until then fails
+    // within its own budget; the session must answer well before the deadline.
+    const t0 = performance.now();
+    let href: string | undefined;
+    const deadline = t0 + 15_000;
+    while (href === undefined && performance.now() < deadline) {
+      const attempt = await timed(async () => { href = await cmdEval({ ...ctx, command: "eval" }, "location.href"); });
+      expect(attempt.ms).toBeLessThan(budget + 1000);
+      if (attempt.error) await Bun.sleep(200);
+    }
+    expect(href).toBe("about:blank");
+
+    const close = await timed(() => cmdClose(ctx));
+    expect(close.error).toBeUndefined();
+    expect(close.ms).toBeLessThan(5000);
+  }, 30_000);
 });

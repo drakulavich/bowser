@@ -103,8 +103,10 @@ export interface Browser {
   reload(): Promise<void>;
   close(): Promise<void>;
   /** Try to free the view from a call that overran its budget: reload a
-   *  committed page or leave the initial document. Waits for the native call
-   *  to settle, then for a landing up to settleMs. */
+   *  committed page or leave the initial document (by script, or by
+   *  navigate("about:blank") when an evaluate is stuck there). Waits for the
+   *  native call to settle (the fallback up to settleMs), then for a landing
+   *  up to settleMs. */
   interrupt(): Promise<void>;
   /** Call `on` when a navigation starts and again when it lands. The daemon
    *  uses it to drop the page's one-shot dialog answer. One listener; a
@@ -399,7 +401,22 @@ function navigationWatch(
           // The call goes to the view, not wrapView's queue: if an evaluate
           // is pending WebKit refuses this one at once, where the queue
           // would run it later over whatever page is there then.
-          await view.evaluate(LEAVE_INITIAL_DOCUMENT);
+          try {
+            await view.evaluate(LEAVE_INITIAL_DOCUMENT);
+          } catch {
+            // Refused: an evaluate is stuck, not a navigation (#67). With no
+            // navigation pending navigate() is accepted, and it frees the
+            // stuck evaluate ~3.2 s later (measured on a bare WebView). Its
+            // own resolution is the landing, so there is no settle after it.
+            // Awaited up to settleMs; one that never settles is left to
+            // WebKit and the lane moves on (the next op may then be refused).
+            const left = view.navigate("about:blank").catch(() => {});
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const bound = new Promise<void>((r) => { timer = setTimeout(r, timing.settleMs); });
+            await Promise.race([left, bound]);
+            clearTimeout(timer);
+            return;
+          }
         } else if (typeof view.reload === "function") {
           await view.reload();
         } else {
