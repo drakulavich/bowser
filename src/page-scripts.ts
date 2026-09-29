@@ -648,15 +648,38 @@ function dialogShim(drop: boolean): string {
 // (Date, URL) and any toJSON the user's own expression calls still apply.
 // The server parses the text (fromPage in src/daemon/server.ts).
 const PAGE_JSON = String.raw`((v) => {
-  const O = Object.prototype, A = Array.prototype;
-  const o = Object.getOwnPropertyDescriptor(O, 'toJSON'), a = Object.getOwnPropertyDescriptor(A, 'toJSON');
+  const O = Object.prototype, A = Array.prototype, own = Object.getOwnPropertyDescriptor;
+  // A toJSON that cannot be deleted cannot be set aside: refuse rather than
+  // answer the page's text as the result. (A replaced JSON.stringify is
+  // refused for every evaluate, by readable().)
+  const o = own(O, 'toJSON'), a = own(A, 'toJSON');
   if (o) delete O.toJSON;
   if (a) delete A.toJSON;
-  try { return JSON.stringify(v); } finally {
-    if (o) Object.defineProperty(O, 'toJSON', o);
-    if (a) Object.defineProperty(A, 'toJSON', a);
+  try {
+    if (own(O, 'toJSON') || own(A, 'toJSON')) {
+      throw new Error("bowser cannot read this page: it locked Object.prototype.toJSON or Array.prototype.toJSON");
+    }
+    return JSON.stringify(v);
+  } finally {
+    if (o && !own(O, 'toJSON')) Object.defineProperty(O, 'toJSON', o);
+    if (a && !own(A, 'toJSON')) Object.defineProperty(A, 'toJSON', a);
   }
 })`;
+
+/** `expr`, refused when the page has replaced JSON.stringify. WebKit
+ *  returns every evaluate's value through the page's JSON.stringify, so a
+ *  replaced one answers the page's text as bowser's result: `open` printed
+ *  the page's string as its URL and title (#84 review). */
+export function readable(expr: string): string {
+  return `(() => {
+  if (!/\\[native code\\]/.test(Function.prototype.toString.call(JSON.stringify))) {
+    throw new Error("bowser cannot read this page: it replaced JSON.stringify");
+  }
+  return (
+${expr}
+);
+})()`;
+}
 
 /** `expr` evaluated with the dialog shim installed first. Evaluates to
  *  `{ value, dialogs }` as PAGE_JSON text: expr's value, and the shim's log

@@ -43,6 +43,10 @@ const PROTOTYPE = String.raw`
     String.prototype.toJSON = function () { return 'str'; };
     Object.keys = function (o) { var k = []; for (var p in o) k.push(p); return k; };
     if (location.search === '?object') Object.prototype.toJSON = function () { return {}; };
+    // What bowser cannot set aside: a replaced JSON.stringify, and a toJSON
+    // it cannot delete. Both must fail loudly, never answer the page's text.
+    if (location.search === '?stringify') JSON.stringify = function () { return '"pwned"'; };
+    if (location.search === '?locked') Object.defineProperty(A, 'toJSON', { value: A.toJSON, configurable: false });
   })();`;
 
 const PAGE = `<!doctype html><meta charset="utf-8"><title>legacy</title>
@@ -121,5 +125,22 @@ runOrSkip("e2e: a page with patched builtins (#76)", () => {
         expect(await cmdEval(ctx, "typeof Array.prototype.toJSON")).toMatch(/^function$/m);
       });
     });
+  }
+
+  for (const [variant, what] of [["?stringify", /JSON\.stringify/], ["?locked", /toJSON/]] as const) {
+    test(`a page bowser cannot read (${variant}) fails loudly instead of answering its own text`, async () => {
+      // open itself reads the page, so it may already refuse.
+      const opened = await cmdOpen(ctx, server!.url.toString() + variant).then(
+        (out) => {
+          expect(out).not.toContain("pwned");
+          return null;
+        },
+        (e: Error) => e,
+      );
+      const err = opened ?? (await cmdEval(ctx, "1").then(() => null, (e: Error) => e));
+      expect(err).not.toBeNull();
+      expect(String(err)).toMatch(what);
+      expect(String(err)).not.toContain("pwned");
+    }, 30_000);
   }
 });
