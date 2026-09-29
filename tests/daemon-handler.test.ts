@@ -37,6 +37,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     watchNavigation: () => {},
     kickerOpened: false,
     navigationPending: false,
+    navigationDestination: async () => "https://x/",
     phase: "idle",
     ...over,
   };
@@ -1293,6 +1294,18 @@ describe("the command budget (budgetMs)", () => {
       dispatch({ id: 1, op: "click", args: ["#x"], cmd: "click", budgetMs }, lane(replies, Date.now()));
       expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'click' timed out after 1000ms" }]);
     }
+  });
+
+  // ET-10 before its fix: a daemon on 30 s and a command on 3 s said "after 30000ms".
+  test("the timeout message names the command's own budget (budgetTotalMs)", async () => {
+    const replies: Array<[number, DaemonResponse]> = [];
+    dispatch({ id: 1, op: "click", args: ["#b"], cmd: "fill", budgetMs: 50, budgetTotalMs: 3000 }, lane(replies, Date.now(), 30_000));
+    dispatch({ id: 2, op: "click", args: ["#b"], cmd: "fill", budgetMs: 0, budgetTotalMs: 3000 }, lane(replies, Date.now(), 30_000));
+    await Bun.sleep(300);
+    expect(replies.map(([, r]) => r)).toEqual([
+      { id: 2, ok: false, error: "'fill' timed out after 3000ms (in its 'click' step)" },
+      { id: 1, ok: false, error: "'fill' timed out after 3000ms (in its 'click' step)" },
+    ]);
   });
 
   test("budgetMs bounds the request when the daemon's budget is off", async () => {

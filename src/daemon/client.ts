@@ -115,7 +115,7 @@ export class DaemonClient implements DaemonConnection {
       id, op, args,
       ...(this.report ? { report: true } : {}),
       ...(this.command ? { cmd: this.command } : {}),
-      ...(budget > 0 ? { budgetMs: budget - (Date.now() - this.start) } : {}),
+      ...(budget > 0 ? { budgetMs: budget - (Date.now() - this.start), budgetTotalMs: budget } : {}),
     }) + "\n";
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: (result) => resolve(result as ResultOf<O>), reject });

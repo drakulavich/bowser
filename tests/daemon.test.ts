@@ -460,7 +460,7 @@ describe("the command budget", () => {
   async function recordingDaemon(firstMs: number) {
     const dir = await mkdtemp(join(tmpdir(), "bowser-budget-"));
     const path = join(dir, "sock");
-    const seen: Array<{ id: number; budgetMs?: number }> = [];
+    const seen: Array<{ id: number; budgetMs?: number; budgetTotalMs?: number }> = [];
     const server = Bun.listen({
       unix: path,
       socket: lineSocket((s, line) => {
@@ -497,6 +497,7 @@ describe("the command budget", () => {
       expect(d.seen[0]!.budgetMs).toBeGreaterThan(900);
       expect(d.seen[1]!.budgetMs).toBeLessThanOrEqual(700);
       expect(d.seen[1]!.budgetMs).toBeGreaterThan(0);
+      expect(d.seen.map((r) => r.budgetTotalMs)).toEqual([1000, 1000]);
     });
   });
 
@@ -512,6 +513,7 @@ describe("the command budget", () => {
         await d.stop();
       }
       expect(d.seen[0]).not.toHaveProperty("budgetMs");
+      expect(d.seen[0]).not.toHaveProperty("budgetTotalMs");
     });
   });
 });

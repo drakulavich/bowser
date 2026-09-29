@@ -333,8 +333,12 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     process.env.BOWSER_OP_TIMEOUT_MS = "3000";
     const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
     expect(fill.ms).toBeLessThan(3500);
-    if (fill.error) expect(fill.error).toBe(`page is still loading ${base}/form; retry later, or run 'bowser close'`);
+    if (fill.error) expect(fill.error).toBe(`page is still loading ${base}/never; retry later, or run 'bowser close'`);
     else expect(await cmdEval(ctx, "document.querySelector('[name=b]').value")).toBe("AFTER");
+
+    // The daemon's budget is 30 s; the timeout names the command's own.
+    const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise(() => {})"));
+    expect(hung.error).toBe("'eval' timed out after 3000ms (in its 'evaluate' step)");
 
     const close = await timed(() => cmdClose(ctx));
     expect(close.error).toBeUndefined();

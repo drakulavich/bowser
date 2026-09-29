@@ -101,6 +101,8 @@ export interface DaemonRequest {
   /** What is left of the command's budget: the daemon times the request with
    *  the smaller of this and its own budget. */
   budgetMs?: number;
+  /** The command's whole budget, which a timeout message names. */
+  budgetTotalMs?: number;
 }
 
 export interface DaemonResponse {

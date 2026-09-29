@@ -132,7 +132,8 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     lane.reply({ id: req.id, ok: false, error: stuckMessage(lane.mark.stuck.op) });
     return;
   }
-  const budget = lane.timeoutMs || Math.max(req.budgetMs ?? 0, 0);
+  const total = req.budgetTotalMs;
+  const budget = total !== undefined && (lane.timeoutMs <= 0 || total < lane.timeoutMs) ? total : lane.timeoutMs || Math.max(req.budgetMs ?? 0, 0);
   if (req.budgetMs !== undefined && req.budgetMs <= 0) {
     lane.reply({ id: req.id, ok: false, error: timeoutMessage(req, budget) });
     return;
@@ -336,9 +337,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
     return dialogs;
   };
   const handle = async (req: DaemonRequest, deadline?: number): Promise<DaemonResponse> => {
-    const res = ACTS.has(req.op) && !(await navigationSettled(deadline))
-      ? { id: req.id, ok: false as const, error: `page is still loading ${browser.url}; retry later, or run 'bowser close'` }
-      : await runShimmed(req);
+    const res = ACTS.has(req.op) ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
     const dialogs = claim(req);
     return dialogs ? { ...res, dialogs } : res;
   };
@@ -356,13 +355,16 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
 
   /** Wait, up to `deadline`, for a navigation an earlier action left
    *  pending: an action must not start before it ends (ET-10, #78). */
-  async function navigationSettled(deadline = Infinity): Promise<boolean> {
+  async function afterPendingNavigation(req: DaemonRequest, deadline = Infinity): Promise<DaemonResponse> {
+    if (!browser.navigationPending) return runShimmed(req);
+    // Read before the wait: after it, the reply is due at once.
+    const url = await browser.navigationDestination();
     while (browser.navigationPending) {
       const left = deadline - Date.now();
-      if (left <= 0) return false;
+      if (left <= 0) return { id: req.id, ok: false, error: `page is still loading ${url}; retry later, or run 'bowser close'` };
       await Bun.sleep(Math.min(10, left));
     }
-    return true;
+    return runShimmed(req);
   }
 
   async function run(req: DaemonRequest): Promise<DaemonResponse> {

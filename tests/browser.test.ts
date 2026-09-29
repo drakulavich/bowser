@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
 import { ACTS, createHandler } from "../src/daemon/server.ts";
 import type { Op } from "../src/daemon/protocol.ts";
-import { CANCEL_PENDING_NAVIGATION, KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
+import { CANCEL_PENDING_NAVIGATION, KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -208,12 +208,13 @@ const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate"
  *  view.loading stays false, as it does on WebKit for a navigation the page
  *  starts (measured: a link click, a form submit, a script's location change). */
 function pageNavView(over: Partial<ViewLike> = {}) {
-  const page = { navs: 0 };
+  const page: { navs: number; to?: string } = { navs: 0 };
   const v = fakeView({
     evaluate: async (expr) => {
       v.calls.push(["evaluate", [expr]]);
       if (expr === NAV_ARM) { page.navs = 0; return undefined; }
       if (expr === NAV_COUNT) return page.navs;
+      if (expr === NAV_DESTINATION) return page.to;
       return undefined;
     },
     ...over,
@@ -514,12 +515,14 @@ describe("wrapView navigation watch", () => {
 // hangs for good on WebKit, even once the page commits.
 describe("a navigation a previous command left pending", () => {
   const slow = { graceMs: 20, settleMs: 60 };
-  /** A view whose `#send` starts a page navigation that nothing answers. */
-  function submitted() {
+  /** A view whose `#send` starts a page navigation to `to` that nothing
+   *  answers; with `to` null the page cannot say where it goes. */
+  function submitted(to: string | null = "https://x/never") {
     const { v, page } = pageNavView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); if (s === "#send") page.navs++; };
+    v.click = async (s) => { v.calls.push(["click", [s]]); if (s === "#send") { page.navs++; page.to = to ?? undefined; } };
     return v;
   }
+  const stillLoading = (url: string) => `page is still loading ${url}; retry later, or run 'bowser close'`;
   const clicks = (v: Fake) => v.calls.filter(([n]) => n === "click").map(([, a]) => a[0]);
 
   test("is pending after act gives up on it, until a landing or a failure", async () => {
@@ -549,10 +552,18 @@ describe("a navigation a previous command left pending", () => {
     const t0 = Date.now();
     const res = await handle({ id: 2, op: "click", args: ["#b"] }, t0 + 150);
     const elapsed = Date.now() - t0;
-    expect(res).toEqual({ id: 2, ok: false, error: "page is still loading https://x/; retry later, or run 'bowser close'" });
+    expect(res).toEqual({ id: 2, ok: false, error: stillLoading("https://x/never") });
     expect(elapsed).toBeGreaterThanOrEqual(140);
     expect(elapsed).toBeLessThan(400);
     expect(clicks(v)).toEqual(["#send"]);
+  });
+
+  test("a page that cannot say where its navigation goes is named by the view's url", async () => {
+    const v = submitted(null);
+    const handle = createHandler(wrapView(v, slow));
+    await handle({ id: 1, op: "click", args: ["#send"] });
+    const res = await handle({ id: 2, op: "click", args: ["#b"] }, Date.now() + 50);
+    expect(res.error).toBe(stillLoading("https://x/"));
   });
 
   test("an action waits for a pending navigation that lands, then acts on the new page", async () => {
@@ -572,7 +583,7 @@ describe("a navigation a previous command left pending", () => {
       const handle = createHandler(wrapView(v, slow));
       await handle({ id: 1, op: "click", args: ["#send"] });
       const res = await handle({ id: 2, op, args: ACT_ARGS[op] ?? [] }, Date.now() + 30);
-      expect([op, res.error]).toEqual([op, "page is still loading https://x/; retry later, or run 'bowser close'"]);
+      expect([op, res.error]).toEqual([op, stillLoading("https://x/never")]);
     }
     for (const op of ["evaluate", "reload", "back", "navigate"] as const) {
       const v = submitted();

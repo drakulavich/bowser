@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  CANCEL_PENDING_NAVIGATION, KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  CANCEL_PENDING_NAVIGATION, KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD,
   hoverScript, keyCommandScript, readable, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
@@ -123,6 +123,9 @@ export interface Browser {
    *  after the action returned: on WebKit a selector click started then
    *  never resolves (ET-10, #78). `view.loading` stays false meanwhile. */
   readonly navigationPending: boolean;
+  /** Where the page's last navigation goes; the view's url when the page
+   *  cannot say. */
+  navigationDestination(): Promise<string>;
 }
 
 /** Open a WebKit Bun.WebView. Bun throws off macOS; the CLI refuses to
@@ -404,6 +407,10 @@ function navigationWatch(
   return {
     get phase() { return phase; },
     get pending() { return pendingAt === landed; },
+    async destination(): Promise<string> {
+      const url = await ask(NAV_DESTINATION, timing.graceMs);
+      return typeof url === "string" && url ? url : view.url;
+    },
     /** Run `action` and wait for a navigation it started; see above.
      *  Answers what the action answered. */
     async act<T>(action: () => Promise<T>): Promise<T> {
@@ -516,6 +523,7 @@ export function wrapView(
     get title() { return view.title; },
     get phase() { return nav.phase; },
     get navigationPending() { return nav.pending; },
+    navigationDestination: () => nav.destination(),
     realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(view.navigate(url)),
