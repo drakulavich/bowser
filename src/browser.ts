@@ -119,6 +119,10 @@ export interface Browser {
   /** Whether the oven-sh/bun#44134 workaround opened its second view. */
   readonly kickerOpened: boolean;
   readonly phase: ActPhase;
+  /** True while a page navigation an action started is still unanswered
+   *  after the action returned: on WebKit a selector click started then
+   *  never resolves (ET-10, #78). `view.loading` stays false meanwhile. */
+  readonly navigationPending: boolean;
 }
 
 /** Open a WebKit Bun.WebView. Bun throws off macOS; the CLI refuses to
@@ -376,6 +380,7 @@ function navigationWatch(
     let seen = await count(timing.graceMs);
     if (seen < 1) return;
     onNavigation();
+    pendingAt = landed;
     // A failure ends the wait unless the page started another navigation
     // since: a script navigating again cancels the first with -999 while
     // the second still loads, and that second one is what the action led to.
@@ -389,13 +394,16 @@ function navigationWatch(
         if (now <= seen) return;
         seen = now;
         base = landed;
+        pendingAt = landed;
       }
       await sleep(10);
     }
   };
   let phase: ActPhase = "idle";
+  let pendingAt: number | undefined;
   return {
     get phase() { return phase; },
+    get pending() { return pendingAt === landed; },
     /** Run `action` and wait for a navigation it started; see above.
      *  Answers what the action answered. */
     async act<T>(action: () => Promise<T>): Promise<T> {
@@ -507,6 +515,7 @@ export function wrapView(
     get url() { return view.url; },
     get title() { return view.title; },
     get phase() { return nav.phase; },
+    get navigationPending() { return nav.pending; },
     realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(view.navigate(url)),

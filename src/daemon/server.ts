@@ -56,7 +56,8 @@ export function removePidFileIfOwned(pidFile: string, pid: number): void {
 /** What `dispatch` needs from the daemon. Separated from the socket so the
  *  lane choice can be tested without one. */
 export interface Lane {
-  handle: (req: DaemonRequest) => Promise<DaemonResponse>;
+  /** `deadline` (epoch ms) is when the request's own timer is about to fire. */
+  handle: (req: DaemonRequest, deadline?: number) => Promise<DaemonResponse>;
   serialize: Serializer;
   timeoutMs: number;
   reply: (res: DaemonResponse) => void;
@@ -116,6 +117,9 @@ export interface StuckMark {
 /** How long a timed-out op may still settle on its own before `recover`
  *  reloads the page under it (capped by the budget). */
 const RECOVERY_GRACE_MS = 2000;
+/** How long before its timer a handler's own failure is due, so that failure,
+ *  not the plain timeout, is what the client hears. */
+const REPLY_MARGIN_MS = 50;
 
 export function dispatch(req: DaemonRequest, lane: Lane): void {
   if (IS_URGENT.has(req.op)) {
@@ -159,6 +163,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     leaveGate?.();
   };
   const ms = req.budgetMs !== undefined && (lane.timeoutMs <= 0 || req.budgetMs < lane.timeoutMs) ? req.budgetMs : lane.timeoutMs;
+  const deadline = ms > 0 ? Date.now() + ms - REPLY_MARGIN_MS : undefined;
   const timer = ms > 0 ? setTimeout(() => {
     const timedOut = timeoutMessage(req, budget, running ? lane.phase?.() : undefined);
     if (atGate) {
@@ -187,7 +192,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
       if (answered) return;
       running = true;
       waiting?.delete(onStuck);
-      const res = await lane.handle(req);
+      const res = await lane.handle(req, deadline);
       settled = true;
       if (lane.mark?.stuck === mine) lane.mark.stuck = undefined;
       // Settled within the grace: no reload, and the next op starts now.
@@ -292,7 +297,7 @@ const PAGE_CRASHED = "the page crashed (its web process exited); run 'bowser rel
 
 /** What createHandler returns: the request handler, and the hook `dispatch`
  *  calls when a request overruns its budget. */
-export type Handler = ((req: DaemonRequest) => Promise<DaemonResponse>) & {
+export type Handler = ((req: DaemonRequest, deadline?: number) => Promise<DaemonResponse>) & {
   timedOut: (req: DaemonRequest) => DialogReport[] | undefined;
 };
 
@@ -330,8 +335,10 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
     state.dialogs = undefined;
     return dialogs;
   };
-  const handle = async (req: DaemonRequest): Promise<DaemonResponse> => {
-    const res = await runShimmed(req);
+  const handle = async (req: DaemonRequest, deadline?: number): Promise<DaemonResponse> => {
+    const res = ACTS.has(req.op) && !(await navigationSettled(deadline))
+      ? { id: req.id, ok: false as const, error: `page is still loading ${browser.url}; retry later, or run 'bowser close'` }
+      : await runShimmed(req);
     const dialogs = claim(req);
     return dialogs ? { ...res, dialogs } : res;
   };
@@ -346,6 +353,17 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
       return dialogs;
     },
   });
+
+  /** Wait, up to `deadline`, for a navigation an earlier action left
+   *  pending: an action must not start before it ends (ET-10, #78). */
+  async function navigationSettled(deadline = Infinity): Promise<boolean> {
+    while (browser.navigationPending) {
+      const left = deadline - Date.now();
+      if (left <= 0) return false;
+      await Bun.sleep(Math.min(10, left));
+    }
+    return true;
+  }
 
   async function run(req: DaemonRequest): Promise<DaemonResponse> {
     // `state` and `dialog-answer` are answered by closures, not entries in

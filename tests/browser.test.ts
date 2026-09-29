@@ -509,6 +509,81 @@ describe("wrapView navigation watch", () => {
   });
 });
 
+// ET-10 (#78): a form POST to a server that never answers leaves a page
+// navigation pending after `click` returns; a selector click started then
+// hangs for good on WebKit, even once the page commits.
+describe("a navigation a previous command left pending", () => {
+  const slow = { graceMs: 20, settleMs: 60 };
+  /** A view whose `#send` starts a page navigation that nothing answers. */
+  function submitted() {
+    const { v, page } = pageNavView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); if (s === "#send") page.navs++; };
+    return v;
+  }
+  const clicks = (v: Fake) => v.calls.filter(([n]) => n === "click").map(([, a]) => a[0]);
+
+  test("is pending after act gives up on it, until a landing or a failure", async () => {
+    for (const end of ["landed", "failed"] as const) {
+      const v = submitted();
+      const b = wrapView(v, slow);
+      expect(b.navigationPending).toBe(false);
+      await b.click("#send");
+      expect(b.navigationPending).toBe(true);
+      if (end === "landed") v.land("https://x/never");
+      else v.onNavigationFailed?.(new Error("Frame load interrupted"));
+      expect(b.navigationPending).toBe(false);
+    }
+  });
+
+  test("an action that navigates nowhere leaves nothing pending", async () => {
+    const v = submitted();
+    const b = wrapView(v, slow);
+    await b.click("#other");
+    expect(b.navigationPending).toBe(false);
+  });
+
+  test("an action waits for a navigation a previous command left pending, then fails with 'page is still loading'", async () => {
+    const v = submitted();
+    const handle = createHandler(wrapView(v, slow));
+    expect((await handle({ id: 1, op: "click", args: ["#send"] })).ok).toBe(true);
+    const t0 = Date.now();
+    const res = await handle({ id: 2, op: "click", args: ["#b"] }, t0 + 150);
+    const elapsed = Date.now() - t0;
+    expect(res).toEqual({ id: 2, ok: false, error: "page is still loading https://x/; retry later, or run 'bowser close'" });
+    expect(elapsed).toBeGreaterThanOrEqual(140);
+    expect(elapsed).toBeLessThan(400);
+    expect(clicks(v)).toEqual(["#send"]);
+  });
+
+  test("an action waits for a pending navigation that lands, then acts on the new page", async () => {
+    const v = submitted();
+    const handle = createHandler(wrapView(v, slow));
+    await handle({ id: 1, op: "click", args: ["#send"] });
+    setTimeout(() => v.land("https://x/answered"), 100);
+    const res = await handle({ id: 2, op: "click", args: ["#b"] }, Date.now() + 2000);
+    expect(res.ok).toBe(true);
+    expect(clicks(v)).toEqual(["#send", "#b"]);
+    expect(v.url).toBe("https://x/answered");
+  });
+
+  test("every ACTS op waits; evaluate and the navigating ops do not", async () => {
+    for (const op of ACTS) {
+      const v = submitted();
+      const handle = createHandler(wrapView(v, slow));
+      await handle({ id: 1, op: "click", args: ["#send"] });
+      const res = await handle({ id: 2, op, args: ACT_ARGS[op] ?? [] }, Date.now() + 30);
+      expect([op, res.error]).toEqual([op, "page is still loading https://x/; retry later, or run 'bowser close'"]);
+    }
+    for (const op of ["evaluate", "reload", "back", "navigate"] as const) {
+      const v = submitted();
+      const handle = createHandler(wrapView(v, slow));
+      await handle({ id: 1, op: "click", args: ["#send"] });
+      const res = await handle({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, Date.now() + 30);
+      expect([op, res.error]).toEqual([op, undefined]);
+    }
+  });
+});
+
 describe("wrapView interrupt", () => {
   test("reloads the page with the native call alone, and waits for it to land", async () => {
     // Measured on WebKit: a pending evaluate() makes a second one throw

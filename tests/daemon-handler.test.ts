@@ -36,6 +36,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     interrupt: rec("interrupt", true),
     watchNavigation: () => {},
     kickerOpened: false,
+    navigationPending: false,
     phase: "idle",
     ...over,
   };
@@ -1300,5 +1301,38 @@ describe("the command budget (budgetMs)", () => {
     dispatch({ id: 1, op: "click", args: ["#x"], budgetMs: 50 }, lane(replies, t0, 0));
     await Bun.sleep(300);
     expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'click' timed out after 50ms" }]);
+  });
+});
+
+describe("an action on a page whose navigation is still pending (ET-10)", () => {
+  const stillLoading = "page is still loading https://x/; retry later, or run 'bowser close'";
+
+  test("fails with 'page is still loading' before its own timer, which counts queue time and budgetMs", async () => {
+    for (const [timeoutMs, budgetMs] of [[200, undefined], [0, 200], [1000, 200]] as const) {
+      const b = fakeBrowser({ navigationPending: true });
+      const replies: Array<[number, DaemonResponse]> = [];
+      const t0 = Date.now();
+      const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs, reply: (r: DaemonResponse) => { replies.push([Date.now() - t0, r]); } };
+      lane.serialize(() => Bun.sleep(80), "evaluate");
+      dispatch({ id: 1, op: "click", args: ["#b"], cmd: "fill", ...(budgetMs ? { budgetMs } : {}) }, lane);
+      await Bun.sleep(400);
+      expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: stillLoading }]);
+      expect(replies[0]![0]).toBeLessThan(200);
+      expect(actions(b)).toEqual([]);
+    }
+  });
+
+  test("with budgets off, it waits until the navigation ends", async () => {
+    let pending = true;
+    const b = fakeBrowser();
+    Object.defineProperty(b, "navigationPending", { get: () => pending });
+    const replies: DaemonResponse[] = [];
+    dispatch({ id: 1, op: "click", args: ["#b"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 0, reply: (r) => { replies.push(r); } });
+    await Bun.sleep(100);
+    expect(replies).toEqual([]);
+    pending = false;
+    await Bun.sleep(50);
+    expect(replies).toEqual([{ id: 1, ok: true }]);
+    expect(actions(b)).toEqual([["click", ["#b"]]]);
   });
 });
