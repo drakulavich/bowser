@@ -134,7 +134,11 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   let grace: ReturnType<typeof setTimeout> | undefined;
   let recovery: Promise<unknown> | undefined;
   const mine = { op: req.cmd ?? req.op };
-  const onStuck = (op: string): void => answer({ id: req.id, ok: false, error: stuckMessage(op) });
+  const onStuck = (op: string): void => {
+    answer({ id: req.id, ok: false, error: stuckMessage(op) });
+    // Still queued at the gate: it would later hold it with nothing to release it.
+    if (atGate && !leaveGate && lane.conn) lane.gate?.leave(lane.conn);
+  };
   const waiting = lane.mark ? (lane.mark.waiting ??= new Set()) : undefined;
   waiting?.add(onStuck);
   const answer = (res: DaemonResponse): void => {

@@ -804,6 +804,26 @@ describe("a stuck session", () => {
     expect(replies).toHaveLength(3);
   });
 
+  test("a stuck answer removes its waiter from a gate that does not idle-release", async () => {
+    const { lane, replies, release } = stuckLanes(async () => false, 0);
+    const A = {};
+    const B = {};
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
+    await Bun.sleep(5);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(B, 1000));
+    await Bun.sleep(60);
+    expect(replies[1]?.[1].error).toBe(STUCK("evaluate"));
+
+    // Release A as though its socket closed. A stale B waiter would become
+    // the permanent gate holder when idle-release is disabled.
+    lane(A).gate.leave(A);
+    release();
+    await Bun.sleep(5);
+    dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane({}));
+    await Bun.sleep(10);
+    expect(replies[2]?.[1]).toEqual({ id: 3, ok: true, result: "evaluate" });
+  });
+
   test("a second timed-out op while stuck does not recover twice", async () => {
     let recoveries = 0;
     const { lane } = stuckLanes(async () => { recoveries++; return false; });
