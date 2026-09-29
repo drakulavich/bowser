@@ -63,12 +63,20 @@ export interface Lane {
    *  and returns those queued now, which the timeout reply carries. */
   timedOut?: (req: DaemonRequest) => DialogReport[] | undefined;
   /** Try once to free the WebView from the op that just overran its budget;
-   *  resolves when the attempt is over, whether or not it worked. */
-  recover?: () => Promise<unknown>;
+   *  resolves when the attempt is over, true when it freed the view. */
+  recover?: () => Promise<boolean>;
+  /** The session's stuck mark: one object shared by every request's lane. */
+  mark?: StuckMark;
   /** The session's gate and this request's connection: with both, a queued
    *  request waits until its connection holds the gate (#77). */
   gate?: Gate;
   conn?: object;
+}
+
+/** Set while an op that timed out is still running after its recovery. That
+ *  op holds the serializer, so it is the only one that can be stuck. */
+export interface StuckMark {
+  stuck?: { op: string };
 }
 
 /** Route one request onto the urgent or the queued lane.
@@ -94,6 +102,10 @@ export interface Lane {
  *    has already been told it failed;
  *  - a request still waiting at the gate for another connection's commands
  *    says so, and is dropped the same way.
+ *  If the op is still running once `recover` resolves, whatever it returned,
+ *  the session is marked stuck until the op settles. A request that arrives
+ *  or reaches the gate meanwhile is answered at once and enters neither the
+ *  gate nor the serializer; one already queued stays queued.
  *  Every request ahead of a queued one arrived earlier with the same budget,
  *  so the op it waits for has always timed out first. */
 /** How long a timed-out op may still settle on its own before `recover`
@@ -107,12 +119,18 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     });
     return;
   }
+  if (lane.mark?.stuck) {
+    lane.reply({ id: req.id, ok: false, error: stuckMessage(lane.mark.stuck.op) });
+    return;
+  }
   let answered = false;
   let running = false;
+  let settled = false;
   let atGate = false;
   let leaveGate: (() => void) | undefined;
   let grace: ReturnType<typeof setTimeout> | undefined;
   let recovery: Promise<unknown> | undefined;
+  const mine = { op: req.op };
   const answer = (res: DaemonResponse): void => {
     if (answered) return;
     answered = true;
@@ -139,7 +157,9 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     // Runs while this op still holds the serializer, so no later queued op
     // can overlap it; see Browser.interrupt for what it may overlap.
     grace = setTimeout(() => {
-      recovery = lane.recover?.().catch(() => {});
+      recovery = lane.recover?.().catch(() => false).then(() => {
+        if (!settled && lane.mark) lane.mark.stuck = mine;
+      });
     }, Math.min(RECOVERY_GRACE_MS, ms));
   }, ms) : undefined;
   const queue = (): void => {
@@ -147,6 +167,8 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
       if (answered) return;
       running = true;
       const res = await lane.handle(req);
+      settled = true;
+      if (lane.mark?.stuck === mine) lane.mark.stuck = undefined;
       // Settled within the grace: no reload, and the next op starts now.
       clearTimeout(grace);
       answer(res);
@@ -164,6 +186,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   atGate = true;
   lane.gate.enter(lane.conn).then((done) => {
     atGate = false;
+    if (!answered && lane.mark?.stuck) answer({ id: req.id, ok: false, error: stuckMessage(lane.mark.stuck.op) });
     if (answered) done();
     else {
       leaveGate = done;
@@ -174,6 +197,10 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     answered = true;
     clearTimeout(timer);
   });
+}
+
+function stuckMessage(op: string): string {
+  return `session is stuck: '${op}' is still running after a reload; run 'bowser close'`;
 }
 
 /** A timeout names the command the user ran, and the op when it is one of
@@ -445,6 +472,7 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
   const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();
   const gate = createGate(timeoutMs);
+  const mark: StuckMark = {};
 
   // Each connection's line reader lives on its socket's `data`, with the
   // object the gate knows it by.
@@ -469,7 +497,7 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
             );
             return;
           }
-          dispatch(req, { handle, serialize, gate, conn, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
+          dispatch(req, { handle, serialize, gate, conn, mark, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
         }) };

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../package.json";
 import type { Browser } from "../src/browser.ts";
-import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
+import { createHandler, dispatch, type DaemonState, type StuckMark } from "../src/daemon/server.ts";
 import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport } from "../src/daemon/protocol.ts";
 import { createGate } from "../src/daemon/gate.ts";
 import { createSerializer } from "../src/serialize.ts";
@@ -456,7 +456,7 @@ describe("the queue-time budget", () => {
       reply: (res: DaemonResponse) => { events.push(`reply ${res.id} ${res.ok}`); },
       recover: () => {
         events.push("recover");
-        return new Promise<void>((r) => { recovered = () => { events.push("recovered"); r(); }; });
+        return new Promise<boolean>((r) => { recovered = () => { events.push("recovered"); r(true); }; });
       },
     };
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane);
@@ -489,7 +489,7 @@ describe("the queue-time budget", () => {
       serialize: createSerializer(),
       timeoutMs: 100,
       reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
-      recover: async () => { recoveries++; },
+      recover: async () => { recoveries++; return false; },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     await Bun.sleep(110); // after the first op timed out, with a budget to spare
@@ -508,7 +508,7 @@ describe("the queue-time budget", () => {
       serialize: createSerializer(),
       timeoutMs: 30,
       reply: () => {},
-      recover: async () => { recoveries++; },
+      recover: async () => { recoveries++; return false; },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     await Bun.sleep(45);
@@ -526,7 +526,7 @@ describe("the queue-time budget", () => {
       serialize: createSerializer(),
       timeoutMs: 10,
       reply: () => {},
-      recover: async () => { recoveries++; },
+      recover: async () => { recoveries++; return false; },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     dispatch({ id: 2, op: "click", args: ["#y"] }, lane);
@@ -687,6 +687,159 @@ describe("the session gate", () => {
     await Bun.sleep(80);
     expect(started).toEqual([1]);
     expect(replies.map((r) => r.id)).toEqual([1]);
+  });
+});
+
+// #78: an op still running after its recovery marks the session stuck, and
+// every non-urgent request is answered at once until that op settles.
+describe("a stuck session", () => {
+  const STUCK = (op: string) => `session is stuck: '${op}' is still running after a reload; run 'bowser close'`;
+
+  function stuckLanes(recover: () => Promise<boolean>, idleMs = 20) {
+    const gate = createGate(idleMs);
+    const serialize = createSerializer();
+    const mark: StuckMark = {};
+    const replies: Array<[number, DaemonResponse]> = [];
+    const started: number[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const t0 = Date.now();
+    const handle = async (req: DaemonRequest): Promise<DaemonResponse> => {
+      started.push(req.id);
+      if (req.id === 1) await held;
+      return { id: req.id, ok: true, result: req.op };
+    };
+    const lane = (conn: object, ms = 20) => ({
+      handle, serialize, gate, conn, mark, timeoutMs: ms, recover,
+      reply: (r: DaemonResponse) => { replies.push([Date.now() - t0, r]); },
+    });
+    return { lane, replies, started, release, mark, t0 };
+  }
+
+  // Timed out at 20 ms, recovered after a 20 ms grace: stuck from ~40 ms.
+  test("a request after an unrecovered timeout is answered stuck at once", async () => {
+    const { lane, replies, started, t0 } = stuckLanes(async () => false);
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
+    await Bun.sleep(60);
+    const sent = Date.now() - t0;
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
+    await Bun.sleep(50);
+    expect(replies.map(([, r]) => r)).toEqual([
+      { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
+      { id: 2, ok: false, error: STUCK("evaluate") },
+    ]);
+    expect(replies[1]![0] - sent).toBeLessThan(50);
+    expect(started).toEqual([1]);
+  });
+
+  test("recovery that reports the view free still leaves the session stuck while the op runs", async () => {
+    const { lane, replies } = stuckLanes(async () => true);
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane({}));
+    await Bun.sleep(60);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
+    await Bun.sleep(10);
+    expect(replies[1]?.[1]).toEqual({ id: 2, ok: false, error: STUCK("click") });
+  });
+
+  test("an op that settles during its recovery leaves no mark", async () => {
+    let lane!: ReturnType<typeof stuckLanes>["lane"];
+    let release!: () => void;
+    const s = stuckLanes(async () => { release(); await Bun.sleep(5); return false; });
+    ({ lane, release } = s);
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane({}));
+    await Bun.sleep(60);
+    dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane({}, 1000));
+    await Bun.sleep(10);
+    expect(s.mark.stuck).toBeUndefined();
+    expect(s.replies[1]?.[1]).toEqual({ id: 2, ok: true, result: "evaluate" });
+  });
+
+  test("ping is not affected while stuck", async () => {
+    const { lane, replies } = stuckLanes(async () => false);
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
+    await Bun.sleep(60);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
+    dispatch({ id: 3, op: "ping", args: [] }, lane({}, 1000));
+    await Bun.sleep(10);
+    expect(replies.map(([, r]) => r).slice(1)).toEqual([
+      { id: 2, ok: false, error: STUCK("evaluate") },
+      { id: 3, ok: true, result: "ping" },
+    ]);
+  });
+
+  test("the mark clears when the stuck op settles, after which the next request runs", async () => {
+    const { lane, replies, release } = stuckLanes(async () => false);
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
+    await Bun.sleep(60);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
+    release();
+    await Bun.sleep(5);
+    dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane({}, 1000));
+    await Bun.sleep(10);
+    expect(replies.map(([, r]) => r).slice(1)).toEqual([
+      { id: 2, ok: false, error: STUCK("evaluate") },
+      { id: 3, ok: true, result: "evaluate" },
+    ]);
+  });
+
+  test("a request already queued when the mark clears runs normally", async () => {
+    const { lane, replies, release } = stuckLanes(async () => false);
+    const A = {};
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
+    await Bun.sleep(5);
+    // Queued behind op 1 before it was marked stuck.
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(A, 1000));
+    await Bun.sleep(60);
+    dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane(A, 1000));
+    await Bun.sleep(5);
+    release();
+    await Bun.sleep(10);
+    expect(replies.map(([, r]) => r)).toEqual([
+      { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
+      { id: 3, ok: false, error: STUCK("evaluate") },
+      { id: 2, ok: true, result: "evaluate" },
+    ]);
+  });
+
+  test("a request that reaches the gate while stuck is answered stuck, and never runs", async () => {
+    const { lane, replies, started } = stuckLanes(async () => false, 50);
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
+    await Bun.sleep(5);
+    // Another connection's request waits at the gate until the holder's idle
+    // time (50 ms) after its answer at 20 ms: it reaches the gate at ~70 ms,
+    // after the mark (~40 ms).
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
+    await Bun.sleep(40);
+    expect(replies).toHaveLength(1);
+    await Bun.sleep(60);
+    expect(replies[1]?.[1]).toEqual({ id: 2, ok: false, error: STUCK("evaluate") });
+    expect(started).toEqual([1]);
+  });
+
+  test("a second timed-out op while stuck does not recover twice", async () => {
+    let recoveries = 0;
+    const { lane } = stuckLanes(async () => { recoveries++; return false; });
+    const A = {};
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(A));
+    await Bun.sleep(60);
+    dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane(A));
+    dispatch({ id: 4, op: "evaluate", args: ["3"] }, lane({}));
+    await Bun.sleep(100);
+    expect(recoveries).toBe(1);
+  });
+
+  test("with budgets off no mark is ever set", async () => {
+    let recoveries = 0;
+    const { lane, replies, mark } = stuckLanes(async () => { recoveries++; return false; });
+    const A = {};
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A, 0));
+    await Bun.sleep(60);
+    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(A, 0));
+    await Bun.sleep(20);
+    expect(recoveries).toBe(0);
+    expect(mark.stuck).toBeUndefined();
+    expect(replies).toEqual([]);
   });
 });
 

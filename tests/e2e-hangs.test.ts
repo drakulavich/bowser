@@ -203,13 +203,16 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     // left …"). It is still bounded by its budget.
     const QUEUED = `'eval' timed out after ${budget}ms (in its 'evaluate' step) (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
     const RAN_OUT = `'eval' timed out after ${budget}ms (in its 'evaluate' step)`;
+    // Where the reload did not free it (CI), the session is marked stuck
+    // until it settles, and each attempt is answered at once (#78).
+    const STUCK = "session is stuck: 'evaluate' is still running after a reload; run 'bowser close'";
     let href: string | undefined;
     const deadline = performance.now() + 20_000;
     while (href === undefined && performance.now() < deadline) {
       const attempt = await timed(async () => { href = await cmdEval({ ...ctx, command: "eval" }, "location.href"); });
       expect(attempt.ms).toBeLessThan(budget + 1000);
       if (attempt.error) {
-        expect([QUEUED, RAN_OUT]).toContain(attempt.error);
+        expect([QUEUED, RAN_OUT, STUCK]).toContain(attempt.error);
         await Bun.sleep(200);
       }
     }
