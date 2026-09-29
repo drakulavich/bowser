@@ -49,7 +49,7 @@ The client sends each request the time left of the command's budget, in a new op
 
 The first implementation task measures, on WebKit (Bun 1.4.2), what holds the native `click` of a later command while a POST to a server that never answers is pending: `view.loading`, the navigation's provisional state, or something else. What the fix does depends on the result:
 
-- **The pending navigation is the cause.** An action that starts while the navigation a previous command started is still pending waits for it within its own budget. If the navigation is still pending when the budget ends, the action fails with `page is still loading <url>; run 'bowser goto' to leave it or retry later`, exit 2.
+- **The pending navigation is the cause.** An action that starts while the navigation a previous command started is still pending waits for it within its own budget. If the navigation is still pending when the budget ends, the action fails with `page is still loading <url>; retry later, or run 'bowser close'`, exit 2.
 - **The cause is something else.** Implementation stops, and the finding goes back to the owner with the data before this part of the design changes.
 
 ## Definition of done
