@@ -638,30 +638,53 @@ function dialogShim(drop: boolean): string {
 })()`;
 }
 
+// The page's answer as JSON text, built in the page (#76). Bun.WebView
+// serializes an evaluate's value with the page's own JSON, so a toJSON the
+// page put on Object.prototype or Array.prototype (Prototype.js sets
+// Array's) rewrote every object or array bowser read back: the snapshot, a
+// dialog log, an eval result. The standard defines neither, so both are set
+// aside for this one synchronous call and put back; the answer then crosses
+// as a string, which no toJSON touches. A value's own toJSON, a class's
+// (Date, URL) and any toJSON the user's own expression calls still apply.
+// The server parses the text (fromPage in src/daemon/server.ts).
+const PAGE_JSON = String.raw`((v) => {
+  const O = Object.prototype, A = Array.prototype;
+  const o = Object.getOwnPropertyDescriptor(O, 'toJSON'), a = Object.getOwnPropertyDescriptor(A, 'toJSON');
+  if (o) delete O.toJSON;
+  if (a) delete A.toJSON;
+  try { return JSON.stringify(v); } finally {
+    if (o) Object.defineProperty(O, 'toJSON', o);
+    if (a) Object.defineProperty(A, 'toJSON', a);
+  }
+})`;
+
 /** `expr` evaluated with the dialog shim installed first. Evaluates to
- *  `{ value, dialogs }`: expr's value, and the shim's log read after it
- *  settles. Newlines around `expr` keep a trailing line comment in it. */
+ *  `{ value, dialogs }` as PAGE_JSON text: expr's value, and the shim's log
+ *  read after it settles. Newlines around `expr` keep a trailing line
+ *  comment in it. */
 export function withDialogShim(expr: string, drop: boolean): string {
   return `(async () => {
   const shim = ${dialogShim(drop)};
   const value = await (
 ${expr}
 );
-  return { value, dialogs: shim.log.splice(0) };
+  return ${PAGE_JSON}({ value, dialogs: shim.log.splice(0) });
 })()`;
 }
 
-/** Install the dialog shim if this document lacks it; read and clear its log. */
+/** Install the dialog shim if this document lacks it; read and clear its
+ *  log, as PAGE_JSON text. */
 export function dialogSyncScript(drop: boolean): string {
-  return `${dialogShim(drop)}.log.splice(0)`;
+  return `${PAGE_JSON}(${dialogShim(drop)}.log.splice(0))`;
 }
 
-/** Set the shim's one-shot answer (installing it first); read and clear its log. */
+/** Set the shim's one-shot answer (installing it first); read and clear its
+ *  log, as PAGE_JSON text. */
 export function dialogAnswerScript(answer: { accept: boolean; text?: string }): string {
   return `(() => {
   const shim = ${dialogShim(false)};
   shim.answer = ${JSON.stringify(answer)};
-  return shim.log.splice(0);
+  return ${PAGE_JSON}(shim.log.splice(0));
 })()`;
 }
 

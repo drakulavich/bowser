@@ -21,6 +21,16 @@ All notable changes to this project are documented here. This project follows
   `eval` result or `snapshot` came back with `�`, and a long `fill` put `�` into the page.
   `eval "'é😀'.repeat(2000)"` printed three of them. Both ends of the socket now decode it as one
   stream per connection. (#75)
+- **Pages that patch `toJSON` no longer garble what bowser reads from them.** `Bun.WebView` sends
+  a page's answer through the page's own `JSON`, so a page that set `Array.prototype.toJSON`, as
+  Prototype.js does, rewrote every array in it: `snapshot` printed `- text: p` … `- text: o`,
+  `eval "['x','y']"` printed `proto`, and `fill`/`click` failed with
+  `state.refs.find is not a function`. A page-wide `Object.prototype.toJSON` emptied `eval`
+  results and broke `snapshot`. bowser now serializes its answer in the page with those two set
+  aside for that one call, then puts them back. What `eval` returns: the value your expression
+  produced, as `JSON.stringify` would give it on a page without those two patches. A value's own
+  `toJSON`, a class's (`Date`, `URL`), and anything your expression itself calls, such as
+  `JSON.stringify(['x'])`, still see the page as it is. (#76)
 
 ## [0.9.0] — 2026-09-28
 
