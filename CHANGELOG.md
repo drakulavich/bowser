@@ -41,6 +41,27 @@ All notable changes to this project are documented here. This project follows
   produced, as `JSON.stringify` would give it on a page without those two patches. A value's own
   `toJSON`, a class's (`Date`, `URL`), and anything your expression itself calls, such as
   `JSON.stringify(['x'])`, still see the page as it is. (#76)
+- After a timed-out `click` whose page never answered, the next command could run before the
+  recovery reload landed. It reported the old page as success, failed with an unrelated error, or
+  wedged the session until `close`. Recovery now holds the session until its own reload lands. (#78)
+- A command that outlives the recovery reload, such as an `eval` of a promise the page keeps,
+  no longer makes every later command wait out its whole budget. Every command but `close` now
+  fails at once with `session is stuck: '<cmd>' is still running after a reload; run 'bowser close'`,
+  exit code 2, until that command ends. (#78)
+- After a form posted to a server that never answers, the next `fill` hung for its whole budget
+  and never typed. An action now waits for a navigation an earlier command left pending, and fails
+  with `page is still loading <url>; retry later, or run 'bowser close'`, exit code 2, if it is
+  still pending when the time runs out. (#78)
+- A timeout while an action waits for the page it opened now says the action reached the page:
+  `'click' timed out after 3000ms waiting for the page it opened; the click was delivered, check
+  the page before retrying`. It used to read as a failed click, so a retry could click twice. (#78)
+
+### Changed
+
+- `BOWSER_OP_TIMEOUT_MS` is a budget for the whole command. Each step used to get the full
+  budget, so `fill` with a 3 s budget answered after 5 s. Each step now gets what its command has
+  left. A value set on a later command applies to that command when it is smaller than the
+  session's, and a timeout names it. (#78)
 
 ## [0.9.0] — 2026-09-28
 

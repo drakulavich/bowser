@@ -342,6 +342,6 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
 
     const close = await timed(() => cmdClose(ctx));
     expect(close.error).toBeUndefined();
-    expect(close.ms).toBeLessThan(5000);
+    expect(close.ms).toBeLessThan(2000);
   }, 40_000);
 });
