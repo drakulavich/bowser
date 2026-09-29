@@ -85,7 +85,11 @@
 - [ ] **Step 4:** Run `bun test tests/daemon-handler.test.ts tests/lifecycle.test.ts tests/daemon.test.ts`. Expected: PASS.
 - [ ] **Step 5:** Commit: "dispatch enters the session gate before the serializer (#77)".
 
-### Task 3: Ref commands read state under the gate
+### Task 3: Dropped
+
+Dropped during implementation, as the spec's section 2 explains: connecting sends only `ping`, which bypasses the gate, so moving `loadRef` gains nothing and changes nine behaviours users can see. `liveSelector` already resolves the ref under the gate. The original text is kept below for the record.
+
+### (Dropped) Task 3: Ref commands read state under the gate
 
 **Files:**
 - Modify: `src/commands/interaction.ts:34,96,166,174,184,193` (every `loadRef` call)

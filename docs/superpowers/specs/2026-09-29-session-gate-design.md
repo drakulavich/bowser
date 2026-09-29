@@ -30,9 +30,11 @@ A small pure module with no WebView: a FIFO gate whose holders are connections.
 
 `startDaemon`'s socket handler gives each connection an identity for the gate, and `dispatch` takes the gate before the serializer. The serializer and the recovery path are unchanged.
 
-### 2. Commands read state under the gate
+### 2. Commands are unchanged
 
-Commands that take a ref call `loadRef` (which reads `state.json`) inside `withClient`/`withPageClient`, so the ref and its saved role come from the same state the command acts in. Nothing else in the commands changes.
+Commands need no change. A ref command's first request resolves the ref in the live page (`liveSelector`), and that request already runs under the gate, so the element it acts on is the one the page has at that moment.
+
+An earlier draft moved `loadRef` (the `state.json` read) inside `withClient`. That was dropped during implementation: connecting sends only `ping`, which bypasses the gate, so the read would still happen before the command held it. The move would also have changed nine behaviours users can see, such as a wrong-kind refusal no longer being made before any daemon request.
 
 The CLI↔daemon protocol does not change.
 
