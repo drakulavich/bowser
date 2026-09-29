@@ -29,7 +29,7 @@ bowser does not rebuild the WebView to recover: a session without `--persistent`
 
 When recovery ends and the timed-out op is still running, the daemon marks the session stuck. While it is stuck, every non-urgent request is answered at once, without waiting at the gate or the serializer:
 
-`session is stuck: '<op>' is still running after a reload; run 'bowser close'`
+`session is stuck: '<cmd>' is still running after a reload; run 'bowser close'`
 
 with exit 2. The mark clears when that op settles, and the session then works again. Urgent ops (`ping`, `shutdown`) are unaffected, so `close` always works.
 
