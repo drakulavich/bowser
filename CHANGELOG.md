@@ -7,6 +7,16 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **Parallel commands on one session no longer mix their steps.** A command sends the daemon
+  several requests, and the daemon kept only the requests in order, so another client's command
+  could run between them. Three parallel `fill`s all reported success while their text landed in
+  one field, and the next `snapshot` could print the password. A `click` raced against a
+  `goto` reported the button it resolved on page one and clicked the button at the same place on
+  page two. Parallel `open`s all printed the URL that loaded last. The daemon now runs one
+  client's command at a time on a session, and the other clients wait their turn. A request that
+  runs out of time while waiting fails with "(waiting for another client's command on this
+  session)", exit code 2. A client that crashes frees the session at once, and one that stops
+  responding frees it after `BOWSER_OP_TIMEOUT_MS`. `close` still works at any time. (#77)
 - **`screenshot` of a viewport too large to capture says what to do.** After
   `resize 16384 16384` on a Retina display, `screenshot` failed with "An unknown error occurred"
   and exit code 2. WebKit refuses a capture whose pixels fill 4 GiB (32768x32768 pixels at pixel
