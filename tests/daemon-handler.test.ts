@@ -33,7 +33,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     forward: rec("forward", undefined),
     reload: rec("reload", undefined),
     close: rec("close", undefined),
-    interrupt: rec("interrupt", undefined),
+    interrupt: rec("interrupt", true),
     watchNavigation: () => {},
     kickerOpened: false,
     ...over,

@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  CANCEL_PENDING_NAVIGATION, KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
   hoverScript, keyCommandScript, readable, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
@@ -104,10 +104,12 @@ export interface Browser {
   close(): Promise<void>;
   /** Try to free the view from a call that overran its budget: reload a
    *  committed page or leave the initial document (by script, or by
-   *  navigate("about:blank") when an evaluate is stuck there). Waits for the
-   *  native call to settle (the fallback up to settleMs), then for a landing
-   *  up to settleMs. */
-  interrupt(): Promise<void>;
+   *  navigate("about:blank") when an evaluate is stuck there). A refused
+   *  reload falls back to a script reload. Waits up to settleMs for a
+   *  landing, and resolves true only when the view is free: a successful
+   *  landing or a second one (the first is the cancelled navigation's
+   *  failure), or the initial document left. */
+  interrupt(): Promise<boolean>;
   /** Call `on` when a navigation starts and again when it lands. The daemon
    *  uses it to drop the page's one-shot dialog answer. One listener; a
    *  second call replaces the first. */
@@ -337,6 +339,18 @@ function navigationWatch(
     const n = await ask(NAV_COUNT, ms);
     return typeof n === "number" ? n : 0;
   };
+  /** Wait for the landing a recovery reload causes, up to settleMs: a
+   *  success, or a second landing after the -999 of the navigation it
+   *  cancelled. */
+  const freed = async (before: number): Promise<boolean> => {
+    const baseArrived = arrived;
+    const began = Date.now();
+    while (Date.now() - began < timing.settleMs) {
+      if (arrived !== baseArrived || landed - before >= 2) return true;
+      await sleep(10);
+    }
+    return false;
+  };
   /** Wait for a landing after `before`, while `still()` holds, up to settleMs. */
   const settle = async (before: number, still: () => boolean): Promise<void> => {
     const began = Date.now();
@@ -393,43 +407,51 @@ function navigationWatch(
     },
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
-    async interrupt(): Promise<void> {
+    async interrupt(): Promise<boolean> {
       const before = landed;
-      try {
-        if (view.url === "") {
-          // Nothing has committed yet: a first navigation from the initial
-          // document is stuck. reload() has no page to reload and does
-          // nothing, and navigate() is refused while one is pending
-          // (measured, Bun 1.4.2). The initial document still runs a
-          // script, and leaving it cancels the navigation with -999 (#48).
-          // The call goes to the view, not wrapView's queue: if an evaluate
-          // is pending WebKit refuses this one at once, where the queue
-          // would run it later over whatever page is there then.
-          try {
-            await view.evaluate(LEAVE_INITIAL_DOCUMENT);
-          } catch {
-            // Refused: an evaluate is stuck, not a navigation (#67). With no
-            // navigation pending navigate() is accepted, and it frees the
-            // stuck evaluate ~3.2 s later (measured on a bare WebView). Its
-            // own resolution is the landing, so there is no settle after it.
-            // Awaited up to settleMs; one that never settles is left to
-            // WebKit and the lane moves on (the next op may then be refused).
-            const left = view.navigate("about:blank").catch(() => {});
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            const bound = new Promise<void>((r) => { timer = setTimeout(r, timing.settleMs); });
-            await Promise.race([left, bound]);
-            clearTimeout(timer);
-            return;
-          }
-        } else if (typeof view.reload === "function") {
-          await view.reload();
-        } else {
-          return;
+      if (view.url === "") {
+        // Nothing has committed yet: a first navigation from the initial
+        // document is stuck. reload() has no page to reload and does
+        // nothing, and navigate() is refused while one is pending
+        // (measured, Bun 1.4.2). The initial document still runs a
+        // script, and leaving it cancels the navigation with -999 (#48).
+        // The call goes to the view, not wrapView's queue: if an evaluate
+        // is pending WebKit refuses this one at once, where the queue
+        // would run it later over whatever page is there then.
+        try {
+          await view.evaluate(LEAVE_INITIAL_DOCUMENT);
+        } catch {
+          // Refused: an evaluate is stuck, not a navigation (#67). With no
+          // navigation pending navigate() is accepted, and it frees the
+          // stuck evaluate ~3.2 s later (measured on a bare WebView). Its
+          // own resolution is the landing, so there is no settle after it.
+          // Awaited up to settleMs; one that never settles is left to
+          // WebKit and the lane moves on (the next op may then be refused).
+          const left = view.navigate("about:blank").then(() => true, () => false);
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const bound = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
+          const ok = await Promise.race([left, bound]);
+          clearTimeout(timer);
+          return ok;
         }
-      } catch {
-        return;
+        await settle(before, () => true);
+        return landed !== before;
       }
-      await settle(before, () => true);
+      if (typeof view.reload !== "function") return false;
+      try {
+        await view.reload();
+      } catch {
+        // Refused while a selector click is hung on a pending page
+        // navigation (#78); a script reload still cancels it. Straight to
+        // the view, as above: wrapView's queue may be held by that page.
+        const sent = view.evaluate(CANCEL_PENDING_NAVIGATION).then(() => true, () => false);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const bound = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
+        const ok = await Promise.race([sent, bound]);
+        clearTimeout(timer);
+        if (!ok) return false;
+      }
+      return freed(before);
     },
   };
 }

@@ -64,7 +64,7 @@ export interface Lane {
   timedOut?: (req: DaemonRequest) => DialogReport[] | undefined;
   /** Try once to free the WebView from the op that just overran its budget;
    *  resolves when the attempt is over, whether or not it worked. */
-  recover?: () => Promise<void>;
+  recover?: () => Promise<unknown>;
   /** The session's gate and this request's connection: with both, a queued
    *  request waits until its connection holds the gate (#77). */
   gate?: Gate;
@@ -112,7 +112,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   let atGate = false;
   let leaveGate: (() => void) | undefined;
   let grace: ReturnType<typeof setTimeout> | undefined;
-  let recovery: Promise<void> | undefined;
+  let recovery: Promise<unknown> | undefined;
   const answer = (res: DaemonResponse): void => {
     if (answered) return;
     answered = true;

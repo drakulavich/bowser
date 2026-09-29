@@ -727,6 +727,9 @@ export const READ_VIEWPORT = "[innerWidth, innerHeight, devicePixelRatio]";
 /** Recovery before the first commit (#48): the initial empty document
  *  leaves itself, which cancels a navigation stuck there. */
 export const LEAVE_INITIAL_DOCUMENT = "location.replace('about:blank')";
+/** Recovery when reload() is refused because a page navigation is pending
+ *  (#78): reloading by script cancels it. */
+export const CANCEL_PENDING_NAVIGATION = "location.replace(location.href)";
 /** Evaluated in browser.ts's kicker view, never in the page (oven-sh/bun#44134). */
 export const NO_OP = "0";
 
