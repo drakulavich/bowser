@@ -125,7 +125,7 @@ export interface Browser {
   readonly navigationPending: boolean;
   /** Where the page's last navigation goes; the view's url when the page
    *  cannot say. */
-  navigationDestination(): Promise<string>;
+  navigationDestination(maxWaitMs?: number): Promise<string>;
 }
 
 /** Open a WebKit Bun.WebView. Bun throws off macOS; the CLI refuses to
@@ -407,8 +407,8 @@ function navigationWatch(
   return {
     get phase() { return phase; },
     get pending() { return pendingAt === landed; },
-    async destination(): Promise<string> {
-      const url = await ask(NAV_DESTINATION, timing.graceMs);
+    async destination(maxWaitMs = timing.graceMs): Promise<string> {
+      const url = await ask(NAV_DESTINATION, maxWaitMs);
       return typeof url === "string" && url ? url : view.url;
     },
     /** Run `action` and wait for a navigation it started; see above.
@@ -523,7 +523,7 @@ export function wrapView(
     get title() { return view.title; },
     get phase() { return nav.phase; },
     get navigationPending() { return nav.pending; },
-    navigationDestination: () => nav.destination(),
+    navigationDestination: (maxWaitMs) => nav.destination(maxWaitMs),
     realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(view.navigate(url)),

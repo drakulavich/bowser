@@ -358,7 +358,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
   async function afterPendingNavigation(req: DaemonRequest, deadline = Infinity): Promise<DaemonResponse> {
     if (!browser.navigationPending) return runShimmed(req);
     // Read before the wait: after it, the reply is due at once.
-    const url = await browser.navigationDestination();
+    const url = await browser.navigationDestination(Math.max(0, deadline - Date.now()));
     while (browser.navigationPending) {
       const left = deadline - Date.now();
       if (left <= 0) return { id: req.id, ok: false, error: `page is still loading ${url}; retry later, or run 'bowser close'` };
