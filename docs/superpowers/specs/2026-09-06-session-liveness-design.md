@@ -1,6 +1,6 @@
 # Spec: a session is live or it is gone
 
-**Status:** approved. Plan: `docs/superpowers/plans/2026-09-06-session-liveness.md`.
+**Status:** approved.
 **Origin:** ticket 2 of the post-refactor triage (`list` prints every session
 ever created). Investigating it found a process leak underneath, and the ticket
 grew to cover both. Also closes ET-01 from the exploratory campaign.
