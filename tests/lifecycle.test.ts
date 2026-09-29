@@ -17,7 +17,7 @@ import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
 import { createSerializer } from "../src/serialize.ts";
 import { ensureSessionDir, saveState, sessionDir } from "../src/state.ts";
-import { daemonOf, fakeDaemon, SILENT } from "./helpers/fake-daemon.ts";
+import { daemonOf, fakeDaemon, lineSocket, SILENT } from "./helpers/fake-daemon.ts";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 
@@ -193,16 +193,12 @@ describe("F21: a timeout names the command", () => {
     };
     return Bun.listen({
       unix: socketPath(session),
-      socket: {
-        data(s, data) {
-          for (const line of data.toString().split("\n").filter(Boolean)) {
-            dispatch(JSON.parse(line) as DaemonRequest, {
-              handle, serialize, timeoutMs: 50,
-              reply: (res) => { s.write(JSON.stringify(res) + "\n"); },
-            });
-          }
-        },
-      },
+      socket: lineSocket((s, line) => {
+        dispatch(JSON.parse(line) as DaemonRequest, {
+          handle, serialize, timeoutMs: 50,
+          reply: (res) => { s.write(JSON.stringify(res) + "\n"); },
+        });
+      }),
     });
   }
 

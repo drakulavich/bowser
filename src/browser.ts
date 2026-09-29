@@ -3,7 +3,7 @@
 
 import {
   KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NO_OP, READ_TITLE, READ_URL, RELOAD,
-  hoverScript, keyCommandScript, selectScript, setCheckedScript,
+  hoverScript, keyCommandScript, readable, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
 
@@ -134,6 +134,10 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
     throw new Error(`--persistent: the browser refused profile ${opts.profile}: ${msg}`);
   }
   // The real Bun.WebView satisfies ViewLike structurally; no cast needed here.
+  // Every evaluate on the real view refuses a page that replaced
+  // JSON.stringify: WebKit returns values through it (see readable()).
+  const rawEvaluate = view.evaluate.bind(view);
+  view.evaluate = (expr: string) => rawEvaluate(readable(expr));
   return wrapView(view, NAV_TIMING, opts.profile, STORAGE_COMMIT_WAIT_MS, { open: openKicker });
 }
 

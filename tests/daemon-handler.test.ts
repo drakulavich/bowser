@@ -156,7 +156,8 @@ describe("createHandler", () => {
     const b = fakeBrowser({
       evaluate: async () => {
         if (dead) throw new Error("JavaScript execution returned a result of an unsupported type");
-        return { value: 2, dialogs: [] };
+        // The shim's answer crosses as JSON text (#76).
+        return JSON.stringify({ value: 2, dialogs: [] });
       },
       reload: async () => { b.calls.push(["reload", []]); dead = false; },
     });
@@ -588,6 +589,48 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
   const inFrame = <T>(f: typeof win, name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (f[name] as (...a: unknown[]) => T)(...a);
   return Object.assign(b, { load, page, window, restore, addFrame, inFrame });
 }
+
+// #76: Bun.WebView serializes the page's answer with the page's own JSON, so
+// a Prototype.js-style Array.prototype.toJSON turned every array in it into
+// "proto". webkitBrowser runs the scripts in this realm, so the patch goes on
+// this realm's Array.prototype for the length of each call.
+describe("a page's Array.prototype.toJSON (#76)", () => {
+  const patched = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const proto = Array.prototype as { toJSON?: () => string };
+    proto.toJSON = () => "proto";
+    try {
+      const out = await fn();
+      // bowser put the page's patch back.
+      expect(proto.toJSON?.()).toBe("proto");
+      return out;
+    } finally {
+      delete proto.toJSON;
+    }
+  };
+
+  test("an eval result and its dialogs keep their arrays", async () => {
+    const b = webkitBrowser();
+    const h = createHandler(b);
+    const res = await patched(() => h(rep("evaluate", ["(window.confirm('sure?'), ['x', ['y']])"])));
+    expect(res).toEqual({
+      id: 7, ok: true, result: ["x", ["y"]],
+      dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
+    });
+  });
+
+  test("the dialog log read around an action keeps its entries", async () => {
+    const b = webkitBrowser();
+    b.click = async () => { b.page("alert", "hi"); };
+    const h = createHandler(b);
+    const res = await patched(() => h(rep("click", ["#go"])));
+    expect(res.dialogs).toEqual([{ type: "alert", message: "hi", state: "dismissed", unanswered: true }]);
+  });
+
+  test("the user's own JSON.stringify still sees the page's toJSON", async () => {
+    const h = createHandler(webkitBrowser());
+    expect(await patched(() => h(req("evaluate", ["JSON.stringify(['x'])"])))).toEqual({ id: 7, ok: true, result: '"proto"' });
+  });
+});
 
 describe("dialogs on webkit: the page shim answers them", () => {
   // F27: the page owns the log, so it can write anything there. A report

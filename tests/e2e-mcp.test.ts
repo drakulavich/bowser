@@ -35,7 +35,7 @@ runOrSkip("e2e: bowser mcp answers ping while a call runs", () => {
           Bun.sleep(left).then(() => ({ done: true as const, value: undefined })),
         ]);
         if (next.done) throw new Error(`stdout closed before id ${id}`);
-        buf += decoder.decode(next.value);
+        buf += decoder.decode(next.value, { stream: true });
         let idx: number;
         while ((idx = buf.indexOf("\n")) !== -1) {
           const msg = JSON.parse(buf.slice(0, idx));

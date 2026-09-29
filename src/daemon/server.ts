@@ -21,6 +21,7 @@ import { readFileSync, unlinkSync } from "node:fs";
 import pkg from "../../package.json";
 import { openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
+import { lineReader } from "../socket-lines.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
   IS_URGENT,
@@ -218,6 +219,19 @@ export type Handler = ((req: DaemonRequest) => Promise<DaemonResponse>) & {
   timedOut: (req: DaemonRequest) => DialogReport[] | undefined;
 };
 
+/** The answer of a script that returns PAGE_JSON text (withDialogShim and
+ *  the dialog scripts in src/page-scripts.ts), parsed. Anything else reads
+ *  as no answer: only a page that replaced JSON.stringify itself gives it,
+ *  and before #76 such a page's answer was empty too. */
+function fromPage(raw: unknown): unknown {
+  if (typeof raw !== "string") return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Dispatch one parsed request to its handler. Never rejects: every failure,
  *  including an op name that is not in the map, is a `{ ok: false }` reply.
  *
@@ -271,7 +285,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
       ? async (b: Browser, accept: boolean, text?: string): Promise<void> => {
           // The shim holds the one-shot answer in the page, so a new
           // document starts without one.
-          take(await b.evaluate(dialogAnswerScript(text === undefined ? { accept } : { accept, text })));
+          take(fromPage(await b.evaluate(dialogAnswerScript(text === undefined ? { accept } : { accept, text }))));
           shimmed = true;
         }
       : Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
@@ -307,7 +321,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
         return res;
       }
       shimmed = true;
-      const r = res.result as { value?: unknown; dialogs?: unknown } | undefined;
+      const r = fromPage(res.result) as { value?: unknown; dialogs?: unknown } | undefined;
       take(r?.dialogs);
       return r?.value === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result: r.value };
     }
@@ -328,7 +342,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
   /** Install the shim if the page lacks it, and take its log. */
   async function sync(): Promise<void> {
     try {
-      take(await browser.evaluate(dialogSyncScript(!shimmed)));
+      take(fromPage(await browser.evaluate(dialogSyncScript(!shimmed))));
       shimmed = true;
     } catch {
       // A page that cannot evaluate right now opened no dialog we can read.
@@ -396,18 +410,17 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
   const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();
 
-  Bun.listen({
+  // Each connection's line reader lives on its socket's `data`.
+  Bun.listen<(chunk: Uint8Array) => void>({
     unix: sock,
     socket: {
       data(socket, data) {
-        // Requests are newline-delimited. Accumulate partial data on
-        // socket.data and process complete lines.
-        const existing = ((socket as { data?: string }).data ?? "") + data.toString();
-        const lines = existing.split("\n");
-        const remainder = lines.pop() ?? "";
-        (socket as { data?: string }).data = remainder;
-        for (const line of lines) {
-          if (!line) continue;
+        socket.data(data);
+      },
+      open(socket) {
+        // Requests are newline-delimited, one reader per connection.
+        socket.data = lineReader((line) => {
+          if (!line) return;
           let req: DaemonRequest;
           try {
             req = JSON.parse(line) as DaemonRequest;
@@ -416,15 +429,12 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
               socket as unknown as WritableSocket,
               JSON.stringify({ id: -1, ok: false, error: "invalid JSON: " + String(err) }) + "\n",
             );
-            continue;
+            return;
           }
           dispatch(req, { handle, serialize, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
-        }
-      },
-      open(socket) {
-        (socket as { data?: string }).data = "";
+        });
       },
       drain(socket) {
         flushSocket(socket as unknown as WritableSocket);

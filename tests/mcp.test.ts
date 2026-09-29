@@ -379,7 +379,7 @@ describe("bowser mcp never reads its own stdin for a command", () => {
           Bun.sleep(deadline - Date.now()).then(() => ({ done: true, value: undefined })),
         ]);
         if (next.done) break;
-        buf += decoder.decode(next.value);
+        buf += decoder.decode(next.value, { stream: true });
       }
       // Responses may come in any order (F36): the ping does not wait.
       const lines = buf.split("\n").filter(Boolean).map((l) => JSON.parse(l));
