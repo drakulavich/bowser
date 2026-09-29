@@ -717,16 +717,16 @@ describe("a stuck session", () => {
   }
 
   // Timed out at 20 ms, recovered after a 20 ms grace: stuck from ~40 ms.
-  test("a request after an unrecovered timeout is answered stuck at once", async () => {
+  test("a request after an unrecovered timeout is answered stuck at once, naming the command", async () => {
     const { lane, replies, started, t0 } = stuckLanes(async () => false);
-    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
+    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"], cmd: "eval" }, lane({}));
     await Bun.sleep(60);
     const sent = Date.now() - t0;
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
     await Bun.sleep(50);
     expect(replies.map(([, r]) => r)).toEqual([
-      { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
-      { id: 2, ok: false, error: STUCK("evaluate") },
+      { id: 1, ok: false, error: "'eval' timed out after 20ms (in its 'evaluate' step)" },
+      { id: 2, ok: false, error: STUCK("eval") },
     ]);
     expect(replies[1]![0] - sent).toBeLessThan(50);
     expect(started).toEqual([1]);
@@ -782,38 +782,26 @@ describe("a stuck session", () => {
     ]);
   });
 
-  test("a request already queued when the mark clears runs normally", async () => {
-    const { lane, replies, release } = stuckLanes(async () => false);
+  test("requests already queued when the mark is set are answered stuck at once", async () => {
+    const { lane, replies, started, release, t0 } = stuckLanes(async () => false, 50);
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
     await Bun.sleep(5);
-    // Queued behind op 1 before it was marked stuck.
+    // Before the mark (~40 ms): one queued at the serializer behind op 1, one
+    // at the gate behind connection A (its idle time runs to ~70 ms).
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(A, 1000));
+    dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane({}, 1000));
     await Bun.sleep(60);
-    dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane(A, 1000));
-    await Bun.sleep(5);
-    release();
-    await Bun.sleep(10);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
+      { id: 2, ok: false, error: STUCK("evaluate") },
       { id: 3, ok: false, error: STUCK("evaluate") },
-      { id: 2, ok: true, result: "evaluate" },
     ]);
-  });
-
-  test("a request that reaches the gate while stuck is answered stuck, and never runs", async () => {
-    const { lane, replies, started } = stuckLanes(async () => false, 50);
-    dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
-    await Bun.sleep(5);
-    // Another connection's request waits at the gate until the holder's idle
-    // time (50 ms) after its answer at 20 ms: it reaches the gate at ~70 ms,
-    // after the mark (~40 ms).
-    dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
-    await Bun.sleep(40);
-    expect(replies).toHaveLength(1);
-    await Bun.sleep(60);
-    expect(replies[1]?.[1]).toEqual({ id: 2, ok: false, error: STUCK("evaluate") });
+    expect(replies[2]![0]).toBeLessThan(60);
+    release();
+    await Bun.sleep(80);
     expect(started).toEqual([1]);
+    expect(replies).toHaveLength(3);
   });
 
   test("a second timed-out op while stuck does not recover twice", async () => {

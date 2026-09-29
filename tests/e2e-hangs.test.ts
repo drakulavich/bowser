@@ -205,7 +205,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const RAN_OUT = `'eval' timed out after ${budget}ms (in its 'evaluate' step)`;
     // Where the reload did not free it (CI), the session is marked stuck
     // until it settles, and each attempt is answered at once (#78).
-    const STUCK = "session is stuck: 'evaluate' is still running after a reload; run 'bowser close'";
+    const STUCK = "session is stuck: 'eval' is still running after a reload; run 'bowser close'";
     let href: string | undefined;
     const deadline = performance.now() + 20_000;
     while (href === undefined && performance.now() < deadline) {

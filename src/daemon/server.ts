@@ -77,6 +77,9 @@ export interface Lane {
  *  op holds the serializer, so it is the only one that can be stuck. */
 export interface StuckMark {
   stuck?: { op: string };
+  /** The requests waiting at the gate or the serializer: each is answered
+   *  stuck when the mark is set. */
+  waiting?: Set<(op: string) => void>;
 }
 
 /** Route one request onto the urgent or the queued lane.
@@ -103,9 +106,9 @@ export interface StuckMark {
  *  - a request still waiting at the gate for another connection's commands
  *    says so, and is dropped the same way.
  *  If the op is still running once `recover` resolves, whatever it returned,
- *  the session is marked stuck until the op settles. A request that arrives
- *  or reaches the gate meanwhile is answered at once and enters neither the
- *  gate nor the serializer; one already queued stays queued.
+ *  the session is marked stuck until the op settles. Every request waiting
+ *  then is answered at once, and so is one that arrives or reaches the gate
+ *  meanwhile, which enters neither the gate nor the serializer.
  *  Every request ahead of a queued one arrived earlier with the same budget,
  *  so the op it waits for has always timed out first. */
 /** How long a timed-out op may still settle on its own before `recover`
@@ -130,10 +133,14 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   let leaveGate: (() => void) | undefined;
   let grace: ReturnType<typeof setTimeout> | undefined;
   let recovery: Promise<unknown> | undefined;
-  const mine = { op: req.op };
+  const mine = { op: req.cmd ?? req.op };
+  const onStuck = (op: string): void => answer({ id: req.id, ok: false, error: stuckMessage(op) });
+  const waiting = lane.mark ? (lane.mark.waiting ??= new Set()) : undefined;
+  waiting?.add(onStuck);
   const answer = (res: DaemonResponse): void => {
     if (answered) return;
     answered = true;
+    waiting?.delete(onStuck);
     clearTimeout(timer);
     lane.reply(res);
     // On answer, not on settle: a timed-out op still running holds only the
@@ -158,7 +165,9 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     // can overlap it; see Browser.interrupt for what it may overlap.
     grace = setTimeout(() => {
       recovery = lane.recover?.().catch(() => false).then(() => {
-        if (!settled && lane.mark) lane.mark.stuck = mine;
+        if (settled || !lane.mark) return;
+        lane.mark.stuck = mine;
+        for (const w of [...waiting ?? []]) w(mine.op);
       });
     }, Math.min(RECOVERY_GRACE_MS, ms));
   }, ms) : undefined;
@@ -166,6 +175,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     lane.serialize(async () => {
       if (answered) return;
       running = true;
+      waiting?.delete(onStuck);
       const res = await lane.handle(req);
       settled = true;
       if (lane.mark?.stuck === mine) lane.mark.stuck = undefined;
@@ -186,7 +196,6 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   atGate = true;
   lane.gate.enter(lane.conn).then((done) => {
     atGate = false;
-    if (!answered && lane.mark?.stuck) answer({ id: req.id, ok: false, error: stuckMessage(lane.mark.stuck.op) });
     if (answered) done();
     else {
       leaveGate = done;
@@ -195,6 +204,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   }, () => {
     // Its connection closed while it waited: nobody is left to answer.
     answered = true;
+    waiting?.delete(onStuck);
     clearTimeout(timer);
   });
 }
