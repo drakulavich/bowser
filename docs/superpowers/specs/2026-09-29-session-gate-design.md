@@ -71,7 +71,7 @@ Commands on one session no longer overlap, so their times add up. They never ran
 2. **ET-16 is fixed.** A `click eN` raced against a `goto` from another client, run 10 times, never reports `clicked` for an element other than the one the ref named on the page it resolved on. Each run either clicks on that page or fails with "ref not found" (exit 1).
 3. **ET-17 is fixed.** Six parallel `open`s of different URLs each report the URL they opened.
 4. **The session can always be closed.** `bowser close` succeeds within 2 s while another client holds the gate, and while that client is stopped with SIGSTOP.
-5. **The gate is released.** A client killed with `kill -9` mid-command releases it at once. An idle holder (SIGSTOP) releases it after `BOWSER_OP_TIMEOUT_MS`, and the waiting command then runs.
+5. **The gate is released.** A client killed with `kill -9` releases the gate as soon as its requests are answered. The next command runs once any op the client left in the page has settled, since the serializer orders the two. An idle holder (SIGSTOP) releases it after `BOWSER_OP_TIMEOUT_MS`, and the waiting command then runs.
 6. **A waiting request fails clearly.** A request that times out while waiting at the gate fails with `(waiting for another client's command on this session)`, exit 2.
 7. **One MCP server is unaffected.** Its concurrency tests (`tests/mcp-concurrency.test.ts`, `tests/e2e-mcp.test.ts`) pass unchanged. Two MCP servers on one session no longer interleave.
 8. **Tests.** Every item above has a test: unit for the gate, a daemon handler test, and e2e for items 1–5. Each test was seen failing before the fix.
