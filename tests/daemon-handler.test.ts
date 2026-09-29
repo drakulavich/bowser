@@ -8,6 +8,7 @@ import pkg from "../package.json";
 import type { Browser } from "../src/browser.ts";
 import { createHandler, dispatch, type DaemonState } from "../src/daemon/server.ts";
 import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport } from "../src/daemon/protocol.ts";
+import { createGate } from "../src/daemon/gate.ts";
 import { createSerializer } from "../src/serialize.ts";
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
@@ -532,6 +533,160 @@ describe("the queue-time budget", () => {
     dispatch({ id: 3, op: "click", args: ["#z"] }, lane);
     await Bun.sleep(40);
     expect(recoveries).toBe(1);
+  });
+});
+
+// #77: requests of different connections on one session run one connection
+// at a time, through the gate, before the serializer.
+describe("the session gate", () => {
+  const WAITING = (op: string, ms: number) =>
+    `'${op}' timed out after ${ms}ms (waiting for another client's command on this session)`;
+
+  function lanes(handle: (req: DaemonRequest) => Promise<DaemonResponse>, timeoutMs: number, idleMs = timeoutMs) {
+    const gate = createGate(idleMs);
+    const serialize = createSerializer();
+    const replies: DaemonResponse[] = [];
+    const lane = (conn: object, ms = timeoutMs) =>
+      ({ handle, serialize, gate, conn, timeoutMs: ms, reply: (r: DaemonResponse) => { replies.push(r); } });
+    return { gate, lane, replies };
+  }
+
+  test("requests of a second connection wait until the first connection closes", async () => {
+    const started: number[] = [];
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
+    const { gate, lane, replies } = lanes(async (req) => {
+      started.push(req.id);
+      if (req.id === 1) await slow;
+      return { id: req.id, ok: true as const };
+    }, 0);
+    const A = {}, B = {};
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
+    dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B));
+    dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane(A));
+    await Bun.sleep(10);
+    release();
+    await Bun.sleep(10);
+    expect(started).toEqual([1, 3]);
+    gate.leave(A);
+    await Bun.sleep(10);
+    expect(started).toEqual([1, 3, 2]);
+    expect(replies.map((r) => r.id)).toEqual([1, 3, 2]);
+  });
+
+  test("urgent ops skip the gate", async () => {
+    const { lane, replies } = lanes(async (req) => {
+      if (req.op !== "ping") await new Promise(() => {});
+      return { id: req.id, ok: true as const, result: req.op };
+    }, 0);
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane({}));
+    dispatch({ id: 2, op: "ping", args: [] }, lane({}));
+    await Bun.sleep(10);
+    expect(replies).toEqual([{ id: 2, ok: true, result: "ping" }]);
+  });
+
+  test("a request that times out at the gate says so", async () => {
+    const { lane, replies } = lanes(() => new Promise<DaemonResponse>(() => {}), 50);
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane({}));
+    await Bun.sleep(5);
+    dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane({}));
+    await Bun.sleep(80);
+    expect(replies).toEqual([
+      { id: 1, ok: false, error: "'evaluate' timed out after 50ms" },
+      { id: 2, ok: false, error: WAITING("evaluate", 50) },
+    ]);
+  });
+
+  test("a closed holder whose op timed out passes the gate on, and the next op still waits for that op at the serializer", async () => {
+    const started: number[] = [];
+    let release!: () => void;
+    const stuck = new Promise<void>((r) => { release = r; });
+    const { gate, lane, replies } = lanes(async (req) => {
+      started.push(req.id);
+      if (req.id === 1) await stuck;
+      return { id: req.id, ok: true as const };
+    }, 20, 0);
+    const A = {};
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
+    await Bun.sleep(30);
+    gate.leave(A);
+    const B = {};
+    dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B, 30));
+    dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane(B, 0));
+    await Bun.sleep(50);
+    expect(replies).toEqual([
+      { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
+      { id: 2, ok: false, error: "'evaluate' timed out after 30ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)" },
+    ]);
+    expect(started).toEqual([1]);
+    release();
+    await Bun.sleep(10);
+    expect(started).toEqual([1, 3]);
+  });
+
+  test("a holder that closes with a later request still queued at the serializer passes the gate on only after it settles", async () => {
+    const started: number[] = [];
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
+    const { gate, lane } = lanes(async (req) => {
+      started.push(req.id);
+      if (req.id === 1) await slow;
+      if (req.id === 2) await Bun.sleep(20);
+      return { id: req.id, ok: true as const };
+    }, 0);
+    const A = {};
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
+    dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(A));
+    dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane({}));
+    await Bun.sleep(5);
+    gate.leave(A);
+    release();
+    await Bun.sleep(10);
+    expect(started).toEqual([1, 2]);
+    await Bun.sleep(30);
+    expect(started).toEqual([1, 2, 3]);
+  });
+
+  test("a request that timed out at the gate does not hold it once its turn comes", async () => {
+    const started: number[] = [];
+    let hold!: () => void;
+    const held = new Promise<void>((r) => { hold = r; });
+    const { gate, lane } = lanes(async (req) => {
+      started.push(req.id);
+      if (req.id === 1) await held;
+      return { id: req.id, ok: true as const };
+    }, 0, 30);
+    const A = {};
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
+    dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane({}, 20));
+    dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane({}));
+    await Bun.sleep(40);
+    hold();
+    gate.leave(A);
+    // B's connection stays open; its turn passes after the idle time, not never.
+    await Bun.sleep(80);
+    expect(started).toEqual([1, 3]);
+  });
+
+  test("a waiting connection that closes is never run and never answered", async () => {
+    const started: number[] = [];
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
+    const { gate, lane, replies } = lanes(async (req) => {
+      started.push(req.id);
+      if (req.id === 1) await slow;
+      return { id: req.id, ok: true as const };
+    }, 50, 0);
+    const A = {}, B = {};
+    dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A, 0));
+    dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B));
+    await Bun.sleep(5);
+    gate.leave(B);
+    release();
+    gate.leave(A);
+    await Bun.sleep(80);
+    expect(started).toEqual([1]);
+    expect(replies.map((r) => r.id)).toEqual([1]);
   });
 });
 

@@ -21,6 +21,7 @@ import { readFileSync, unlinkSync } from "node:fs";
 import pkg from "../../package.json";
 import { openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
+import { createGate, type Gate } from "./gate.ts";
 import { lineReader } from "../socket-lines.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
@@ -64,6 +65,10 @@ export interface Lane {
   /** Try once to free the WebView from the op that just overran its budget;
    *  resolves when the attempt is over, whether or not it worked. */
   recover?: () => Promise<void>;
+  /** The session's gate and this request's connection: with both, a queued
+   *  request waits until its connection holds the gate (#77). */
+  gate?: Gate;
+  conn?: object;
 }
 
 /** Route one request onto the urgent or the queued lane.
@@ -86,7 +91,9 @@ export interface Lane {
  *    settles within the grace is left alone, so its page survives;
  *  - a request still queued behind an op that timed out gets its own error
  *    naming that op, and is dropped when its turn comes, since its client
- *    has already been told it failed.
+ *    has already been told it failed;
+ *  - a request still waiting at the gate for another connection's commands
+ *    says so, and is dropped the same way.
  *  Every request ahead of a queued one arrived earlier with the same budget,
  *  so the op it waits for has always timed out first. */
 /** How long a timed-out op may still settle on its own before `recover`
@@ -102,6 +109,8 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   }
   let answered = false;
   let running = false;
+  let atGate = false;
+  let leaveGate: (() => void) | undefined;
   let grace: ReturnType<typeof setTimeout> | undefined;
   let recovery: Promise<void> | undefined;
   const answer = (res: DaemonResponse): void => {
@@ -109,10 +118,17 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     answered = true;
     clearTimeout(timer);
     lane.reply(res);
+    // On answer, not on settle: a timed-out op still running holds only the
+    // serializer, so the next client gets its "waiting for" hint (F9).
+    leaveGate?.();
   };
   const ms = lane.timeoutMs;
   const timer = ms > 0 ? setTimeout(() => {
     const timedOut = timeoutMessage(req, ms);
+    if (atGate) {
+      answer({ id: req.id, ok: false, error: `${timedOut} (waiting for another client's command on this session)` });
+      return;
+    }
     if (!running) {
       const prev = lane.serialize.running ?? "an earlier operation";
       answer({ id: req.id, ok: false, error: `${timedOut} (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)` });
@@ -126,18 +142,37 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
       recovery = lane.recover?.().catch(() => {});
     }, Math.min(RECOVERY_GRACE_MS, ms));
   }, ms) : undefined;
-  lane.serialize(async () => {
-    if (answered) return;
-    running = true;
-    const res = await lane.handle(req);
-    // Settled within the grace: no reload, and the next op starts now.
-    clearTimeout(grace);
-    answer(res);
-    // Hold the lane until the recovery's reload has landed, so the next op
-    // sees the page it left rather than racing it.
-    await recovery;
-  }, req.op).catch(() => {
-    // handle() never rejects; guards against an unhandled rejection.
+  const queue = (): void => {
+    lane.serialize(async () => {
+      if (answered) return;
+      running = true;
+      const res = await lane.handle(req);
+      // Settled within the grace: no reload, and the next op starts now.
+      clearTimeout(grace);
+      answer(res);
+      // Hold the lane until the recovery's reload has landed, so the next op
+      // sees the page it left rather than racing it.
+      await recovery;
+    }, req.op).catch(() => {
+      // handle() never rejects; guards against an unhandled rejection.
+    });
+  };
+  if (!lane.gate || !lane.conn) {
+    queue();
+    return;
+  }
+  atGate = true;
+  lane.gate.enter(lane.conn).then((done) => {
+    atGate = false;
+    if (answered) done();
+    else {
+      leaveGate = done;
+      queue();
+    }
+  }, () => {
+    // Its connection closed while it waited: nobody is left to answer.
+    answered = true;
+    clearTimeout(timer);
   });
 }
 
@@ -409,17 +444,20 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
   const handle = createHandler(browser, state);
   const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();
+  const gate = createGate(timeoutMs);
 
-  // Each connection's line reader lives on its socket's `data`.
-  Bun.listen<(chunk: Uint8Array) => void>({
+  // Each connection's line reader lives on its socket's `data`, with the
+  // object the gate knows it by.
+  Bun.listen<{ read: (chunk: Uint8Array) => void; conn: object }>({
     unix: sock,
     socket: {
       data(socket, data) {
-        socket.data(data);
+        socket.data.read(data);
       },
       open(socket) {
+        const conn = {};
         // Requests are newline-delimited, one reader per connection.
-        socket.data = lineReader((line) => {
+        socket.data = { conn, read: lineReader((line) => {
           if (!line) return;
           let req: DaemonRequest;
           try {
@@ -431,16 +469,20 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
             );
             return;
           }
-          dispatch(req, { handle, serialize, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
+          dispatch(req, { handle, serialize, gate, conn, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
-        });
+        }) };
+      },
+      close(socket) {
+        gate.leave(socket.data.conn);
       },
       drain(socket) {
         flushSocket(socket as unknown as WritableSocket);
       },
       error(socket, err) {
         console.error("[bowser daemon] socket error:", err.message);
+        gate.leave(socket.data.conn);
         // Close the socket so its WriteQueue (`_wq` in socket-write.ts) can't
         // strand buffered chunks on a peer that will never fire `drain` again.
         socket.end();
