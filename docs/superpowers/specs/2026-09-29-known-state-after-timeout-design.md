@@ -55,7 +55,7 @@ The first implementation task measures, on WebKit (Bun 1.4.2), what holds the na
 ## Definition of done
 
 1. **ET-09.** With a link to a server that never answers and `BOWSER_OP_TIMEOUT_MS=3000`, `click` times out. The next `eval location.href`, over 5 runs, either reports the reloaded page's URL (exit 0) or fails with the stuck message (exit 2). It never reports the pre-reload page as success, and it never takes longer than its own budget.
-2. **ET-12.** After an `eval` of a reachable promise that never settles times out, every later command until `close` fails within 1 s with the stuck message. When the page resolves the promise (`window.hold()` from a timer), the session works again without `close`.
+2. **ET-12.** After an `eval` of a reachable promise that never settles times out, and once recovery has ended, every later command fails within 1 s with the stuck message. A command sent during the recovery grace waits for it, within its budget. When WebKit frees the evaluate (about 4 s after the reload, measured), the session works again without `close`. The page cannot resolve the promise itself, because the reload replaced its document.
 3. **ET-10.** The measurement is recorded in the plan's task report. After a submit to a server that never answers, the next `fill` either types its text, or fails within its budget with `page is still loading …`. It never hangs past its budget and never exits 0 without typing.
 4. **ET-15, message.** `click` on a link to a page served after 3 s with a 3 s budget fails with `… waiting for the page it opened; the click was delivered …`.
 5. **ET-15, budget.** `fill` with `BOWSER_OP_TIMEOUT_MS=3000` against a page whose steps are slow answers, success or failure, within 3.5 s.
