@@ -98,6 +98,9 @@ export interface DaemonRequest {
   /** The command the user ran, which a timeout names; its ops are the
    *  command's steps (F21). */
   cmd?: string;
+  /** What is left of the command's budget: the daemon times the request with
+   *  the smaller of this and its own budget. */
+  budgetMs?: number;
 }
 
 export interface DaemonResponse {

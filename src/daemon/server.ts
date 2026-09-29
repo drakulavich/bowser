@@ -22,6 +22,7 @@ import pkg from "../../package.json";
 import { openBrowser, type ActPhase, type Browser } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
 import { createGate, type Gate } from "./gate.ts";
+import { opTimeoutMs } from "../budget.ts";
 import { lineReader } from "../socket-lines.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
@@ -127,6 +128,11 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     lane.reply({ id: req.id, ok: false, error: stuckMessage(lane.mark.stuck.op) });
     return;
   }
+  const budget = lane.timeoutMs || Math.max(req.budgetMs ?? 0, 0);
+  if (req.budgetMs !== undefined && req.budgetMs <= 0) {
+    lane.reply({ id: req.id, ok: false, error: timeoutMessage(req, budget) });
+    return;
+  }
   let answered = false;
   let running = false;
   let settled = false;
@@ -152,9 +158,9 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     // serializer, so the next client gets its "waiting for" hint (F9).
     leaveGate?.();
   };
-  const ms = lane.timeoutMs;
+  const ms = req.budgetMs !== undefined && (lane.timeoutMs <= 0 || req.budgetMs < lane.timeoutMs) ? req.budgetMs : lane.timeoutMs;
   const timer = ms > 0 ? setTimeout(() => {
-    const timedOut = timeoutMessage(req, ms, running ? lane.phase?.() : undefined);
+    const timedOut = timeoutMessage(req, budget, running ? lane.phase?.() : undefined);
     if (atGate) {
       answer({ id: req.id, ok: false, error: `${timedOut} (waiting for another client's command on this session)` });
       return;
@@ -228,15 +234,6 @@ function timeoutMessage(req: DaemonRequest, ms: number, phase?: ActPhase): strin
   }
   const step = cmd === req.op ? "" : ` (in its '${req.op}' step)`;
   return `'${cmd}' timed out after ${ms}ms${step}`;
-}
-
-/** Per-operation timeout budget. Default 30s; override with BOWSER_OP_TIMEOUT_MS
- *  (set to 0 to disable). Guards a wedged WebKit call from hanging forever. */
-function opTimeoutMs(): number {
-  const raw = process.env.BOWSER_OP_TIMEOUT_MS;
-  if (raw === undefined || raw === "") return 30000;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : 30000;
 }
 
 // `state` and `dialog-answer` are excluded: they alone need the DaemonState

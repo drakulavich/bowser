@@ -1267,3 +1267,38 @@ describe("dialogs in same-origin frames", () => {
     expect((await h(rep("evaluate", ["1"]))).dialogs).toBeUndefined();
   });
 });
+
+describe("the command budget (budgetMs)", () => {
+  const lane = (replies: Array<[number, DaemonResponse]>, t0: number, timeoutMs = 1000) => ({
+    handle: () => new Promise<DaemonResponse>(() => {}), // never settles
+    serialize: createSerializer(),
+    timeoutMs,
+    reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+  });
+
+  test("a request with budgetMs smaller than the daemon's budget times out at budgetMs", async () => {
+    const replies: Array<[number, DaemonResponse]> = [];
+    const t0 = Date.now();
+    dispatch({ id: 1, op: "type", args: ["hi"], cmd: "fill", budgetMs: 50 }, lane(replies, t0));
+    await Bun.sleep(300);
+    // The message names the command's budget, not what was left of it.
+    expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'fill' timed out after 1000ms (in its 'type' step)" }]);
+    expect(replies[0]![0]).toBeLessThan(200);
+  });
+
+  test("budgetMs <= 0 fails at once with the timeout message", async () => {
+    for (const budgetMs of [0, -5]) {
+      const replies: Array<[number, DaemonResponse]> = [];
+      dispatch({ id: 1, op: "click", args: ["#x"], cmd: "click", budgetMs }, lane(replies, Date.now()));
+      expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'click' timed out after 1000ms" }]);
+    }
+  });
+
+  test("budgetMs bounds the request when the daemon's budget is off", async () => {
+    const replies: Array<[number, DaemonResponse]> = [];
+    const t0 = Date.now();
+    dispatch({ id: 1, op: "click", args: ["#x"], budgetMs: 50 }, lane(replies, t0, 0));
+    await Bun.sleep(300);
+    expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'click' timed out after 50ms" }]);
+  });
+});
