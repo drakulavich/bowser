@@ -88,6 +88,8 @@ op read op://vault/app/password | bowser -s=login fill e2 --stdin
 bowser -s=login click e3
 ```
 
+Commands on one session run one at a time: when several clients (parallel shell calls, two MCP servers) send commands to the same session, each waits its turn and runs whole.
+
 ### Persistent profiles
 
 A session's browser store is in memory by default: `close` (or a crash) loses its logins. A persistent profile is the way to keep cookies, and so logins, between sessions: bowser has no cookie commands, and `state-save`/`state-load` carry only `localStorage`. Open the session with `--persistent` to keep cookies, `localStorage` and IndexedDB on disk, like `playwright-cli open --persistent`:
