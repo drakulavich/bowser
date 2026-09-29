@@ -669,7 +669,11 @@ const PAGE_JSON = String.raw`((v) => {
 /** `expr`, refused when the page has replaced JSON.stringify. WebKit
  *  returns every evaluate's value through the page's JSON.stringify, so a
  *  replaced one answers the page's text as bowser's result: `open` printed
- *  the page's string as its URL and title (#84 review). */
+ *  the page's string as its URL and title (#84 review). The check itself
+ *  uses the page's Function.prototype.toString, so a page that forges it
+ *  passes. That is deliberate: bowser shields against legacy libraries'
+ *  patches, not against a page written to deceive automation, which no
+ *  check made from inside the page can stop. */
 export function readable(expr: string): string {
   return `(() => {
   if (!/\\[native code\\]/.test(Function.prototype.toString.call(JSON.stringify))) {

@@ -263,6 +263,8 @@ Notes:
 2. `bowser snapshot` runs a [snapshot script](./src/page-scripts.ts) in the page that walks the DOM into an aria tree (roles, names, text, refs) and keeps a reference to each ref's element in the page; [`src/snapshot.ts`](./src/snapshot.ts) renders that tree as YAML. Refs are persisted with the CSS path each element had (`#id` when safe, otherwise an `nth-of-type` chain), e.g. `e3` → `html > body > button:nth-of-type(2)`.
 3. `bowser click e3` resolves the ref from state, then in the page: the snapshot script kept a reference to each ref's element, so the command checks that element is still in the document and computes its CSS path afresh (a stale ref fails here, before anything is clicked). It then dispatches the click via the daemon, using `Bun.WebView`'s built-in actionability auto-wait — no polling, no hard-coded timeouts.
 
+bowser's scripts run in the page's own JavaScript world, and WebKit returns their results through the page's `JSON.stringify`. bowser sets aside the builtin patches that legacy libraries such as Prototype.js install, and it refuses a page that replaced `JSON.stringify`. It does not defend against a page written to deceive automation: such a page can forge any check made from inside it.
+
 ## Environment variables
 
 | Variable | Effect |
