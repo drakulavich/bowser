@@ -19,7 +19,7 @@
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
 import pkg from "../../package.json";
-import { openBrowser, type Browser } from "../browser.ts";
+import { openBrowser, type ActPhase, type Browser } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
 import { createGate, type Gate } from "./gate.ts";
 import { lineReader } from "../socket-lines.ts";
@@ -65,6 +65,7 @@ export interface Lane {
   /** Try once to free the WebView from the op that just overran its budget;
    *  resolves when the attempt is over, true when it freed the view. */
   recover?: () => Promise<boolean>;
+  phase?: () => ActPhase;
   /** The session's stuck mark: one object shared by every request's lane. */
   mark?: StuckMark;
   /** The session's gate and this request's connection: with both, a queued
@@ -153,7 +154,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   };
   const ms = lane.timeoutMs;
   const timer = ms > 0 ? setTimeout(() => {
-    const timedOut = timeoutMessage(req, ms);
+    const timedOut = timeoutMessage(req, ms, running ? lane.phase?.() : undefined);
     if (atGate) {
       answer({ id: req.id, ok: false, error: `${timedOut} (waiting for another client's command on this session)` });
       return;
@@ -220,8 +221,11 @@ function stuckMessage(op: string): string {
 /** A timeout names the command the user ran, and the op when it is one of
  *  the command's steps: `fill` sends `click` first, and `snapshot` and
  *  `eval` both send `evaluate` (F21). A request with no `cmd` is its op. */
-function timeoutMessage(req: DaemonRequest, ms: number): string {
+function timeoutMessage(req: DaemonRequest, ms: number, phase?: ActPhase): string {
   const cmd = req.cmd ?? req.op;
+  if (phase === "awaiting-navigation") {
+    return `'${cmd}' timed out after ${ms}ms waiting for the page it opened; the ${cmd} was delivered, check the page before retrying`;
+  }
   const step = cmd === req.op ? "" : ` (in its '${req.op}' step)`;
   return `'${cmd}' timed out after ${ms}ms${step}`;
 }
@@ -511,7 +515,7 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
             );
             return;
           }
-          dispatch(req, { handle, serialize, gate, conn, mark, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
+          dispatch(req, { handle, serialize, gate, conn, mark, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), phase: () => browser.phase, reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
         }) };

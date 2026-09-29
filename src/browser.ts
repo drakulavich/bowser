@@ -81,6 +81,8 @@ export async function resolveTitle(
   }
 }
 
+export type ActPhase = "idle" | "acting" | "awaiting-navigation";
+
 export interface Browser {
   url: string;
   title: string;
@@ -116,6 +118,7 @@ export interface Browser {
   watchNavigation(on: () => void): void;
   /** Whether the oven-sh/bun#44134 workaround opened its second view. */
   readonly kickerOpened: boolean;
+  readonly phase: ActPhase;
 }
 
 /** Open a WebKit Bun.WebView. Bun throws off macOS; the CLI refuses to
@@ -390,19 +393,27 @@ function navigationWatch(
       await sleep(10);
     }
   };
+  let phase: ActPhase = "idle";
   return {
+    get phase() { return phase; },
     /** Run `action` and wait for a navigation it started; see above.
      *  Answers what the action answered. */
     async act<T>(action: () => Promise<T>): Promise<T> {
-      const before = landed;
-      // A navigation already in flight is not ours: only a false→true transition
-      // of `loading` counts, or one stuck navigation would cost every later
-      // action the full settleMs. The page flag is cleared for the same reason.
-      const wasLoading = view.loading;
-      await ask(NAV_ARM, timing.graceMs);
-      const result = await action();
-      await awaitNavigation(before, wasLoading);
-      return result;
+      phase = "acting";
+      try {
+        const before = landed;
+        // A navigation already in flight is not ours: only a false→true transition
+        // of `loading` counts, or one stuck navigation would cost every later
+        // action the full settleMs. The page flag is cleared for the same reason.
+        const wasLoading = view.loading;
+        await ask(NAV_ARM, timing.graceMs);
+        const result = await action();
+        phase = "awaiting-navigation";
+        await awaitNavigation(before, wasLoading);
+        return result;
+      } finally {
+        phase = "idle";
+      }
     },
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
@@ -495,6 +506,7 @@ export function wrapView(
   return {
     get url() { return view.url; },
     get title() { return view.title; },
+    get phase() { return nav.phase; },
     realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(view.navigate(url)),

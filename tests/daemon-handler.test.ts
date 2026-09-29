@@ -36,6 +36,7 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     interrupt: rec("interrupt", true),
     watchNavigation: () => {},
     kickerOpened: false,
+    phase: "idle",
     ...over,
   };
   return b;
@@ -247,6 +248,27 @@ test("a queued op that overruns its budget answers with a timeout error", async 
   expect(replies).toEqual([
     { id: 1, ok: false, error: "'click' timed out after 5ms" },
   ]);
+});
+
+test("a timeout while awaiting navigation says the click was delivered", async () => {
+  const b = fakeBrowser({ phase: "awaiting-navigation", click: () => new Promise<void>(() => {}) });
+  const replies: DaemonResponse[] = [];
+  const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r: DaemonResponse) => { replies.push(r); } };
+  dispatch({ id: 1, op: "click", args: ["#go"], cmd: "click" }, lane);
+  dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
+  await Bun.sleep(60);
+  expect(replies).toEqual([
+    { id: 1, ok: false, error: "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying" },
+    { id: 2, ok: false, error: "'fill' timed out after 20ms waiting for the page it opened; the fill was delivered, check the page before retrying" },
+  ]);
+});
+
+test("a timeout while acting keeps the plain timeout message", async () => {
+  const b = fakeBrowser({ phase: "acting", click: () => new Promise<void>(() => {}) });
+  const replies: DaemonResponse[] = [];
+  dispatch({ id: 1, op: "click", args: ["#go"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r) => { replies.push(r); } });
+  await Bun.sleep(60);
+  expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 20ms" }]);
 });
 
 test("an op that overruns its budget: the timeout reply carries the reports queued before it, and its own late ones wait for the next printing request", async () => {

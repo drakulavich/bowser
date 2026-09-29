@@ -486,6 +486,27 @@ describe("wrapView navigation watch", () => {
     expect(own(v.calls)).toEqual([["reload", []]]);
     expect(b.url).toBe("https://x/re");
   });
+
+  test("phase is awaiting-navigation while act waits for a landing", async () => {
+    const v = fakeView();
+    let during = "";
+    const b = wrapView(v, fast);
+    v.click = async () => { during = b.phase; v.loading = true; setTimeout(() => v.land("https://x/next"), 100); };
+    expect(b.phase).toBe("idle");
+    const clicked = b.click("#go");
+    await Bun.sleep(50);
+    expect(during).toBe("acting");
+    expect(b.phase).toBe("awaiting-navigation");
+    await clicked;
+    expect(b.phase).toBe("idle");
+  });
+
+  test("phase resets to idle when the action throws", async () => {
+    const v = fakeView({ click: async () => { throw new Error("no element"); } });
+    const b = wrapView(v, fast);
+    await expect(b.click("#missing")).rejects.toThrow("no element");
+    expect(b.phase).toBe("idle");
+  });
 });
 
 describe("wrapView interrupt", () => {
