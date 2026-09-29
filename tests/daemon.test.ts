@@ -11,7 +11,7 @@ import { ensureSessionDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, daemonCommand, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, daemonCommand, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -451,5 +451,69 @@ describe("session claim (F29)", () => {
     b.release();
     expect(await b.said).toBe("won");
     expect(await Bun.file(pidFile).text()).toBe(String(b.proc.pid));
+  });
+});
+
+describe("the command budget", () => {
+  /** A daemon on a temporary socket that records each request and answers
+   *  the first after `firstMs`, the rest at once. */
+  async function recordingDaemon(firstMs: number) {
+    const dir = await mkdtemp(join(tmpdir(), "bowser-budget-"));
+    const path = join(dir, "sock");
+    const seen: Array<{ id: number; budgetMs?: number; budgetTotalMs?: number }> = [];
+    const server = Bun.listen({
+      unix: path,
+      socket: lineSocket((s, line) => {
+        const req = JSON.parse(line) as { id: number; budgetMs?: number };
+        seen.push(req);
+        setTimeout(() => s.write(JSON.stringify({ id: req.id, ok: true }) + "\n"), seen.length === 1 ? firstMs : 0);
+      }),
+    });
+    return { path, seen, stop: async () => { server.stop(true); await rm(dir, { recursive: true, force: true }); } };
+  }
+
+  async function withBudget(value: string, run: () => Promise<void>): Promise<void> {
+    const orig = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = value;
+    try {
+      await run();
+    } finally {
+      if (orig !== undefined) process.env.BOWSER_OP_TIMEOUT_MS = orig; else delete process.env.BOWSER_OP_TIMEOUT_MS;
+    }
+  }
+
+  test("the second request of a command carries the budget left", async () => {
+    await withBudget("1000", async () => {
+      const d = await recordingDaemon(300);
+      const c = new DaemonClient(d.path, "s");
+      try {
+        await c.connect();
+        await c.request("evaluate", ["1"]);
+        await c.request("evaluate", ["2"]);
+      } finally {
+        c.close();
+        await d.stop();
+      }
+      expect(d.seen[0]!.budgetMs).toBeGreaterThan(900);
+      expect(d.seen[1]!.budgetMs).toBeLessThanOrEqual(700);
+      expect(d.seen[1]!.budgetMs).toBeGreaterThan(0);
+      expect(d.seen.map((r) => r.budgetTotalMs)).toEqual([1000, 1000]);
+    });
+  });
+
+  test("no budgetMs when budgets are off", async () => {
+    await withBudget("0", async () => {
+      const d = await recordingDaemon(0);
+      const c = new DaemonClient(d.path, "s");
+      try {
+        await c.connect();
+        await c.request("evaluate", ["1"]);
+      } finally {
+        c.close();
+        await d.stop();
+      }
+      expect(d.seen[0]).not.toHaveProperty("budgetMs");
+      expect(d.seen[0]).not.toHaveProperty("budgetTotalMs");
+    });
   });
 });

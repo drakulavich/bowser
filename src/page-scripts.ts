@@ -727,6 +727,9 @@ export const READ_VIEWPORT = "[innerWidth, innerHeight, devicePixelRatio]";
 /** Recovery before the first commit (#48): the initial empty document
  *  leaves itself, which cancels a navigation stuck there. */
 export const LEAVE_INITIAL_DOCUMENT = "location.replace('about:blank')";
+/** Recovery when reload() is refused because a page navigation is pending
+ *  (#78): reloading by script cancels it. */
+export const CANCEL_PENDING_NAVIGATION = "location.replace(location.href)";
 /** Evaluated in browser.ts's kicker view, never in the page (oven-sh/bun#44134). */
 export const NO_OP = "0";
 
@@ -736,7 +739,8 @@ export const NO_OP = "0";
 // server answers; the Navigation API's navigate event fires within ~6 ms
 // (measured, Bun 1.4.2). NAV_ARM listens for it once per document and
 // zeroes the count before each action; NAV_COUNT reads how many
-// cross-document navigations the page has started since. A same-document
+// cross-document navigations the page has started since, and NAV_DESTINATION
+// where the last one goes. A same-document
 // navigation (a hash link) never lands, so it is not counted.
 // The API is reached only as `window.navigation`: a page's own global
 // `let navigation` shadows the bare name in any script run there. A missing
@@ -750,13 +754,14 @@ export const NAV_ARM = String.raw`(() => {
     try {
       const api = window.navigation;
       if (api && typeof api.addEventListener === 'function') {
-        api.addEventListener('navigate', (e) => { if (!e.destination.sameDocument) s.count++; });
+        api.addEventListener('navigate', (e) => { if (!e.destination.sameDocument) { s.count++; s.url = e.destination.url; } });
       }
     } catch {}
   }
   s.count = 0;
 })()`;
 export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
+export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
 // `press Meta+a` and friends (#55). Bun.WebView sends Meta+A/Z to WebKit as
 // key events only; on macOS those shortcuts are menu commands, which the page

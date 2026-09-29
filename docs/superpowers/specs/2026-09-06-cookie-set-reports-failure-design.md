@@ -1,6 +1,6 @@
 # Spec: `cookie-set` reports failure instead of claiming success
 
-**Status:** approved 2026-09-06. Plan: `docs/superpowers/plans/2026-09-06-cookie-set-reports-failure.md`.
+**Status:** approved 2026-09-06.
 **Origin:** ticket 3 of the post-refactor triage. The ticket described the
 symptom; the measurements below found a broader cause and cancelled half of
 the proposed fix.

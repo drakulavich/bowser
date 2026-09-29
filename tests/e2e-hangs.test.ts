@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { CommandContext } from "../src/commands/context.ts";
-import { cmdClick } from "../src/commands/interaction.ts";
+import { cmdClick, cmdFill } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -43,6 +43,9 @@ const SHADOWED_PAGE = `<!doctype html><title>Shadowed</title>
  *  with another: WebKit cancels the first (-999) while the second loads. */
 const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 <button onclick="location.href = '/slow'; setTimeout(() => { location.href = '/slow2'; }, 200)">Twice</button>`;
+/** ET-10 (#78): Send posts to a server that never answers. */
+const FORM_PAGE = `<!doctype html><title>Form</title>
+<form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
 const SLOW_MS = 3000;
 
 runOrSkip("e2e: a session never hangs, never reports a page it has not reached", () => {
@@ -97,7 +100,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
         // A server that never answers: the navigation never settles.
         if (path === "/never") return new Promise<Response>(() => {});
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
-        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE }[path] ?? HOME_PAGE;
+        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE }[path] ?? HOME_PAGE;
         return new Response(page, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
@@ -203,13 +206,16 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     // left …"). It is still bounded by its budget.
     const QUEUED = `'eval' timed out after ${budget}ms (in its 'evaluate' step) (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
     const RAN_OUT = `'eval' timed out after ${budget}ms (in its 'evaluate' step)`;
+    // Where the reload did not free it (CI), the session is marked stuck
+    // until it settles, and each attempt is answered at once (#78).
+    const STUCK = "session is stuck: 'eval' is still running after a reload; run 'bowser close'";
     let href: string | undefined;
     const deadline = performance.now() + 20_000;
     while (href === undefined && performance.now() < deadline) {
       const attempt = await timed(async () => { href = await cmdEval({ ...ctx, command: "eval" }, "location.href"); });
       expect(attempt.ms).toBeLessThan(budget + 1000);
       if (attempt.error) {
-        expect([QUEUED, RAN_OUT]).toContain(attempt.error);
+        expect([QUEUED, RAN_OUT, STUCK]).toContain(attempt.error);
         await Bun.sleep(200);
       }
     }
@@ -310,4 +316,32 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(5000);
   }, 30_000);
+
+  // ET-10 (#78): a selector click started while the page's POST is still
+  // unanswered never resolved on WebKit, so this fill hung until its budget.
+  test("ET-10: after a submit to a server that never answers, the next fill types or says the page is still loading, within its budget", async () => {
+    const ctx = await openWith("et10", 30_000);
+    await cmdGoto(ctx, `${base}/form`);
+    await cmdSnapshot(ctx);
+    const refs = (await loadState(ctx.session))!.refs;
+    const ref = (name: string) => refs.find((r) => r.name === name)!.id;
+    await cmdFill(ctx, ref("First"), "hello");
+    // Returns at the navigation watch's 10 s cap with the POST still pending.
+    const submit = await timed(() => cmdClick(ctx, ref("Send")));
+    expect(submit.error).toBeUndefined();
+
+    process.env.BOWSER_OP_TIMEOUT_MS = "3000";
+    const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
+    expect(fill.ms).toBeLessThan(3500);
+    if (fill.error) expect(fill.error).toBe(`page is still loading ${base}/never; retry later, or run 'bowser close'`);
+    else expect(await cmdEval(ctx, "document.querySelector('[name=b]').value")).toBe("AFTER");
+
+    // The daemon's budget is 30 s; the timeout names the command's own.
+    const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise(() => {})"));
+    expect(hung.error).toBe("'eval' timed out after 3000ms (in its 'evaluate' step)");
+
+    const close = await timed(() => cmdClose(ctx));
+    expect(close.error).toBeUndefined();
+    expect(close.ms).toBeLessThan(2000);
+  }, 40_000);
 });

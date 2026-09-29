@@ -306,8 +306,7 @@ cover `fill`, `type`, `press`, `hover`, `select`, `check`/`uncheck`, `resize`,
 Chromium under Ubuntu; the macOS job runs unit tests only. That gap is closed
 first, before any code moves.
 
-- **PR 1 — WebKit e2e coverage and the type gate.** Plan:
-  `docs/superpowers/plans/2026-09-05-refactor-pr1-webkit-e2e.md`.
+- **PR 1 — WebKit e2e coverage and the type gate.**
   - **Typecheck gate.** `bun test` strips types and checks nothing, so a typed
     protocol without `tsc` guarantees nothing. `typescript` becomes a
     devDependency, `bun run typecheck` a script, and a CI step. Running `tsc`

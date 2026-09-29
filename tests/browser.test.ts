@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
 import { ACTS, createHandler } from "../src/daemon/server.ts";
 import type { Op } from "../src/daemon/protocol.ts";
-import { KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT } from "../src/page-scripts.ts";
+import { CANCEL_PENDING_NAVIGATION, KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -208,12 +208,13 @@ const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate"
  *  view.loading stays false, as it does on WebKit for a navigation the page
  *  starts (measured: a link click, a form submit, a script's location change). */
 function pageNavView(over: Partial<ViewLike> = {}) {
-  const page = { navs: 0 };
+  const page: { navs: number; to?: string } = { navs: 0 };
   const v = fakeView({
     evaluate: async (expr) => {
       v.calls.push(["evaluate", [expr]]);
       if (expr === NAV_ARM) { page.navs = 0; return undefined; }
       if (expr === NAV_COUNT) return page.navs;
+      if (expr === NAV_DESTINATION) return page.to;
       return undefined;
     },
     ...over,
@@ -486,6 +487,112 @@ describe("wrapView navigation watch", () => {
     expect(own(v.calls)).toEqual([["reload", []]]);
     expect(b.url).toBe("https://x/re");
   });
+
+  test("phase is awaiting-navigation while act waits for a landing", async () => {
+    const v = fakeView();
+    let during = "";
+    const b = wrapView(v, fast);
+    v.click = async () => { during = b.phase; v.loading = true; setTimeout(() => v.land("https://x/next"), 100); };
+    expect(b.phase).toBe("idle");
+    const clicked = b.click("#go");
+    await Bun.sleep(50);
+    expect(during).toBe("acting");
+    expect(b.phase).toBe("awaiting-navigation");
+    await clicked;
+    expect(b.phase).toBe("idle");
+  });
+
+  test("phase resets to idle when the action throws", async () => {
+    const v = fakeView({ click: async () => { throw new Error("no element"); } });
+    const b = wrapView(v, fast);
+    await expect(b.click("#missing")).rejects.toThrow("no element");
+    expect(b.phase).toBe("idle");
+  });
+});
+
+// ET-10 (#78): a form POST to a server that never answers leaves a page
+// navigation pending after `click` returns; a selector click started then
+// hangs for good on WebKit, even once the page commits.
+describe("a navigation a previous command left pending", () => {
+  const slow = { graceMs: 20, settleMs: 60 };
+  /** A view whose `#send` starts a page navigation to `to` that nothing
+   *  answers; with `to` null the page cannot say where it goes. */
+  function submitted(to: string | null = "https://x/never") {
+    const { v, page } = pageNavView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); if (s === "#send") { page.navs++; page.to = to ?? undefined; } };
+    return v;
+  }
+  const stillLoading = (url: string) => `page is still loading ${url}; retry later, or run 'bowser close'`;
+  const clicks = (v: Fake) => v.calls.filter(([n]) => n === "click").map(([, a]) => a[0]);
+
+  test("is pending after act gives up on it, until a landing or a failure", async () => {
+    for (const end of ["landed", "failed"] as const) {
+      const v = submitted();
+      const b = wrapView(v, slow);
+      expect(b.navigationPending).toBe(false);
+      await b.click("#send");
+      expect(b.navigationPending).toBe(true);
+      if (end === "landed") v.land("https://x/never");
+      else v.onNavigationFailed?.(new Error("Frame load interrupted"));
+      expect(b.navigationPending).toBe(false);
+    }
+  });
+
+  test("an action that navigates nowhere leaves nothing pending", async () => {
+    const v = submitted();
+    const b = wrapView(v, slow);
+    await b.click("#other");
+    expect(b.navigationPending).toBe(false);
+  });
+
+  test("an action waits for a navigation a previous command left pending, then fails with 'page is still loading'", async () => {
+    const v = submitted();
+    const handle = createHandler(wrapView(v, slow));
+    expect((await handle({ id: 1, op: "click", args: ["#send"] })).ok).toBe(true);
+    const t0 = Date.now();
+    const res = await handle({ id: 2, op: "click", args: ["#b"] }, t0 + 150);
+    const elapsed = Date.now() - t0;
+    expect(res).toEqual({ id: 2, ok: false, error: stillLoading("https://x/never") });
+    expect(elapsed).toBeGreaterThanOrEqual(140);
+    expect(elapsed).toBeLessThan(400);
+    expect(clicks(v)).toEqual(["#send"]);
+  });
+
+  test("a page that cannot say where its navigation goes is named by the view's url", async () => {
+    const v = submitted(null);
+    const handle = createHandler(wrapView(v, slow));
+    await handle({ id: 1, op: "click", args: ["#send"] });
+    const res = await handle({ id: 2, op: "click", args: ["#b"] }, Date.now() + 50);
+    expect(res.error).toBe(stillLoading("https://x/"));
+  });
+
+  test("an action waits for a pending navigation that lands, then acts on the new page", async () => {
+    const v = submitted();
+    const handle = createHandler(wrapView(v, slow));
+    await handle({ id: 1, op: "click", args: ["#send"] });
+    setTimeout(() => v.land("https://x/answered"), 100);
+    const res = await handle({ id: 2, op: "click", args: ["#b"] }, Date.now() + 2000);
+    expect(res.ok).toBe(true);
+    expect(clicks(v)).toEqual(["#send", "#b"]);
+    expect(v.url).toBe("https://x/answered");
+  });
+
+  test("every ACTS op waits; evaluate and the navigating ops do not", async () => {
+    for (const op of ACTS) {
+      const v = submitted();
+      const handle = createHandler(wrapView(v, slow));
+      await handle({ id: 1, op: "click", args: ["#send"] });
+      const res = await handle({ id: 2, op, args: ACT_ARGS[op] ?? [] }, Date.now() + 30);
+      expect([op, res.error]).toEqual([op, stillLoading("https://x/never")]);
+    }
+    for (const op of ["evaluate", "reload", "back", "navigate"] as const) {
+      const v = submitted();
+      const handle = createHandler(wrapView(v, slow));
+      await handle({ id: 1, op: "click", args: ["#send"] });
+      const res = await handle({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, Date.now() + 30);
+      expect([op, res.error]).toEqual([op, undefined]);
+    }
+  });
 });
 
 describe("wrapView interrupt", () => {
@@ -495,25 +602,108 @@ describe("wrapView interrupt", () => {
     const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); setTimeout(() => v.land("https://x/"), 30); } });
     const b = wrapView(v, fast);
     const t0 = Date.now();
-    await b.interrupt();
+    expect(await b.interrupt()).toBe(true);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(25);
     expect(v.calls).toEqual([["reload", []]]);
   });
 
-  test("a stuck navigation the reload cancels ends the wait", async () => {
-    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); v.onNavigationFailed?.(new Error("-999")); } });
-    const b = wrapView(v, fast);
-    const t0 = Date.now();
-    await b.interrupt();
-    expect(Date.now() - t0).toBeLessThan(30);
+  test("counts a successful landing that happens before reload resolves", async () => {
+    const v = fakeView({ reload: async () => { v.land("https://x/reloaded"); } });
+    expect(await wrapView(v, fast).interrupt()).toBe(true);
   });
 
-  test("gives up after settleMs when nothing lands, as on a page stuck in a script", async () => {
-    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); } });
-    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+  test("a reload that never settles ends the interrupt at settleMs", async () => {
+    const v = fakeView({ reload: () => new Promise<void>(() => {}) });
     const t0 = Date.now();
-    await b.interrupt();
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(55);
+    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(200);
+  });
+
+  test("interrupt waits past the cancelled navigation's failure", async () => {
+    const v = fakeView({ reload: async () => {
+      v.onNavigationFailed?.(new Error("-999"));
+      setTimeout(() => v.land("https://x/"), 100);
+    } });
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    expect(await b.interrupt()).toBe(true);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(95);
+  });
+
+  test("interrupt returns false when nothing lands", async () => {
+    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); } });
+    const b = wrapView(v, { graceMs: 20, settleMs: 50 });
+    const t0 = Date.now();
+    expect(await b.interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(45);
+  });
+
+  test("interrupt returns false when only the failure lands", async () => {
+    const v = fakeView({ reload: async () => { v.onNavigationFailed?.(new Error("-999")); } });
+    const b = wrapView(v, { graceMs: 20, settleMs: 50 });
+    expect(await b.interrupt()).toBe(false);
+  });
+
+  test("a second landing within settleMs frees the view too", async () => {
+    const v = fakeView({ reload: async () => {
+      v.onNavigationFailed?.(new Error("-999"));
+      setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 20);
+    } });
+    expect(await wrapView(v, fast).interrupt()).toBe(true);
+  });
+
+  // Measured on WebKit (#78, Task 1): while a selector click is hung on a
+  // pending page navigation, reload() throws ERR_INVALID_STATE, and a script
+  // location.replace frees the view (5 of 5).
+  test("a refused reload falls back to a script that cancels the pending navigation", async () => {
+    const v = fakeView({
+      reload: async () => { v.calls.push(["reload", []]); throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        v.onNavigationFailed?.(new Error("-999"));
+        setTimeout(() => v.land("https://x/"), 20);
+        return "https://x/";
+      },
+    });
+    expect(await wrapView(v, fast).interrupt()).toBe(true);
+    expect(v.calls).toEqual([["reload", []], ["evaluate", [CANCEL_PENDING_NAVIGATION]]]);
+  });
+
+  test("the fallback script bypasses wrapView's evaluate queue", async () => {
+    let first = true;
+    const v = fakeView({
+      reload: async () => { throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
+      evaluate: (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        if (first) { first = false; return new Promise(() => {}); }
+        setTimeout(() => v.land("https://x/"), 10);
+        return Promise.resolve(1);
+      },
+    });
+    const b = wrapView(v, fast);
+    void b.evaluate("stuck");
+    expect(await b.interrupt()).toBe(true);
+    expect(v.calls.at(-1)).toEqual(["evaluate", [CANCEL_PENDING_NAVIGATION]]);
+  });
+
+  test("a fallback script that never answers ends the interrupt at settleMs", async () => {
+    const v = fakeView({
+      reload: async () => { throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
+      evaluate: () => new Promise(() => {}),
+    });
+    const t0 = Date.now();
+    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(200);
+  });
+
+  test("a refused reload and a refused script return false at once", async () => {
+    const v = fakeView({
+      reload: async () => { throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
+      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
+    });
+    const t0 = Date.now();
+    expect(await wrapView(v, fast).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(30);
   });
 
   // #48, measured on WebKit (Bun 1.4.2): before the first commit (url "")
@@ -528,7 +718,7 @@ describe("wrapView interrupt", () => {
     v.url = "";
     const b = wrapView(v, fast);
     const t0 = Date.now();
-    await b.interrupt();
+    expect(await b.interrupt()).toBe(true);
     expect(Date.now() - t0).toBeLessThan(30);
     expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]]]);
   });
@@ -549,6 +739,17 @@ describe("wrapView interrupt", () => {
     expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]], ["navigate", ["about:blank"]]]);
   });
 
+  test("a stuck initial-document evaluate and navigation are each bounded", async () => {
+    const v = fakeView({
+      evaluate: () => new Promise<unknown>(() => {}),
+      navigate: () => new Promise<void>(() => {}),
+    });
+    v.url = "";
+    const t0 = Date.now();
+    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(200);
+  });
+
   test("the about:blank fallback is awaited until it settles", async () => {
     let settled = 0;
     const v = fakeView({
@@ -556,7 +757,7 @@ describe("wrapView interrupt", () => {
       navigate: async () => { await Bun.sleep(40); settled = Date.now(); },
     });
     v.url = "";
-    await wrapView(v, { graceMs: 20, settleMs: 300 }).interrupt();
+    expect(await wrapView(v, { graceMs: 20, settleMs: 300 }).interrupt()).toBe(true);
     expect(settled).toBeGreaterThan(0);
   });
 
@@ -567,7 +768,7 @@ describe("wrapView interrupt", () => {
     });
     v.url = "";
     const t0 = Date.now();
-    await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt();
+    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
     const ms = Date.now() - t0;
     expect(ms).toBeGreaterThanOrEqual(55);
     expect(ms).toBeLessThan(200);
@@ -580,13 +781,13 @@ describe("wrapView interrupt", () => {
     });
     v.url = "";
     const t0 = Date.now();
-    await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt();
+    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
     expect(Date.now() - t0).toBeLessThan(30);
   });
 
   test("without a native reload it does nothing", async () => {
     const v = fakeView();
-    await wrapView(v, fast).interrupt();
+    expect(await wrapView(v, fast).interrupt()).toBe(false);
     expect(v.calls).toEqual([]);
   });
 });
