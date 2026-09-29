@@ -15,6 +15,12 @@ All notable changes to this project are documented here. This project follows
   `resize`'s limits are unchanged: every size it accepts works for everything but a screenshot,
   and at pixel ratio 1 no size it accepts should reach the limit (by the same arithmetic; not
   measured). (#69)
+- **Long non-ASCII text crosses the daemon socket intact.** A message over the socket's ~8 KB read
+  size could arrive with a multi-byte character split between two reads, and each read was decoded
+  on its own, so that character became U+FFFD, reported as success. It hit both directions: a long
+  `eval` result or `snapshot` came back with `�`, and a long `fill` put `�` into the page.
+  `eval "'é😀'.repeat(2000)"` printed three of them. Both ends of the socket now decode it as one
+  stream per connection. (#75)
 
 ## [0.9.0] — 2026-09-28
 

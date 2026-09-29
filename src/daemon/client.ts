@@ -6,6 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import pkg from "../../package.json";
 import { withTimeout } from "../serialize.ts";
+import { lineReader } from "../socket-lines.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { checkNewSessionName, sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
@@ -30,7 +31,6 @@ export class DaemonClient implements DaemonConnection {
   private sock: Awaited<ReturnType<typeof Bun.connect>> | undefined;
   private nextId = 1;
   private pending = new Map<number, { resolve: (result: unknown) => void; reject: (err: Error) => void }>();
-  private buf = "";
   private closed = false;
   private reported: DialogReport[] = [];
   private report = false;
@@ -58,29 +58,26 @@ export class DaemonClient implements DaemonConnection {
 
   async connect(): Promise<void> {
     const self = this;
+    const read = lineReader((line) => {
+      if (!line) return;
+      try {
+        const res = JSON.parse(line) as DaemonResponse;
+        const entry = self.pending.get(res.id);
+        if (entry) {
+          if (res.dialogs) self.reported.push(...res.dialogs);
+          self.pending.delete(res.id);
+          if (res.ok) entry.resolve(res.result);
+          else entry.reject(new Error(res.error ?? "daemon error"));
+        }
+      } catch {
+        // swallow
+      }
+    });
     this.sock = await Bun.connect({
       unix: this.path,
       socket: {
         data(_s, data) {
-          self.buf += data.toString();
-          let idx: number;
-          while ((idx = self.buf.indexOf("\n")) !== -1) {
-            const line = self.buf.slice(0, idx);
-            self.buf = self.buf.slice(idx + 1);
-            if (!line) continue;
-            try {
-              const res = JSON.parse(line) as DaemonResponse;
-              const entry = self.pending.get(res.id);
-              if (entry) {
-                if (res.dialogs) self.reported.push(...res.dialogs);
-                self.pending.delete(res.id);
-                if (res.ok) entry.resolve(res.result);
-                else entry.reject(new Error(res.error ?? "daemon error"));
-              }
-            } catch {
-              // swallow
-            }
-          }
+          read(data);
         },
         drain(s) {
           flushSocket(s as unknown as WritableSocket);

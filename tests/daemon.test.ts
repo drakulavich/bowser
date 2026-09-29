@@ -15,6 +15,7 @@ import { connectOrSpawn, daemonCommand, DaemonNotAnswering, pidPath, socketPath 
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
+import { lineSocket } from "./helpers/fake-daemon.ts";
 
 describe("socketPath", () => {
   test("resolves under process.env.HOME at call time", () => {
@@ -280,16 +281,11 @@ describe("daemon goes away mid-request", () => {
     await ensureSessionDir(session);
     return Bun.listen({
       unix: socketPath(session),
-      socket: {
-        data(s, data) {
-          for (const line of data.toString().split("\n")) {
-            if (!line) continue;
-            const req = JSON.parse(line) as { id: number; op: string };
-            if (req.op === "ping") s.write(JSON.stringify({ id: req.id, ok: true, result: pkg.version }) + "\n");
-            else s.end();
-          }
-        },
-      },
+      socket: lineSocket((s, line) => {
+        const req = JSON.parse(line) as { id: number; op: string };
+        if (req.op === "ping") s.write(JSON.stringify({ id: req.id, ok: true, result: pkg.version }) + "\n");
+        else s.end();
+      }),
     });
   }
 

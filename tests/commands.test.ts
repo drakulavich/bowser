@@ -30,6 +30,7 @@ import {
 import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
 import { longHome } from "./helpers/long-home.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
+import { lineSocket } from "./helpers/fake-daemon.ts";
 import { fillScript, READ_VIEWPORT, resolveRefScript, runCodeScript, storageSetScript } from "../src/page-scripts.ts";
 import { UserError } from "../src/errors.ts";
 import { usageOf } from "../src/cli/help.ts";
@@ -221,15 +222,11 @@ describe("open --persistent / --profile", () => {
     await ensureSessionDir(session);
     const listener = Bun.listen({
       unix: join(sessionDir(session), "sock"),
-      socket: {
-        data(s, data) {
-          for (const line of data.toString().split("\n").filter(Boolean)) {
-            const req = JSON.parse(line) as { id: number; op: string };
-            const result = req.op === "state" ? { url: "about:blank", title: "" } : pkg.version;
-            s.write(JSON.stringify({ id: req.id, ok: true, result }) + "\n");
-          }
-        },
-      },
+      socket: lineSocket((s, line) => {
+        const req = JSON.parse(line) as { id: number; op: string };
+        const result = req.op === "state" ? { url: "about:blank", title: "" } : pkg.version;
+        s.write(JSON.stringify({ id: req.id, ok: true, result }) + "\n");
+      }),
     });
     try {
       const proc = Bun.spawn(

@@ -21,6 +21,7 @@ import { readFileSync, unlinkSync } from "node:fs";
 import pkg from "../../package.json";
 import { openBrowser, type Browser } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
+import { lineReader } from "../socket-lines.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
   IS_URGENT,
@@ -396,18 +397,17 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
   const serialize = createSerializer();
   const timeoutMs = opTimeoutMs();
 
-  Bun.listen({
+  // Each connection's line reader lives on its socket's `data`.
+  Bun.listen<(chunk: Uint8Array) => void>({
     unix: sock,
     socket: {
       data(socket, data) {
-        // Requests are newline-delimited. Accumulate partial data on
-        // socket.data and process complete lines.
-        const existing = ((socket as { data?: string }).data ?? "") + data.toString();
-        const lines = existing.split("\n");
-        const remainder = lines.pop() ?? "";
-        (socket as { data?: string }).data = remainder;
-        for (const line of lines) {
-          if (!line) continue;
+        socket.data(data);
+      },
+      open(socket) {
+        // Requests are newline-delimited, one reader per connection.
+        socket.data = lineReader((line) => {
+          if (!line) return;
           let req: DaemonRequest;
           try {
             req = JSON.parse(line) as DaemonRequest;
@@ -416,15 +416,12 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
               socket as unknown as WritableSocket,
               JSON.stringify({ id: -1, ok: false, error: "invalid JSON: " + String(err) }) + "\n",
             );
-            continue;
+            return;
           }
           dispatch(req, { handle, serialize, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
-        }
-      },
-      open(socket) {
-        (socket as { data?: string }).data = "";
+        });
       },
       drain(socket) {
         flushSocket(socket as unknown as WritableSocket);
