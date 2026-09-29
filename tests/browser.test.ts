@@ -500,6 +500,18 @@ describe("wrapView interrupt", () => {
     expect(v.calls).toEqual([["reload", []]]);
   });
 
+  test("counts a successful landing that happens before reload resolves", async () => {
+    const v = fakeView({ reload: async () => { v.land("https://x/reloaded"); } });
+    expect(await wrapView(v, fast).interrupt()).toBe(true);
+  });
+
+  test("a reload that never settles ends the interrupt at settleMs", async () => {
+    const v = fakeView({ reload: () => new Promise<void>(() => {}) });
+    const t0 = Date.now();
+    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(200);
+  });
+
   test("interrupt waits past the cancelled navigation's failure", async () => {
     const v = fakeView({ reload: async () => {
       v.onNavigationFailed?.(new Error("-999"));
@@ -618,6 +630,17 @@ describe("wrapView interrupt", () => {
     await b.interrupt();
     expect(Date.now() - t0).toBeLessThan(30);
     expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]], ["navigate", ["about:blank"]]]);
+  });
+
+  test("a stuck initial-document evaluate and navigation are each bounded", async () => {
+    const v = fakeView({
+      evaluate: () => new Promise<unknown>(() => {}),
+      navigate: () => new Promise<void>(() => {}),
+    });
+    v.url = "";
+    const t0 = Date.now();
+    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(200);
   });
 
   test("the about:blank fallback is awaited until it settles", async () => {

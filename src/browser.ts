@@ -342,11 +342,10 @@ function navigationWatch(
   /** Wait for the landing a recovery reload causes, up to settleMs: a
    *  success, or a second landing after the -999 of the navigation it
    *  cancelled. */
-  const freed = async (before: number): Promise<boolean> => {
-    const baseArrived = arrived;
+  const freed = async (before: number, arrivedBefore: number): Promise<boolean> => {
     const began = Date.now();
     while (Date.now() - began < timing.settleMs) {
-      if (arrived !== baseArrived || landed - before >= 2) return true;
+      if (arrived !== arrivedBefore || landed - before >= 2) return true;
       await sleep(10);
     }
     return false;
@@ -409,6 +408,7 @@ function navigationWatch(
      *  stuck call; see Browser.interrupt. */
     async interrupt(): Promise<boolean> {
       const before = landed;
+      const arrivedBefore = arrived;
       if (view.url === "") {
         // Nothing has committed yet: a first navigation from the initial
         // document is stuck. reload() has no page to reload and does
@@ -418,40 +418,48 @@ function navigationWatch(
         // The call goes to the view, not wrapView's queue: if an evaluate
         // is pending WebKit refuses this one at once, where the queue
         // would run it later over whatever page is there then.
-        try {
-          await view.evaluate(LEAVE_INITIAL_DOCUMENT);
-        } catch {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const leave = Promise.resolve().then(() => view.evaluate(LEAVE_INITIAL_DOCUMENT)).then(() => true, () => false);
+        const leaveBound = new Promise<false>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
+        const left = await Promise.race([leave, leaveBound]);
+        clearTimeout(timer);
+        if (left) {
+          await settle(before, () => true);
+          return landed !== before;
+        } else {
           // Refused: an evaluate is stuck, not a navigation (#67). With no
           // navigation pending navigate() is accepted, and it frees the
           // stuck evaluate ~3.2 s later (measured on a bare WebView). Its
           // own resolution is the landing, so there is no settle after it.
           // Awaited up to settleMs; one that never settles is left to
           // WebKit and the lane moves on (the next op may then be refused).
-          const left = view.navigate("about:blank").then(() => true, () => false);
-          let timer: ReturnType<typeof setTimeout> | undefined;
+          const navigate = view.navigate("about:blank").then(() => true, () => false);
+          timer = undefined;
           const bound = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
-          const ok = await Promise.race([left, bound]);
+          const ok = await Promise.race([navigate, bound]);
           clearTimeout(timer);
           return ok;
         }
-        await settle(before, () => true);
-        return landed !== before;
       }
       if (typeof view.reload !== "function") return false;
-      try {
-        await view.reload();
-      } catch {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const reloadAttempt = Promise.resolve().then(() => view.reload!()).then(() => "ok" as const, () => "failed" as const);
+      const reloadBound = new Promise<"timeout">((r) => { timer = setTimeout(() => r("timeout"), timing.settleMs); });
+      const reloadResult = await Promise.race([reloadAttempt, reloadBound]);
+      clearTimeout(timer);
+      if (reloadResult === "timeout") return false;
+      if (reloadResult === "failed") {
         // Refused while a selector click is hung on a pending page
         // navigation (#78); a script reload still cancels it. Straight to
         // the view, as above: wrapView's queue may be held by that page.
         const sent = view.evaluate(CANCEL_PENDING_NAVIGATION).then(() => true, () => false);
-        let timer: ReturnType<typeof setTimeout> | undefined;
+        timer = undefined;
         const bound = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
         const ok = await Promise.race([sent, bound]);
         clearTimeout(timer);
         if (!ok) return false;
       }
-      return freed(before);
+      return freed(before, arrivedBefore);
     },
   };
 }
