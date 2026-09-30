@@ -39,6 +39,10 @@ All notable changes to this project are documented here. This project follows
   `open` now records the session's profile in its state, and the advice follows the record:
   `bowser open --persistent`, `bowser open --profile=<dir>` or `bowser open`. A session opened by
   an older bowser has no record and still gets the directory check. (#93)
+- **A `fill` that timed out waiting for the page its click opened no longer claims the fill was
+  delivered.** Only the click reached the page. The message now says `'fill' timed out after
+  <ms>ms waiting for the page its click opened; the click was delivered but the fill did not
+  finish, check the page before retrying`. A plain `click` keeps its message. (#78)
 
 ## [0.10.0] — 2026-09-30
 
