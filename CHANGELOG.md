@@ -46,6 +46,13 @@ All notable changes to this project are documented here. This project follows
 - **The restart advice no longer calls a downgraded process older.** The message said "this bowser
   (<w>) is older than the installed bowser (<v>)" whenever the two versions differed, so after a
   downgrade it had the direction wrong. It now says "differs from". (#79)
+- **A failed `open <url>` or `goto` no longer leaves the previous page's refs in place.** The
+  session state was written only after a navigation succeeded, so a navigation that timed out
+  after the new page loaded kept the old page's refs, and a later `click e3` could act on an
+  element of the new page with the same role and name. `open` and `goto` now clear the refs
+  before they navigate. When the navigation fails and the page still has the saved URL, the refs
+  come back. After a timeout bowser cannot ask the page where it is, so the refs stay cleared:
+  run `bowser snapshot` before the next ref command. (#102)
 
 ## [0.10.0] — 2026-09-30
 

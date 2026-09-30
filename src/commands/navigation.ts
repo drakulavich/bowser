@@ -10,6 +10,7 @@ import {
 } from "../state.ts";
 import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
+import type { DaemonConnection } from "../daemon/protocol.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
  *  state op reads the page's location.href (realUrl), which stays about:blank
@@ -18,6 +19,19 @@ import { UserError } from "../errors.ts";
 function assertNavigated(requested: string, finalUrl: string): void {
   if (requested && requested !== "about:blank" && finalUrl === "about:blank") {
     throw new Error(`navigate: page did not load ${requested} (ended on about:blank)`);
+  }
+}
+
+async function navigate(c: DaemonConnection, saved: SessionState, url: string): Promise<void> {
+  // Cleared before, not after: after a timeout `state` fails too (budget spent), so it cannot tell whether the page changed (#102).
+  await saveState({ ...saved, refs: [] });
+  try {
+    await c.request("navigate", [url]);
+  } catch (err) {
+    try {
+      if ((await c.request("state")).url === saved.url) await saveState(saved);
+    } catch {}
+    throw err;
   }
 }
 
@@ -85,11 +99,10 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
     }
     if (url) {
       const saved = await loadState(ctx.session);
-      await saveState({
+      await navigate(c, {
         ...(saved ?? { name: ctx.session, url: before.url, title: before.title, refs: [], updatedAt: Date.now() }),
         profile: before.profile ?? null,
-      });
-      await c.request("navigate", [url]);
+      }, url);
     }
     const state = url ? await c.request("state") : before;
     if (url) assertNavigated(url, state.url);
@@ -108,7 +121,7 @@ export async function cmdGoto(ctx: CommandContext, typed: string): Promise<strin
   const url = normalizeUrl(typed);
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withPageClient(ctx, async (c) => {
-    await c.request("navigate", [url]);
+    await navigate(c, prev, url);
     const state = await c.request("state");
     assertNavigated(url, state.url);
     await syncState(prev, state);

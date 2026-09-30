@@ -46,6 +46,8 @@ const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 /** ET-10 (#78): Send posts to a server that never answers. */
 const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
+/** #102: the page commits, and its load never finishes. */
+const HANG_PAGE = `<!doctype html><title>Hang</title><a href="/">Home</a><img src="/never">`;
 const SLOW_MS = 3000;
 
 runOrSkip("e2e: a session never hangs, never reports a page it has not reached", () => {
@@ -100,7 +102,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
         // A server that never answers: the navigation never settles.
         if (path === "/never") return new Promise<Response>(() => {});
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
-        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE }[path] ?? HOME_PAGE;
+        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE, "/hang": HANG_PAGE }[path] ?? HOME_PAGE;
         return new Response(page, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
@@ -257,6 +259,15 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   // ""), so reload() has no page to reload and does nothing, and WebKit
   // refuses navigate() while one is pending. Before the fix every later
   // command failed at its budget until `close`.
+  test("#102: a goto that times out after the new page committed clears the saved refs", async () => {
+    const ctx = await openWith("hangload", 2000);
+    await cmdSnapshot(ctx);
+    expect((await loadState(ctx.session))!.refs.length).toBeGreaterThan(0);
+    const nav = await timed(() => cmdGoto(ctx, `${base}/hang`));
+    expect(nav.error).toContain("timed out after");
+    expect((await loadState(ctx.session))!.refs).toEqual([]);
+  }, 30_000);
+
   test("#48: after a first goto from about:blank whose server never answers, recovery frees the session", async () => {
     const budget = 1000;
     process.env.BOWSER_OP_TIMEOUT_MS = String(budget);

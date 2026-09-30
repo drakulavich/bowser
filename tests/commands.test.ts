@@ -337,6 +337,45 @@ describe("goto", () => {
   });
 });
 
+describe("a failed navigation keeps refs only when the page did not change (#102)", () => {
+  const refs = [{ id: "e3", role: "link", name: "Home", tag: "a" }];
+  const commands = {
+    open: (c: CommandContext) => cmdOpen(c, "https://new.example", {}),
+    goto: (c: CommandContext) => cmdGoto(c, "https://new.example"),
+  };
+  for (const [name, runCmd] of Object.entries(commands)) {
+    async function failNavigation(state: () => { url: string; title: string }) {
+      await saveState({ name: session, url: "https://old", title: "Old", refs, updatedAt: 1, profile: null });
+      const failure = new Error("'navigate' timed out after 2000ms");
+      let navigated = false;
+      const client = fakeClient({
+        state: () => (navigated ? state() : { url: "https://old", title: "Old" }),
+        navigate: () => { navigated = true; throw failure; },
+      });
+      const err = await runCmd(ctx({ connect: async () => client })).then(() => null, (e: unknown) => e);
+      return { err, failure, saved: await loadState(session) };
+    }
+
+    test(`${name}: page changed, refs cleared`, async () => {
+      const { err, failure, saved } = await failNavigation(() => ({ url: "https://new.example/", title: "New" }));
+      expect(err).toBe(failure);
+      expect(saved?.refs).toEqual([]);
+    });
+
+    test(`${name}: page unchanged, refs restored`, async () => {
+      const { err, failure, saved } = await failNavigation(() => ({ url: "https://old", title: "Old" }));
+      expect(err).toBe(failure);
+      expect(saved?.refs).toEqual(refs);
+    });
+
+    test(`${name}: state fails, refs stay cleared and the navigation error is thrown`, async () => {
+      const { err, failure, saved } = await failNavigation(() => { throw new Error("'state' timed out after 2000ms"); });
+      expect(err).toBe(failure);
+      expect(saved?.refs).toEqual([]);
+    });
+  }
+});
+
 // F4 (docs/superpowers/specs/2026-09-27-p1-fixes-design.md): a word past a
 // command's declared positionals is an error, not silently dropped.
 describe("too many arguments", () => {
