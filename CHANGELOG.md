@@ -29,6 +29,9 @@ All notable changes to this project are documented here. This project follows
 - **A `playwright-cli` frame ref is named as such.** `fill f1e3 …` answered `expected a ref like
   'e1', got 'f1e3'. Run 'bowser snapshot' first.`, but no snapshot prints such a ref. It now says
   `'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents`. (#80)
+- **CI runs every e2e test file.** The workflow listed the files by hand and had missed five of
+  them: `e2e-session-gate`, `e2e-known-state`, `e2e-patched-builtins`, `e2e-search` and
+  `e2e-utf8`. It now runs `bun test tests/e2e`, which picks up every `tests/e2e*.test.ts`.
 
 ## [0.10.0] — 2026-09-30
 
