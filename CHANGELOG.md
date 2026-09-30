@@ -7,6 +7,12 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **An action waits for a navigation a script started in place of a pending one.** After a
+  submit to a server that had not answered within the 10 s watch, a page script that navigated
+  elsewhere cancelled the first navigation, and that cancellation counted as the end of the load.
+  The next `fill` or `click` then went into a page still loading and hung until its budget. The
+  navigation now stays pending while the page is asked whether it started another, and the next
+  action waits for that one, or fails with `page is still loading <url>`. (#98)
 - **A persistent session whose browser exited is told to reopen it with `--persistent`.** The
   refusal said `run 'bowser open'`, and doing just that started an empty in-memory browser, so
   the session looked logged out although its profile was intact on disk. When the session has a

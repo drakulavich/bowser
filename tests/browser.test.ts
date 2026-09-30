@@ -533,9 +533,59 @@ describe("a navigation a previous command left pending", () => {
       await b.click("#send");
       expect(b.navigationPending).toBe(true);
       if (end === "landed") v.land("https://x/never");
-      else v.onNavigationFailed?.(new Error("Frame load interrupted"));
+      else { v.onNavigationFailed?.(new Error("Frame load interrupted")); await Bun.sleep(10); }
       expect(b.navigationPending).toBe(false);
     }
+  });
+
+  test("stays pending when a script replaces it after the watch ended, until the replacement lands (#98)", async () => {
+    const { v, page } = pageNavView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; page.to = "https://x/never"; };
+    const b = wrapView(v, slow);
+    await b.click("#send");
+    page.navs++;
+    page.to = "https://x/never2";
+    v.onNavigationFailed?.(new Error("-999"));
+    await Bun.sleep(10);
+    expect(b.navigationPending).toBe(true);
+    v.land("https://x/never2");
+    expect(b.navigationPending).toBe(false);
+  });
+
+  test("two failures read NAV_COUNT in order and do not leave a failed replacement pending", async () => {
+    let countReads = 0;
+    let startFirstFailureRead!: () => void;
+    let releaseFirstFailureRead!: () => void;
+    const firstFailureReadStarted = new Promise<void>((resolve) => { startFirstFailureRead = resolve; });
+    const firstFailureReadGate = new Promise<void>((resolve) => { releaseFirstFailureRead = resolve; });
+    const { v, page } = pageNavView({
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_COUNT && ++countReads === 2) {
+          startFirstFailureRead();
+          await firstFailureReadGate;
+        }
+        if (expr === NAV_COUNT) return page.navs;
+        if (expr === NAV_DESTINATION) return page.to;
+        return undefined;
+      },
+    });
+    v.click = async () => { page.navs++; };
+    const b = wrapView(v, slow);
+    await b.click("#send");
+
+    v.onNavigationFailed?.(new Error("-999"));
+    await firstFailureReadStarted;
+    page.navs++;
+    v.onNavigationFailed?.(new Error("-999"));
+    releaseFirstFailureRead();
+
+    const settled = Date.now() + 200;
+    while (b.navigationPending && Date.now() < settled) await Bun.sleep(1);
+    expect(countReads).toBe(3);
+    expect(b.navigationPending).toBe(false);
+    expect(v.calls.filter(([name, args]) => name === "evaluate" && args[0] === NAV_COUNT)).toHaveLength(3);
   });
 
   test("an action that navigates nowhere leaves nothing pending", async () => {

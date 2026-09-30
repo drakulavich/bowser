@@ -47,6 +47,11 @@ const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
 const SLOW_MS = 3000;
+/** #98: Send posts to a server that never answers; 11 s later, after the
+ *  navigation watch has given up, a script replaces that POST with another
+ *  navigation that never answers either. */
+const REDIRECT_PAGE = `<!doctype html><title>Redirect</title>
+<form action="/never" method="post" onsubmit="setTimeout(() => { location.href = '/never2'; }, 11000)"><input name="b" aria-label="Second"><button>Send</button></form>`;
 
 runOrSkip("e2e: a session never hangs, never reports a page it has not reached", () => {
   let tmp: string;
@@ -54,6 +59,8 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   let origTimeout: string | undefined;
   let server: ReturnType<typeof Bun.serve> | undefined;
   let base: string;
+  let never2Requested: Promise<void> = Promise.resolve();
+  let resolveNever2Requested = () => {};
   const sessions: string[] = [];
 
   /** Open a fresh session whose daemon has a budget of `budgetMs`, on the
@@ -91,6 +98,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   beforeAll(async () => {
     origHome = process.env.HOME;
     origTimeout = process.env.BOWSER_OP_TIMEOUT_MS;
+    never2Requested = new Promise<void>((resolve) => { resolveNever2Requested = resolve; });
     tmp = await mkdtemp(join(tmpdir(), "bowser-hangs-"));
     process.env.HOME = tmp;
     server = Bun.serve({
@@ -98,9 +106,12 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
       async fetch(req) {
         const path = new URL(req.url).pathname;
         // A server that never answers: the navigation never settles.
-        if (path === "/never") return new Promise<Response>(() => {});
+        if (path === "/never" || path === "/never2") {
+          if (path === "/never2") resolveNever2Requested();
+          return new Promise<Response>(() => {});
+        }
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
-        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE }[path] ?? HOME_PAGE;
+        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE, "/redirect": REDIRECT_PAGE }[path] ?? HOME_PAGE;
         return new Response(page, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
@@ -344,4 +355,31 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(2000);
   }, 40_000);
+
+  test("#98: a navigation that replaces the pending one after the watch ends still holds the next fill", async () => {
+    const ctx = await openWith("replaced", 30_000);
+    await cmdGoto(ctx, `${base}/redirect`);
+    await cmdSnapshot(ctx);
+    const refs = (await loadState(ctx.session))!.refs;
+    const ref = (name: string) => refs.find((r) => r.name === name)!.id;
+    const submit = await timed(() => cmdClick(ctx, ref("Send")));
+    expect(submit.error).toBeUndefined();
+    // Wait for the server to see the replacement request. The page's 11 s
+    // timer starts at submit, before cmdClick returns; bound this wait so a
+    // broken repro cannot hold the suite indefinitely.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const requested = await Promise.race([
+      never2Requested.then(() => true),
+      new Promise<false>((resolve) => { timeout = setTimeout(() => resolve(false), 15_000); }),
+    ]);
+    clearTimeout(timeout);
+    expect(requested).toBe(true);
+
+    process.env.BOWSER_OP_TIMEOUT_MS = "3000";
+    const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
+    expect(fill.error).toBe(`page is still loading ${base}/never2; retry later, or run 'bowser close'`);
+
+    const close = await timed(() => cmdClose(ctx));
+    expect(close.error).toBeUndefined();
+  }, 60_000);
 });
