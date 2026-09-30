@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A persistent session whose browser exited is told to reopen it with `--persistent`.** The
+  refusal said `run 'bowser open'`, and doing just that started an empty in-memory browser, so
+  the session looked logged out although its profile was intact on disk. When the session has a
+  profile, the refusal now says `run 'bowser open --persistent'`. (#79)
+
 ## [0.10.0] — 2026-09-30
 
 ### Fixed

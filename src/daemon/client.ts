@@ -1,7 +1,7 @@
 // Client side of the daemon protocol: connect to a session's Unix socket (or
 // spawn the daemon first), send typed requests, match replies by id.
 
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import pkg from "../../package.json";
@@ -9,7 +9,7 @@ import { opTimeoutMs } from "../budget.ts";
 import { withTimeout } from "../serialize.ts";
 import { lineReader } from "../socket-lines.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
-import { checkNewSessionName, sessionDir, statePath } from "../state.ts";
+import { checkNewSessionName, profileDir, sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 import { UserError } from "../errors.ts";
 
@@ -188,7 +188,11 @@ function checked(client: DaemonClient, session: string, answer: unknown, opts: C
  *  refs and, for `--persistent`, its store went with it, and a new daemon
  *  started quietly would be an empty in-memory browser. A user error (exit 1). */
 function browserExited(session: string): string {
-  return `session '${session}' is not open (its browser exited); run 'bowser open'`;
+  return `session '${session}' is not open (its browser exited); run '${openCommand(session)}'`;
+}
+
+function openCommand(session: string): string {
+  return existsSync(profileDir(session)) ? "bowser open --persistent" : "bowser open";
 }
 
 /** Why bowser cannot start a daemon off macOS: its only engine is WebKit's
