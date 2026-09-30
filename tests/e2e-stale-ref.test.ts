@@ -25,7 +25,9 @@ const FIXTURES = join(import.meta.dir, "fixtures");
 
 // ET-21: a button whose click relabels it and counts the clicks.
 const RELABEL = `<!doctype html><title>relabel</title>
-<button id="buy" onclick="window.clicks = (window.clicks || 0) + 1; this.textContent = 'Delete account'">Buy A</button>`;
+<button id="buy" onclick="window.clicks = (window.clicks || 0) + 1; this.textContent = 'Delete account'">Buy A</button>
+<button id="save">Save <span style="display:none">Delete</span></button>
+<button id="send">Send <b>now</b></button>`;
 
 const stale = (ref: string) => `ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`;
 
@@ -196,6 +198,20 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     await cmdHover(ctx, hover);
     expect(await cmdEval(ctx, "document.getElementById('hovered').textContent")).toBe("hovered");
   }, 60_000);
+
+  // The name of an element hidden now leaves out only descendants hidden in
+  // their own right, as the snapshot of the visible element did.
+  for (const [how, hide] of [["display", "display = 'none'"], ["visibility", "visibility = 'hidden'"]] as const) {
+    test(`#80: a ref hidden by ${how} since the snapshot keeps its name and is not refused`, async () => {
+      await cmdOpen(ctx, `${base}/relabel.html`);
+      await cmdSnapshot(ctx);
+      const save = await refNamed("Save");
+      const send = await refNamed("Send now");
+      await cmdEval(ctx, `(document.getElementById('save').style.${hide}, document.getElementById('send').style.${hide}, 1)`);
+      expect(await cmdHover(ctx, save)).toBe(`hovered ${save}`);
+      expect(await cmdHover(ctx, send)).toBe(`hovered ${send}`);
+    }, 60_000);
+  }
 
   test("#80: a ref whose element changed its name is refused, exit 1, and the element is not clicked", async () => {
     await cmdOpen(ctx, `${base}/relabel.html`);
