@@ -5,7 +5,7 @@ import { str } from "../cli/parser.ts";
 import { READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import type { DaemonConnection } from "../daemon/protocol.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
-import { saveState } from "../state.ts";
+import { loadState, saveState } from "../state.ts";
 import { dialogsJson, modalState, reply, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
@@ -21,6 +21,7 @@ export async function cmdSnapshot(
   return withPageClient(ctx, async (c) => {
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
     await saveState({
+      ...(await loadState(ctx.session)),
       name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
     });
     // Dialogs the daemon answered since the last command that printed them

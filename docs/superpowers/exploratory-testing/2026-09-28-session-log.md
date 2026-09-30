@@ -22,7 +22,7 @@ The earlier P1–P3 findings (F1–F42) are fixed. Their specs are in `docs/supe
   - output that an agent misparses;
   - a password leaking into a snapshot.
 
-**Method:** session-based exploratory testing, following the same rules as `2026-09-06-session-log.md`. Each observation records why the probe was made, the evidence (the exact command, exit code and an output excerpt), and a status. Issues are filed only after the campaign triage.
+**Method:** session-based exploratory testing, following the same rules as `2026-09-06-session-log.md`. Each observation records why the probe was made, the evidence (the exact command, exit code and an output excerpt), and a status. Issues are filed only after the campaign triage. The clients, fixtures and runner scripts named in the sessions below (`lib.ts`, `p*.ts`, `fixtures.ts`, `b.sh` and the rest) lived in each session's scratch directory and are not in the repo.
 
 **Ground rules for every session:**
 - Isolated temp `HOME`. Never touch the real `~/.bowser`.
@@ -90,7 +90,7 @@ Order: S1 → S2 → S3 → S4 → S5. Each session appends its section below, a
 ## S1 — `bowser mcp` as a real stdio client
 **Charter:** S1 (see Charters).   **Time box:** 60 min.   **Tours/heuristics:** Money, Rained-Out, Saboteur; SFDIPOT Interfaces/Time; oracles Standards (MCP 2025-11-25, JSON-RPC 2.0), Claims (README "MCP bridge").   **Environment:** macOS 27, Bun 1.4.2, bowser 0.9.0 at 82eb268, run as `bun src/cli.ts mcp` with a temp HOME.
 
-Client: `scratchpad/s1/lib.ts` (Bun, spawns the server, 20 s per-request deadline, `alarm` per script, kills only daemons whose pid file is under its own HOME). Scripts `p*.ts`, outputs `p*.out` beside it.
+Client: `lib.ts` (Bun, spawns the server, 20 s per-request deadline, `alarm` per script, kills only daemons whose pid file is under its own HOME). Scripts `p*.ts`, outputs `p*.out` beside it.
 
 ### Live notes
 - Protocol edges with no browser (p1-protocol.ts, exit 0, 10.6 s). Every line below reproduced in two runs.
@@ -147,7 +147,7 @@ Client: `scratchpad/s1/lib.ts` (Bun, spawns the server, 20 s per-request deadlin
 ## S2 — one long-lived session against hostile pages
 **Charter:** S2 (see Charters).   **Time box:** 60 min.   **Tours/heuristics:** Bad Neighborhood, Saboteur, Intellectual; SFDIPOT Time/Function; oracles History (P0 F9 hang spec), Explainable.   **Environment:** macOS 27, Bun 1.4.2, bowser 0.9.0 at 3b5a62a, `bun src/cli.ts`, temp HOME, `BOWSER_OP_TIMEOUT_MS=3000` unless noted.
 
-Fixtures: `scratchpad/s2/fixtures.ts` (Bun.serve port 0). Runner `scratchpad/s2/b.sh <session> <args>` prints output, exit code and wall ms, with a 60 s `alarm`.
+Fixtures: `fixtures.ts` (Bun.serve port 0). Runner `b.sh <session> <args>` prints output, exit code and wall ms, with a 60 s `alarm`.
 
 ### Live notes
 - ET-07 check (why: S1 asked to confirm the message on a real page). Fresh session `u` on `/form`: `eval "new Promise(() => {})"` → exit 2 after 2439 ms, `bowser: Completion handler for function call is no longer reachable`; next `eval location.href` answered in 30 ms. Second run of the same eval: GC did not collect the promise in time, so it was `'eval' timed out after 3000ms`, and the next eval answered normally. So the same command fails with two different messages depending on GC timing. ET-07 confirmed as P3.
@@ -199,9 +199,9 @@ Fixtures: `scratchpad/s2/fixtures.ts` (Bun.serve port 0). Runner `scratchpad/s2/
 **Triage note (orchestrator, after S2):** I reproduced ET-11 independently. On a page with `Array.prototype.toJSON = () => "proto"`, `eval "['x','y']"` prints `proto` (exit 0) and `snapshot` prints `- text: p` … `- text: o`. Status: confirmed. The S3 and S4 charters were extended per the S2 debrief.
 
 ## S3 — session lifecycle under concurrency and interruption
-**Charter:** S3 (see Charters).   **Time box:** 60 min.   **Tours/heuristics:** Rained-Out, Obsessive-Compulsive, FedEx (one session's life); SFDIPOT Operations/Time; oracles Product (F28/F29 claim), Claims (README "Multiple sessions", "Persistent profiles", `close`, MCP).   **Environment:** macOS 27, Bun 1.4.2, bowser 0.9.0 at 2d65660, `bun src/cli.ts`, temp HOME `scratchpad/s3/home`, default 30 s budget unless noted, `caffeinate -dims` for the whole session.
+**Charter:** S3 (see Charters).   **Time box:** 60 min.   **Tours/heuristics:** Rained-Out, Obsessive-Compulsive, FedEx (one session's life); SFDIPOT Operations/Time; oracles Product (F28/F29 claim), Claims (README "Multiple sessions", "Persistent profiles", `close`, MCP).   **Environment:** macOS 27, Bun 1.4.2, bowser 0.9.0 at 2d65660, `bun src/cli.ts`, temp HOME, default 30 s budget unless noted, `caffeinate -dims` for the whole session.
 
-Fixtures: `scratchpad/s3/fixtures.ts` (Bun.serve port 0: `/slow?ms=`, `/never`, `/form`, any other path a page with a button). Runner `scratchpad/s3/b.sh <session> <args>` (output, exit code, wall ms, 60 s `alarm`); `st.sh <session>` prints the session directory, its pidfile and the live daemons of this HOME.
+Fixtures: `fixtures.ts` (Bun.serve port 0: `/slow?ms=`, `/never`, `/form`, any other path a page with a button). Runner `b.sh <session> <args>` (output, exit code, wall ms, 60 s `alarm`); `st.sh <session>` prints the session directory, its pidfile and the live daemons of this HOME.
 
 ### Live notes
 - F29 regression check (why: the claim is the newest lifecycle code). 8 parallel `eval` on fresh session `p1`: all exit 0 in ~415 ms, one daemon (97826), dir `pid sock`. 6 parallel `open /x1…/x6` on fresh `p2`: one daemon (97911). F29 holds.
@@ -237,9 +237,9 @@ Fixtures: `scratchpad/s3/fixtures.ts` (Bun.serve port 0: `/slow?ms=`, `/never`, 
 **Triage note (orchestrator, after S3):** I reproduced ET-18 independently. I stored a token in a `--persistent` session, waited 3 s, killed the daemon with `kill -9`, then ran the suggested `bowser open`: `localStorage.getItem` gave `null`. On the same session, `bowser open --persistent` gave `42`. The store survives on disk, and only the suggested command drops it. Status: confirmed.
 
 ## S4 — the documented agent loop on realistic forms and SPAs
-**Charter:** S4 (see Charters).   **Time box:** 75 min.   **Tours/heuristics:** Guidebook (SKILL.md, literally), Landmark, Intellectual; FEW HICCUPPS Comparable (`playwright-cli --browser=webkit`), Claims, Users; SFDIPOT Data.   **Environment:** macOS 27, Bun 1.4.2, bowser 0.9.0 at 3357237, `bun src/cli.ts`, temp HOME `scratchpad/s4/home`, default 30 s budget unless noted, `caffeinate -dims` throughout. playwright-cli 0.x at `/opt/homebrew/bin/playwright-cli`, session `s4pw`, WebKit.
+**Charter:** S4 (see Charters).   **Time box:** 75 min.   **Tours/heuristics:** Guidebook (SKILL.md, literally), Landmark, Intellectual; FEW HICCUPPS Comparable (`playwright-cli --browser=webkit`), Claims, Users; SFDIPOT Data.   **Environment:** macOS 27, Bun 1.4.2, bowser 0.9.0 at 3357237, `bun src/cli.ts`, temp HOME, default 30 s budget unless noted, `caffeinate -dims` throughout. playwright-cli 0.x at `/opt/homebrew/bin/playwright-cli`, session `s4pw`, WebKit.
 
-Fixtures: `scratchpad/s4/fixtures.ts` (Bun.serve port 0; `/signup`, `/editor`, `/spa/*`, `/shadow`, `/iframe`, `/intl`, `/legacy`, `/slowpost`, `/pw`). Runners `b.sh <session> <args>` and `p.sh <args>` (playwright-cli) print output, exit code, wall ms, 60 s `alarm`.
+Fixtures: `fixtures.ts` (Bun.serve port 0; `/signup`, `/editor`, `/spa/*`, `/shadow`, `/iframe`, `/intl`, `/legacy`, `/slowpost`, `/pw`). Runners `b.sh <session> <args>` and `p.sh <args>` (playwright-cli) print output, exit code, wall ms, 60 s `alarm`.
 
 ### Live notes
 - Signup form, both tools (why: the Comparable oracle on the most common agent task). The snapshot trees are **identical line for line** (30 refs, same roles, names, `[selected]`, `[checked]`, `/placeholder`). `fill`/`select`/`check` on text, email, password, select (by label), multi-select, checkbox, radio, date, number, textarea: both reach the same `FormData`. Errors: a bad date and text into `type=number` → bowser exit 1 with the documented messages; playwright-cli prints `### Error` and exits **0**. bowser is the stricter of the two here. The only tree difference after filling is the documented one: playwright-cli prints `textbox "Password" [ref=e8]: Hunter2Secret!`, bowser prints no value.
@@ -258,7 +258,7 @@ Fixtures: `scratchpad/s4/fixtures.ts` (Bun.serve port 0; `/signup`, `/editor`, `
 - **A ref follows its element after the element's name changes, and the reply names the old one** (why: SKILL.md says refs stay the same "while the element's role and name are unchanged"; what happens when the name changes and the agent reuses the ref?). One client, no race. Button `Buy A` whose click relabels it `Delete account`: `click e2` → `clicked e2 (button "Buy A")`; `click e2` again (no snapshot) → `clicked e2 (button "Buy A")`, exit 0, and `--json` `{"ok":true,"ref":"e2",…}`, while the button it clicked reads `Delete account` (next snapshot: `button "Delete account" [ref=e3]`). A counter button: second `click e2` reported `button "Clicked 0"` while the button read `Clicked 1`. Reproduced 3 times. playwright-cli refuses the second click: `Ref e2 not found in the current page snapshot. Try capturing new snapshot.` The agent breaks rule 1 here, but bowser's confirmation line is the check an agent relies on, and it names the snapshot's label, not what was clicked. (ET-21)
 - ARIA states compared with playwright-cli on the same nodes (`details`, `aria-expanded=false`, indeterminate checkbox, range, progress, `aria-current`, `aria-invalid`, `aria-pressed`): identical lines (`[checked=mixed]`, `slider "Vol" [ref=e9]: "30"`, `[pressed]`), except that playwright-cli adds `[cursor=pointer]` to the link and moves `[active]` to a clicked button (bowser keeps `[active]` on the body: WebKit does not focus a clicked button). (observations)
 - Dialogs, per the SKILL.md recipe: dismissed without an answer (with the hint), `dialog-accept` then `click` → `accepted`, `dialog-accept "Анна"` answers a prompt, a prepared answer is dropped by `goto`. All as documented.
-- *(Continued by a second agent after the first stalled; fixture server restarted on a new port, same fixtures and runners, HOME `scratchpad/s4/home`.)*
+- *(Continued by a second agent after the first stalled; fixture server restarted on a new port, same fixtures, runners and HOME.)*
 - **Second run, ET-20** (`b.sh r20`, `/signup`, three parallel `fill`s, 2 runs). Run 1: all three `filled …`, rc=0, `eval` → `|anna@example.comAnna PetrovaTopSecretPass99|` (all text in the password field). Run 2: all rc=0, `eval` → `||TopSecretPass99anna@example.com`, and `snapshot` prints `textbox "Email" [active] [ref=e6]:` / `- text: TopSecretPass99anna@example.com`. Reproduces; the password leak into the snapshot reproduces too. README (MCP section) says same-session calls run one at a time; nothing says so for the CLI.
 - **Second run, ET-21** (`b.sh r21`, button `Buy A` whose click relabels it `Delete account` and counts clicks). `click e2` ×2 → `clicked e2 (button "Buy A")`, rc=0 both; `--json click e2` → `{"ok":true,"ref":"e2",…}`; `eval` → `3 Delete account`; next snapshot `button "Delete account" [ref=e3]`. Reproduces.
 - **Second run, iframe ref** (`b.sh r22`, `/iframe`). `fill f1e3 4242` → `bowser: expected a ref like 'e1', got 'f1e3'. Run 'bowser snapshot' first.` rc=1. A snapshot never prints an `f1…` ref (SKILL.md line 13: iframes and shadow DOM are not walked), so the hint sends a `playwright-cli` migrant (SKILL.md: "replace `playwright` with `bowser`") in a loop. Shadow: `/shadow` snapshot again has no line for `my-widget` (documented). (ET-22)
@@ -277,9 +277,9 @@ Fixtures: `scratchpad/s4/fixtures.ts` (Bun.serve port 0; `/signup`, `/editor`, `
 **Triage note (orchestrator, after S4):** I reproduced ET-21 independently. I relabelled `button "Buy A"` to `Delete account` via `eval`, then ran `click e2`: it printed `clicked e2 (button "Buy A")`, exit 0, and the page title became `Delete account`. Status: confirmed. The S5 charter was extended per the S4 debrief.
 
 ## S5 — install and upgrade from npm
-**Charter:** S5 (see Charters).   **Time box:** 60 min.   **Tours/heuristics:** Couch Potato, Prior Version, Saboteur; SFDIPOT Operations/Platform; oracles Claims (README "Install", "Upgrading"), History (CHANGELOG 0.9.0, 0.8.2 behaviour).   **Environment:** macOS 27, Bun 1.4.2, `@drakulavich/bowser-cli@0.9.0` and `@0.8.2` from npm, each installed with `bun add` into its own temp dir under `scratchpad/s5/` (`i090`, `i082`, `iu`), a temp HOME per probe, run as `<dir>/node_modules/.bin/bowser`. A global `bowser` is on PATH (`~/.bun/bin/bowser`); not used. `caffeinate -dims` throughout.
+**Charter:** S5 (see Charters).   **Time box:** 60 min.   **Tours/heuristics:** Couch Potato, Prior Version, Saboteur; SFDIPOT Operations/Platform; oracles Claims (README "Install", "Upgrading"), History (CHANGELOG 0.9.0, 0.8.2 behaviour).   **Environment:** macOS 27, Bun 1.4.2, `@drakulavich/bowser-cli@0.9.0` and `@0.8.2` from npm, each installed with `bun add` into its own temp dir (`i090`, `i082`, `iu`), a temp HOME per probe, run as `<dir>/node_modules/.bin/bowser`. A global `bowser` is on PATH (`~/.bun/bin/bowser`); not used. `caffeinate -dims` throughout.
 
-Runner `scratchpad/s5/b.sh <install> <args>` (output, `[vVER rc=N Tms]`, 60 s `alarm`); MCP client `scratchpad/s5/mcp.ts` (20 s per request). Fixture `scratchpad/s5/fix.ts` (Bun.serve port 0, `/form`, `/slow`, any other path a button).
+Runner `b.sh <install> <args>` (output, `[vVER rc=N Tms]`, 60 s `alarm`); MCP client `mcp.ts` (20 s per request). Fixture `fix.ts` (Bun.serve port 0, `/form`, `/slow`, any other path a button).
 
 ### Live notes
 - Install (why: first contact). `bun add @drakulavich/bowser-cli@0.9.0` in an empty dir: 1.6 s, one package, no dependencies, no postinstall, no prompt; 0.8.2 the same (0.8 s). `.bin/bowser` is a symlink to `src/cli.ts`, mode 755, shebang `#!/usr/bin/env bun`; it runs under the `bun` on PATH. First command 414 ms (transpile), then ~30 ms.
@@ -301,7 +301,7 @@ Runner `scratchpad/s5/b.sh <install> <args>` (output, `[vVER rc=N Tms]`, 60 s `a
 - **A running `bowser mcp` cannot open any new session after an in-place upgrade** (why: an MCP server lives as long as the agent host, and the daemon it spawns is `new URL("./main.ts", import.meta.url)`, read from disk at spawn time: `src/daemon/client.ts:293`). `mcpup.ts`: start `iu/…/bowser mcp` at 0.8.2, `open` session `before` (works), then `bun add @…@0.9.0` in `iu`, as `npm i -g` does to a global install. `before` keeps working. `open` of a new session `after` → 316–366 ms, a 0.9.0 daemon starts, and the 0.8.2 server refuses its own daemon: `isError: session 'after' is running bowser 0.9.0 (this is 0.8.2); run 'bowser close -s after', then open it again`. `close` then `open` as told → the same refusal again, for ever: every new session fails until the MCP server is restarted, and neither the message nor README "Upgrading" says to restart it. Twice (`h9`, `h9b`). `bunx @…@<version>` is immune (each version has its own path). (ET-26)
 - Parallel first run (6 `open`s on 2 sessions at once in a fresh HOME, twice): all exit 0, one daemon per session. Fine.
 - Not tried: a Bun older than 1.3 (1.3.0 and 1.4.1 were enough to show the check); Linux (no machine; README's `os: darwin` refusal untested); how the agent host installs SKILL.md (neither README nor SKILL.md says where to put `skills/bowser/SKILL.md` from the package; observation).
-- Cleanup: every session closed (`close`/`close --all`), no `daemon/main.ts` process left, fixture (26509) and `caffeinate` (26056) stopped. I removed the install dirs, the temp HOMEs and the `bunx` cache dir `$TMPDIR/bunx-501-@drakulavich` by exact path; scripts remain in `scratchpad/s5/`.
+- Cleanup: every session closed (`close`/`close --all`), no `daemon/main.ts` process left, fixture (26509) and `caffeinate` (26056) stopped. I removed the install dirs, the temp HOMEs and the `bunx` cache dir `$TMPDIR/bunx-501-@drakulavich` by exact path.
 
 ### Debrief
 - **Learned.** A new user's path is clean: `bun add`/`npm i`/`bunx` install in seconds with no scripts, the SKILL.md loop works with every default, HOMEs with spaces and non-ASCII work, and the Bun floor refuses 1.3.0 and 1.4.1 with the documented message while a 1.4.3 canary runs. CLI version skew works as README says in both directions and back to 0.5.0. The breakage is in upgrading with something still running: a long-lived `bowser mcp` spawns daemons from the upgraded files and refuses them, and the refusal's advice loops (ET-26); the same advice logs a persistent session out (ET-25). Small gaps: no `--version` (ET-27), `close` claims to close sessions that do not exist (ET-28), raw `EACCES`/`ENOTDIR` for a bad HOME and `env: bun: No such file or directory` without Bun (observations).
@@ -319,7 +319,7 @@ Runner `scratchpad/s5/b.sh <install> <args>` (output, `[vVER rc=N Tms]`, 60 s `a
 - **P3:** 10;
 - **observations:** 3.
 
-I reproduced 8 of them myself (ET-04, ET-11, ET-18, ET-21, ET-27, ET-28, and ET-07 through S2). Each of the others reproduced at least twice within its session.
+Seven were reproduced outside the run that found them: I reproduced six myself (ET-04, ET-11, ET-18, ET-21, ET-27, ET-28), and S2 confirmed ET-07 from S1. The notes record at least two runs for each of the others except three: ET-14 and ET-15, whose notes give no run count, and ET-24, seen in one run only.
 
 **Held up well:**
 - Snapshot parity with `playwright-cli` on WebKit: forms, contenteditable, SPA routing and ARIA states match line for line.

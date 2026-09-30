@@ -189,9 +189,9 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  const crashed = async (session: string): Promise<void> => {
+  const crashed = async (session: string, record: { profile?: string | null } = {}): Promise<void> => {
     // What a dead daemon leaves: state.json, a pidfile naming no process, a socket file.
-    await saveState({ name: session, url: "http://x/", title: "", refs: [], updatedAt: Date.now() });
+    await saveState({ name: session, url: "http://x/", title: "", refs: [], updatedAt: Date.now(), ...record });
     await Bun.write(pidPath(session), "99999");
     await Bun.write(socketPath(session), "");
   };
@@ -214,6 +214,41 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     await mkdir(profileDir(session), { recursive: true });
     const err = await connectOrSpawn(session, { platform: "linux" }).then(() => undefined, (e: unknown) => e);
     expect((err as Error).message).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --persistent'`);
+  });
+
+  describe("the profile open recorded decides the advice (#93)", () => {
+    const refusal = (session: string) =>
+      connectOrSpawn(session, { platform: "linux" }).then(() => "no refusal", (e: unknown) => (e as Error).message);
+
+    test("the default profile: open --persistent", async () => {
+      const session = "rec-default";
+      await crashed(session, { profile: profileDir(session) });
+      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --persistent'`);
+    });
+
+    test("a custom profile: open --profile=<dir>", async () => {
+      const session = "rec-custom";
+      const dir = join(tmp, "custom-profile");
+      await crashed(session, { profile: dir });
+      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --profile=${dir}'`);
+    });
+
+    test("quotes a custom profile path when the shell would split it", async () => {
+      const session = "rec-spaces";
+      const dir = join(tmp, "custom profile's");
+      await crashed(session, { profile: dir });
+      const quoted = `'${dir.replaceAll("'", "'\\''")}'`;
+      expect(await refusal(session)).toBe(
+        `session '${session}' is not open (its browser exited); run 'bowser open --profile=${quoted}'`,
+      );
+    });
+
+    test("no profile: plain open, even with a profile directory left on disk", async () => {
+      const session = "rec-none";
+      await crashed(session, { profile: null });
+      await mkdir(profileDir(session), { recursive: true });
+      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open'`);
+    });
   });
 
   test("open (reopen) still starts a daemon there", async () => {

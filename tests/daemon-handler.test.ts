@@ -261,7 +261,7 @@ test("a timeout while awaiting navigation says the click was delivered", async (
   await Bun.sleep(60);
   expect(replies).toEqual([
     { id: 1, ok: false, error: "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying" },
-    { id: 2, ok: false, error: "'fill' timed out after 20ms waiting for the page it opened; the fill was delivered, check the page before retrying" },
+    { id: 2, ok: false, error: "'fill' timed out after 20ms waiting for the page its click opened; the click was delivered but the fill did not finish, check the page before retrying" },
   ]);
 });
 

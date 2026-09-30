@@ -28,6 +28,9 @@ export interface SessionState {
   title: string;
   refs: Ref[];
   updatedAt: number;
+  /** The profile directory `open` recorded, null for none; absent in state
+   *  from an older bowser. null, not undefined: JSON drops undefined. */
+  profile?: string | null;
 }
 
 /** Root of per-session state, resolved at call time from process.env.HOME so

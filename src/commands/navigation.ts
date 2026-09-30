@@ -74,19 +74,28 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
   // The directory is created only when a new daemon is spawned for it
   // (spawnDaemon), so a refused open (below) leaves nothing behind.
   return withPageClient(ctx, async (c) => {
+    const before = await c.request("state");
     // The store is fixed when the daemon starts. A daemon that was already
     // running may have another one, and navigating it would silently lose
     // the persistence asked for, so refuse before touching the page.
-    if (profile && (await c.request("state")).profile !== profile) {
+    if (profile && before.profile !== profile) {
       throw new UserError(
         `usage: session '${ctx.session}' is already open with a different profile; run 'bowser close' first`,
       );
     }
-    if (url) await c.request("navigate", [url]);
-    const state = await c.request("state");
+    if (url) {
+      const saved = await loadState(ctx.session);
+      await saveState({
+        ...(saved ?? { name: ctx.session, url: before.url, title: before.title, refs: [], updatedAt: Date.now() }),
+        profile: before.profile ?? null,
+      });
+      await c.request("navigate", [url]);
+    }
+    const state = url ? await c.request("state") : before;
     if (url) assertNavigated(url, state.url);
     const next: SessionState = {
       name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
+      profile: state.profile ?? null,
     };
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;

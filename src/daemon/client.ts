@@ -9,7 +9,7 @@ import { opTimeoutMs } from "../budget.ts";
 import { withTimeout } from "../serialize.ts";
 import { lineReader } from "../socket-lines.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
-import { checkNewSessionName, profileDir, sessionDir, statePath } from "../state.ts";
+import { checkNewSessionName, loadState, profileDir, sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 import { UserError } from "../errors.ts";
 
@@ -178,10 +178,11 @@ async function otherVersion(session: string, answer: unknown, opts: ConnectOptio
   // long-running process (`bowser mcp`) meets its own new daemon here.
   const installed = await (opts.installedVersion ?? installedVersion)();
   if (installed === answer && installed !== pkg.version) {
-    return `this bowser (${pkg.version}) is older than the installed bowser (${installed}); restart the MCP server or re-run the command`;
+    return `this bowser (${pkg.version}) differs from the installed bowser (${installed}); restart the MCP server or re-run the command`;
   }
   const v = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer) ? answer : "an older version";
-  const open = existsSync(profileDir(session)) ? "open it again with 'bowser open --persistent'" : "open it again";
+  const cmd = await openCommand(session);
+  const open = cmd === "bowser open" ? "open it again" : `open it again with '${cmd}'`;
   return `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then ${open}`;
 }
 
@@ -205,12 +206,18 @@ async function checked(client: DaemonClient, session: string, answer: unknown, o
 /** Why a command refuses a session whose daemon ran and is gone: its page,
  *  refs and, for `--persistent`, its store went with it, and a new daemon
  *  started quietly would be an empty in-memory browser. A user error (exit 1). */
-function browserExited(session: string): string {
-  return `session '${session}' is not open (its browser exited); run '${openCommand(session)}'`;
+async function browserExited(session: string): Promise<string> {
+  return `session '${session}' is not open (its browser exited); run '${await openCommand(session)}'`;
 }
 
-function openCommand(session: string): string {
-  return existsSync(profileDir(session)) ? "bowser open --persistent" : "bowser open";
+/** State from an older bowser has no profile record: a directory on disk decides. */
+async function openCommand(session: string): Promise<string> {
+  const profile = (await loadState(session))?.profile;
+  if (profile === undefined) return existsSync(profileDir(session)) ? "bowser open --persistent" : "bowser open";
+  if (profile === null) return "bowser open";
+  if (profile === profileDir(session)) return "bowser open --persistent";
+  const path = /[^A-Za-z0-9_./-]/.test(profile) ? `'${profile.replaceAll("'", "'\\''")}'` : profile;
+  return `bowser open --profile=${path}`;
 }
 
 /** Why bowser cannot start a daemon off macOS: its only engine is WebKit's
@@ -269,7 +276,7 @@ export async function connectOrSpawn(
     // A daemon ran here (it left state.json) and none answers now: its
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.
-    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new UserError(browserExited(session));
+    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new UserError(await browserExited(session));
     // Before the spawn guards: a daemon under a name too long for this HOME
     // would die claiming its pidfile, seen only as "did not start in time" (F35).
     checkNewSessionName(session);

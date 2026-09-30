@@ -17,7 +17,7 @@ All notable changes to this project are documented here. This project follows
 - **A `bowser mcp` server that outlived an upgrade says to restart it.** It starts new daemons
   from the upgraded files, then refused each one as a daemon of another version, and "close, then
   open it again" only repeated the refusal. When the refused daemon matches the installed version,
-  it now says "this bowser (<w>) is older than the installed bowser (<v>); restart the MCP server
+  it now says "this bowser (<w>) differs from the installed bowser (<v>); restart the MCP server
   or re-run the command". (#79)
 - **An action on a ref whose element changed its name is refused.** A `Buy A` button that
   relabelled itself `Delete account` kept its ref, and a second `click e2` without a new snapshot
@@ -29,6 +29,23 @@ All notable changes to this project are documented here. This project follows
 - **A `playwright-cli` frame ref is named as such.** `fill f1e3 …` answered `expected a ref like
   'e1', got 'f1e3'. Run 'bowser snapshot' first.`, but no snapshot prints such a ref. It now says
   `'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents`. (#80)
+- **CI runs every e2e test file.** The workflow listed the files by hand and had missed five of
+  them: `e2e-session-gate`, `e2e-known-state`, `e2e-patched-builtins`, `e2e-search` and
+  `e2e-utf8`. It now runs `bun test tests/e2e`, which picks up every `tests/e2e*.test.ts`.
+- **The advice to reopen a session names the profile it really had.** Both refusals from #79
+  guessed from whether `~/.bowser/profiles/<name>` existed. A session opened with
+  `--profile=<dir>` was told `bowser open` and came back without its data, and an in-memory
+  session was told `--persistent` whenever an earlier session had left that directory behind.
+  `open` now records the session's profile in its state, and the advice follows the record:
+  `bowser open --persistent`, `bowser open --profile=<dir>` or `bowser open`. A session opened by
+  an older bowser has no record and still gets the directory check. (#93)
+- **A `fill` that timed out waiting for the page its click opened no longer claims the fill was
+  delivered.** Only the click reached the page. The message now says `'fill' timed out after
+  <ms>ms waiting for the page its click opened; the click was delivered but the fill did not
+  finish, check the page before retrying`. A plain `click` keeps its message. (#78)
+- **The restart advice no longer calls a downgraded process older.** The message said "this bowser
+  (<w>) is older than the installed bowser (<v>)" whenever the two versions differed, so after a
+  downgrade it had the direction wrong. It now says "differs from". (#79)
 
 ## [0.10.0] — 2026-09-30
 

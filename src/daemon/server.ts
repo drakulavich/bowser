@@ -236,6 +236,9 @@ function stuckMessage(op: string): string {
 function timeoutMessage(req: DaemonRequest, ms: number, phase?: ActPhase): string {
   const cmd = req.cmd ?? req.op;
   if (phase === "awaiting-navigation") {
+    if (cmd !== req.op) {
+      return `'${cmd}' timed out after ${ms}ms waiting for the page its ${req.op} opened; the ${req.op} was delivered but the ${cmd} did not finish, check the page before retrying`;
+    }
     return `'${cmd}' timed out after ${ms}ms waiting for the page it opened; the ${cmd} was delivered, check the page before retrying`;
   }
   const step = cmd === req.op ? "" : ` (in its '${req.op}' step)`;

@@ -168,10 +168,59 @@ describe("open --persistent / --profile", () => {
     expect(seen[0]?.profile).toBe(dir);
   });
 
-  test("no flag hands the daemon no profile and asks it nothing extra", async () => {
+  test("no flag hands the daemon no profile", async () => {
     const { seen, calls } = await openWith({});
     expect(seen[0]?.profile).toBeUndefined();
-    expect(calls().map(([op]) => op)).toEqual(["navigate", "state"]);
+    expect(calls().map(([op]) => op)).toEqual(["state", "navigate", "state"]);
+  });
+
+  test("records the profile the daemon reports, or null for none (#93)", async () => {
+    await openWith({ persistent: true });
+    expect((await loadState(session))?.profile).toBe(join(tmp, ".bowser", "profiles", session));
+    const dir = join(tmp, "recorded-profile");
+    await openWith({ profile: dir });
+    expect((await loadState(session))?.profile).toBe(dir);
+    await openWith({});
+    expect((await loadState(session))?.profile).toBeNull();
+    // A daemon already running on a store: plain `open` records that store.
+    await openWith({}, { profile: dir });
+    expect((await loadState(session))?.profile).toBe(dir);
+  });
+
+  test("a failed open records the profile of the daemon it started", async () => {
+    const previous = join(tmp, "previous-profile");
+    const current = join(tmp, "current profile");
+    await saveState({ name: session, url: "https://old", title: "Old", refs: [], updatedAt: 1, profile: previous });
+    const client = fakeClient({
+      state: () => ({ url: "about:blank", title: "", profile: current }),
+      navigate: () => { throw new Error("navigation failed"); },
+    });
+    const connect: CommandContext["connect"] = async () => client;
+    const error = await cmdOpen(ctx({ connect }), "https://unreachable.example", {}).then(
+      () => undefined,
+      (err: Error) => err,
+    );
+    expect(error?.message).toBe("navigation failed");
+    expect((await loadState(session))?.profile).toBe(current);
+  });
+
+  test("a failed open on a live session keeps the saved refs", async () => {
+    const refs = [{ id: "e3", role: "link", name: "Home", tag: "a" }];
+    await saveState({ name: session, url: "https://old", title: "Old", refs, updatedAt: 1, profile: null });
+    const client = fakeClient({
+      state: () => ({ url: "https://old", title: "Old" }),
+      navigate: () => { throw new Error("navigation failed"); },
+    });
+    const connect: CommandContext["connect"] = async () => client;
+    await cmdOpen(ctx({ connect }), "https://unreachable.example", {}).catch(() => {});
+    expect((await loadState(session))?.refs).toEqual(refs);
+  });
+
+  test("snapshot keeps the recorded profile (#93)", async () => {
+    await openWith({ persistent: true });
+    const snap = { url: "https://x", title: "X", tree: [], refs: [] };
+    await cmdSnapshot({ ...ctx(), connect: async () => fakeClient({ evaluate: () => snap }) }, {});
+    expect((await loadState(session))?.profile).toBe(join(tmp, ".bowser", "profiles", session));
   });
 
   for (const empty of ["", "   "]) {
