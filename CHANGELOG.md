@@ -17,7 +17,7 @@ All notable changes to this project are documented here. This project follows
 - **A `bowser mcp` server that outlived an upgrade says to restart it.** It starts new daemons
   from the upgraded files, then refused each one as a daemon of another version, and "close, then
   open it again" only repeated the refusal. When the refused daemon matches the installed version,
-  it now says "this bowser (<w>) is older than the installed bowser (<v>); restart the MCP server
+  it now says "this bowser (<w>) differs from the installed bowser (<v>); restart the MCP server
   or re-run the command". (#79)
 - **An action on a ref whose element changed its name is refused.** A `Buy A` button that
   relabelled itself `Delete account` kept its ref, and a second `click e2` without a new snapshot
@@ -43,6 +43,9 @@ All notable changes to this project are documented here. This project follows
   delivered.** Only the click reached the page. The message now says `'fill' timed out after
   <ms>ms waiting for the page its click opened; the click was delivered but the fill did not
   finish, check the page before retrying`. A plain `click` keeps its message. (#78)
+- **The restart advice no longer calls a downgraded process older.** The message said "this bowser
+  (<w>) is older than the installed bowser (<v>)" whenever the two versions differed, so after a
+  downgrade it had the direction wrong. It now says "differs from". (#79)
 
 ## [0.10.0] — 2026-09-30
 

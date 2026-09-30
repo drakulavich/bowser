@@ -107,24 +107,26 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
-  describe("a process older than the installed bowser (#79)", () => {
-    const installed = "99.0.0";
+  describe("a process whose version differs from the installed bowser (#79)", () => {
     const refusal = (session: string, installedVersion: () => Promise<string | undefined>) =>
       connectOrSpawn(session, { installedVersion }).then(() => "no refusal", (e: unknown) => (e as Error).message);
 
-    test("a daemon of the installed version: restart this process", async () => {
-      const session = "ver-stale-proc";
-      const d = await fakeDaemon(session, daemonOf(installed));
-      try {
-        expect(await refusal(session, async () => installed)).toBe(
-          `this bowser (${pkg.version}) is older than the installed bowser (${installed}); restart the MCP server or re-run the command`,
-        );
-      } finally {
-        d.stop();
-      }
-    });
+    for (const [label, installed] of [["an upgrade", "99.0.0"], ["a downgrade", "0.0.1"]] as const) {
+      test(`${label}: a daemon of the installed version: restart this process`, async () => {
+        const session = `ver-stale-${installed.replaceAll(".", "")}`;
+        const d = await fakeDaemon(session, daemonOf(installed));
+        try {
+          expect(await refusal(session, async () => installed)).toBe(
+            `this bowser (${pkg.version}) differs from the installed bowser (${installed}); restart the MCP server or re-run the command`,
+          );
+        } finally {
+          d.stop();
+        }
+      });
+    }
 
     test("a daemon of neither version, or no package.json on disk: close and open again", async () => {
+      const installed = "99.0.0";
       const session = "ver-stale-other";
       const d = await fakeDaemon(session, daemonOf("0.6.1"));
       const closeAndOpen = `session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`;

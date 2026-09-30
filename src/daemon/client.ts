@@ -178,7 +178,7 @@ async function otherVersion(session: string, answer: unknown, opts: ConnectOptio
   // long-running process (`bowser mcp`) meets its own new daemon here.
   const installed = await (opts.installedVersion ?? installedVersion)();
   if (installed === answer && installed !== pkg.version) {
-    return `this bowser (${pkg.version}) is older than the installed bowser (${installed}); restart the MCP server or re-run the command`;
+    return `this bowser (${pkg.version}) differs from the installed bowser (${installed}); restart the MCP server or re-run the command`;
   }
   const v = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer) ? answer : "an older version";
   const cmd = await openCommand(session);

@@ -50,8 +50,8 @@ again" (exit 1). For a session with a persistent profile it says "open it again 
 `close` still ends such a daemon, and `list` still lists it.
 
 Restart any running `bowser mcp` server after an upgrade too. It starts each new daemon from the
-upgraded files, then refuses it, and closing the session does not help: "this bowser (<w>) is
-older than the installed bowser (<v>); restart the MCP server or re-run the command" (exit 1).
+upgraded files, then refuses it, and closing the session does not help: "this bowser (<w>)
+differs from the installed bowser (<v>); restart the MCP server or re-run the command" (exit 1).
 
 ### Screenshots
 
