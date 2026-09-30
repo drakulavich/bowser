@@ -3,11 +3,11 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ensureSessionDir, saveState } from "../src/state.ts";
+import { ensureSessionDir, profileDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
@@ -206,6 +206,14 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     expect(reportFailure(err).code).toBe(1);
     expect((await Bun.file(pidPath(session)).text()).trim()).toBe("99999");
     expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test("a session with a persistent profile on disk is told to open --persistent (#79)", async () => {
+    const session = "crashed-persistent";
+    await crashed(session);
+    await mkdir(profileDir(session), { recursive: true });
+    const err = await connectOrSpawn(session, { platform: "linux" }).then(() => undefined, (e: unknown) => e);
+    expect((err as Error).message).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --persistent'`);
   });
 
   test("open (reopen) still starts a daemon there", async () => {

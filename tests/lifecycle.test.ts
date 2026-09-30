@@ -6,17 +6,17 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import pkg from "../package.json";
 import { reportFailure, run } from "../src/cli.ts";
-import { socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, socketPath } from "../src/daemon/client.ts";
 import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
 import { createSerializer } from "../src/serialize.ts";
-import { ensureSessionDir, saveState, sessionDir } from "../src/state.ts";
+import { ensureSessionDir, profileDir, saveState, sessionDir } from "../src/state.ts";
 import { daemonOf, fakeDaemon, lineSocket, SILENT } from "./helpers/fake-daemon.ts";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -78,6 +78,50 @@ describe("F2: a daemon from another bowser version", () => {
       }
     });
   }
+
+  test("a session with a persistent profile on disk is told to open it with --persistent (#79)", async () => {
+    const session = "ver-persistent";
+    await mkdir(profileDir(session), { recursive: true });
+    const d = await fakeDaemon(session, daemonOf("0.6.1"));
+    try {
+      expect(await failure(["snapshot", "-s", session])).toEqual({
+        stderr: `bowser: session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again with 'bowser open --persistent'`,
+        code: 1,
+      });
+    } finally {
+      d.stop();
+    }
+  });
+
+  describe("a process older than the installed bowser (#79)", () => {
+    const installed = "99.0.0";
+    const refusal = (session: string, installedVersion: () => Promise<string | undefined>) =>
+      connectOrSpawn(session, { installedVersion }).then(() => "no refusal", (e: unknown) => (e as Error).message);
+
+    test("a daemon of the installed version: restart this process", async () => {
+      const session = "ver-stale-proc";
+      const d = await fakeDaemon(session, daemonOf(installed));
+      try {
+        expect(await refusal(session, async () => installed)).toBe(
+          `this bowser (${pkg.version}) is older than the installed bowser (${installed}); restart the MCP server or re-run the command`,
+        );
+      } finally {
+        d.stop();
+      }
+    });
+
+    test("a daemon of neither version, or no package.json on disk: close and open again", async () => {
+      const session = "ver-stale-other";
+      const d = await fakeDaemon(session, daemonOf("0.6.1"));
+      const closeAndOpen = `session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`;
+      try {
+        expect(await refusal(session, async () => installed)).toBe(closeAndOpen);
+        expect(await refusal(session, async () => undefined)).toBe(closeAndOpen);
+      } finally {
+        d.stop();
+      }
+    });
+  });
 
   test("close --all shuts an old daemon down too", async () => {
     const session = "ver-all";

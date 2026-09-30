@@ -1,7 +1,7 @@
 // Client side of the daemon protocol: connect to a session's Unix socket (or
 // spawn the daemon first), send typed requests, match replies by id.
 
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import pkg from "../../package.json";
@@ -9,7 +9,7 @@ import { opTimeoutMs } from "../budget.ts";
 import { withTimeout } from "../serialize.ts";
 import { lineReader } from "../socket-lines.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
-import { checkNewSessionName, sessionDir, statePath } from "../state.ts";
+import { checkNewSessionName, profileDir, sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 import { UserError } from "../errors.ts";
 
@@ -154,6 +154,8 @@ export interface ConnectOptions {
   anyVersion?: boolean;
   /** The command the user ran; a timeout names it (F21). */
   command?: string;
+  /** The bowser version installed on disk now; a test fakes it. */
+  installedVersion?: () => Promise<string | undefined>;
 }
 
 /** A daemon whose socket accepted the connection and never answered the
@@ -171,24 +173,44 @@ export class DaemonNotAnswering extends Error {
  *  and restarting it quietly would drop its page (F2). A user error (exit 1).
  *  `answer` is what it said to `ping`: its version, or "pong" from every
  *  daemon before the version was sent. */
-function otherVersion(session: string, answer: unknown): string {
+async function otherVersion(session: string, answer: unknown, opts: ConnectOptions): Promise<string> {
+  // A daemon is spawned from the files on disk, so after an in-place upgrade a
+  // long-running process (`bowser mcp`) meets its own new daemon here.
+  const installed = await (opts.installedVersion ?? installedVersion)();
+  if (installed === answer && installed !== pkg.version) {
+    return `this bowser (${pkg.version}) is older than the installed bowser (${installed}); restart the MCP server or re-run the command`;
+  }
   const v = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer) ? answer : "an older version";
-  return `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`;
+  const open = existsSync(profileDir(session)) ? "open it again with 'bowser open --persistent'" : "open it again";
+  return `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then ${open}`;
+}
+
+/** undefined where package.json is not on disk (a compiled binary). */
+async function installedVersion(): Promise<string | undefined> {
+  try {
+    return (await Bun.file(new URL("../../package.json", import.meta.url)).json()).version;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The client, once its daemon has answered `ping` with `answer`; refused
  *  when the daemon is of another version, unless `opts.anyVersion`. */
-function checked(client: DaemonClient, session: string, answer: unknown, opts: ConnectOptions): DaemonClient {
+async function checked(client: DaemonClient, session: string, answer: unknown, opts: ConnectOptions): Promise<DaemonClient> {
   if (opts.anyVersion || answer === pkg.version) return client;
   client.close();
-  throw new UserError(otherVersion(session, answer));
+  throw new UserError(await otherVersion(session, answer, opts));
 }
 
 /** Why a command refuses a session whose daemon ran and is gone: its page,
  *  refs and, for `--persistent`, its store went with it, and a new daemon
  *  started quietly would be an empty in-memory browser. A user error (exit 1). */
 function browserExited(session: string): string {
-  return `session '${session}' is not open (its browser exited); run 'bowser open'`;
+  return `session '${session}' is not open (its browser exited); run '${openCommand(session)}'`;
+}
+
+function openCommand(session: string): string {
+  return existsSync(profileDir(session)) ? "bowser open --persistent" : "bowser open";
 }
 
 /** Why bowser cannot start a daemon off macOS: its only engine is WebKit's

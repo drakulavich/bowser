@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A persistent session whose browser exited is told to reopen it with `--persistent`.** The
+  refusal said `run 'bowser open'`, and doing just that started an empty in-memory browser, so
+  the session looked logged out although its profile was intact on disk. When the session has a
+  profile, the refusal now says `run 'bowser open --persistent'`. (#79)
+- **The upgrade refusal keeps `--persistent` too.** "run 'bowser close -s <name>', then open it
+  again" led a persistent session to the same empty browser. For a session with a profile it now
+  says "then open it again with 'bowser open --persistent'". (#79)
+- **A `bowser mcp` server that outlived an upgrade says to restart it.** It starts new daemons
+  from the upgraded files, then refused each one as a daemon of another version, and "close, then
+  open it again" only repeated the refusal. When the refused daemon matches the installed version,
+  it now says "this bowser (<w>) is older than the installed bowser (<v>); restart the MCP server
+  or re-run the command". (#79)
+
 ## [0.10.0] — 2026-09-30
 
 ### Fixed
