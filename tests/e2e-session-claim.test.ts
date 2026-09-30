@@ -91,7 +91,7 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
     // The next command fails, a user error, and starts no browser.
     for (const attempt of [() => cmdGoto(ctx, `${url}two`), () => cmdEval(ctx, "localStorage.getItem('pre')")]) {
       const err = await attempt().then(() => undefined, (e: unknown) => e);
-      expect((err as Error)?.message).toBe(`session '${s}' is not open (its browser exited); run 'bowser open'`);
+      expect((err as Error)?.message).toBe(`session '${s}' is not open (its browser exited); run 'bowser open --persistent'`);
       expect(reportFailure(err).code).toBe(1);
     }
     expect(await daemonPids(s)).toEqual([]);
