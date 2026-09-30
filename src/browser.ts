@@ -412,9 +412,10 @@ function navigationWatch(
     const base = landed;
     pendingAt = base;
     const now = await count(timing.settleMs);
-    if (landed !== base) return;
+    const hasReplacement = now > pendingSeen;
     if (now > pendingSeen) pendingSeen = now;
-    else pendingAt = undefined;
+    if (landed !== base) return;
+    if (!hasReplacement) pendingAt = undefined;
   };
   let phase: ActPhase = "idle";
   let pendingAt: number | undefined;

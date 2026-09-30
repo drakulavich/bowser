@@ -59,6 +59,8 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   let origTimeout: string | undefined;
   let server: ReturnType<typeof Bun.serve> | undefined;
   let base: string;
+  let never2Requested: Promise<void> = Promise.resolve();
+  let resolveNever2Requested = () => {};
   const sessions: string[] = [];
 
   /** Open a fresh session whose daemon has a budget of `budgetMs`, on the
@@ -96,6 +98,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   beforeAll(async () => {
     origHome = process.env.HOME;
     origTimeout = process.env.BOWSER_OP_TIMEOUT_MS;
+    never2Requested = new Promise<void>((resolve) => { resolveNever2Requested = resolve; });
     tmp = await mkdtemp(join(tmpdir(), "bowser-hangs-"));
     process.env.HOME = tmp;
     server = Bun.serve({
@@ -103,7 +106,10 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
       async fetch(req) {
         const path = new URL(req.url).pathname;
         // A server that never answers: the navigation never settles.
-        if (path === "/never" || path === "/never2") return new Promise<Response>(() => {});
+        if (path === "/never" || path === "/never2") {
+          if (path === "/never2") resolveNever2Requested();
+          return new Promise<Response>(() => {});
+        }
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
         const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE, "/redirect": REDIRECT_PAGE }[path] ?? HOME_PAGE;
         return new Response(page, {
@@ -358,8 +364,16 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const ref = (name: string) => refs.find((r) => r.name === name)!.id;
     const submit = await timed(() => cmdClick(ctx, ref("Send")));
     expect(submit.error).toBeUndefined();
-    // The page's timer replaces the POST 11 s after the submit.
-    await Bun.sleep(Math.max(0, 12_500 - submit.ms));
+    // Wait for the server to see the replacement request. The page's 11 s
+    // timer starts at submit, before cmdClick returns; bound this wait so a
+    // broken repro cannot hold the suite indefinitely.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const requested = await Promise.race([
+      never2Requested.then(() => true),
+      new Promise<false>((resolve) => { timeout = setTimeout(() => resolve(false), 15_000); }),
+    ]);
+    clearTimeout(timeout);
+    expect(requested).toBe(true);
 
     process.env.BOWSER_OP_TIMEOUT_MS = "3000";
     const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
