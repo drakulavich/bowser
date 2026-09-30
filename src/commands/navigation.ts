@@ -84,8 +84,9 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
       );
     }
     if (url) {
+      const saved = await loadState(ctx.session);
       await saveState({
-        name: ctx.session, url: before.url, title: before.title, refs: [], updatedAt: Date.now(),
+        ...(saved ?? { name: ctx.session, url: before.url, title: before.title, refs: [], updatedAt: Date.now() }),
         profile: before.profile ?? null,
       });
       await c.request("navigate", [url]);

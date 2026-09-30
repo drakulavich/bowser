@@ -204,6 +204,18 @@ describe("open --persistent / --profile", () => {
     expect((await loadState(session))?.profile).toBe(current);
   });
 
+  test("a failed open on a live session keeps the saved refs", async () => {
+    const refs = [{ id: "e3", role: "link", name: "Home", tag: "a" }];
+    await saveState({ name: session, url: "https://old", title: "Old", refs, updatedAt: 1, profile: null });
+    const client = fakeClient({
+      state: () => ({ url: "https://old", title: "Old" }),
+      navigate: () => { throw new Error("navigation failed"); },
+    });
+    const connect: CommandContext["connect"] = async () => client;
+    await cmdOpen(ctx({ connect }), "https://unreachable.example", {}).catch(() => {});
+    expect((await loadState(session))?.refs).toEqual(refs);
+  });
+
   test("snapshot keeps the recorded profile (#93)", async () => {
     await openWith({ persistent: true });
     const snap = { url: "https://x", title: "X", tree: [], refs: [] };
