@@ -45,8 +45,13 @@ On another platform, any command that would start a session fails with the error
 Run `bowser close --all` before you upgrade. A session keeps the daemon that started it, and after
 an upgrade every command but `close` and `list` refuses a daemon of another version:
 "session '<name>' is running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it
-again" (exit 1). A daemon from bowser 0.7 or older reports no version, so `<v>` reads `an older version`.
+again" (exit 1). For a session with a persistent profile it says "open it again with 'bowser open
+--persistent'". A daemon from bowser 0.7 or older reports no version, so `<v>` reads `an older version`.
 `close` still ends such a daemon, and `list` still lists it.
+
+Restart any running `bowser mcp` server after an upgrade too. It starts each new daemon from the
+upgraded files, then refuses it, and closing the session does not help: "this bowser (<w>) is
+older than the installed bowser (<v>); restart the MCP server or re-run the command" (exit 1).
 
 ### Screenshots
 
