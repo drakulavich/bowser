@@ -40,11 +40,14 @@ import { usageOf } from "../src/cli/help.ts";
  *  script evaluates to undefined, the fake's default. */
 function resolving(live: Record<string, string | null>) {
   return (expr: string): unknown => {
-    for (const [id, selector] of Object.entries(live)) {
-      if (expr === resolveRefScript(id) || expr === resolveRefScript(id, { enabled: true })) return selector;
-    }
-    return undefined;
+    const id = resolvedId(expr);
+    return id !== undefined && id in live ? live[id] : undefined;
   };
+}
+
+/** The ref a resolve script looks up, or undefined for any other script. */
+function resolvedId(expr: string): string | undefined {
+  return /\.byRef\?\.get\("(e\d+)"\)/.exec(expr)?.[1];
 }
 
 async function seedRefs() {
@@ -913,7 +916,7 @@ describe("fill", () => {
   const SECRET = "tomorrow-S3cr3t";
   const answering = (answer: unknown) => {
     const resolve = resolving({ e2: "input" });
-    return (expr: string): unknown => expr === resolveRefScript("e2") ? resolve(expr) : answer;
+    return (expr: string): unknown => resolvedId(expr) === "e2" ? resolve(expr) : answer;
   };
   const fillWith = async (answer: unknown, text = SECRET) => {
     await saveState({
@@ -972,7 +975,7 @@ describe("fill", () => {
     const resolve = resolving({ e2: "input" });
     const c = fakeClient({
       evaluate: (expr) => {
-        if (expr === resolveRefScript("e2")) return resolve(expr);
+        if (resolvedId(expr) === "e2") return resolve(expr);
         throw new Error(`evaluate failed: ${expr}`);
       },
     });
@@ -1155,7 +1158,7 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
 
   // The page's answer to the enabled resolve for a disabled element.
   const disabled = (ref: string) => (expr: string): unknown =>
-    expr === resolveRefScript(ref, { enabled: true }) ? { disabled: true } : undefined;
+    expr === resolveRefScript(REFS.find((r) => r.id === ref)!, { enabled: true }) ? { disabled: true } : undefined;
 
   for (const [name, ref, run] of [
     ["click", "e1", (x: CommandContext) => cmdClick(x, "e1")],
@@ -1170,7 +1173,7 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
       );
       expect(err.message).toBe(`ref '${ref}' is disabled`);
       expect(reportFailure(err).code).toBe(1);
-      expect(c.calls).toEqual([["evaluate", [resolveRefScript(ref, { enabled: true })]]]);
+      expect(c.calls).toEqual([["evaluate", [resolveRefScript(REFS.find((r) => r.id === ref)!, { enabled: true })]]]);
     });
   }
 
@@ -1346,12 +1349,26 @@ describe("ref commands resolve the ref in the live page first", () => {
   });
 
   for (const [name, ref, op, run, enabled] of COMMANDS) {
-    const resolve = enabled ? resolveRefScript(ref, { enabled: true }) : resolveRefScript(ref);
+    const saved = REFS.find((r) => r.id === ref)!;
+    const resolve = resolveRefScript(saved, { enabled });
     test(`${name} on a ref whose element is gone fails with playwright-cli's message and sends no action`, async () => {
       const c = fakeClient({ evaluate: resolving({ [ref]: null }) });
       await expect(run({ ...ctx(), connect: async () => c })).rejects.toThrow(
         new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`),
       );
+      expect(c.calls).toEqual([["evaluate", [resolve]]]);
+    });
+
+    test(`${name} on a ref whose element changed its role or name fails, exit 1, and sends no action`, async () => {
+      const c = fakeClient({ evaluate: (e) => (e === resolve ? { changed: { role: "button", name: "Delete account" } } : undefined) });
+      const err = await run({ ...ctx(), connect: async () => c }).then(
+        (out) => { throw new Error(`expected a failure, got ${out}`); },
+        (e: Error) => e,
+      );
+      expect(err.message).toBe(
+        `ref '${ref}' now points to button "Delete account", not ${saved.role} "${saved.name}"; take a new snapshot`,
+      );
+      expect(reportFailure(err).code).toBe(1);
       expect(c.calls).toEqual([["evaluate", [resolve]]]);
     });
 
@@ -1370,13 +1387,18 @@ describe("ref commands resolve the ref in the live page first", () => {
     expect(c.calls).toContainEqual(["evaluate", [fillScript("fresh-e2", "hi")]]);
   });
 
-  test("the resolve script embeds the ref with JSON.stringify", () => {
-    expect(resolveRefScript("e7")).toContain(JSON.stringify("e7"));
-    expect(resolveRefScript("e7", { enabled: true })).toContain(JSON.stringify("e7"));
+  test("the resolve script embeds the ref, its role and its name with JSON.stringify", () => {
+    const saved = { id: "e7", role: "button", name: 'Say "hi"' };
+    for (const script of [resolveRefScript(saved), resolveRefScript(saved, { enabled: true })]) {
+      expect(script).toContain(JSON.stringify("e7"));
+      expect(script).toContain(JSON.stringify("button"));
+      expect(script).toContain(JSON.stringify('Say "hi"'));
+    }
   });
 
   test("the enabled check is a different script, so the fakes above tell them apart", () => {
-    expect(resolveRefScript("e7", { enabled: true })).not.toBe(resolveRefScript("e7"));
+    const saved = { id: "e7", role: "button", name: "Go" };
+    expect(resolveRefScript(saved, { enabled: true })).not.toBe(resolveRefScript(saved));
   });
 });
 
