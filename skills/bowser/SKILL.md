@@ -104,6 +104,7 @@ words after `--` included. A missing argument fails with the command's usage lin
 - Any visible element can have a ref, not only controls. Refs stay the same across snapshots of one document while the element's role and name are unchanged, so gaps in the numbers are normal. A navigation or reload starts again at `e1`.
 - Password field values are never shown: a filled `<input type="password">` prints without its value, unlike `playwright-cli`.
 - An action on a ref whose element is gone (re-rendered away, or from before a navigation or reload) fails at once with `ref 'eN' not found in the current page snapshot. Try capturing new snapshot.` (exit 1). Snapshot again and use the new refs.
+- An action on a ref whose element changed its role or name since the snapshot fails the same way, before it touches the page: `ref 'eN' now points to button "Delete account", not button "Buy A"; take a new snapshot`.
 - `--depth=N` prints N levels below the first line: a node at the limit drops its children but keeps its inline text value and its prop lines (`/url`, `/placeholder`). `--depth=0` or no flag prints the whole tree. `--json` gives `{"snapshot": "<tree>"}` without the `### Page` header.
 
 Refs persist in `~/.bowser/sessions/<name>/state.json`. The CLI resolves refs for you.
@@ -185,6 +186,8 @@ bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only t
 - **"run-code runs JavaScript in the page and has no Playwright 'page'"** — you passed a `playwright-cli` snippet (`async page => …`). Write page JavaScript instead: statements with `return`, e.g. `bowser run-code "return document.title"`.
 - **"ref 'eN' not found in the current page snapshot"** — the element behind the ref is gone: the page re-rendered, navigated or reloaded since that snapshot. Run `bowser snapshot` and use the new refs.
 - **"ref 'eN' not found in last snapshot"** — the ref was never in the last snapshot. Run `bowser snapshot`.
+- **"ref 'eN' now points to …; take a new snapshot"** — the element behind the ref now has another role or name (a button relabelled itself); nothing was done. Run `bowser snapshot` and pick the ref you mean.
+- **"'f1e3' is a playwright-cli frame ref"** — bowser does not snapshot iframe contents, so it has no frame refs. Click the iframe's own ref, then use `press` or `type`.
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
 - **"ref 'eN' has no option \"…\""** — `select` found no option with that value or label. Read the options in the snapshot and pass one of them.
 - **"ref 'eN' is not an editable element (disabled)"** or `(readonly)` — the page does not let that field be edited now; enable it first (e.g. fill the field that unlocks it) or pick another.

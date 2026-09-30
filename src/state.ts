@@ -131,6 +131,9 @@ export async function saveState(state: SessionState): Promise<void> {
 
 export function resolveRef(state: SessionState, ref: string): Ref {
   if (!/^e\d+$/.test(ref)) {
+    if (/^f\d+e\d+$/.test(ref)) {
+      throw new UserError(`'${ref}' is a playwright-cli frame ref; bowser does not snapshot iframe contents`);
+    }
     throw new UserError(
       `expected a ref like 'e1', got '${ref}'. Run 'bowser snapshot' first.`,
     );

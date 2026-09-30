@@ -33,7 +33,7 @@ export async function cmdClick(
 ): Promise<string> {
   const { prev, target } = await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
-    await c.request("click", [await liveSelector(c, ref, { enabled: true })]);
+    await c.request("click", [await liveSelector(c, target, { enabled: true })]);
     const state = await c.request("state");
     await syncState(prev, state);
     return replyPage(ctx, c, { ok: true, ref, url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
@@ -96,7 +96,7 @@ export async function cmdFill(
   const { target } = await loadRef(ctx.session, ref);
   requireKind("fill", ref, target);
   return withPageClient(ctx, async (c) => {
-    const selector = await liveSelector(c, ref);
+    const selector = await liveSelector(c, target);
     await c.request("click", [selector]);
     const found = await withholdingText("fill", value, () => c.request("evaluate", [fillScript(selector, value)]));
     const { outcome, type } = readFillAnswer(found);
@@ -163,9 +163,9 @@ export async function cmdPress(ctx: CommandContext, input: string): Promise<stri
 }
 
 export async function cmdHover(ctx: CommandContext, ref: string): Promise<string> {
-  await loadRef(ctx.session, ref);
+  const { target } = await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
-    await c.request("hover", [await liveSelector(c, ref)]);
+    await c.request("hover", [await liveSelector(c, target)]);
     return replyPage(ctx, c, { ok: true, ref }, `hovered ${ref}`);
   });
 }
@@ -174,7 +174,7 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
   const { target } = await loadRef(ctx.session, ref);
   requireKind("select", ref, target);
   return withPageClient(ctx, async (c) => {
-    const found = await c.request("select", [await liveSelector(c, ref), value]);
+    const found = await c.request("select", [await liveSelector(c, target), value]);
     if (!found) throw new UserError(`ref '${ref}' has no option ${JSON.stringify(value)}`);
     return replyPage(ctx, c, { ok: true, ref, value }, `selected ${ref} -> "${value}"`);
   });
@@ -184,7 +184,7 @@ export async function cmdCheck(ctx: CommandContext, ref: string): Promise<string
   const { target } = await loadRef(ctx.session, ref);
   requireKind("check", ref, target);
   return withPageClient(ctx, async (c) => {
-    await c.request("check", [await liveSelector(c, ref, { enabled: true })]);
+    await c.request("check", [await liveSelector(c, target, { enabled: true })]);
     return replyPage(ctx, c, { ok: true, ref }, `checked ${ref}`);
   });
 }
@@ -193,7 +193,7 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   const { target } = await loadRef(ctx.session, ref);
   requireKind("check", ref, target);
   return withPageClient(ctx, async (c) => {
-    const done = await c.request("uncheck", [await liveSelector(c, ref, { enabled: true })]);
+    const done = await c.request("uncheck", [await liveSelector(c, target, { enabled: true })]);
     if (done === false) throw new UserError(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
     return replyPage(ctx, c, { ok: true, ref }, `unchecked ${ref}`);
   });

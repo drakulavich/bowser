@@ -169,6 +169,8 @@ Password field values are never shown: a filled `<input type="password">` prints
 
 An action on a ref whose element is gone (removed by a re-render, or from before a navigation or reload) fails at once with `ref 'eN' not found in the current page snapshot. Try capturing new snapshot.` and exit code 1, as in `playwright-cli`. Run `snapshot` again and use the new refs.
 
+An action on a ref whose element changed its role or name since the snapshot (a `Buy A` button that relabelled itself) also fails, exit code 1, before it touches the page: `ref 'e2' now points to button "Delete account", not button "Buy A"; take a new snapshot`. A `playwright-cli` frame ref such as `f1e3` fails with `'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents`.
+
 `--depth=N` prints N levels below the first line: a node at the limit drops its children but keeps its inline text value and its prop lines (`/url`, `/placeholder`). `--depth=0` or no flag prints the whole tree. Iframe contents and shadow DOM are not walked: an iframe prints as a leaf with a ref.
 
 ### JSON output for agent pipelines

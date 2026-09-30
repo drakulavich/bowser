@@ -32,6 +32,12 @@ describe("resolveRef", () => {
   test("rejects ref with @ prefix", () => {
     expect(() => resolveRef(state, "@e2")).toThrow(/expected a ref like 'e1'/);
   });
+  test("names a playwright-cli frame ref as unsupported", () => {
+    expect(() => resolveRef(state, "f1e3")).toThrow(
+      new Error("'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents"),
+    );
+    expect(() => resolveRef(state, "f1")).toThrow(/expected a ref like 'e1', got 'f1'/);
+  });
   test("throws for unknown ref", () => {
     expect(() => resolveRef(state, "e9")).toThrow(/not found/);
   });
