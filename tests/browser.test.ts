@@ -533,9 +533,23 @@ describe("a navigation a previous command left pending", () => {
       await b.click("#send");
       expect(b.navigationPending).toBe(true);
       if (end === "landed") v.land("https://x/never");
-      else v.onNavigationFailed?.(new Error("Frame load interrupted"));
+      else { v.onNavigationFailed?.(new Error("Frame load interrupted")); await Bun.sleep(10); }
       expect(b.navigationPending).toBe(false);
     }
+  });
+
+  test("stays pending when a script replaces it after the watch ended, until the replacement lands (#98)", async () => {
+    const { v, page } = pageNavView();
+    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; page.to = "https://x/never"; };
+    const b = wrapView(v, slow);
+    await b.click("#send");
+    page.navs++;
+    page.to = "https://x/never2";
+    v.onNavigationFailed?.(new Error("-999"));
+    await Bun.sleep(10);
+    expect(b.navigationPending).toBe(true);
+    v.land("https://x/never2");
+    expect(b.navigationPending).toBe(false);
   });
 
   test("an action that navigates nowhere leaves nothing pending", async () => {

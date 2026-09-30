@@ -322,7 +322,10 @@ function navigationWatch(
   let landed = 0;
   let arrived = 0;
   view.onNavigated = () => { landed++; arrived++; onNavigation(); };
-  view.onNavigationFailed = () => { landed++; };
+  view.onNavigationFailed = () => {
+    landed++;
+    if (phase === "idle" && pendingAt === landed - 1) void replaced();
+  };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   /** Evaluate a watch script, waiting at most `ms`: a page that cannot
    *  answer in time, or at all, reads as "no". Every page read in `act` goes
@@ -380,8 +383,9 @@ function navigationWatch(
     // One read at the end of the window, not a poll: each read is an
     // evaluate, and fewer of them means fewer chances to race the commit.
     if (landed !== before) return;
-    let seen = await count(timing.graceMs);
+    const seen = await count(timing.graceMs);
     if (seen < 1) return;
+    pendingSeen = seen;
     onNavigation();
     pendingAt = landed;
     // A failure ends the wait unless the page started another navigation
@@ -394,16 +398,27 @@ function navigationWatch(
       if (arrived !== baseArrived) return;
       if (landed !== base) {
         const now = await count(began + timing.settleMs - Date.now());
-        if (now <= seen) return;
-        seen = now;
+        if (now <= pendingSeen) return;
+        pendingSeen = now;
         base = landed;
         pendingAt = landed;
       }
       await sleep(10);
     }
   };
+  /** The pending navigation failed after the watch ended: it stays pending
+   *  while the page is asked whether a script started another (#98). */
+  const replaced = async (): Promise<void> => {
+    const base = landed;
+    pendingAt = base;
+    const now = await count(timing.settleMs);
+    if (landed !== base) return;
+    if (now > pendingSeen) pendingSeen = now;
+    else pendingAt = undefined;
+  };
   let phase: ActPhase = "idle";
   let pendingAt: number | undefined;
+  let pendingSeen = 0;
   return {
     get phase() { return phase; },
     get pending() { return pendingAt === landed; },
