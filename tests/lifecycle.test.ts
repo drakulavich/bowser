@@ -93,6 +93,20 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
+  test("a session whose open recorded a custom profile is told to open it with --profile (#93)", async () => {
+    const session = "ver-custom";
+    const dir = join(tmp, "custom-profile");
+    await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: dir });
+    const d = await fakeDaemon(session, daemonOf("0.6.1"));
+    try {
+      expect((await failure(["snapshot", "-s", session])).stderr).toBe(
+        `bowser: session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again with 'bowser open --profile=${dir}'`,
+      );
+    } finally {
+      d.stop();
+    }
+  });
+
   describe("a process older than the installed bowser (#79)", () => {
     const installed = "99.0.0";
     const refusal = (session: string, installedVersion: () => Promise<string | undefined>) =>

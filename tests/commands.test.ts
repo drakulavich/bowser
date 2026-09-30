@@ -174,6 +174,26 @@ describe("open --persistent / --profile", () => {
     expect(calls().map(([op]) => op)).toEqual(["navigate", "state"]);
   });
 
+  test("records the profile the daemon reports, or null for none (#93)", async () => {
+    await openWith({ persistent: true });
+    expect((await loadState(session))?.profile).toBe(join(tmp, ".bowser", "profiles", session));
+    const dir = join(tmp, "recorded-profile");
+    await openWith({ profile: dir });
+    expect((await loadState(session))?.profile).toBe(dir);
+    await openWith({});
+    expect((await loadState(session))?.profile).toBeNull();
+    // A daemon already running on a store: plain `open` records that store.
+    await openWith({}, { profile: dir });
+    expect((await loadState(session))?.profile).toBe(dir);
+  });
+
+  test("snapshot keeps the recorded profile (#93)", async () => {
+    await openWith({ persistent: true });
+    const snap = { url: "https://x", title: "X", tree: [], refs: [] };
+    await cmdSnapshot({ ...ctx(), connect: async () => fakeClient({ evaluate: () => snap }) }, {});
+    expect((await loadState(session))?.profile).toBe(join(tmp, ".bowser", "profiles", session));
+  });
+
   for (const empty of ["", "   "]) {
     test(`--profile=${JSON.stringify(empty)} is a usage error before any daemon is reached`, async () => {
       const err = await openWith({ profile: empty }).then(() => null, (e: Error) => e);

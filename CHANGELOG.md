@@ -32,6 +32,13 @@ All notable changes to this project are documented here. This project follows
 - **CI runs every e2e test file.** The workflow listed the files by hand and had missed five of
   them: `e2e-session-gate`, `e2e-known-state`, `e2e-patched-builtins`, `e2e-search` and
   `e2e-utf8`. It now runs `bun test tests/e2e`, which picks up every `tests/e2e*.test.ts`.
+- **The advice to reopen a session names the profile it really had.** Both refusals from #79
+  guessed from whether `~/.bowser/profiles/<name>` existed. A session opened with
+  `--profile=<dir>` was told `bowser open` and came back without its data, and an in-memory
+  session was told `--persistent` whenever an earlier session had left that directory behind.
+  `open` now records the session's profile in its state, and the advice follows the record:
+  `bowser open --persistent`, `bowser open --profile=<dir>` or `bowser open`. A session opened by
+  an older bowser has no record and still gets the directory check. (#93)
 
 ## [0.10.0] — 2026-09-30
 

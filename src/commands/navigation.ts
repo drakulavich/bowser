@@ -87,6 +87,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
     if (url) assertNavigated(url, state.url);
     const next: SessionState = {
       name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
+      profile: state.profile ?? null,
     };
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
