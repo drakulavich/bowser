@@ -263,6 +263,16 @@ const ROLE_NAME = String.raw`
     'insertion', 'list', 'listitem', 'mark', 'none', 'paragraph', 'presentation', 'region', 'row', 'rowgroup',
     'section', 'strong', 'subscript', 'superscript', 'table', 'term', 'time'];
   const nameHidden = (el) => hiddenSubtree(el) || styleHidden(el);
+  // Inside a root that is hidden now (o.hiddenRoot), styleHidden without what
+  // the root's own hiding causes: a closed <details> around it, the
+  // visibility its descendants inherit.
+  function hiddenUnder(el, root) {
+    if (hiddenSubtree(el)) return true;
+    const ds = el.closest('details,summary');
+    if (ds && ds !== el && ds !== root && root.contains(ds) && tagOf(ds) === 'DETAILS' && !ds.open) return true;
+    if (tagOf(el) === 'OPTION' && el.closest('select')) return false;
+    return styleOf(el).visibility !== 'visible' && styleOf(root).visibility === 'visible';
+  }
   const idRefs = (el, attr) => {
     const ids = (el.getAttribute(attr) || '').split(' ').filter(Boolean);
     const out = [];
@@ -280,11 +290,14 @@ const ROLE_NAME = String.raw`
     return null;
   };
 
-  // o: { visited: Set, mode: 'self' | 'descendant' | undefined, embedded: bool, labelledBy: bool, hiddenOk: bool }
+  // o: { visited: Set, mode: 'self' | 'descendant' | undefined, embedded: bool, labelledBy: bool, hiddenOk: bool, hiddenRoot: Element }
   function textAlt(el, o) {
     if (o.visited.has(el)) return '';
     const child = Object.assign({}, o, { mode: o.mode === 'self' ? 'descendant' : o.mode });
-    if (!o.hiddenOk && nameHidden(el)) { o.visited.add(el); return ''; }
+    if (!o.hiddenOk && (o.hiddenRoot ? el !== o.hiddenRoot && hiddenUnder(el, o.hiddenRoot) : nameHidden(el))) {
+      o.visited.add(el);
+      return '';
+    }
     const labelledBy = el.hasAttribute('aria-labelledby') ? idRefs(el, 'aria-labelledby') : null;
     if (!o.labelledBy && labelledBy) {
       const s = labelledBy.map((r) => textAlt(r, { visited: o.visited, embedded: true, labelledBy: true, hiddenOk: nameHidden(r) })).join(' ');
@@ -395,9 +408,9 @@ const ROLE_NAME = String.raw`
     parts.push(cssContent(el, '::after'));
     return parts.join('');
   }
-  function nameOf(el, hiddenOk) {
+  function nameOf(el, hiddenRoot) {
     if (NO_NAME_ROLES.includes(ariaRole(el) || '')) return '';
-    const name = norm(textAlt(el, { visited: new Set(), mode: 'self', hiddenOk }));
+    const name = norm(textAlt(el, { visited: new Set(), mode: 'self', hiddenRoot }));
     return name.length > 900 ? '' : name;
   }`;
 
@@ -968,7 +981,7 @@ export function resolveRefScript(ref: { id: string; role: string; name: string }
   const role = tagOf(el) === 'IFRAME' ? 'iframe' : ariaRole(el) || 'generic';
   // Named as if shown when hidden now: a hidden element's name is '', and
   // an action on a hidden ref must still go through (tests/e2e-stale-ref.test.ts).
-  const name = role === 'iframe' ? '' : nameOf(el, nameHidden(el));
+  const name = role === 'iframe' ? '' : nameOf(el, nameHidden(el) ? el : undefined);
   if (role !== ${JSON.stringify(ref.role)} || name !== ${JSON.stringify(ref.name)}) return { changed: { role, name } };${enabled}
   const r = el.getBoundingClientRect();
   const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
