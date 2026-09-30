@@ -100,7 +100,10 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
     await cmdOpen(ctx, url, { persistent: true });
     await cmdEval(ctx, "(localStorage.setItem('pre', '1'), 1)");
     // WebKit commits localStorage ~500 ms after a write; a kill before that loses it (#87).
-    expect(await waitFor(() => storedOnDisk(profileDir(s), "pre"))).toBe(true);
+    expect(
+      await waitFor(() => storedOnDisk(profileDir(s), "pre")),
+      `localStorage key 'pre' never reached ${profileDir(s)} on disk`,
+    ).toBe(true);
     const pid = Number((await Bun.file(pidPath(s)).text()).trim());
     process.kill(pid, "SIGKILL");
     expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
