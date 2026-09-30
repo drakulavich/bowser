@@ -154,7 +154,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
 
     process.env.HOME = tmp;
     await cmdOpen(ctx, base);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     try { await cmdClose(ctx); } catch {}
@@ -162,7 +162,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   test("bowser's refs are a subset of playwright-cli's tree on the fresh page", async () => {
     if (!pwReady) throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
