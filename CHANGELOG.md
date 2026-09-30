@@ -19,6 +19,16 @@ All notable changes to this project are documented here. This project follows
   open it again" only repeated the refusal. When the refused daemon matches the installed version,
   it now says "this bowser (<w>) is older than the installed bowser (<v>); restart the MCP server
   or re-run the command". (#79)
+- **An action on a ref whose element changed its name is refused.** A `Buy A` button that
+  relabelled itself `Delete account` kept its ref, and a second `click e2` without a new snapshot
+  pressed `Delete account` and replied `clicked e2 (button "Buy A")`, exit code 0. Every ref
+  command now compares the element's current role and accessible name with the snapshot's, in the
+  same page request that finds the element, and on a difference fails with exit code 1 before it
+  touches the page: `ref 'e2' now points to button "Delete account", not button "Buy A"; take a
+  new snapshot`. (#80)
+- **A `playwright-cli` frame ref is named as such.** `fill f1e3 …` answered `expected a ref like
+  'e1', got 'f1e3'. Run 'bowser snapshot' first.`, but no snapshot prints such a ref. It now says
+  `'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents`. (#80)
 
 ## [0.10.0] — 2026-09-30
 

@@ -69,7 +69,8 @@ async function seed(session: string): Promise<void> {
  *  every other script with `other`. */
 function resolvesThen(other: unknown) {
   return (expr: string): unknown =>
-    expr === resolveRefScript("e2") || expr === resolveRefScript("e4", { enabled: true }) ? "input" : other;
+    expr === resolveRefScript({ id: "e2", role: "textbox", name: "Email" }) ||
+    expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true }) ? "input" : other;
 }
 
 interface Case {

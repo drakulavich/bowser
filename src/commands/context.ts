@@ -5,7 +5,7 @@ import type { FlagSpec } from "../cli/parser.ts";
 import { connectOrSpawn, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
-import { loadState, resolveRef, saveState, type SessionState } from "../state.ts";
+import { loadState, resolveRef, saveState, type Ref, type SessionState } from "../state.ts";
 import { UserError } from "../errors.ts";
 
 export interface CommandContext {
@@ -87,10 +87,18 @@ export async function loadRef(session: string, ref: string) {
  *  whose element is gone (removed, or from a previous document) fails here,
  *  before any action, with playwright-cli's message; acting on the saved
  *  selector instead would wait out the op timeout or hit whatever element
- *  moved into its place. With `enabled`, a disabled element fails too, at
+ *  moved into its place. So does one whose element's role or name changed
+ *  since the snapshot (#80). With `enabled`, a disabled element fails too, at
  *  once, and nothing is clicked (F20). One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, ref: string, opts: { enabled?: boolean } = {}): Promise<string> {
-  const selector = await c.request("evaluate", [resolveRefScript(ref, opts)]);
+export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean } = {}): Promise<string> {
+  const ref = target.id;
+  const selector = await c.request("evaluate", [resolveRefScript(target, opts)]);
+  const changed = (selector as { changed?: { role: string; name: string } } | null)?.changed;
+  if (changed) {
+    throw new UserError(
+      `ref '${ref}' now points to ${changed.role} ${JSON.stringify(changed.name)}, not ${target.role} ${JSON.stringify(target.name)}; take a new snapshot`,
+    );
+  }
   if (opts.enabled && (selector as { disabled?: unknown } | null)?.disabled === true) {
     throw new UserError(`ref '${ref}' is disabled`);
   }

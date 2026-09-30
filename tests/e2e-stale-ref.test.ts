@@ -23,6 +23,12 @@ const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
 const FIXTURES = join(import.meta.dir, "fixtures");
 
+// ET-21: a button whose click relabels it and counts the clicks.
+const RELABEL = `<!doctype html><title>relabel</title>
+<button id="buy" onclick="window.clicks = (window.clicks || 0) + 1; this.textContent = 'Delete account'">Buy A</button>
+<button id="save">Save <span style="display:none">Delete</span></button>
+<button id="send">Send <b>now</b></button>`;
+
 const stale = (ref: string) => `ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`;
 
 /** The tree text inside the ```yaml fence of `snapshot`'s output. */
@@ -50,6 +56,9 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     server = Bun.serve({
       port: 0,
       fetch(req) {
+        if (new URL(req.url).pathname === "/relabel.html") {
+          return new Response(RELABEL, { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
         const file = pages[new URL(req.url).pathname];
         if (!file) return new Response("not found", { status: 404 });
         return new Response(Bun.file(join(FIXTURES, file)), {
@@ -188,6 +197,39 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     expect(await checked("Agree")).toBe("true");
     await cmdHover(ctx, hover);
     expect(await cmdEval(ctx, "document.getElementById('hovered').textContent")).toBe("hovered");
+  }, 60_000);
+
+  // The name of an element hidden now leaves out only descendants hidden in
+  // their own right, as the snapshot of the visible element did.
+  for (const [how, hide] of [["display", "display = 'none'"], ["visibility", "visibility = 'hidden'"]] as const) {
+    test(`#80: a ref hidden by ${how} since the snapshot keeps its name and is not refused`, async () => {
+      await cmdOpen(ctx, `${base}/relabel.html`);
+      await cmdSnapshot(ctx);
+      const save = await refNamed("Save");
+      const send = await refNamed("Send now");
+      await cmdEval(ctx, `(document.getElementById('save').style.${hide}, document.getElementById('send').style.${hide}, 1)`);
+      expect(await cmdHover(ctx, save)).toBe(`hovered ${save}`);
+      expect(await cmdHover(ctx, send)).toBe(`hovered ${send}`);
+    }, 60_000);
+  }
+
+  test("#80: a ref whose element changed its name is refused, exit 1, and the element is not clicked", async () => {
+    await cmdOpen(ctx, `${base}/relabel.html`);
+    await cmdSnapshot(ctx);
+    const buy = await refNamed("Buy A");
+    await cmdClick(ctx, buy);
+    const clicks = "String(window.clicks)";
+    expect(await cmdEval(ctx, clicks)).toBe("1");
+    const p = Bun.spawn({
+      cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", ctx.session, "click", buy],
+      env: process.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
+    expect(stderr).toContain(`ref '${buy}' now points to button "Delete account", not button "Buy A"; take a new snapshot`);
+    expect(code).toBe(1);
+    expect(await cmdEval(ctx, clicks)).toBe("1");
   }, 60_000);
 
   test("refs from the current snapshot work for click, fill, hover, select, check and uncheck", async () => {

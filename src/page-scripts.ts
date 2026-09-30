@@ -40,13 +40,11 @@ const CSS_PATH = String.raw`
     return 'html > ' + chain(el);
   }`;
 
-// The rule behind the snapshot's [disabled], inlined into SNAPSHOT_SCRIPT and
-// resolveRefScript so `click`/`check`/`uncheck` refuse exactly what the
-// snapshot marks (spec F20): a natively disabled control (a disabled
+// The rule behind the snapshot's [disabled], inlined into ROLE_NAME so
+// `click`/`check`/`uncheck` refuse exactly what the snapshot marks (spec F20): a natively disabled control (a disabled
 // <fieldset> included, except in its first legend), or aria-disabled="true"
-// on the element or an ancestor, for the roles that take it. The scope must
-// define tagOf(el) and ariaRole(el); ariaRole is asked only of the element
-// itself, never of an ancestor. Plain JavaScript under String.raw.
+// on the element or an ancestor, for the roles that take it. Plain
+// JavaScript under String.raw.
 const DISABLED = String.raw`
   const DISABLED_ROLES = ['application', 'button', 'composite', 'gridcell', 'group', 'input', 'link', 'menuitem',
     'scrollbar', 'separator', 'tab', 'checkbox', 'columnheader', 'combobox', 'grid', 'listbox', 'menu', 'menubar',
@@ -73,29 +71,11 @@ const DISABLED = String.raw`
   }
   const isDisabled = (el, role) => DISABLED_ROLES.includes(role) && ariaDisabled(el, false);`;
 
-// The snapshot walker, serialized into the page. It builds the aria tree from
-// document.body the way playwright-cli 0.1.x does (its injected script's
-// generateAriaTree, trimmed to what bowser prints: no iframes' contents, no
-// shadow DOM, no aria-owns) and returns SnapshotResult (src/snapshot.ts).
-// Written with String.raw, so backslashes below are plain JavaScript; the
-// only things this text may not contain are backticks and dollar-brace,
-// apart from the two interpolations, DISABLED and CSS_PATH.
-//
-// Refs: every visible node that receives pointer events gets `e<N>`, in DOM
-// pre-order. The element -> {ref, role, name} map, the reverse ref ->
-// WeakRef(element) map and the counter live on window, so a ref survives
-// between snapshots of one document while the element's role and name are
-// unchanged, and a new document starts at e1. Each ref is saved with its
-// CSS_PATH; an action resolves the ref through the reverse map first
-// (resolveRefScript) and uses a path computed at that moment.
-export const SNAPSHOT_SCRIPT = String.raw`(() => {
-  const KEY = Symbol.for('bowser.aria-refs');
-  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
-  // A store from a previous bowser version has no byRef.
-  if (!store.byRef) store.byRef = new Map();
-  // Forget refs whose element is gone, so byRef does not grow with every re-render.
-  for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
-
+// The walker's roles, visibility and accessible names (with DISABLED),
+// shared by SNAPSHOT_SCRIPT and resolveRefScript: an action checks a ref
+// against the role and name the snapshot gave it, by the same rules.
+// Plain JavaScript under String.raw.
+const ROLE_NAME = String.raw`
   const styleCache = new Map();
   const styleOf = (el) => {
     let s = styleCache.get(el);
@@ -283,6 +263,16 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     'insertion', 'list', 'listitem', 'mark', 'none', 'paragraph', 'presentation', 'region', 'row', 'rowgroup',
     'section', 'strong', 'subscript', 'superscript', 'table', 'term', 'time'];
   const nameHidden = (el) => hiddenSubtree(el) || styleHidden(el);
+  // Inside a root that is hidden now (o.hiddenRoot), styleHidden without what
+  // the root's own hiding causes: a closed <details> around it, the
+  // visibility its descendants inherit.
+  function hiddenUnder(el, root) {
+    if (hiddenSubtree(el)) return true;
+    const ds = el.closest('details,summary');
+    if (ds && ds !== el && ds !== root && root.contains(ds) && tagOf(ds) === 'DETAILS' && !ds.open) return true;
+    if (tagOf(el) === 'OPTION' && el.closest('select')) return false;
+    return styleOf(el).visibility !== 'visible' && styleOf(root).visibility === 'visible';
+  }
   const idRefs = (el, attr) => {
     const ids = (el.getAttribute(attr) || '').split(' ').filter(Boolean);
     const out = [];
@@ -300,11 +290,14 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     return null;
   };
 
-  // o: { visited: Set, mode: 'self' | 'descendant' | undefined, embedded: bool, labelledBy: bool, hiddenOk: bool }
+  // o: { visited: Set, mode: 'self' | 'descendant' | undefined, embedded: bool, labelledBy: bool, hiddenOk: bool, hiddenRoot: Element }
   function textAlt(el, o) {
     if (o.visited.has(el)) return '';
     const child = Object.assign({}, o, { mode: o.mode === 'self' ? 'descendant' : o.mode });
-    if (!o.hiddenOk && nameHidden(el)) { o.visited.add(el); return ''; }
+    if (!o.hiddenOk && (o.hiddenRoot ? el !== o.hiddenRoot && hiddenUnder(el, o.hiddenRoot) : nameHidden(el))) {
+      o.visited.add(el);
+      return '';
+    }
     const labelledBy = el.hasAttribute('aria-labelledby') ? idRefs(el, 'aria-labelledby') : null;
     if (!o.labelledBy && labelledBy) {
       const s = labelledBy.map((r) => textAlt(r, { visited: o.visited, embedded: true, labelledBy: true, hiddenOk: nameHidden(r) })).join(' ');
@@ -415,11 +408,36 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     parts.push(cssContent(el, '::after'));
     return parts.join('');
   }
-  function nameOf(el) {
+  function nameOf(el, hiddenRoot) {
     if (NO_NAME_ROLES.includes(ariaRole(el) || '')) return '';
-    const name = norm(textAlt(el, { visited: new Set(), mode: 'self' }));
+    const name = norm(textAlt(el, { visited: new Set(), mode: 'self', hiddenRoot }));
     return name.length > 900 ? '' : name;
-  }
+  }`;
+
+// The snapshot walker, serialized into the page. It builds the aria tree from
+// document.body the way playwright-cli 0.1.x does (its injected script's
+// generateAriaTree, trimmed to what bowser prints: no iframes' contents, no
+// shadow DOM, no aria-owns) and returns SnapshotResult (src/snapshot.ts).
+// Written with String.raw, so backslashes below are plain JavaScript; the
+// only things this text may not contain are backticks and dollar-brace,
+// apart from the interpolation of ROLE_NAME.
+//
+// Refs: every visible node that receives pointer events gets `e<N>`, in DOM
+// pre-order. The element -> {ref, role, name} map, the reverse ref ->
+// WeakRef(element) map and the counter live on window, so a ref survives
+// between snapshots of one document while the element's role and name are
+// unchanged, and a new document starts at e1. Each ref is saved with its
+// CSS_PATH; an action resolves the ref through the reverse map first
+// (resolveRefScript) and uses a path computed at that moment.
+export const SNAPSHOT_SCRIPT = String.raw`(() => {
+  const KEY = Symbol.for('bowser.aria-refs');
+  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
+  // A store from a previous bowser version has no byRef.
+  if (!store.byRef) store.byRef = new Map();
+  // Forget refs whose element is gone, so byRef does not grow with every re-render.
+  for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
+
+  ${ROLE_NAME}
 
   // ---- state attributes ----
   const CHECKED_ROLES = ['checkbox', 'menuitemcheckbox', 'option', 'radio', 'switch', 'menuitemradio', 'treeitem'];
@@ -942,24 +960,29 @@ export function runCodeScript(code: string): string {
 
 /** The ref's element in the live page, as a CSS_PATH computed now, or null
  *  when it is gone: no ref store (a new document), a ref this document never
- *  handed out, an element collected or no longer connected. It also scrolls
+ *  handed out, an element collected or no longer connected. An element whose
+ *  role or name (as the snapshot computes them) differs from the saved ref's
+ *  answers { changed: { role, name } }, before any scroll. It also scrolls
  *  the element to the centre when it is outside the viewport or its centre
  *  point is covered (a fixed header), as playwright-cli does before acting:
  *  WebKit's native click waits for its target to be hittable, so a link below
  *  the fold timed out (spec F8). Here it costs no round trip. */
-export function resolveRefScript(ref: string, opts: { enabled?: boolean } = {}): string {
-  // With `enabled`, a disabled element (DISABLED, the snapshot's rule, with
-  // the role the snapshot gave it) answers { disabled: true } instead, before
-  // any scroll: click, check and uncheck refuse it at no extra round trip.
+export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean } = {}): string {
+  // With `enabled`, a disabled element (DISABLED, the snapshot's rule)
+  // answers { disabled: true } instead, before any scroll: click, check and
+  // uncheck refuse it at no extra round trip.
   const enabled = opts.enabled ? String.raw`
-  const tagOf = (x) => x.tagName.toUpperCase();
-  const ariaRole = (x) => store.refs?.get(x)?.role || null;
-  ${DISABLED}
-  if (isDisabled(el, ariaRole(el))) return { disabled: true };` : "";
+  if (isDisabled(el, role)) return { disabled: true };` : "";
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
-  const el = store?.byRef?.get(${JSON.stringify(ref)})?.deref();
-  if (!el || !el.isConnected) return null;${enabled}
+  const el = store?.byRef?.get(${JSON.stringify(ref.id)})?.deref();
+  if (!el || !el.isConnected) return null;
+  ${ROLE_NAME}
+  const role = tagOf(el) === 'IFRAME' ? 'iframe' : ariaRole(el) || 'generic';
+  // Named as if shown when hidden now: a hidden element's name is '', and
+  // an action on a hidden ref must still go through (tests/e2e-stale-ref.test.ts).
+  const name = role === 'iframe' ? '' : nameOf(el, nameHidden(el) ? el : undefined);
+  if (role !== ${JSON.stringify(ref.role)} || name !== ${JSON.stringify(ref.name)}) return { changed: { role, name } };${enabled}
   const r = el.getBoundingClientRect();
   const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
   // In view but under something else, like a fixed header: the point a
