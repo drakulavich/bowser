@@ -215,7 +215,9 @@ async function openCommand(session: string): Promise<string> {
   const profile = (await loadState(session))?.profile;
   if (profile === undefined) return existsSync(profileDir(session)) ? "bowser open --persistent" : "bowser open";
   if (profile === null) return "bowser open";
-  return profile === profileDir(session) ? "bowser open --persistent" : `bowser open --profile=${profile}`;
+  if (profile === profileDir(session)) return "bowser open --persistent";
+  const path = /[^A-Za-z0-9_./-]/.test(profile) ? `'${profile.replaceAll("'", "'\\''")}'` : profile;
+  return `bowser open --profile=${path}`;
 }
 
 /** Why bowser cannot start a daemon off macOS: its only engine is WebKit's

@@ -233,6 +233,16 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
       expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --profile=${dir}'`);
     });
 
+    test("quotes a custom profile path when the shell would split it", async () => {
+      const session = "rec-spaces";
+      const dir = join(tmp, "custom profile's");
+      await crashed(session, { profile: dir });
+      const quoted = `'${dir.replaceAll("'", "'\\''")}'`;
+      expect(await refusal(session)).toBe(
+        `session '${session}' is not open (its browser exited); run 'bowser open --profile=${quoted}'`,
+      );
+    });
+
     test("no profile: plain open, even with a profile directory left on disk", async () => {
       const session = "rec-none";
       await crashed(session, { profile: null });

@@ -168,10 +168,10 @@ describe("open --persistent / --profile", () => {
     expect(seen[0]?.profile).toBe(dir);
   });
 
-  test("no flag hands the daemon no profile and asks it nothing extra", async () => {
+  test("no flag hands the daemon no profile", async () => {
     const { seen, calls } = await openWith({});
     expect(seen[0]?.profile).toBeUndefined();
-    expect(calls().map(([op]) => op)).toEqual(["navigate", "state"]);
+    expect(calls().map(([op]) => op)).toEqual(["state", "navigate", "state"]);
   });
 
   test("records the profile the daemon reports, or null for none (#93)", async () => {
@@ -185,6 +185,23 @@ describe("open --persistent / --profile", () => {
     // A daemon already running on a store: plain `open` records that store.
     await openWith({}, { profile: dir });
     expect((await loadState(session))?.profile).toBe(dir);
+  });
+
+  test("a failed open records the profile of the daemon it started", async () => {
+    const previous = join(tmp, "previous-profile");
+    const current = join(tmp, "current profile");
+    await saveState({ name: session, url: "https://old", title: "Old", refs: [], updatedAt: 1, profile: previous });
+    const client = fakeClient({
+      state: () => ({ url: "about:blank", title: "", profile: current }),
+      navigate: () => { throw new Error("navigation failed"); },
+    });
+    const connect: CommandContext["connect"] = async () => client;
+    const error = await cmdOpen(ctx({ connect }), "https://unreachable.example", {}).then(
+      () => undefined,
+      (err: Error) => err,
+    );
+    expect(error?.message).toBe("navigation failed");
+    expect((await loadState(session))?.profile).toBe(current);
   });
 
   test("snapshot keeps the recorded profile (#93)", async () => {
