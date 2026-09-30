@@ -5,6 +5,7 @@
 //
 //   BOWSER_E2E=1 bun test tests/e2e-session-claim.test.ts
 
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -16,13 +17,27 @@ import type { CommandContext } from "../src/commands/context.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
-import { ensureSessionDir, sessionDir } from "../src/state.ts";
+import { ensureSessionDir, profileDir, sessionDir } from "../src/state.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.skip;
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
+
+function storedOnDisk(profile: string, key: string): boolean {
+  for (const f of new Bun.Glob("Origins/*/*/LocalStorage/localstorage.sqlite3").scanSync(profile)) {
+    try {
+      const db = new Database(join(profile, f), { readonly: true });
+      try {
+        if (db.query("SELECT 1 FROM ItemTable WHERE key = ?").get(key)) return true;
+      } finally {
+        db.close();
+      }
+    } catch {}
+  }
+  return false;
+}
 
 runOrSkip("e2e: sessions (F28, F29)", () => {
   let tmp: string;
@@ -84,6 +99,11 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
     const ctx: CommandContext = { session: s, json: false };
     await cmdOpen(ctx, url, { persistent: true });
     await cmdEval(ctx, "(localStorage.setItem('pre', '1'), 1)");
+    // WebKit commits localStorage ~500 ms after a write; a kill before that loses it (#87).
+    expect(
+      await waitFor(() => storedOnDisk(profileDir(s), "pre")),
+      `localStorage key 'pre' never reached ${profileDir(s)} on disk`,
+    ).toBe(true);
     const pid = Number((await Bun.file(pidPath(s)).text()).trim());
     process.kill(pid, "SIGKILL");
     expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
