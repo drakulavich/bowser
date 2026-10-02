@@ -157,7 +157,7 @@ runOrSkip("e2e: real browser", () => {
           const at = JSON.parse(out).url as string;
           return at.includes(`long-${i}`) ? "landed" : at.slice(0, 80);
         }),
-        Bun.sleep(opTimeoutMs() / 2).then(() => `goto ${i} still pending at half its budget`),
+        Bun.sleep((opTimeoutMs() || 30_000) / 2).then(() => `goto ${i} still pending at half its budget`),
       ]);
       expect(got).toBe("landed");
     }
@@ -186,7 +186,7 @@ runOrSkip("e2e: real browser", () => {
         const link = (await loadState(session))?.refs.find((r) => r.role === "link");
         const got = await Promise.race([
           cmdClick({ session, json: false }, link!.id).then(async () => (await loadState(session))?.url ?? ""),
-          Bun.sleep(opTimeoutMs() / 2).then(() => `click ${i} still pending at half its budget`),
+          Bun.sleep((opTimeoutMs() || 30_000) / 2).then(() => `click ${i} still pending at half its budget`),
         ]);
         expect(got).toContain(`/long?${i}-aaa`);
       }

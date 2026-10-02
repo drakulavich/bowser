@@ -47,10 +47,11 @@ const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
 const SLOW_MS = 3000;
-/** openWith's retry window, from its start. It may overrun by one budget,
- *  so a test that opens with it adds both to its own timeout. */
+/** openWith's retry window, from the end of its first open. That open and
+ *  the last retry each take up to a budget, so a test that opens with it
+ *  adds the window and two budgets to its own timeout. */
 const OPEN_MS = 20_000;
-const openTimeout = (budgetMs: number, bodyMs: number): number => OPEN_MS + budgetMs + bodyMs;
+const openTimeout = (budgetMs: number, bodyMs: number): number => OPEN_MS + 2 * budgetMs + bodyMs;
 /** #98: Send posts to a server that never answers; 11 s later, after the
  *  navigation watch has given up, a script replaces that POST with another
  *  navigation that never answers either. */
@@ -77,8 +78,8 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     process.env.BOWSER_OP_TIMEOUT_MS = String(budgetMs);
     sessions.push(session);
     const ctx: CommandContext = { session, json: false };
-    const deadline = performance.now() + OPEN_MS;
     let landed = await timed(() => cmdOpen(ctx, `${base}/`));
+    const deadline = performance.now() + OPEN_MS;
     while (landed.error !== undefined) {
       expect(landed.error).toContain("timed out after");
       if (performance.now() > deadline) throw new Error(`setup: ${session} never reached ${base}/: ${landed.error}`);
