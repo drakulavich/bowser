@@ -1,7 +1,7 @@
 # Refs belong to the document they came from (#105)
 
 **Issue:** #105. It replaces #102 and the closed PR #104.
-**Status:** draft for review, 2026-10-02.
+**Status:** approved on #108, 2026-10-02.
 
 ## Goal
 
@@ -41,7 +41,9 @@ Refs are not cleared when the state is saved. `syncState` stays as it is. Cleari
 
 ### 3. The resolve waits for a pending navigation
 
-The resolve goes to the daemon as a new op, `resolve` (`args: [expr]`, result as `evaluate`), and `resolve` joins `ACTS` (`server.ts:475`). That gives it the pending-navigation wait `click` already has (`server.ts:343`, `361-371`) and the dialog shim sync of an action. It also scrolls the element into view, which is an action on the page, and CLAUDE.md puts those in `ACTS`. Its handler is `browser.evaluate(expr)`. `liveSelector` sends `resolve` instead of `evaluate`; no other caller changes.
+The resolve goes to the daemon as a new op, `resolve` (`args: [expr]`, result as `evaluate`). The daemon's handler gives it the pending-navigation wait `click` already has (`server.ts:343`, `361-371`) and then runs `browser.evaluate(expr)`. `liveSelector` sends `resolve` instead of `evaluate`; no other caller changes.
+
+`resolve` is not in `ACTS`. A first draft put it there, but every `ACTS` op runs inside the navigation watch (`tests/browser.test.ts:884`), and that adds the watch's 100 ms grace window to every ref command. The resolve's only side effect is a scroll into view.
 
 With the wait, path 2 resolves in the document that landed. That document has no store, or one with another id, so the ref fails before the click is sent. If the navigation is still pending when the budget ends, the command fails with the existing `page is still loading <url>; retry later, or run 'bowser close'`, exit 2, as a `click` does today in that state.
 
@@ -55,12 +57,9 @@ A ref whose document is gone fails with a `UserError`, exit 1, before any action
 ref 'e2' is from a page that is no longer loaded; take a new snapshot
 ```
 
-Two designs are equally simple here and differ in what the user reads. Both use the same check and cover the same paths.
+This message covers every document mismatch, including a document with no store, which today reads "not found". The agent learns that the page changed, not that an element went away, and "take a new snapshot" matches the #91 message. The goto and reload cases change their message: `tests/e2e-stale-ref.test.ts:129-156` and `170-185` expect the new text, and README (line 178) and `skills/bowser/SKILL.md` (line 106) describe both messages. `ref 'eN' not found …` stays for an element gone from the same document.
 
-- **A (recommended): the new message above for every document mismatch,** including a document with no store, which today reads "not found". The agent learns that the page changed, not that an element went away, and "take a new snapshot" matches the #91 message. The cost is a changed message for the goto and reload cases: `tests/e2e-stale-ref.test.ts:129-156` and `170-185` expect the new text, and README (line 178) and `skills/bowser/SKILL.md` (line 106) describe both messages.
-- **B: keep `ref 'e2' not found in the current page snapshot. Try capturing new snapshot.` for a document mismatch too.** That is playwright-cli's text (README line 178 says "as in playwright-cli"), so no existing test or doc changes. The agent cannot tell a navigation from a re-render.
-
-`ref 'eN' not found …` stays for an element gone from the same document, under both.
+Considered: keeping playwright-cli's `not found` text for a mismatch too. It changes no existing test or doc, but the agent cannot tell a navigation from a re-render. The owner chose the new message on #108.
 
 ### 5. Interplay
 
@@ -76,16 +75,16 @@ Two designs are equally simple here and differ in what the user reads. Both use 
 
 ## Definition of done
 
-1. **Back-forward path fixed.** An e2e test with two pages that each have `button "OK"` at the same ref: `open` A, `snapshot`, `click` the link to B, `snapshot`, `go-back`, `click` the OK ref. On main it exits 0 and A's title changes. After the change it fails with `ref 'e2' is from a page that is no longer loaded; take a new snapshot` (or the B text, if B is chosen), exit 1, and A's title is unchanged.
+1. **Back-forward path fixed.** An e2e test with two pages that each have `button "OK"` at the same ref: `open` A, `snapshot`, `click` the link to B, `snapshot`, `go-back`, `click` the OK ref. On main it exits 0 and A's title changes. After the change it fails with `ref 'e2' is from a page that is no longer loaded; take a new snapshot`, exit 1, and A's title is unchanged.
 2. **Pending-navigation path fixed.** An e2e test with a link to a page served after the 10 s navigation cap (14 s in the probe): `click` the link returns, then `click` the OK ref. On main it clicks the new page's button, exit 0. After the change it fails with the message, exit 1, and the new page's title is unchanged. A variant that runs the second `click` with `BOWSER_OP_TIMEOUT_MS=2000`, while about 4 s of the navigation remain, fails with `page is still loading …`, exit 2, and clicks nothing.
 3. **Lost-save path fixed.** An e2e test: `snapshot` the kitchen-sink page, `goto` the same URL, run `SNAPSHOT_SCRIPT` through `eval` (a snapshot whose save was lost), `click` the saved Submit ref. On main it clicks, exit 0. After the change it fails with the message, exit 1.
 4. **Same document kept.** After `snapshot`, `eval history.pushState({}, '', '/other')` and then `eval location.hash = 'x'`, a ref still clicks, exit 0.
 5. **Exact message and exit code.** `tests/exit-codes.test.ts` has a `click e1` case whose `resolve` answers `{ gone: true }`, with the message on stderr and exit 1. A unit test in `tests/commands.test.ts` checks that `liveSelector` sends `resolve` with the saved `doc`.
 6. **Daemon.** A `tests/daemon-handler.test.ts` case shows `resolve` waiting for a pending navigation, as `click` does.
-7. **Existing behaviour.** The #91 tests, the `e2e-stale-ref` tests (with the message updated under A), the ET-10 tests in `tests/e2e-known-state.test.ts` and `tests/e2e-hangs.test.ts`, and the MCP tests pass. A snapshot on a store from a previous version gets an id and keeps its numbering (`tests/e2e-stale-ref.test.ts:162-168`).
+7. **Existing behaviour.** The #91 tests, the `e2e-stale-ref` tests (with the message updated), the ET-10 tests in `tests/e2e-known-state.test.ts` and `tests/e2e-hangs.test.ts`, and the MCP tests pass. A snapshot on a store from a previous version gets an id and keeps its numbering (`tests/e2e-stale-ref.test.ts:162-168`).
 8. **Tests seen failing.** Items 1 to 3 and 5 to 6 fail on main and pass after.
 9. **Checks.** `bun run check` and `BOWSER_E2E=1 bun test` pass. CI is green.
-10. **Docs.** README and `skills/bowser/SKILL.md` describe the message (under A), and CHANGELOG `[Unreleased]` has an entry.
+10. **Docs.** README and `skills/bowser/SKILL.md` describe the message, and CHANGELOG `[Unreleased]` has an entry.
 11. **Review and issue.** A Codex review ends with no open Critical or Required finding, and the PR closes #105.
 
 ## Out of scope
