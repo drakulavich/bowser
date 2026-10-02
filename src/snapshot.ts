@@ -27,6 +27,7 @@ export interface SnapshotResult {
   title: string;
   tree: Array<AriaNode | string>;  // top level after generic collapse (usually one node)
   refs: Ref[];                     // every ref-bearing node, for state.json
+  doc: string;                     // the document's id; its refs resolve only there
 }
 
 const YAML_WORDS = ["y", "n", "yes", "no", "true", "false", "on", "off", "null"];

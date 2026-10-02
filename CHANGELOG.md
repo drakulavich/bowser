@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A ref acts only on the page whose snapshot gave it.** After `go-back` restored a page from the
+  back-forward cache, a ref from the page just left clicked the restored page's element with the
+  same ref, role and name, exit code 0. After a click left a slow navigation pending, the next ref
+  command found its element on the old page and clicked the same spot on the new one. A snapshot
+  now saves the page's id with its refs, a ref command waits for a pending navigation before it
+  looks the ref up, and a ref from another page fails with `ref 'eN' is from a page that is no
+  longer loaded; take a new snapshot`, exit code 1. That message replaces `not found` for a ref
+  from before a navigation or reload; `pushState` and `#hash` changes keep the refs. (#105)
+
 ## [0.10.1] — 2026-09-30
 
 ### Fixed

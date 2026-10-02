@@ -426,14 +426,17 @@ const ROLE_NAME = String.raw`
 // pre-order. The element -> {ref, role, name} map, the reverse ref ->
 // WeakRef(element) map and the counter live on window, so a ref survives
 // between snapshots of one document while the element's role and name are
-// unchanged, and a new document starts at e1. Each ref is saved with its
+// unchanged, and a new document starts at e1. The store's random `doc` id
+// is saved with the refs, so they resolve in no other document (#105), even
+// one that numbers its own refs the same. Each ref is saved with its
 // CSS_PATH; an action resolves the ref through the reverse map first
 // (resolveRefScript) and uses a path computed at that moment.
 export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const KEY = Symbol.for('bowser.aria-refs');
   const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
-  // A store from a previous bowser version has no byRef.
+  // A store from a previous bowser version has no byRef or doc.
   if (!store.byRef) store.byRef = new Map();
+  if (!store.doc) store.doc = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
   // Forget refs whose element is gone, so byRef does not grow with every re-render.
   for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
 
@@ -583,7 +586,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   mergeText(root);
   collapse(root);
   for (const c of root.children) if (typeof c !== 'string') markCursor(c, true);
-  return { url: location.href, title: document.title, tree: root.children, refs };
+  return { url: location.href, title: document.title, tree: root.children, refs, doc: store.doc };
 })()`;
 
 // The WebKit dialog shim (dialogs spec, item 5). WebKit has no dialog events:
@@ -958,16 +961,17 @@ export function runCodeScript(code: string): string {
 })()`;
 }
 
-/** The ref's element in the live page, as a CSS_PATH computed now, or null
- *  when it is gone: no ref store (a new document), a ref this document never
- *  handed out, an element collected or no longer connected. An element whose
+/** The ref's element in the live page, as a CSS_PATH computed now.
+ *  { gone: true } when the page is not the document `doc` names: no ref
+ *  store, or another store's id. null when the element is gone: a ref this
+ *  document never handed out, an element collected or no longer connected. An element whose
  *  role or name (as the snapshot computes them) differs from the saved ref's
  *  answers { changed: { role, name } }, before any scroll. It also scrolls
  *  the element to the centre when it is outside the viewport or its centre
  *  point is covered (a fixed header), as playwright-cli does before acting:
  *  WebKit's native click waits for its target to be hittable, so a link below
  *  the fold timed out (spec F8). Here it costs no round trip. */
-export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean } = {}): string {
+export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean; doc?: string } = {}): string {
   // With `enabled`, a disabled element (DISABLED, the snapshot's rule)
   // answers { disabled: true } instead, before any scroll: click, check and
   // uncheck refuse it at no extra round trip.
@@ -975,6 +979,7 @@ export function resolveRefScript(ref: { id: string; role: string; name: string }
   if (isDisabled(el, role)) return { disabled: true };` : "";
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
+  if (store?.doc !== ${JSON.stringify(opts.doc ?? null)}) return { gone: true };
   const el = store?.byRef?.get(${JSON.stringify(ref.id)})?.deref();
   if (!el || !el.isConnected) return null;
   ${ROLE_NAME}

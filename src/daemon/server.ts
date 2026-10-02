@@ -268,6 +268,7 @@ const handlers: Handlers = {
   },
   navigate: (browser, url) => browser.navigate(url),
   evaluate: (browser, expr) => browser.evaluate(expr),
+  resolve: (browser, expr) => browser.evaluate(expr),
   click: (browser, selector) => browser.click(selector),
   type: (browser, text) => browser.type(text),
   press: (browser, key, modifiers) => browser.press(key, modifiers),
@@ -340,7 +341,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
     return dialogs;
   };
   const handle = async (req: DaemonRequest, deadline?: number): Promise<DaemonResponse> => {
-    const res = ACTS.has(req.op) ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
+    // A ref resolved before the pending navigation lands would be acted on
+    // in the next document (#105).
+    const res = ACTS.has(req.op) || req.op === "resolve" ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
     const dialogs = claim(req);
     return dialogs ? { ...res, dialogs } : res;
   };

@@ -957,7 +957,7 @@ describe("fill", () => {
     const c = fakeClient({ evaluate: resolving({ e2: "input" }) });
     await cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi");
     const ops = c.calls.map((cl) => cl[0]);
-    expect(ops).toEqual(["evaluate", "click", "evaluate", "type"]);
+    expect(ops).toEqual(["resolve", "click", "evaluate", "type"]);
   });
 
   // F13, F14: the page script fill already sends reports what it found; the
@@ -988,7 +988,7 @@ describe("fill", () => {
       const { err, ops } = await fillWith({ outcome: why, type: "text" });
       expect(err?.message).toBe(`ref 'e2' is not an editable element (${why})`);
       expect(reportFailure(err).code).toBe(1);
-      expect(ops).toEqual(["evaluate", "click", "evaluate"]);
+      expect(ops).toEqual(["resolve", "click", "evaluate"]);
     });
   }
 
@@ -1010,7 +1010,7 @@ describe("fill", () => {
   test("a value the page set itself is not typed again", async () => {
     const { out, ops } = await fillWith({ outcome: "set", type: "date" }, "2024-01-02");
     expect(out).toBe('filled e2 (textbox "Email")');
-    expect(ops).toEqual(["evaluate", "click", "evaluate"]);
+    expect(ops).toEqual(["resolve", "click", "evaluate"]);
   });
 
   test("the page script carries the text, and its failure does not echo it", async () => {
@@ -1222,7 +1222,7 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
       );
       expect(err.message).toBe(`ref '${ref}' is disabled`);
       expect(reportFailure(err).code).toBe(1);
-      expect(c.calls).toEqual([["evaluate", [resolveRefScript(REFS.find((r) => r.id === ref)!, { enabled: true })]]]);
+      expect(c.calls).toEqual([["resolve", [resolveRefScript(REFS.find((r) => r.id === ref)!, { enabled: true })]]]);
     });
   }
 
@@ -1234,7 +1234,7 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
     );
     expect(err.message).toBe("ref 'e5' is a radio button; select another option in its group to uncheck it");
     expect(reportFailure(err).code).toBe(1);
-    expect(c.calls.map(([op]) => op)).toEqual(["evaluate", "uncheck"]);
+    expect(c.calls.map(([op]) => op)).toEqual(["resolve", "uncheck"]);
   });
 
   test("uncheck the page accepts (an unchecked radio included) succeeds", async () => {
@@ -1394,18 +1394,29 @@ describe("ref commands resolve the ref in the live page first", () => {
   beforeEach(async () => {
     await ensureSessionDir(session);
     await Bun.write(join(sessionDir(session), "state.json"),
-      JSON.stringify({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() }));
+      JSON.stringify({ name: session, url: "https://x", title: "X", refs: REFS, doc: "doc-1", updatedAt: Date.now() }));
   });
 
   for (const [name, ref, op, run, enabled] of COMMANDS) {
     const saved = REFS.find((r) => r.id === ref)!;
-    const resolve = resolveRefScript(saved, { enabled });
+    const resolve = resolveRefScript(saved, { enabled, doc: "doc-1" });
+    test(`${name} on a ref from another document fails, exit 1, and sends no action (#105)`, async () => {
+      const c = fakeClient({ resolve: (e) => (e === resolve ? { gone: true } : undefined) });
+      const err = await run({ ...ctx(), connect: async () => c }).then(
+        (out) => { throw new Error(`expected a failure, got ${out}`); },
+        (e: Error) => e,
+      );
+      expect(err.message).toBe(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(c.calls).toEqual([["resolve", [resolve]]]);
+    });
+
     test(`${name} on a ref whose element is gone fails with playwright-cli's message and sends no action`, async () => {
       const c = fakeClient({ evaluate: resolving({ [ref]: null }) });
       await expect(run({ ...ctx(), connect: async () => c })).rejects.toThrow(
         new Error(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`),
       );
-      expect(c.calls).toEqual([["evaluate", [resolve]]]);
+      expect(c.calls).toEqual([["resolve", [resolve]]]);
     });
 
     test(`${name} on a ref whose element changed its role or name fails, exit 1, and sends no action`, async () => {
@@ -1418,13 +1429,13 @@ describe("ref commands resolve the ref in the live page first", () => {
         `ref '${ref}' now points to button "Delete account", not ${saved.role} "${saved.name}"; take a new snapshot`,
       );
       expect(reportFailure(err).code).toBe(1);
-      expect(c.calls).toEqual([["evaluate", [resolve]]]);
+      expect(c.calls).toEqual([["resolve", [resolve]]]);
     });
 
     test(`${name} acts on the fresh selector the page returns, not the saved one`, async () => {
       const c = fakeClient({ evaluate: resolving({ [ref]: `fresh-${ref}` }) });
       await run({ ...ctx(), connect: async () => c });
-      expect(c.calls[0]).toEqual(["evaluate", [resolve]]);
+      expect(c.calls[0]).toEqual(["resolve", [resolve]]);
       expect(c.calls.find(([o]) => o === op)?.[1][0]).toBe(`fresh-${ref}`);
       expect(JSON.stringify(c.calls)).not.toContain("saved-");
     });

@@ -48,6 +48,8 @@ interface DaemonOps {
   "dialog-answer":  { args: [accept: boolean, text?: string];            result: void };
   navigate:         { args: [url: string];                               result: void };
   evaluate:         { args: [expr: string];                              result: unknown };
+  /** `evaluate` of a ref's resolve script, after any pending navigation. */
+  resolve:          { args: [expr: string];                              result: unknown };
   click:            { args: [selector: string];                          result: void };
   type:             { args: [text: string];                              result: void };
   press:            { args: [key: string, modifiers?: KeyModifier[]];    result: void };

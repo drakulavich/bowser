@@ -27,6 +27,8 @@ export interface SessionState {
   url: string;
   title: string;
   refs: Ref[];
+  /** The id of the document the refs came from (#105); absent before a snapshot. */
+  doc?: string;
   updatedAt: number;
   /** The profile directory `open` recorded, null for none; absent in state
    *  from an older bowser. null, not undefined: JSON drops undefined. */

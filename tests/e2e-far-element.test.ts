@@ -35,6 +35,12 @@ const COVERED = `<!doctype html><title>covered</title>
 <button id="under" onclick="document.body.dataset.clicked = 'yes'">Under</button>
 <div style="height: 3000px"></div>`;
 
+/** A button below the fold on a page that alerts on its first scroll. */
+const SCROLL_ALERT = `<!doctype html><title>scroll alert</title>
+<div style="height: 2500px">spacer</div>
+<button id="low" onclick="document.body.dataset.clicked = 'yes'">LowButton</button>
+<script>addEventListener('scroll', () => { if (!window.alerted) { window.alerted = 1; alert('scrolled'); } });</script>`;
+
 runOrSkip("e2e: click and fill reach an element below the fold", () => {
   const ctx: CommandContext = { session: "farelement", json: false };
   let tmp: string;
@@ -53,7 +59,7 @@ runOrSkip("e2e: click and fill reach an element below the fold", () => {
     process.env.BOWSER_OP_TIMEOUT_MS = "8000";
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response(new URL(req.url).pathname === "/covered" ? COVERED : LONG, {
+      fetch: (req) => new Response({ "/covered": COVERED, "/scroll-alert": SCROLL_ALERT }[new URL(req.url).pathname] ?? LONG, {
         headers: { "content-type": "text/html; charset=utf-8" },
       }),
     });
@@ -108,5 +114,21 @@ runOrSkip("e2e: click and fill reach an element below the fold", () => {
     expect(performance.now() - t0).toBeLessThan(5000);
     expect(await cmdEval(ctx, "document.body.dataset.clicked")).toBe("yes");
     expect(await cmdEval(ctx, "String(document.body.dataset.header)")).toBe("undefined");
+  }, 30_000);
+
+  test("a dialog the page opens while the target is scrolled into view is answered and reported", async () => {
+    await cmdOpen(ctx, `${base}/scroll-alert`);
+    await cmdSnapshot(ctx);
+    const low = await refNamed("LowButton");
+    const p = Bun.spawn({
+      cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", ctx.session, "click", low],
+      env: process.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stdout, stderr] = await Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+    expect(stdout).toContain('["alert" dialog with message "scrolled"]: dismissed');
+    expect(await cmdEval(ctx, "document.body.dataset.clicked")).toBe("yes");
   }, 30_000);
 });
