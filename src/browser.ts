@@ -321,9 +321,11 @@ function navigationWatch(
   // can tell a failure that another navigation replaced (below).
   let landed = 0;
   let arrived = 0;
+  let failure: Error | undefined;
   view.onNavigated = () => { landed++; arrived++; onNavigation(); };
-  view.onNavigationFailed = () => {
+  view.onNavigationFailed = (error) => {
     landed++;
+    failure = error;
     if (phase === "idle" && pendingAt === landed - 1) void replaced();
   };
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -385,6 +387,11 @@ function navigationWatch(
     if (landed !== before) return;
     const seen = await count(timing.graceMs);
     if (seen < 1) return;
+    await follow(seen, timing.settleMs);
+  };
+  /** Wait up to `capMs` for the pending navigation to land; the page
+   *  counted `seen` navigations when it began. */
+  const follow = async (seen: number, capMs: number): Promise<void> => {
     pendingSeen = seen;
     onNavigation();
     pendingAt = landed;
@@ -394,10 +401,11 @@ function navigationWatch(
     const began = Date.now();
     let base = landed;
     const baseArrived = arrived;
-    while (Date.now() - began < timing.settleMs) {
+    while (Date.now() - began < capMs) {
       if (arrived !== baseArrived) return;
       if (landed !== base) {
-        const now = await count(began + timing.settleMs - Date.now());
+        // setTimeout treats Infinity as 1 ms.
+        const now = await count(Math.min(began + capMs - Date.now(), timing.settleMs));
         if (now <= pendingSeen) return;
         pendingSeen = now;
         base = landed;
@@ -428,8 +436,9 @@ function navigationWatch(
       return typeof url === "string" && url ? url : view.url;
     },
     /** Run `action` and wait for a navigation it started; see above.
-     *  Answers what the action answered. */
-    async act<T>(action: () => Promise<T>): Promise<T> {
+     *  Answers what the action answered. An action that always `navigates`
+     *  waits for its landing with no grace or settle cap, as navigate does. */
+    async act<T>(action: () => Promise<T>, navigates = false): Promise<T> {
       phase = "acting";
       try {
         const before = landed;
@@ -440,11 +449,29 @@ function navigationWatch(
         await ask(NAV_ARM, timing.graceMs);
         const result = await action();
         phase = "awaiting-navigation";
-        await awaitNavigation(before, wasLoading);
+        if (!navigates) await awaitNavigation(before, wasLoading);
+        else if (landed === before) await follow(0, Infinity);
         return result;
       } finally {
         phase = "idle";
       }
+    },
+    /** Run `go`, a navigate(). WebKit answers it with the first landing
+     *  after it: when it cancels a navigation still loading (a reload's, a
+     *  page script's), that one's -999 rejects it while its own still loads
+     *  (#116, measured on Bun 1.4.2). Then this waits for the next landing. */
+    async navigate(url: string, go: () => Promise<void>): Promise<void> {
+      const before = landed;
+      const arrivedBefore = arrived;
+      try {
+        return await go();
+      } catch (err) {
+        if (!cancelled(err)) throw err;
+      }
+      while (landed - before < 2) await sleep(10);
+      if (arrived !== arrivedBefore) return;
+      if (failure && !cancelled(failure)) throw failure;
+      throw new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
     },
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
@@ -542,7 +569,7 @@ export function wrapView(
     navigationDestination: (maxWaitMs) => nav.destination(maxWaitMs),
     realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
-    navigate: (url) => guard(view.navigate(url)),
+    navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
     click: (selector) => guard(nav.act(() => view.click(selector))),
     type: (text) => guard(nav.act(() => view.type(text))),
@@ -572,13 +599,15 @@ export function wrapView(
     resize: (width, height) => guard(view.resize(width, height)),
     back: () => guard(nav.act(() => view.goBack())),
     forward: () => guard(nav.act(() => view.goForward())),
+    // Native reload() resolves before the reload commits, and nothing shows
+    // the reload until it lands: view.loading stays false and the page sees
+    // no navigate event (#116, measured on Bun 1.4.2). So its landing is
+    // always awaited, except where nothing has committed and reload() does
+    // nothing.
     reload: () => guard(nav.act(async () => {
-      // Native reload() resolves before the reload commits, like goBack();
-      // measured in the daemon: a navigate() 1 ms later was rejected with
-      // NSURLErrorDomain -999. The watch makes reload return once it lands.
       if (typeof view.reload === "function") await view.reload();
       else await evaluate(RELOAD);
-    })),
+    }, view.url !== "")),
     close: async () => {
       // WebKit commits localStorage in a transaction 500 ms after a write
       // (measured ~530 ms, also with the CPU saturated), and Bun force-kills
@@ -620,7 +649,12 @@ export function wrapView(
   };
 }
 
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+/** WebKit's failure for a navigation it cancelled. */
+function cancelled(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("NSURLErrorDomain error -999");
+}
+
+const PNG_SIGNATURE =[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /** Cheap sanity check that `bytes` is a real PNG: the 8-byte signature plus a
  *  plausible minimum length (a 1x1 PNG is ~67 bytes; the broken capture writes

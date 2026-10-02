@@ -7,6 +7,9 @@ import { CANCEL_PENDING_NAVIGATION, KEY_WATCH, keyCommandScript, LEAVE_INITIAL_D
 
 type Calls = Array<[string, unknown[]]>;
 
+/** WebKit's text for a navigation it cancelled. */
+const CANCELLED = "The operation couldn’t be completed. (NSURLErrorDomain error -999.)";
+
 type Fake = ViewLike & { calls: Calls; loading: boolean; url: string; land(url: string): void };
 
 function fakeView(over: Partial<ViewLike> = {}): Fake {
@@ -471,10 +474,48 @@ describe("wrapView navigation watch", () => {
   });
 
   test("reload falls back to location.reload() when the runtime lacks it", async () => {
-    const v = fakeView();
+    const v = fakeView({ evaluate: async (expr) => {
+      v.calls.push(["evaluate", [expr]]);
+      if (expr === "location.reload()") setTimeout(() => v.land("https://x/"), 10);
+      return undefined;
+    } });
     const b = wrapView(v, fast);
     await b.reload();
     expect(own(v.calls)).toEqual([["evaluate", ["location.reload()"]]]);
+  });
+
+  // #116: on WebKit a reload shows no sign before it lands: view.loading
+  // stays false, the page sees no navigate event, and the server may take
+  // longer than the grace window to answer.
+  test("reload waits for its landing past the grace and settle windows, as navigate does", async () => {
+    const v = fakeView({ reload: async () => { setTimeout(() => v.land("https://x/"), fast.settleMs + 100); } });
+    const b = wrapView(v, fast);
+    let during = "";
+    setTimeout(() => { during = b.phase; }, fast.graceMs * 3);
+    const t0 = Date.now();
+    await b.reload();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(fast.settleMs + 90);
+    expect(during).toBe("awaiting-navigation");
+    expect(b.navigationPending).toBe(false);
+  });
+
+  test("reload of a view where nothing has committed does not wait for a landing", async () => {
+    const v = fakeView({ reload: async () => {} });
+    v.url = "";
+    const b = wrapView(v, slow);
+    const t0 = Date.now();
+    await b.reload();
+    expect(Date.now() - t0).toBeLessThan(slow.settleMs);
+  });
+
+  test("a reload that a page script cancels waits for the script's navigation", async () => {
+    const { v, page } = pageNavView({ reload: async () => {
+      setTimeout(() => { page.navs = 1; v.onNavigationFailed?.(new Error(CANCELLED)); }, 30);
+      setTimeout(() => v.land("https://x/elsewhere"), 120);
+    } });
+    const b = wrapView(v, fast);
+    await b.reload();
+    expect(b.url).toBe("https://x/elsewhere");
   });
 
   test("reload prefers the native call and waits for its navigation to land", async () => {
@@ -515,6 +556,43 @@ describe("wrapView navigation watch", () => {
 // ET-10 (#78): a form POST to a server that never answers leaves a page
 // navigation pending after `click` returns; a selector click started then
 // hangs for good on WebKit, even once the page commits.
+// #116, measured on WebKit: navigate() answers the first landing after it.
+// When it cancels a navigation still loading (a reload's, a page script's),
+// that one's -999 comes first and rejects it, and its own lands just after.
+describe("navigate over a navigation still loading", () => {
+  /** A view whose navigate cancels a pending navigation, then fires `then`. */
+  function cancelling(then: (v: Fake, url: string) => void) {
+    const v = fakeView({ navigate: async (url) => {
+      v.onNavigationFailed?.(new Error(CANCELLED));
+      setTimeout(() => then(v, url), 30);
+      throw new Error(CANCELLED);
+    } });
+    return v;
+  }
+
+  test("waits for its own landing instead of failing with the cancelled one's -999", async () => {
+    const b = wrapView(cancelling((v, url) => v.land(url)), fast);
+    await b.navigate("https://x/next");
+    expect(b.url).toBe("https://x/next");
+  });
+
+  test("its own failure is reported", async () => {
+    const b = wrapView(cancelling((v) => v.onNavigationFailed?.(new Error("Could not connect to the server."))), fast);
+    await expect(b.navigate("https://x/next")).rejects.toThrow("Could not connect to the server.");
+  });
+
+  test("cancelled itself, it fails with bowser's message, not WebKit's", async () => {
+    const b = wrapView(cancelling((v) => v.onNavigationFailed?.(new Error(CANCELLED))), fast);
+    const err = await b.navigate("https://x/next").then(() => undefined, (e: Error) => e);
+    expect(err?.message).toBe("navigate: the navigation to https://x/next was cancelled by another navigation; run 'bowser snapshot' to see where the page is");
+  });
+
+  test("any other failure is reported at once", async () => {
+    const v = fakeView({ navigate: async () => { throw new Error("bad URL"); } });
+    await expect(wrapView(v, fast).navigate("nope")).rejects.toThrow("bad URL");
+  });
+});
+
 describe("a navigation a previous command left pending", () => {
   const slow = { graceMs: 20, settleMs: 60 };
   /** A view whose `#send` starts a page navigation to `to` that nothing
@@ -639,6 +717,7 @@ describe("a navigation a previous command left pending", () => {
     }
     for (const op of ["evaluate", "reload", "back", "navigate"] as const) {
       const v = submitted();
+      v.reload = async () => { setTimeout(() => v.land(v.url), 5); };
       const handle = createHandler(wrapView(v, slow));
       await handle({ id: 1, op: "click", args: ["#send"] });
       const res = await handle({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, Date.now() + 30);
