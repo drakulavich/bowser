@@ -83,7 +83,7 @@ runOrSkip("e2e: fill --stdin keeps a secret out of argv and output", () => {
       expect(run.stdout).not.toContain(secret);
       expect(run.stderr).not.toContain(secret);
       expect(run.argv.join("\0")).not.toContain(secret);
-      expect(run.stdout.trim()).toBe(json ? JSON.stringify({ ok: true, ref }) : `filled ${ref} (textbox "Password")`);
+      expect(run.stdout.trim()).toBe(json ? JSON.stringify({ ok: true, ref, element: { role: "textbox", name: "Password" } }) : `filled ${ref} (textbox "Password")`);
     }, 60_000);
   }
 });

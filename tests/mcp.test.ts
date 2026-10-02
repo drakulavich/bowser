@@ -339,7 +339,7 @@ describe("MCP positionals are data, never flags", () => {
           deps,
         );
         expect(res.result.isError).toBeFalsy();
-        expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, ref: "e1" });
+        expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, ref: "e1", element: { role: "textbox", name: "Email" } });
         expect(c.calls.filter(([op]) => op === "type")).toEqual([["type", [text]]]);
       } finally {
         process.env.HOME = prevHome;
@@ -700,4 +700,43 @@ describe("bowser mcp exits when its client is gone", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe("MCP ref tools name the element they acted on (#117)", () => {
+  const REFS = [
+    { id: "e1", role: "button", name: "Add to cart", tag: "button" },
+    { id: "e2", role: "textbox", name: "Password", tag: "input" },
+    { id: "e3", role: "combobox", name: "Color", tag: "select" },
+    { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
+  ];
+  const SECRET = "hunter2-S3cr3t!";
+  for (const [tool, args, expected] of [
+    ["click", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" }, url: "" }],
+    ["fill", { ref: "e2", text: SECRET }, { ok: true, ref: "e2", element: { role: "textbox", name: "Password" } }],
+    ["hover", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" } }],
+    ["select", { ref: "e3", value: "red" }, { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" }],
+    ["check", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
+    ["uncheck", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
+  ] as const) {
+    test(`${tool} returns the element's role and name`, async () => {
+      const home = await mkdtemp(join(tmpdir(), "bowser-mcp-element-"));
+      const prevHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        await saveState({ name: "el", url: "https://x", title: "X", updatedAt: Date.now(), refs: REFS });
+        const c = fakeClient({ evaluate: () => "sel" });
+        const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
+        const res: any = await handleMcpRequest(
+          { jsonrpc: "2.0", id: 13, method: "tools/call", params: { name: tool, arguments: { ...args, session: "el" } } },
+          deps,
+        );
+        expect(res.result.isError).toBeFalsy();
+        expect(JSON.parse(res.result.content[0].text)).toEqual(expected);
+        expect(JSON.stringify(res)).not.toContain(SECRET);
+      } finally {
+        process.env.HOME = prevHome;
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  }
 });

@@ -37,7 +37,7 @@ Do **not** use for static HTTP fetches.
 | `bowser goto <url>` | Navigate within current session. `open` and `goto` add a missing scheme: `http://` for `localhost`, `127.0.0.1`, `[::1]` (`localhost:3000/x`), `https://` otherwise (`example.com`); a URL with a scheme is used as typed |
 | `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited); `--filename` writes the `### Page` text to `f` and answers with its absolute path |
 | `bowser click <ref>` | Click an element by ref. A `[disabled]` one fails at once with exit 1 and is not clicked |
-| `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4"}`), with or without `--stdin`. Refuses a disabled or readonly field (exit 1). Sets `date`/`time`/`datetime-local`/`month`/`week`/`color` inputs directly (`fill e9 2024-01-02`); a value they do not keep, or text on `type=number`, fails with exit 1 |
+| `bowser fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type into a field. `--stdin` takes the text from piped input, minus one trailing newline, so a secret stays out of the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed back, plain or `--json` (`{"ok":true,"ref":"e4","element":{"role":"textbox","name":"Password"}}`), with or without `--stdin`. Refuses a disabled or readonly field (exit 1). Sets `date`/`time`/`datetime-local`/`month`/`week`/`color` inputs directly (`fill e9 2024-01-02`); a value they do not keep, or text on `type=number`, fails with exit 1 |
 | `bowser type <text>` | Type into focused element. Prints `typed N characters` (`typed 1 character` for one), never the text; `--json` gives `{"ok":true,"length":N}` |
 | `bowser press <key>` | Press a keyboard key or a combination: `Tab` moves focus to the next field, `Shift+Tab` back; `Meta+a` selects all (macOS keys: `Control+a` goes to the line start). Modifiers: `Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`. No `F1`–`F12`, lone modifiers or key codes (`KeyA`): those fail with `usage:`. `Meta+c/x/v` do not reach the clipboard |
 | `bowser hover <ref>` | Hover an element |
@@ -65,6 +65,8 @@ Do **not** use for static HTTP fetches.
 | `bowser state-save <file>` | Save localStorage to a Playwright `storageState` JSON file (`cookies` is always empty) |
 | `bowser state-load <file>` | Restore localStorage from a `storageState` file; cookies in it are skipped. A bad file names the wrong field and exits 1 |
 | `bowser mcp` | Run a Model Context Protocol stdio server exposing every command as an MCP tool |
+
+Under `--json` and over MCP, the ref commands (`click`, `fill`, `hover`, `select`, `check`, `uncheck`) add `"element":{"role":"…","name":"…"}`, the role and name the snapshot gave the ref. Compare it with the element you meant before acting on the result.
 
 **Global flags:** `-s=<name>` / `--session=<name>` (default `default`; letters, digits, `.`, `_`, `-`, at most 255 characters, fewer under a very long `HOME`), `--json`, `-h`/`--help`.
 

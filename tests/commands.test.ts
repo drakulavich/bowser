@@ -945,6 +945,30 @@ describe("click", () => {
   });
 });
 
+describe("--json of every ref command names the element (#117)", () => {
+  const REFS = [
+    { id: "e1", role: "link", name: "Home", tag: "a" },
+    { id: "e2", role: "textbox", name: "Email", tag: "input" },
+    { id: "e3", role: "combobox", name: "Color", tag: "select" },
+    { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
+  ];
+  for (const [argv, expected] of [
+    [["click", "e1"], { ok: true, ref: "e1", element: { role: "link", name: "Home" }, url: "" }],
+    [["fill", "e2", "hi"], { ok: true, ref: "e2", element: { role: "textbox", name: "Email" } }],
+    [["hover", "e1"], { ok: true, ref: "e1", element: { role: "link", name: "Home" } }],
+    [["select", "e3", "red"], { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" }],
+    [["check", "e4"], { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
+    [["uncheck", "e4"], { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
+  ] as const) {
+    test(`bowser --json ${argv.join(" ")}`, async () => {
+      await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+      const c = fakeClient({ evaluate: () => "sel" });
+      const out = await run(["-s", session, "--json", ...argv], { connect: async () => c });
+      expect(JSON.parse(out)).toEqual(expected);
+    });
+  }
+});
+
 describe("fill", () => {
   test("clicks, clears, types", async () => {
     await saveState({
@@ -1957,13 +1981,13 @@ describe("fill --stdin", () => {
 
   test("the --json answer has no text key and does not echo the text", async () => {
     const out = await cmdFill(sctx(`${SECRET}\n`, { json: true }), "e2", undefined, { stdin: true });
-    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2" });
+    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2", element: { role: "textbox", name: "Password" } });
     expect(out).not.toContain(SECRET);
   });
 
   test("fill <ref> <text> answers --json without the text", async () => {
     const out = await cmdFill(sctx("", { json: true }), "e2", SECRET);
-    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2" });
+    expect(JSON.parse(out)).toEqual({ ok: true, ref: "e2", element: { role: "textbox", name: "Password" } });
     expect(out).not.toContain(SECRET);
     expect(reads).toBe(0);
   });
