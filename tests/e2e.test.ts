@@ -15,7 +15,8 @@ import { reportFailure } from "../src/cli.ts";
 import { UserError } from "../src/errors.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
-import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
+import { opTimeoutMs } from "../src/budget.ts";
+import { cmdScreenshot, cmdSnapshot, maxCaptureHeight } from "../src/commands/snapshot.ts";
 import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
 import { loadState } from "../src/state.ts";
 
@@ -106,14 +107,14 @@ runOrSkip("e2e: real browser", () => {
     await cmdOpen({ session, json: false }, dataUrl);
     await cmdResize({ session, json: false }, "16384", "16384");
     try {
-      const [, , dpr] = JSON.parse(await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])")) as number[];
+      const [vw, , dpr] = JSON.parse(await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])")) as number[];
       // Only a display at pixel ratio 2 reaches the limit through resize: at
       // ratio 1, 16384x16384 is 1 GiB of pixels, and capturing that is slow
       // and not what this test is about. Not measured at ratio 1 (#69).
       if (dpr! < 2) return;
       const err = await cmdScreenshot({ session, json: false }, { filename: join(tmp, "e2e-huge.png") }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(UserError);
-      expect((err as Error).message).toContain("run 'bowser resize 16384 16383' or smaller");
+      expect((err as Error).message).toContain(`run 'bowser resize ${vw} ${maxCaptureHeight(vw!, dpr!)}' or smaller`);
       expect(reportFailure(err).code).toBe(1);
     } finally {
       await cmdResize({ session, json: false }, "800", "600");
@@ -156,7 +157,7 @@ runOrSkip("e2e: real browser", () => {
           const at = JSON.parse(out).url as string;
           return at.includes(`long-${i}`) ? "landed" : at.slice(0, 80);
         }),
-        Bun.sleep(5000).then(() => `goto ${i} still pending after 5 s`),
+        Bun.sleep(opTimeoutMs() / 2).then(() => `goto ${i} still pending at half its budget`),
       ]);
       expect(got).toBe("landed");
     }
@@ -166,7 +167,7 @@ runOrSkip("e2e: real browser", () => {
   // data: URL, so this one is served. Measured without the workaround, 0 of
   // 500 such clicks stalled (the host sends one large frame for them, not
   // navigate()'s two), so this pins the path rather than the bug.
-  test("a link click to a >8 KB URL lands, 20 times, within 5 s each", async () => {
+  test("a link click to a >8 KB URL lands, 20 times, within half its budget each", async () => {
     const q = "a".repeat(17_000);
     const server = Bun.serve({
       port: 0,
@@ -185,7 +186,7 @@ runOrSkip("e2e: real browser", () => {
         const link = (await loadState(session))?.refs.find((r) => r.role === "link");
         const got = await Promise.race([
           cmdClick({ session, json: false }, link!.id).then(async () => (await loadState(session))?.url ?? ""),
-          Bun.sleep(5000).then(() => `click ${i} still pending after 5 s`),
+          Bun.sleep(opTimeoutMs() / 2).then(() => `click ${i} still pending at half its budget`),
         ]);
         expect(got).toContain(`/long?${i}-aaa`);
       }
@@ -195,18 +196,26 @@ runOrSkip("e2e: real browser", () => {
   }, 120_000);
 
   // The workaround's second view costs a WebContent process; a session that
-  // never meets the bug must not open it.
+  // never meets the bug must not open it. The view opens once a call has been
+  // pending STALL_MS (1 s, src/browser.ts), which a loaded runner can reach
+  // on a short URL too, so a call that slow counts as meeting it.
   test("a session on short URLs never opens the kick view", async () => {
     const b = await openBrowser();
+    let slowest = 0;
+    const timed = async (p: Promise<unknown>) => {
+      const t0 = Date.now();
+      await p;
+      slowest = Math.max(slowest, Date.now() - t0);
+    };
     try {
-      await b.navigate(`data:text/html,${encodeURIComponent(html)}`);
-      await b.evaluate(SNAPSHOT_SCRIPT);
-      await b.click("#go");
-      await b.click("#more");
-      await b.realUrl();
-      await b.screenshot();
+      await timed(b.navigate(`data:text/html,${encodeURIComponent(html)}`));
+      await timed(b.evaluate(SNAPSHOT_SCRIPT));
+      await timed(b.click("#go"));
+      await timed(b.click("#more"));
+      await timed(b.realUrl());
+      await timed(b.screenshot());
       await Bun.sleep(1500);
-      expect(b.kickerOpened).toBe(false);
+      if (slowest < 1000) expect(b.kickerOpened).toBe(false);
     } finally {
       await b.close();
     }

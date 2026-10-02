@@ -424,25 +424,27 @@ describe("the queue-time budget", () => {
     // overrun it while running. It was not queued at its deadline, so it
     // gets no "waiting for" tail (seen on CI, run 36299769857).
     const replies: Array<[number, DaemonResponse]> = [];
+    const BUDGET = 1000, RUN = 600;
     const t0 = Date.now();
     const lane = {
       handle: async (req: DaemonRequest) => {
-        await Bun.sleep(150);
+        await Bun.sleep(RUN);
         return { id: req.id, ok: true as const };
       },
       serialize: createSerializer(),
-      timeoutMs: 200,
+      timeoutMs: BUDGET,
       reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
     };
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["location.href"] }, lane);
-    await Bun.sleep(400);
+    await waitFor(() => replies.length >= 2, 3 * BUDGET);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 1, ok: true },
-      { id: 2, ok: false, error: "'evaluate' timed out after 200ms" },
+      { id: 2, ok: false, error: `'evaluate' timed out after ${BUDGET}ms` },
     ]);
-    // Still bounded by its budget from receipt.
-    expect(replies[1]![0]).toBeLessThan(260);
+    // Still bounded by its budget from receipt (BUDGET), not from its start
+    // (RUN + BUDGET).
+    expect(replies[1]![0]).toBeLessThan(BUDGET + RUN / 2);
   });
 
   test("ping still answers at once while the queue is wedged past every budget", async () => {
