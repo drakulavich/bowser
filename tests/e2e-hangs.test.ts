@@ -352,7 +352,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     else expect(await cmdEval(ctx, "document.querySelector('[name=b]').value")).toBe("AFTER");
 
     // The daemon's budget is 30 s; the timeout names the command's own.
-    const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise(() => {})"));
+    // The page holds the resolver: JSC collects an unreachable promise and
+    // WebKit then rejects the evaluate "no longer reachable" (#100).
+    const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
     expect(hung.error).toBe("'eval' timed out after 3000ms (in its 'evaluate' step)");
 
     const close = await timed(() => cmdClose(ctx));
