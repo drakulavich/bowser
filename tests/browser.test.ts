@@ -518,6 +518,19 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/elsewhere");
   });
 
+  test("reload waits when the cancelled navigation fails before reload resolves", async () => {
+    const { v, page } = pageNavView({ reload: async () => {
+      setTimeout(() => { page.navs = 1; v.onNavigationFailed?.(new Error(CANCELLED)); }, 10);
+      await Bun.sleep(30);
+      setTimeout(() => v.land("https://x/elsewhere"), 40);
+    } });
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    await b.reload();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(35);
+    expect(b.url).toBe("https://x/elsewhere");
+  });
+
   test("reload prefers the native call and waits for its navigation to land", async () => {
     // Native reload() resolves before the reload commits (measured), so the
     // fake resolves at once with loading=true and lands 60 ms later.

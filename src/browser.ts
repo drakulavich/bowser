@@ -447,10 +447,11 @@ function navigationWatch(
         // action the full settleMs. The page flag is cleared for the same reason.
         const wasLoading = view.loading;
         await ask(NAV_ARM, timing.graceMs);
+        const arrivedBefore = arrived;
         const result = await action();
         phase = "awaiting-navigation";
         if (!navigates) await awaitNavigation(before, wasLoading);
-        else if (landed === before) await follow(0, Infinity);
+        else if (arrived === arrivedBefore) await follow(0, Infinity);
         return result;
       } finally {
         phase = "idle";
