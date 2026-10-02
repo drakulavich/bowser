@@ -810,13 +810,14 @@ describe("a stuck session", () => {
   });
 
   test("requests already queued when the mark is set are answered stuck at once", async () => {
-    const { lane, replies, started, release } = stuckLanes(async () => false, 60_000);
+    const { lane, replies, started, release, t0 } = stuckLanes(async () => false, 60_000);
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
     await Bun.sleep(5);
     // Before the mark (~40 ms): one queued at the serializer behind op 1, one
     // at the gate behind connection A, which holds it for its 60 s idle time,
     // so only the mark can answer op 3 before its own 1 s budget does.
+    const queuedAt = Date.now() - t0;
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(A, 1000));
     dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane({}, 1000));
     await waitFor(() => replies.length >= 3, 3000);
@@ -825,6 +826,7 @@ describe("a stuck session", () => {
       { id: 2, ok: false, error: STUCK("evaluate") },
       { id: 3, ok: false, error: STUCK("evaluate") },
     ]);
+    expect(replies[2]![0] - queuedAt).toBeLessThan(500);
     release();
     await Bun.sleep(80);
     expect(started).toEqual([1]);
