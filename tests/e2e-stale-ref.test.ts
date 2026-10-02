@@ -177,6 +177,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     await cmdSnapshot(ctx);
     const ids = (await loadState(ctx.session))!.refs.map((r) => Number(r.id.slice(1)));
     expect(Math.min(...ids)).toBe(6);
+    expect((await loadState(ctx.session))!.doc).toMatch(/^[0-9a-f]{32}$/);
   }, 60_000);
 
   test("an action on a page with a previous version's ref store is refused as from another page, exit 1", async () => {
