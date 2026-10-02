@@ -80,19 +80,24 @@ export function emptyState(name: string): SessionState {
 export async function loadRef(session: string, ref: string) {
   const prev = await loadState(session);
   if (!prev) throw new UserError("no open page. Run 'bowser open <url>' first.");
-  return { prev, target: resolveRef(prev, ref) };
+  return { prev, target: resolveRef(prev, ref), doc: prev.doc };
 }
 
 /** The selector of the ref's element in the live page, computed now. A ref
- *  whose element is gone (removed, or from a previous document) fails here,
- *  before any action, with playwright-cli's message; acting on the saved
+ *  from another document than `doc`, the one its snapshot ran in, fails here
+ *  (#105). The resolve waits for a pending navigation, so it runs in the
+ *  document the action will land in. A ref whose element is
+ *  gone fails before any action with playwright-cli's message; acting on the saved
  *  selector instead would wait out the op timeout or hit whatever element
  *  moved into its place. So does one whose element's role or name changed
  *  since the snapshot (#80). With `enabled`, a disabled element fails too, at
  *  once, and nothing is clicked (F20). One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean } = {}): Promise<string> {
+export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean; doc?: string } = {}): Promise<string> {
   const ref = target.id;
-  const selector = await c.request("evaluate", [resolveRefScript(target, opts)]);
+  const selector = await c.request("resolve", [resolveRefScript(target, opts)]);
+  if ((selector as { gone?: unknown } | null)?.gone === true) {
+    throw new UserError(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
+  }
   const changed = (selector as { changed?: { role: string; name: string } } | null)?.changed;
   if (changed) {
     throw new UserError(

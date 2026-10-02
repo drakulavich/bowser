@@ -17,6 +17,7 @@ import {
 import { cmdClose, cmdGoto, cmdHistory, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
+import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -30,6 +31,11 @@ const RELABEL = `<!doctype html><title>relabel</title>
 <button id="send">Send <b>now</b></button>`;
 
 const stale = (ref: string) => `ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`;
+const gone = (ref: string) => `ref '${ref}' is from a page that is no longer loaded; take a new snapshot`;
+
+// #105: pages whose OK button and link get the same refs in every document.
+const docPage = (title: string, next: string) =>
+  `<!doctype html><title>${title}</title><button onclick="document.title = '${title} clicked'">OK</button> <a href="${next}">next</a>`;
 
 /** The tree text inside the ```yaml fence of `snapshot`'s output. */
 function tree(out: string): string {
@@ -55,7 +61,13 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     };
     server = Bun.serve({
       port: 0,
-      fetch(req) {
+      // /doc-slow answers after the 10 s navigation cap.
+      idleTimeout: 30,
+      async fetch(req) {
+        const path = new URL(req.url).pathname;
+        const doc = { "/doc-a": docPage("A", "/doc-b"), "/doc-b": docPage("B", "/doc-a"), "/doc-pending": docPage("A", "/doc-slow"), "/doc-slow": docPage("S", "/doc-a") }[path];
+        if (path === "/doc-slow") await Bun.sleep(14_000);
+        if (doc) return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8" } });
         if (new URL(req.url).pathname === "/relabel.html") {
           return new Response(RELABEL, { headers: { "content-type": "text/html; charset=utf-8" } });
         }
@@ -132,7 +144,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     const submit = await refNamed("Submit");
     await cmdGoto(ctx, `${base}/kitchen-sink.html`);
     const t0 = performance.now();
-    await expect(cmdClick(ctx, submit)).rejects.toThrow(stale(submit));
+    await expect(cmdClick(ctx, submit)).rejects.toThrow(gone(submit));
     expect(performance.now() - t0).toBeLessThan(1000);
     // The CLI classifies the message as a user error.
     const p = Bun.spawn({
@@ -142,7 +154,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       stderr: "pipe",
     });
     const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
-    expect(stderr).toContain(stale(submit));
+    expect(stderr).toContain(gone(submit));
     expect(code).toBe(1);
   }, 60_000);
 
@@ -151,7 +163,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     await cmdSnapshot(ctx);
     const name = await refNamed("Name");
     await cmdHistory(ctx, "reload");
-    await expect(cmdFill(ctx, name, "x")).rejects.toThrow(stale(name));
+    await expect(cmdFill(ctx, name, "x")).rejects.toThrow(gone(name));
     expect(await cmdEval(ctx, "document.getElementById('name').value")).toBe("");
   }, 60_000);
 
@@ -167,13 +179,13 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     expect(Math.min(...ids)).toBe(6);
   }, 60_000);
 
-  test("an action on a page with a previous version's ref store fails as stale, exit 1", async () => {
+  test("an action on a page with a previous version's ref store is refused as from another page, exit 1", async () => {
     await cmdOpen(ctx, `${base}/kitchen-sink.html`);
     await cmdSnapshot(ctx);
     const submit = await refNamed("Submit");
     await cmdGoto(ctx, `${base}/kitchen-sink.html`);
     await cmdEval(ctx, OLD_STORE);
-    await expect(cmdClick(ctx, submit)).rejects.toThrow(stale(submit));
+    await expect(cmdClick(ctx, submit)).rejects.toThrow(gone(submit));
     const p = Bun.spawn({
       cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", ctx.session, "click", submit],
       env: process.env,
@@ -181,7 +193,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       stderr: "pipe",
     });
     const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
-    expect(stderr).toContain(stale(submit));
+    expect(stderr).toContain(gone(submit));
     expect(code).toBe(1);
   }, 60_000);
 
@@ -247,5 +259,69 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     expect(await checked("Agree")).toBe("true");
     await cmdUncheck(ctx, agree);
     expect(await checked("Agree")).toBe("false");
+  }, 60_000);
+
+  /** The CLI on this session, as an agent runs it: its stderr and exit code. */
+  const cli = async (args: string[], env: Record<string, string> = {}) => {
+    const p = Bun.spawn({
+      cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", ctx.session, ...args],
+      env: { ...process.env, ...env },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
+    return { code, stderr };
+  };
+  const title = () => cmdEval(ctx, "document.title");
+
+  test("#105: after go-back restores a page from the cache, a ref from the page it left is refused, exit 1", async () => {
+    await cmdOpen(ctx, `${base}/doc-a`);
+    await cmdSnapshot(ctx);
+    await cmdClick(ctx, await refNamed("next"));
+    await cmdSnapshot(ctx);
+    const ok = await refNamed("OK");
+    await cmdHistory(ctx, "back");
+    expect(await title()).toBe("A");
+    // The case under test: A came back with its window, and so with its ref store.
+    expect(await cmdEval(ctx, "String(!!window[Symbol.for('bowser.aria-refs')])")).toBe("true");
+    const r = await cli(["click", ok]);
+    expect(r.stderr).toContain(gone(ok));
+    expect(r.code).toBe(1);
+    expect(await title()).toBe("A");
+  }, 60_000);
+
+  test("#105: a ref resolved while a navigation is pending waits for it and is refused on the page that landed", async () => {
+    await cmdOpen(ctx, `${base}/doc-pending`);
+    await cmdSnapshot(ctx);
+    const ok = await refNamed("OK");
+    // Returns after the 10 s navigation cap, with /doc-slow still pending.
+    await cmdClick(ctx, await refNamed("next"));
+    const short = await cli(["click", ok], { BOWSER_OP_TIMEOUT_MS: "2000" });
+    expect(short.stderr).toContain(`page is still loading ${base}/doc-slow`);
+    expect(short.code).toBe(2);
+    const r = await cli(["click", ok]);
+    expect(r.stderr).toContain(gone(ok));
+    expect(r.code).toBe(1);
+    expect(await cmdEval(ctx, "location.pathname")).toBe("/doc-slow");
+    expect(await title()).toBe("S");
+  }, 60_000);
+
+  test("#105: a ref is refused on a document whose own snapshot was never saved", async () => {
+    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdSnapshot(ctx);
+    const submit = await refNamed("Submit");
+    await cmdGoto(ctx, `${base}/kitchen-sink.html`);
+    // A snapshot whose evaluate ran in the page and whose save was lost.
+    await cmdEval(ctx, SNAPSHOT_SCRIPT);
+    await expect(cmdClick(ctx, submit)).rejects.toThrow(gone(submit));
+    expect(await cmdEval(ctx, "document.getElementById('submitted').textContent")).toBe("");
+  }, 60_000);
+
+  test("#105: pushState and a hash change keep the document, so its refs still work", async () => {
+    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdSnapshot(ctx);
+    const hover = await refNamed("Hover me");
+    await cmdEval(ctx, "(history.pushState({}, '', '/other'), location.hash = 'x', location.href)");
+    expect(await cmdHover(ctx, hover)).toBe(`hovered ${hover}`);
   }, 60_000);
 });

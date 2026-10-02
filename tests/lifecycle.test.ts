@@ -247,7 +247,7 @@ describe("F21: a timeout names the command", () => {
     const serialize = createSerializer();
     const handle = async (req: DaemonRequest): Promise<DaemonResponse> => {
       if (req.op === "ping") return { id: req.id, ok: true, result: pkg.version };
-      if (req.op === "evaluate") return { id: req.id, ok: true, result: "#x" };
+      if (req.op === "resolve" || req.op === "evaluate") return { id: req.id, ok: true, result: "#x" };
       if (req.op === "click") return new Promise(() => {});
       return { id: req.id, ok: true };
     };

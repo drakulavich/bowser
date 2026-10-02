@@ -175,7 +175,7 @@ A ref stays the same across snapshots of one document while the element's role a
 
 Password field values are never shown: a filled `<input type="password">` prints as `textbox "Password" [ref=e3]` with no value, `state.json` does not store it, and it adds nothing to another element's name. This is a deliberate difference from `playwright-cli`, which prints the value.
 
-An action on a ref whose element is gone (removed by a re-render, or from before a navigation or reload) fails at once with `ref 'eN' not found in the current page snapshot. Try capturing new snapshot.` and exit code 1, as in `playwright-cli`. Run `snapshot` again and use the new refs.
+An action on a ref whose element a re-render removed fails at once with `ref 'eN' not found in the current page snapshot. Try capturing new snapshot.` and exit code 1, as in `playwright-cli`. A ref from another page (from before a navigation or reload, or from the page you left before `go-back`) fails the same way with `ref 'eN' is from a page that is no longer loaded; take a new snapshot`. Run `snapshot` again and use the new refs. A `pushState` or `#hash` change keeps the page, and its refs keep working.
 
 An action on a ref whose element changed its role or name since the snapshot (a `Buy A` button that relabelled itself) also fails, exit code 1, before it touches the page: `ref 'e2' now points to button "Delete account", not button "Buy A"; take a new snapshot`. A `playwright-cli` frame ref such as `f1e3` fails with `'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents`.
 

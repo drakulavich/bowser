@@ -2,7 +2,8 @@
 // Ops without a handler get the same defaults the three old hand-written
 // fakes had: ping → the package version, state → the last navigated url with a "Fake …"
 // title, screenshot → mirror the daemon (write the file when given a path),
-// select → true (the option was found), everything else → undefined.
+// select → true (the option was found), resolve → the evaluate handler (both
+// run a script in the page), everything else → undefined.
 // Every request is recorded in `calls` as [op, args].
 //
 // screenshot is not a plain overridable handler: the real daemon's contract
@@ -58,7 +59,7 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
         }
         return b64 as never;
       }
-      const fn = (handlers[op] ?? defaults[op]) as ((...a: unknown[]) => unknown) | undefined;
+      const fn = (handlers[op] ?? (op === "resolve" ? handlers.evaluate : undefined) ?? defaults[op]) as ((...a: unknown[]) => unknown) | undefined;
       return (fn ? await fn(...args) : undefined) as never;
     },
     dialogs: () => (c.reporting ? [...(opts.dialogs ?? [])] : []),

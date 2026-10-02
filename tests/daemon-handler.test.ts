@@ -1348,4 +1348,28 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
     expect(replies).toEqual([{ id: 1, ok: true }]);
     expect(actions(b)).toEqual([["click", ["#b"]]]);
   });
+
+  test("a ref resolve waits for it too, then runs in the page that landed (#105)", async () => {
+    let pending = true;
+    const b = fakeBrowser();
+    Object.defineProperty(b, "navigationPending", { get: () => pending });
+    const replies: DaemonResponse[] = [];
+    dispatch({ id: 1, op: "resolve", args: ["resolve-script"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 0, reply: (r) => { replies.push(r); } });
+    await Bun.sleep(100);
+    expect(replies).toEqual([]);
+    expect(b.calls).toEqual([]);
+    pending = false;
+    await Bun.sleep(50);
+    expect(replies).toEqual([{ id: 1, ok: true, result: 42 }]);
+    expect(b.calls).toEqual([["evaluate", ["resolve-script"]]]);
+  });
+
+  test("a ref resolve fails with 'page is still loading' when its budget ends first (#105)", async () => {
+    const b = fakeBrowser({ navigationPending: true });
+    const replies: DaemonResponse[] = [];
+    dispatch({ id: 1, op: "resolve", args: ["resolve-script"], budgetMs: 100 }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 1000, reply: (r) => { replies.push(r); } });
+    await Bun.sleep(300);
+    expect(replies).toEqual([{ id: 1, ok: false, error: stillLoading }]);
+    expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
+  });
 });

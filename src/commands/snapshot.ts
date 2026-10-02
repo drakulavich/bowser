@@ -22,7 +22,7 @@ export async function cmdSnapshot(
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
     await saveState({
       ...(await loadState(ctx.session)),
-      name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, updatedAt: Date.now(),
+      name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, doc: snap.doc, updatedAt: Date.now(),
     });
     // Dialogs the daemon answered since the last command that printed them
     // (a page timer's, say). Nothing is blocked, so the tree renders too.

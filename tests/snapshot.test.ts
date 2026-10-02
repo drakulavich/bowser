@@ -36,7 +36,7 @@ function n(role: string, name = "", attrs: Attrs = {}, ...children: Array<AriaNo
 }
 
 function page(tree: Array<AriaNode | string>, over: Partial<SnapshotResult> = {}): SnapshotResult {
-  return { url: "http://localhost:49731/x.html", title: "X", tree, refs: [], ...over };
+  return { url: "http://localhost:49731/x.html", title: "X", tree, refs: [], doc: "doc-x", ...over };
 }
 
 async function snapshot(

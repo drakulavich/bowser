@@ -87,3 +87,28 @@ describe("the snapshot walker reads values only through valueOf", () => {
     expect(valueReads("saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')")).toEqual(["saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')"]);
   });
 });
+
+// #105. Only the document check runs here: it answers before the script
+// touches the DOM, so a plain object stands in for the page's window.
+describe("a ref resolves only in the document whose snapshot saved it", () => {
+  const ref = { id: "e2", role: "button", name: "OK" };
+  const inWindow = (win: object, doc: string | undefined) =>
+    new Function("window", `return ${resolveRefScript(ref, { doc })}`)(win);
+  const store = (doc?: string) => ({ [Symbol.for("bowser.aria-refs")]: { refs: new WeakMap(), byRef: new Map(), last: 2, doc } });
+
+  test("another document's id is refused", () => {
+    expect(inWindow(store("page-b"), "page-a")).toEqual({ gone: true });
+  });
+
+  test("a document with no ref store is refused", () => {
+    expect(inWindow({}, "page-a")).toEqual({ gone: true });
+  });
+
+  test("a state saved without an id is refused", () => {
+    expect(inWindow(store("page-a"), undefined)).toEqual({ gone: true });
+  });
+
+  test("the same document goes on to the element lookup", () => {
+    expect(inWindow(store("page-a"), "page-a")).toBeNull();
+  });
+});
