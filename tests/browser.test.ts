@@ -199,6 +199,8 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
 });
 
 const fast = { graceMs: 40, settleMs: 300 };
+// For "at once" checks: any wait for a landing costs at least graceMs.
+const slow = { graceMs: 1_000, settleMs: 2_000 };
 
 /** The calls an action made, without the watch's own page reads. */
 const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
@@ -752,8 +754,8 @@ describe("wrapView interrupt", () => {
       evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
     });
     const t0 = Date.now();
-    expect(await wrapView(v, fast).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(30);
+    expect(await wrapView(v, slow).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(slow.graceMs);
   });
 
   // #48, measured on WebKit (Bun 1.4.2): before the first commit (url "")
@@ -766,10 +768,10 @@ describe("wrapView interrupt", () => {
       evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); v.onNavigationFailed?.(new Error("-999")); return 1; },
     });
     v.url = "";
-    const b = wrapView(v, fast);
+    const b = wrapView(v, slow);
     const t0 = Date.now();
     expect(await b.interrupt()).toBe(true);
-    expect(Date.now() - t0).toBeLessThan(30);
+    expect(Date.now() - t0).toBeLessThan(slow.graceMs);
     expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]]]);
   });
 
@@ -782,10 +784,10 @@ describe("wrapView interrupt", () => {
       evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); throw new Error("Invalid state: an evaluate() is already pending"); },
     });
     v.url = "";
-    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+    const b = wrapView(v, slow);
     const t0 = Date.now();
     await b.interrupt();
-    expect(Date.now() - t0).toBeLessThan(30);
+    expect(Date.now() - t0).toBeLessThan(slow.graceMs);
     expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]], ["navigate", ["about:blank"]]]);
   });
 
@@ -831,8 +833,8 @@ describe("wrapView interrupt", () => {
     });
     v.url = "";
     const t0 = Date.now();
-    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(30);
+    expect(await wrapView(v, slow).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(slow.graceMs);
   });
 
   test("without a native reload it does nothing", async () => {

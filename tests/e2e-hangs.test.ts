@@ -47,6 +47,11 @@ const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
 const SLOW_MS = 3000;
+/** openWith's retry window, from the end of its first open. That open and
+ *  the last retry each take up to a budget, so a test that opens with it
+ *  adds the window and two budgets to its own timeout. */
+const OPEN_MS = 20_000;
+const openTimeout = (budgetMs: number, bodyMs: number): number => OPEN_MS + 2 * budgetMs + bodyMs;
 /** #98: Send posts to a server that never answers; 11 s later, after the
  *  navigation watch has given up, a script replaces that POST with another
  *  navigation that never answers either. */
@@ -74,7 +79,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     sessions.push(session);
     const ctx: CommandContext = { session, json: false };
     let landed = await timed(() => cmdOpen(ctx, `${base}/`));
-    const deadline = performance.now() + 20_000;
+    const deadline = performance.now() + OPEN_MS;
     while (landed.error !== undefined) {
       expect(landed.error).toContain("timed out after");
       if (performance.now() > deadline) throw new Error(`setup: ${session} never reached ${base}/: ${landed.error}`);
@@ -151,7 +156,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(snap).toContain(`- Page URL: ${base}/slow`);
     expect(snap).toContain("- Page Title: Slow");
     expect(snap).toContain('heading "Arrived"');
-  }, 30_000);
+  }, openTimeout(8000, 30_000));
 
   test("F10: a page whose own `navigation` shadows the Navigation API still has its slow click awaited", async () => {
     const ctx = await openWith("shadowed", 8000);
@@ -163,7 +168,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const snap = await cmdSnapshot(ctx);
     expect(snap).toContain(`- Page URL: ${base}/slow`);
     expect(snap).toContain("- Page Title: Slow");
-  }, 30_000);
+  }, openTimeout(8000, 30_000));
 
   test("F10: a navigation that replaces the one the click started is awaited too", async () => {
     const ctx = await openWith("double", 12000);
@@ -177,7 +182,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const snap = await cmdSnapshot(ctx);
     expect(snap).toContain(`- Page URL: ${base}/slow2`);
     expect(snap).toContain("- Page Title: Slow two");
-  }, 30_000);
+  }, openTimeout(12000, 30_000));
 
   test("F9: after an eval that never settles, the next eval works or fails within its budget, recovery frees the session, and close works", async () => {
     const budget = 1000;
@@ -235,7 +240,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const close = await timed(() => cmdClose(ctx));
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(5000);
-  }, 45_000);
+  }, openTimeout(1000, 45_000));
 
   test("F9: after a goto whose server never answers, the next command is bounded by its budget", async () => {
     const budget = 1000;
@@ -262,7 +267,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const close = await timed(() => cmdClose(ctx));
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(5000);
-  }, 30_000);
+  }, openTimeout(1000, 30_000));
 
   // #48: from a fresh session nothing has committed yet (the view's url is
   // ""), so reload() has no page to reload and does nothing, and WebKit
@@ -348,13 +353,15 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     else expect(await cmdEval(ctx, "document.querySelector('[name=b]').value")).toBe("AFTER");
 
     // The daemon's budget is 30 s; the timeout names the command's own.
-    const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise(() => {})"));
+    // The page holds the resolver: JSC collects an unreachable promise and
+    // WebKit then rejects the evaluate "no longer reachable" (#100).
+    const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
     expect(hung.error).toBe("'eval' timed out after 3000ms (in its 'evaluate' step)");
 
     const close = await timed(() => cmdClose(ctx));
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(2000);
-  }, 40_000);
+  }, openTimeout(30_000, 40_000));
 
   test("#98: a navigation that replaces the pending one after the watch ends still holds the next fill", async () => {
     const ctx = await openWith("replaced", 30_000);
@@ -381,5 +388,5 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
 
     const close = await timed(() => cmdClose(ctx));
     expect(close.error).toBeUndefined();
-  }, 60_000);
+  }, openTimeout(30_000, 60_000));
 });

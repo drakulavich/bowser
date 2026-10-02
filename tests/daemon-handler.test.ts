@@ -10,6 +10,7 @@ import { createHandler, dispatch, type DaemonState, type StuckMark } from "../sr
 import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport } from "../src/daemon/protocol.ts";
 import { createGate } from "../src/daemon/gate.ts";
 import { createSerializer } from "../src/serialize.ts";
+import { waitFor } from "./helpers/daemons.ts";
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
   const calls: Array<[string, unknown[]]> = [];
@@ -423,25 +424,27 @@ describe("the queue-time budget", () => {
     // overrun it while running. It was not queued at its deadline, so it
     // gets no "waiting for" tail (seen on CI, run 36299769857).
     const replies: Array<[number, DaemonResponse]> = [];
+    const BUDGET = 1000, RUN = 600;
     const t0 = Date.now();
     const lane = {
       handle: async (req: DaemonRequest) => {
-        await Bun.sleep(150);
+        await Bun.sleep(RUN);
         return { id: req.id, ok: true as const };
       },
       serialize: createSerializer(),
-      timeoutMs: 200,
+      timeoutMs: BUDGET,
       reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
     };
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["location.href"] }, lane);
-    await Bun.sleep(400);
+    await waitFor(() => replies.length >= 2, 3 * BUDGET);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 1, ok: true },
-      { id: 2, ok: false, error: "'evaluate' timed out after 200ms" },
+      { id: 2, ok: false, error: `'evaluate' timed out after ${BUDGET}ms` },
     ]);
-    // Still bounded by its budget from receipt.
-    expect(replies[1]![0]).toBeLessThan(260);
+    // Still bounded by its budget from receipt (BUDGET), not from its start
+    // (RUN + BUDGET).
+    expect(replies[1]![0]).toBeLessThan(BUDGET + RUN / 2);
   });
 
   test("ping still answers at once while the queue is wedged past every budget", async () => {
@@ -807,21 +810,23 @@ describe("a stuck session", () => {
   });
 
   test("requests already queued when the mark is set are answered stuck at once", async () => {
-    const { lane, replies, started, release, t0 } = stuckLanes(async () => false, 50);
+    const { lane, replies, started, release, t0 } = stuckLanes(async () => false, 60_000);
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
     await Bun.sleep(5);
     // Before the mark (~40 ms): one queued at the serializer behind op 1, one
-    // at the gate behind connection A (its idle time runs to ~70 ms).
+    // at the gate behind connection A, which holds it for its 60 s idle time,
+    // so only the mark can answer op 3 before its own 1 s budget does.
+    const queuedAt = Date.now() - t0;
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(A, 1000));
     dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane({}, 1000));
-    await Bun.sleep(60);
+    await waitFor(() => replies.length >= 3, 3000);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
       { id: 2, ok: false, error: STUCK("evaluate") },
       { id: 3, ok: false, error: STUCK("evaluate") },
     ]);
-    expect(replies[2]![0]).toBeLessThan(60);
+    expect(replies[2]![0] - queuedAt).toBeLessThan(500);
     release();
     await Bun.sleep(80);
     expect(started).toEqual([1]);
