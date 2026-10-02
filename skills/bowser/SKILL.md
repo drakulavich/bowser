@@ -191,10 +191,11 @@ bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only t
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…) — the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
 - **"ref 'eN' has no option \"…\""** — `select` found no option with that value or label. Read the options in the snapshot and pass one of them.
 - **"ref 'eN' is not an editable element (disabled)"** or `(readonly)` — the page does not let that field be edited now; enable it first (e.g. fill the field that unlocks it) or pick another.
+- **"ref 'eN' (…) is covered by … at its click point"** — `click` or `fill` found another element on top of the ref's centre: a backdrop, a dialog, or a control the page swapped in (a `+` stepper where "Add to cart" was); nothing was clicked. Close what covers it, or take a new snapshot and use the ref of what is there now.
 - **"ref 'eN' is disabled"** — `click`, `check` or `uncheck` on an element the page has disabled (`[disabled]` in the snapshot); nothing was clicked. Do what enables it first, then act again.
 - **"ref 'eN' is a radio button; select another option in its group to uncheck it"** — a radio cannot be unchecked on its own: `check` another radio in its group.
 - **"did not accept the value for input[type=date]"** or **"needs a number"** — use the input's own format: `YYYY-MM-DD` for `date`, `HH:MM` for `time`, `#rrggbb` (lowercase) for `color`, digits for `number`.
 - **"no open page"** — call `bowser open <url>` first.
-- **Click times out** — element not actionable (overlay, animating). Re-snapshot.
+- **Click times out** — element not actionable (animating, or covered only after the ref was resolved). Re-snapshot.
 - **`state-save` / `state-load` round-trip a Playwright `storageState`** — `state-save <file>` dumps the current origin's localStorage; `state-load <file>` restores it. The JSON is interchangeable with Playwright's `storageState`. Because the daemon holds one page, load only restores localStorage for origins matching the current page (others are reported skipped) — navigate to an origin first, then `state-load`, to restore its localStorage. sessionStorage is not persisted (matching Playwright).
 - **Cookies and logins** — bowser has no cookie commands, and `state-save` writes an empty `cookies` array (`state-load` skips any cookies, with one line on stderr). To keep a login between sessions, open the session with `--persistent` (or `--profile=<dir>`) each time.

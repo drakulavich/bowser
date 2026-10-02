@@ -1205,24 +1205,21 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
     await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
   });
 
-  // The page's answer to the enabled resolve for a disabled element.
-  const disabled = (ref: string) => (expr: string): unknown =>
-    expr === resolveRefScript(REFS.find((r) => r.id === ref)!, { enabled: true }) ? { disabled: true } : undefined;
-
-  for (const [name, ref, run] of [
-    ["click", "e1", (x: CommandContext) => cmdClick(x, "e1")],
-    ["check", "e4", (x: CommandContext) => cmdCheck(x, "e4")],
-    ["uncheck", "e4", (x: CommandContext) => cmdUncheck(x, "e4")],
+  for (const [name, ref, run, hit] of [
+    ["click", "e1", (x: CommandContext) => cmdClick(x, "e1"), true],
+    ["check", "e4", (x: CommandContext) => cmdCheck(x, "e4"), false],
+    ["uncheck", "e4", (x: CommandContext) => cmdUncheck(x, "e4"), false],
   ] as const) {
+    const resolve = resolveRefScript(REFS.find((r) => r.id === ref)!, { enabled: true, ...(hit ? { hit } : {}) });
     test(`${name} on a disabled element: exit 1, and the resolve is the only request`, async () => {
-      const c = fakeClient({ evaluate: disabled(ref) });
+      const c = fakeClient({ evaluate: (expr) => (expr === resolve ? { disabled: true } : undefined) });
       const err = await run({ ...ctx(), connect: async () => c }).then(
         (out) => { throw new Error(`expected a failure, got ${out}`); },
         (e: Error) => e,
       );
       expect(err.message).toBe(`ref '${ref}' is disabled`);
       expect(reportFailure(err).code).toBe(1);
-      expect(c.calls).toEqual([["resolve", [resolveRefScript(REFS.find((r) => r.id === ref)!, { enabled: true })]]]);
+      expect(c.calls).toEqual([["resolve", [resolve]]]);
     });
   }
 
@@ -1379,16 +1376,17 @@ describe("ref commands resolve the ref in the live page first", () => {
     { id: "e4", selector: "saved-cb",     role: "checkbox", name: "Agree", tag: "input" },
   ];
   // Each ref command, the ref it acts on, and the action op that must carry the fresh selector.
-  // The last column: whether the resolve script also refuses a disabled
+  // The fifth column: whether the resolve script also refuses a disabled
   // element (F20). fill keeps its own disabled message; hover and select
-  // do not refuse.
-  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>, boolean]> = [
-    ["click",   "e1", "click",   (x) => cmdClick(x, "e1"), true],
-    ["fill",    "e2", "click",   (x) => cmdFill(x, "e2", "hi"), false],
-    ["hover",   "e1", "hover",   (x) => cmdHover(x, "e1"), false],
-    ["select",  "e3", "select",  (x) => cmdSelect(x, "e3", "red"), false],
-    ["check",   "e4", "check",   (x) => cmdCheck(x, "e4"), true],
-    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4"), true],
+  // do not refuse. The last: whether it refuses a covered one, for the
+  // commands that click at the element's centre (#112).
+  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>, boolean, boolean]> = [
+    ["click",   "e1", "click",   (x) => cmdClick(x, "e1"), true, true],
+    ["fill",    "e2", "click",   (x) => cmdFill(x, "e2", "hi"), false, true],
+    ["hover",   "e1", "hover",   (x) => cmdHover(x, "e1"), false, false],
+    ["select",  "e3", "select",  (x) => cmdSelect(x, "e3", "red"), false, false],
+    ["check",   "e4", "check",   (x) => cmdCheck(x, "e4"), true, false],
+    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4"), true, false],
   ];
 
   beforeEach(async () => {
@@ -1397,9 +1395,28 @@ describe("ref commands resolve the ref in the live page first", () => {
       JSON.stringify({ name: session, url: "https://x", title: "X", refs: REFS, doc: "doc-1", updatedAt: Date.now() }));
   });
 
-  for (const [name, ref, op, run, enabled] of COMMANDS) {
+  for (const [name, ref, op, run, enabled, hit] of COMMANDS) {
     const saved = REFS.find((r) => r.id === ref)!;
-    const resolve = resolveRefScript(saved, { enabled, doc: "doc-1" });
+    const resolve = resolveRefScript(saved, { enabled, doc: "doc-1", ...(hit ? { hit } : {}) });
+    if (hit) {
+      for (const [by, said] of [
+        [{ role: "generic", name: "", tag: "div" }, "generic <div>"],
+        [{ role: "button", name: "+", tag: "button" }, 'button "+"'],
+      ] as const) {
+        test(`${name} on a ref covered by ${said} fails, exit 1, and sends no action (#112)`, async () => {
+          const c = fakeClient({ resolve: (e) => (e === resolve ? { covered: by } : undefined) });
+          const err = await run({ ...ctx(), connect: async () => c }).then(
+            (out) => { throw new Error(`expected a failure, got ${out}`); },
+            (e: Error) => e,
+          );
+          expect(err.message).toBe(
+            `ref '${ref}' (${saved.role} "${saved.name}") is covered by ${said} at its click point; take a new snapshot or close what covers it`,
+          );
+          expect(reportFailure(err).code).toBe(1);
+          expect(c.calls).toEqual([["resolve", [resolve]]]);
+        });
+      }
+    }
     test(`${name} on a ref from another document fails, exit 1, and sends no action (#105)`, async () => {
       const c = fakeClient({ resolve: (e) => (e === resolve ? { gone: true } : undefined) });
       const err = await run({ ...ctx(), connect: async () => c }).then(
