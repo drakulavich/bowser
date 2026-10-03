@@ -28,6 +28,11 @@ All notable changes to this project are documented here. This project follows
   been delivered" too: bowser cannot tell that wait from a click WebKit already fired. A click that returned but opened no page no longer says `waiting for the page it
   opened`, and the recovery no longer reloads its page while bowser is still checking whether the
   click started a navigation. (#115)
+- **A `click` on a covered target no longer answers with Bun's own timeout text.** Bun's click
+  deadline falls 50 ms after bowser's reply timer, so when the timer was late, `click` or `fill`
+  answered `timeout waiting for 'main > button:nth-child(2)' to be actionable`. It now gets the
+  same message the timer gives: `'click' timed out after <ms>ms; the click may have been
+  delivered, check the page before retrying`, or the `fill` form of it. (#122)
 - **A ref acts only on the page whose snapshot gave it.** After `go-back` restored a page from the
   back-forward cache, a ref from the page just left clicked the restored page's element with the
   same ref, role and name, exit code 0. After a click left a slow navigation pending, the next ref
