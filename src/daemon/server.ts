@@ -64,6 +64,7 @@ export interface Lane {
   /** Called when `req` overran its budget: gives up its late reply's reports
    *  and returns those queued now, which the timeout reply carries. */
   timedOut?: (req: DaemonRequest) => DialogReport[] | undefined;
+  cancelAction?: () => void;
   /** Try once to free the WebView from the op that just overran its budget;
    *  resolves when the attempt is over, true when it freed the view. */
   recover?: () => Promise<boolean>;
@@ -177,16 +178,32 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
       return;
     }
     const dialogs = lane.timedOut?.(req);
+    lane.cancelAction?.();
     answer({ id: req.id, ok: false, error: timedOut, ...(dialogs ? { dialogs } : {}) });
     // Runs while this op still holds the serializer, so no later queued op
     // can overlap it; see Browser.interrupt for what it may overlap.
-    grace = setTimeout(() => {
+    const graceMs = Math.min(RECOVERY_GRACE_MS, ms);
+    let watched = false;
+    const recover = (): void => {
+      // The action returned and the watch ends on its own unless it sees a
+      // navigation: a reload now would only throw away the page (#115).
+      if (lane.phase?.() === "delivered") {
+        watched = true;
+        grace = setTimeout(recover, 10);
+        return;
+      }
+      if (watched) {
+        watched = false;
+        grace = setTimeout(recover, graceMs);
+        return;
+      }
       recovery = lane.recover?.().catch(() => false).then(() => {
         if (settled || !lane.mark) return;
         lane.mark.stuck = mine;
         for (const w of [...waiting ?? []]) w(mine.op);
       });
-    }, Math.min(RECOVERY_GRACE_MS, ms));
+    };
+    grace = setTimeout(recover, graceMs);
   }, ms) : undefined;
   const queue = (): void => {
     lane.serialize(async () => {
@@ -242,6 +259,11 @@ function timeoutMessage(req: DaemonRequest, ms: number, phase?: ActPhase): strin
     return `'${cmd}' timed out after ${ms}ms waiting for the page it opened; the ${cmd} was delivered, check the page before retrying`;
   }
   const step = cmd === req.op ? "" : ` (in its '${req.op}' step)`;
+  if (phase === "acting" || phase === "delivered") {
+    const how = phase === "acting" ? "may have been delivered" : "was delivered";
+    const unfinished = cmd === req.op ? "" : ` but the ${cmd} did not finish`;
+    return `'${cmd}' timed out after ${ms}ms${step}; the ${req.op} ${how}${unfinished}, check the page before retrying`;
+  }
   return `'${cmd}' timed out after ${ms}ms${step}`;
 }
 
@@ -304,6 +326,7 @@ const PAGE_CRASHED = "the page crashed (its web process exited); run 'bowser rel
  *  calls when a request overruns its budget. */
 export type Handler = ((req: DaemonRequest, deadline?: number) => Promise<DaemonResponse>) & {
   timedOut: (req: DaemonRequest) => DialogReport[] | undefined;
+  cancelAction: () => void;
 };
 
 /** The answer of a script that returns PAGE_JSON text (withDialogShim and
@@ -341,6 +364,8 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
     return dialogs;
   };
   const handle = async (req: DaemonRequest, deadline?: number): Promise<DaemonResponse> => {
+    // An urgent op runs beside a timed-out one; clearing it would let that op still act.
+    if (!IS_URGENT.has(req.op)) browser.resetActionCancellation?.();
     // A ref resolved before the pending navigation lands would be acted on
     // in the next document (#105).
     const res = ACTS.has(req.op) || req.op === "resolve" ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
@@ -352,6 +377,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
   // native action took them just before the action wedged. The timeout
   // reply carries them, since the late reply will reach nobody.
   return Object.assign(handle, {
+    cancelAction: () => browser.cancelAction?.(),
     timedOut: (req: DaemonRequest) => {
       const dialogs = claim(req);
       abandoned.add(req);
@@ -542,7 +568,7 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
             );
             return;
           }
-          dispatch(req, { handle, serialize, gate, conn, mark, timeoutMs, timedOut: handle.timedOut, recover: () => browser.interrupt(), phase: () => browser.phase, reply: (res) => {
+          dispatch(req, { handle, serialize, gate, conn, mark, timeoutMs, timedOut: handle.timedOut, cancelAction: handle.cancelAction, recover: () => browser.interrupt(), phase: () => browser.phase, reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
         }) };

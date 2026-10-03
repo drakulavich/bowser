@@ -58,6 +58,12 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
           return html(`<title>Busy</title><script>const spin = () => { const t = Date.now(); while (Date.now() - t < 2000); };</script>
             <input aria-label="Name" onclick="spin()" oninput="spin()">`);
         }
+        if (path === "/cart") {
+          // sessionStorage outlives a reload; window.added does not.
+          const add = "sessionStorage.n = +(sessionStorage.n ?? 0) + 1; window.added = (window.added ?? 0) + 1;";
+          return html(`<title>Cart</title><button onclick="${add}">Add</button>
+            <button onclick="${add} const t = Date.now(); while (Date.now() - t < 1000);">Slow add</button>`);
+        }
         return html(`<title>Home</title><a href="/never">Never</a> <a href="/slow">Slow</a>`);
       },
     });
@@ -210,6 +216,51 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
 
     const fill = await run(s, ["fill", input, "hello"], budget);
     expect(fill.ms).toBeLessThan(3500);
+
+    await closesFast(s);
+  }, 60_000);
+
+  /** The page's answer to `expr` once the session answers: a timed-out op
+   *  may hold the session, or mark it stuck, for a while. */
+  async function settledEval(s: string, expr: string): Promise<string> {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      const r = await run(s, ["eval", expr], 3000);
+      if (r.code === 0 || Date.now() > deadline) return r.out;
+      await Bun.sleep(200);
+    }
+  }
+
+  test("#115: a click whose handler outlasts the budget says the click may have been delivered", async () => {
+    const budget = 300;
+    const s = session("115acting");
+    await ok(s, ["open", `${base}/cart`], 3000);
+    const add = refOf(await ok(s, ["snapshot"], 3000), "button", "Slow add");
+
+    const click = await run(s, ["click", add], budget);
+    expect([click.code, click.err]).toEqual([
+      2,
+      `bowser: 'click' timed out after ${budget}ms; the click may have been delivered, check the page before retrying`,
+    ]);
+    expect(await settledEval(s, "sessionStorage.n")).toBe("1");
+
+    await closesFast(s);
+  }, 60_000);
+
+  test("#115: a click that returned within the budget says it was delivered, and its page is not reloaded", async () => {
+    // Under the watch's 100 ms wait for a navigation the click may start.
+    const budget = 80;
+    const s = session("115delivered");
+    await ok(s, ["open", `${base}/cart`], 3000);
+    const add = refOf(await ok(s, ["snapshot"], 3000), "button", "Add");
+
+    const click = await run(s, ["click", add], budget);
+    expect([click.code, click.err]).toEqual([
+      2,
+      `bowser: 'click' timed out after ${budget}ms; the click was delivered, check the page before retrying`,
+    ]);
+    await Bun.sleep(2500); // past the recovery grace
+    expect(await settledEval(s, "performance.getEntriesByType('navigation')[0].type + ' ' + window.added")).toBe("navigate 1");
 
     await closesFast(s);
   }, 60_000);

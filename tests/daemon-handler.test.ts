@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../package.json";
-import type { Browser } from "../src/browser.ts";
+import type { ActPhase, Browser } from "../src/browser.ts";
 import { createHandler, dispatch, type DaemonState, type StuckMark } from "../src/daemon/server.ts";
 import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport } from "../src/daemon/protocol.ts";
 import { createGate } from "../src/daemon/gate.ts";
@@ -73,6 +73,15 @@ describe("createHandler", () => {
     const b = fakeBrowser();
     expect(await createHandler(b)(req("ping"))).toEqual({ id: 7, ok: true, result: pkg.version });
     expect(b.calls).toEqual([]);
+  });
+
+  test("an urgent ping keeps a timed-out op's action cancelled", async () => {
+    let resets = 0;
+    const b = fakeBrowser({ resetActionCancellation: () => { resets++; } });
+    await createHandler(b)(req("ping"));
+    expect(resets).toBe(0);
+    await createHandler(b)(req("state"));
+    expect(resets).toBe(1);
   });
 
   test("state returns the resolved url and title", async () => {
@@ -283,12 +292,38 @@ test("a timeout while awaiting navigation says the click was delivered", async (
   ]);
 });
 
-test("a timeout while acting keeps the plain timeout message", async () => {
-  const b = fakeBrowser({ phase: "acting", click: () => new Promise<void>(() => {}) });
-  const replies: DaemonResponse[] = [];
-  dispatch({ id: 1, op: "click", args: ["#go"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r) => { replies.push(r); } });
-  await Bun.sleep(60);
-  expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 20ms" }]);
+// #115: a click whose page handler outlasts the budget had reached the page,
+// and the plain message made an agent retry and add to the cart twice.
+describe("a timeout says how far the action got, per phase", () => {
+  const cases: Array<[ActPhase, string, string]> = [
+    ["idle", "'click' timed out after 20ms", "'fill' timed out after 20ms (in its 'click' step)"],
+    [
+      "acting",
+      "'click' timed out after 20ms; the click may have been delivered, check the page before retrying",
+      "'fill' timed out after 20ms (in its 'click' step); the click may have been delivered but the fill did not finish, check the page before retrying",
+    ],
+    [
+      "delivered",
+      "'click' timed out after 20ms; the click was delivered, check the page before retrying",
+      "'fill' timed out after 20ms (in its 'click' step); the click was delivered but the fill did not finish, check the page before retrying",
+    ],
+    [
+      "awaiting-navigation",
+      "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying",
+      "'fill' timed out after 20ms waiting for the page its click opened; the click was delivered but the fill did not finish, check the page before retrying",
+    ],
+  ];
+  for (const [phase, own, step] of cases) {
+    test(phase, async () => {
+      const b = fakeBrowser({ phase, click: () => new Promise<void>(() => {}) });
+      const replies: DaemonResponse[] = [];
+      const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r: DaemonResponse) => { replies.push(r); } };
+      dispatch({ id: 1, op: "click", args: ["#go"], cmd: "click" }, lane);
+      dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
+      await Bun.sleep(60);
+      expect(replies).toEqual([{ id: 1, ok: false, error: own }, { id: 2, ok: false, error: step }]);
+    });
+  }
 });
 
 test("an op that overruns its budget: the timeout reply carries the reports queued before it, and its own late ones wait for the next printing request", async () => {
@@ -559,6 +594,47 @@ describe("the queue-time budget", () => {
     expect(recoveries).toBe(0); // timed out at 30, grace until 60
     await Bun.sleep(60);
     expect(recoveries).toBe(1);
+    await Bun.sleep(60);
+    expect(recoveries).toBe(1);
+  });
+
+  // #115: the reload threw away the page the click had just changed, while
+  // the watch's grace window would have ended on its own.
+  test("an op whose action was delivered is not recovered while the watch waits, and settles without a reload", async () => {
+    let recoveries = 0;
+    let phase: ActPhase = "delivered";
+    const lane = {
+      handle: async (req: DaemonRequest) => {
+        await Bun.sleep(100);
+        phase = "idle";
+        return { id: req.id, ok: true as const };
+      },
+      serialize: createSerializer(),
+      timeoutMs: 20,
+      phase: () => phase,
+      reply: () => {},
+      recover: async () => { recoveries++; return true; },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    await Bun.sleep(150);
+    expect(recoveries).toBe(0);
+  });
+
+  test("an op whose watch then follows a navigation that hangs is recovered once", async () => {
+    let recoveries = 0;
+    let phase: ActPhase = "delivered";
+    const lane = {
+      handle: () => new Promise<DaemonResponse>(() => {}),
+      serialize: createSerializer(),
+      timeoutMs: 20,
+      phase: () => phase,
+      reply: () => {},
+      recover: async () => { recoveries++; return false; },
+    };
+    dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    await Bun.sleep(80); // timed out at 20, grace ended at 40
+    expect(recoveries).toBe(0);
+    phase = "awaiting-navigation";
     await Bun.sleep(60);
     expect(recoveries).toBe(1);
   });

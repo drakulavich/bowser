@@ -201,7 +201,9 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
       process.env.BOWSER_OP_TIMEOUT_MS = "8000";
     }
     expect(performance.now() - t0).toBeLessThan(4000);
-    expect(err.message).toBe("'click' timed out after 3000ms");
+    // Bun's click was still waiting for the target to be actionable, which
+    // the daemon cannot tell from a click it already fired (#115).
+    expect(err.message).toBe("'click' timed out after 3000ms; the click may have been delivered, check the page before retrying");
     expect(reportFailure(err).code).toBe(2);
     expect(await cmdEval(ctx, "String(document.body.dataset.clicked) + ' ' + window.covered")).toBe("undefined true");
   }, 30_000);
