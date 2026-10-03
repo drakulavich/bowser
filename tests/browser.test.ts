@@ -4,6 +4,7 @@ import { wrapView, type ViewLike } from "../src/browser.ts";
 import { ACTS, createHandler, dispatch } from "../src/daemon/server.ts";
 import { createSerializer } from "../src/serialize.ts";
 import type { Op } from "../src/daemon/protocol.ts";
+import { waitFor } from "./helpers/daemons.ts";
 import { CANCEL_PENDING_NAVIGATION, KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
@@ -76,6 +77,20 @@ describe("wrapView click", () => {
     releaseArm();
     await Bun.sleep(20);
     expect(v.calls.filter(([op]) => op === "click")).toEqual([]);
+  });
+
+  test("Bun's actionability timeout answers as bowser's own timeout of the acting phase (#122)", async () => {
+    const v = fakeView({ click: async (s) => { throw new Error(`timeout waiting for '${s}' to be actionable`); } });
+    const handler = createHandler(wrapView(v, fast));
+    const replies: unknown[] = [];
+    const lane = { handle: handler, serialize: createSerializer(), timeoutMs: 5000, reply: (r: unknown) => { replies.push(r); } };
+    dispatch({ id: 1, op: "click", args: ["main > button:nth-child(2)"], cmd: "click" }, lane);
+    dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
+    await waitFor(() => replies.length === 2);
+    expect(replies).toEqual([
+      { id: 1, ok: false, error: "'click' timed out after 5000ms; the click may have been delivered, check the page before retrying" },
+      { id: 2, ok: false, error: "'fill' timed out after 5000ms (in its 'click' step); the click may have been delivered but the fill did not finish, check the page before retrying" },
+    ]);
   });
 });
 
