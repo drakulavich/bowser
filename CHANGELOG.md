@@ -15,6 +15,19 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **A timeout says when the action may already have reached the page.** With
+  `BOWSER_OP_TIMEOUT_MS=50`, `click` on an "Add to cart" button answered `'click' timed out after
+  50ms`, exit code 2, although the cart count went up, so an agent that retried added the item
+  twice. A timeout that hits once the action was sent now says `'click' timed out after <ms>ms; the
+  click may have been delivered, check the page before retrying`, and `… the click was delivered,
+  check the page before retrying` once the action returned. In a step of another command it reads
+  `'fill' timed out after <ms>ms (in its 'click' step); the click may have been delivered but the
+  fill did not finish, check the page before retrying`. This covers `click`, `fill`, `type`,
+  `press`, `hover`, `select`, `check` and `uncheck`. A timeout before the action was sent keeps the
+  plain message. A `click` still waiting for a target that another element covers says "may have
+  been delivered" too: bowser cannot tell that wait from a click WebKit already fired. A click that returned but opened no page no longer says `waiting for the page it
+  opened`, and the recovery no longer reloads its page while bowser is still checking whether the
+  click started a navigation. (#115)
 - **A ref acts only on the page whose snapshot gave it.** After `go-back` restored a page from the
   back-forward cache, a ref from the page just left clicked the restored page's element with the
   same ref, role and name, exit code 0. After a click left a slow navigation pending, the next ref

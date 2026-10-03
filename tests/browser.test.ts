@@ -576,6 +576,27 @@ describe("wrapView navigation watch", () => {
     expect(b.phase).toBe("idle");
   });
 
+  test("phase is delivered while the watch waits for a navigation that never begins", async () => {
+    const v = fakeView();
+    const b = wrapView(v, fast);
+    const clicked = b.click("#go");
+    await Bun.sleep(fast.graceMs / 2);
+    expect(b.phase).toBe("delivered");
+    await clicked;
+    expect(b.phase).toBe("idle");
+  });
+
+  test("phase turns awaiting-navigation when the page reports a navigation it started", async () => {
+    const { v, page } = pageNavView({ click: async () => { page.navs = 1; } });
+    const b = wrapView(v, fast);
+    const clicked = b.click("#go");
+    await Bun.sleep(fast.graceMs * 2);
+    expect(b.phase).toBe("awaiting-navigation");
+    v.land("https://x/next");
+    await clicked;
+    expect(b.phase).toBe("idle");
+  });
+
   test("phase resets to idle when the action throws", async () => {
     const v = fakeView({ click: async () => { throw new Error("no element"); } });
     const b = wrapView(v, fast);
@@ -1016,6 +1037,31 @@ describe("every ACTS op runs inside the navigation watch", () => {
       const arm = seq.indexOf("arm");
       expect(arm).toBeGreaterThanOrEqual(0);
       expect(seq.slice(arm + 1, seq.indexOf("count", arm))).toEqual(["act"]);
+    });
+  }
+
+  // #115: the daemon's timeout message says "may have been delivered" from
+  // the moment the action is sent, and "was delivered" once it returned.
+  for (const op of ACTS) {
+    test(`${op}: phase is idle while arming, acting while the action runs, delivered after it`, async () => {
+      const args = ACT_ARGS[op] ?? [];
+      const seen: Array<[string, string]> = [];
+      let b!: ReturnType<typeof wrapView>;
+      const v = fakeView();
+      const note = (call: string, a: unknown[]) => {
+        if (call === "evaluate" && a[0] === NAV_ARM) seen.push(["arm", b.phase]);
+        else if (call === "evaluate" && a[0] === NAV_COUNT) seen.push(["count", b.phase]);
+        else if (a.some((x) => String(x).includes(args[0]!))) seen.push(["act", b.phase]);
+      };
+      const { evaluate, click, type, press } = v;
+      v.evaluate = async (e) => { note("evaluate", [e]); return evaluate(e); };
+      v.click = async (s, o) => { note("click", [s]); return click(s, o); };
+      v.type = async (t) => { note("type", [t]); return type(t); };
+      v.press = async (k, o) => { note("press", [k]); return press(k, o); };
+      b = wrapView(v, fast);
+      expect((await createHandler(b)({ id: 1, op, args })).ok).toBe(true);
+      expect(seen).toEqual([["arm", "idle"], ["act", "acting"], ["count", "delivered"]]);
+      expect(b.phase).toBe("idle");
     });
   }
 });

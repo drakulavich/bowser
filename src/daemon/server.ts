@@ -180,13 +180,28 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     answer({ id: req.id, ok: false, error: timedOut, ...(dialogs ? { dialogs } : {}) });
     // Runs while this op still holds the serializer, so no later queued op
     // can overlap it; see Browser.interrupt for what it may overlap.
-    grace = setTimeout(() => {
+    const graceMs = Math.min(RECOVERY_GRACE_MS, ms);
+    let watched = false;
+    const recover = (): void => {
+      // The action returned and the watch ends on its own unless it sees a
+      // navigation: a reload now would only throw away the page (#115).
+      if (lane.phase?.() === "delivered") {
+        watched = true;
+        grace = setTimeout(recover, 10);
+        return;
+      }
+      if (watched) {
+        watched = false;
+        grace = setTimeout(recover, graceMs);
+        return;
+      }
       recovery = lane.recover?.().catch(() => false).then(() => {
         if (settled || !lane.mark) return;
         lane.mark.stuck = mine;
         for (const w of [...waiting ?? []]) w(mine.op);
       });
-    }, Math.min(RECOVERY_GRACE_MS, ms));
+    };
+    grace = setTimeout(recover, graceMs);
   }, ms) : undefined;
   const queue = (): void => {
     lane.serialize(async () => {
@@ -242,6 +257,11 @@ function timeoutMessage(req: DaemonRequest, ms: number, phase?: ActPhase): strin
     return `'${cmd}' timed out after ${ms}ms waiting for the page it opened; the ${cmd} was delivered, check the page before retrying`;
   }
   const step = cmd === req.op ? "" : ` (in its '${req.op}' step)`;
+  if (phase === "acting" || phase === "delivered") {
+    const how = phase === "acting" ? "may have been delivered" : "was delivered";
+    const unfinished = cmd === req.op ? "" : ` but the ${cmd} did not finish`;
+    return `'${cmd}' timed out after ${ms}ms${step}; the ${req.op} ${how}${unfinished}, check the page before retrying`;
+  }
   return `'${cmd}' timed out after ${ms}ms${step}`;
 }
 

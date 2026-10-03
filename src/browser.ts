@@ -81,7 +81,9 @@ export async function resolveTitle(
   }
 }
 
-export type ActPhase = "idle" | "acting" | "awaiting-navigation";
+/** `acting`: the action was sent and has not returned. `delivered`: it
+ *  returned, and the watch has seen no navigation it started yet. */
+export type ActPhase = "idle" | "acting" | "delivered" | "awaiting-navigation";
 
 export interface Browser {
   url: string;
@@ -379,6 +381,7 @@ function navigationWatch(
     while (Date.now() - start < timing.graceMs) {
       if (landed !== before) return;
       if (view.loading && !wasLoading) {
+        phase = "awaiting-navigation";
         onNavigation();
         return settle(before, () => view.loading);
       }
@@ -394,6 +397,7 @@ function navigationWatch(
   /** Wait up to `capMs` for the pending navigation to land; the page
    *  counted `seen` navigations when it began. */
   const follow = async (seen: number, capMs: number): Promise<void> => {
+    phase = "awaiting-navigation";
     pendingSeen = seen;
     onNavigation();
     pendingAt = landed;
@@ -441,7 +445,6 @@ function navigationWatch(
      *  Answers what the action answered. An action that always `navigates`
      *  waits for its landing with no grace or settle cap, as navigate does. */
     async act<T>(action: () => Promise<T>, navigates = false): Promise<T> {
-      phase = "acting";
       try {
         const before = landed;
         // A navigation already in flight is not ours: only a false→true transition
@@ -451,8 +454,9 @@ function navigationWatch(
         await ask(NAV_ARM, timing.graceMs);
         const landedBefore = landed;
         const arrivedBefore = arrived;
+        phase = "acting";
         const result = await action();
-        phase = "awaiting-navigation";
+        phase = "delivered";
         // A -999 here is the navigation the reload cancelled; any other
         // failure is the reload's own (measured, Bun 1.4.2).
         const ended = arrived !== arrivedBefore || (landed !== landedBefore && !cancelled(failure));
