@@ -329,7 +329,7 @@ describe("MCP positionals are data, never flags", () => {
       try {
         await saveState({ name: "dash", url: "https://x", title: "X", updatedAt: Date.now(),
           refs: [{ id: "e1", role: "textbox", name: "Email", tag: "input" }] });
-        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }) ? "input" : undefined) });
+        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }, { hit: true }) ? "input" : undefined) });
         const deps: McpDeps = {
           run: (argv) => run(argv, { connect: async () => c, readStdin: async () => { throw new Error("read stdin"); } }),
           version: "9.9.9",
@@ -483,7 +483,7 @@ describe("MCP fill and type never echo the entered text", () => {
       try {
         await saveState({ name: "echo", url: "https://x", title: "X", updatedAt: Date.now(),
           refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }] });
-        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }) ? "input" : undefined) });
+        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined) });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
         const res: any = await handleMcpRequest(
           { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } },
@@ -514,7 +514,7 @@ describe("MCP fill and type errors never carry the entered text", () => {
       await saveState({ name: "echoerr", url: "https://x", title: "X", updatedAt: Date.now(),
         refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }] });
       const c = fakeClient({
-        evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }) ? "input" : undefined),
+        evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined),
         type: () => { throw new Error(message); },
       });
       const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };

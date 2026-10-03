@@ -970,13 +970,24 @@ export function runCodeScript(code: string): string {
  *  the element to the centre when it is outside the viewport or its centre
  *  point is covered (a fixed header), as playwright-cli does before acting:
  *  WebKit's native click waits for its target to be hittable, so a link below
- *  the fold timed out (spec F8). Here it costs no round trip. */
-export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean; doc?: string } = {}): string {
+ *  the fold timed out (spec F8). Here it costs no round trip. With `hit`,
+ *  an element still covered at its centre after the scroll answers
+ *  { covered: { role, name, tag } } for what covers it: the native click
+ *  would wait out the budget for it, or press what the page put there (#112). */
+export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean; doc?: string; hit?: boolean } = {}): string {
   // With `enabled`, a disabled element (DISABLED, the snapshot's rule)
   // answers { disabled: true } instead, before any scroll: click, check and
   // uncheck refuse it at no extra round trip.
   const enabled = opts.enabled ? String.raw`
   if (isDisabled(el, role)) return { disabled: true };` : "";
+  // Bun's selector click waits on this same test (kActionabilityJS in its
+  // WebViewHost.cpp): a stricter one would refuse what it clicks.
+  const covered = opts.hit ? String.raw`
+  const area = el.getBoundingClientRect();
+  const top = document.elementFromPoint(area.left + area.width / 2, area.top + area.height / 2);
+  if (top && top !== el && !el.contains(top)) {
+    return { covered: { role: ariaRole(top) || 'generic', name: nameOf(top), tag: tagOf(top).toLowerCase() } };
+  }` : "";
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
   if (store?.doc !== ${JSON.stringify(opts.doc ?? null)}) return { gone: true };
@@ -995,8 +1006,8 @@ export function resolveRefScript(ref: { id: string; role: string; name: string }
   // root, so a shadow root does not answer with its host.
   const hit = outside ? null : el.getRootNode().elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
   if (outside || (hit && hit !== el && !el.contains(hit))) {
-    el.scrollIntoView({ block: 'center', inline: 'center' });
-  }
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  }${covered}
   ${CSS_PATH}
   return cssPath(el);
 })()`;

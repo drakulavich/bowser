@@ -69,7 +69,7 @@ async function seed(session: string): Promise<void> {
  *  every other script with `other`. */
 function resolvesThen(other: unknown) {
   return (expr: string): unknown =>
-    expr === resolveRefScript({ id: "e2", role: "textbox", name: "Email" }) ||
+    expr === resolveRefScript({ id: "e2", role: "textbox", name: "Email" }, { hit: true }) ||
     expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true }) ? "input" : other;
 }
 
@@ -97,6 +97,7 @@ const USER_ERRORS: Case[] = [
   { argv: ["click", "e1"], handlers: { evaluate: () => null }, stderr: "ref 'e1' not found in the current page snapshot. Try capturing new snapshot." },
   { argv: ["click", "e1"], handlers: { evaluate: () => ({ disabled: true }) }, stderr: "ref 'e1' is disabled" },
   { argv: ["click", "e1"], handlers: { resolve: () => ({ gone: true }) }, stderr: "ref 'e1' is from a page that is no longer loaded; take a new snapshot" },
+  { argv: ["click", "e1"], handlers: { resolve: () => ({ covered: { role: "generic", name: "", tag: "div" } }) }, stderr: `ref 'e1' (button "Go") is covered by generic <div> at its click point; take a new snapshot or close what covers it` },
   { argv: ["check", "e1"], stderr: "ref 'e1' is not a checkbox or radio button (button)" },
   { argv: ["select", "e1", "a"], stderr: "ref 'e1' is not a <select> element (button)" },
   { argv: ["fill", "e1", "a"], stderr: "ref 'e1' is not an <input>, <textarea> or contenteditable element (button)" },

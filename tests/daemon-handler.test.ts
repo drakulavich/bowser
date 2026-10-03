@@ -135,6 +135,23 @@ describe("createHandler", () => {
     }
   });
 
+  test("a click is given the time left until its budget's timer, so a cover that appears late fails it there (#112)", async () => {
+    const b = fakeBrowser();
+    const deadline = Date.now() + 1000;
+    await createHandler(b)(req("click", ["#a"]), deadline);
+    const [, args] = b.calls.find(([name]) => name === "click")!;
+    expect(args[0]).toBe("#a");
+    // The handler's deadline is 50 ms before the timer (REPLY_MARGIN_MS).
+    expect(args[1]).toBeGreaterThan(1000);
+    expect(args[1]).toBeLessThanOrEqual(1050);
+  });
+
+  test("a click with no budget is given no timeout", async () => {
+    const b = fakeBrowser();
+    await createHandler(b)(req("click", ["#a"]));
+    expect(b.calls.find(([name]) => name === "click")).toEqual(["click", ["#a", undefined]]);
+  });
+
   test("a throwing browser method becomes { ok: false, error }", async () => {
     const b = fakeBrowser({ click: async () => { throw new Error("click: element not found"); } });
     expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({ id: 7, ok: false, error: "click: element not found" });

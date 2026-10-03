@@ -35,7 +35,7 @@ export async function cmdClick(
 ): Promise<string> {
   const { prev, target, doc } = await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
-    await c.request("click", [await liveSelector(c, target, { enabled: true, doc })]);
+    await c.request("click", [await liveSelector(c, target, { enabled: true, doc, hit: true })]);
     const state = await c.request("state");
     await syncState(prev, state);
     return replyPage(ctx, c, { ok: true, ref, element: element(target), url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
@@ -98,7 +98,7 @@ export async function cmdFill(
   const { target, doc } = await loadRef(ctx.session, ref);
   requireKind("fill", ref, target);
   return withPageClient(ctx, async (c) => {
-    const selector = await liveSelector(c, target, { doc });
+    const selector = await liveSelector(c, target, { doc, hit: true });
     await c.request("click", [selector]);
     const found = await withholdingText("fill", value, () => c.request("evaluate", [fillScript(selector, value)]));
     const { outcome, type } = readFillAnswer(found);

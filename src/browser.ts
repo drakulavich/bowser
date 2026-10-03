@@ -31,7 +31,7 @@ export interface ViewLike {
   readonly title: string;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
-  click(selector: string): Promise<void>;
+  click(selector: string, options?: { timeout?: number }): Promise<void>;
   type(text: string): Promise<void>;
   press(key: string, options?: { modifiers: KeyModifier[] }): Promise<void>;
   resize(width: number, height: number): Promise<void>;
@@ -90,7 +90,9 @@ export interface Browser {
   realTitle(): Promise<string>;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
-  click(selector: string): Promise<void>;
+  /** Bun's selector click: waits up to `timeoutMs` (Bun's default, 30 s,
+   *  when absent) for the element to be the topmost at its centre. */
+  click(selector: string, timeoutMs?: number): Promise<void>;
   type(text: string): Promise<void>;
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
   hover(selector: string): Promise<void>;
@@ -576,7 +578,7 @@ export function wrapView(
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
-    click: (selector) => guard(nav.act(() => view.click(selector))),
+    click: (selector, timeoutMs) => guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
     type: (text) => guard(nav.act(() => view.type(text))),
     press: (key, modifiers = []) => guard(nav.act(async () => {
       const command = menuCommand(key, modifiers);
