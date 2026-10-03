@@ -1,7 +1,8 @@
 // wrapView() against a fake view.
 import { describe, expect, test } from "bun:test";
 import { wrapView, type ViewLike } from "../src/browser.ts";
-import { ACTS, createHandler } from "../src/daemon/server.ts";
+import { ACTS, createHandler, dispatch } from "../src/daemon/server.ts";
+import { createSerializer } from "../src/serialize.ts";
 import type { Op } from "../src/daemon/protocol.ts";
 import { CANCEL_PENDING_NAVIGATION, KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION } from "../src/page-scripts.ts";
 
@@ -43,6 +44,38 @@ describe("wrapView click", () => {
     v.click = async (s, o) => { seen.push([s, o]); };
     await wrapView(v).click("#a", 1234);
     expect(seen).toEqual([["#a", { timeout: 1234 }]]);
+  });
+
+  test("a timed-out navigation-arming read never sends the click", async () => {
+    let releaseArm!: () => void;
+    let armStarted!: () => void;
+    const started = new Promise<void>((r) => { armStarted = r; });
+    const v = fakeView({
+      evaluate: async (expr) => {
+        if (expr === NAV_ARM) {
+          armStarted();
+          await new Promise<void>((r) => { releaseArm = r; });
+        }
+        return undefined;
+      },
+    });
+    const b = wrapView(v, fast);
+    const replies: unknown[] = [];
+    const handler = createHandler(b);
+    dispatch({ id: 1, op: "click", args: ["#go"] }, {
+      handle: handler,
+      serialize: createSerializer(),
+      timeoutMs: 30,
+      cancelAction: handler.cancelAction,
+      reply: (reply) => { replies.push(reply); },
+    });
+
+    await started;
+    await Bun.sleep(50);
+    expect(replies).toHaveLength(1);
+    releaseArm();
+    await Bun.sleep(20);
+    expect(v.calls.filter(([op]) => op === "click")).toEqual([]);
   });
 });
 

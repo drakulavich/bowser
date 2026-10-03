@@ -75,6 +75,15 @@ describe("createHandler", () => {
     expect(b.calls).toEqual([]);
   });
 
+  test("an urgent ping keeps a timed-out op's action cancelled", async () => {
+    let resets = 0;
+    const b = fakeBrowser({ resetActionCancellation: () => { resets++; } });
+    await createHandler(b)(req("ping"));
+    expect(resets).toBe(0);
+    await createHandler(b)(req("state"));
+    expect(resets).toBe(1);
+  });
+
   test("state returns the resolved url and title", async () => {
     const b = fakeBrowser();
     expect(await createHandler(b)(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X" } });
