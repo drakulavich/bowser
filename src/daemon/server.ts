@@ -210,7 +210,10 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
       if (answered) return;
       running = true;
       waiting?.delete(onStuck);
-      const res = await lane.handle(req, deadline);
+      let res = await lane.handle(req, deadline);
+      if (!res.ok && req.op === "click" && res.error === `timeout waiting for '${req.args?.[0]}' to be actionable`) {
+        res = { ...res, error: timeoutMessage(req, budget, "acting") };
+      }
       settled = true;
       if (lane.mark?.stuck === mine) lane.mark.stuck = undefined;
       // Settled within the grace: no reload, and the next op starts now.
