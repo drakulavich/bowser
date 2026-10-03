@@ -33,6 +33,16 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
   return v;
 }
 
+describe("wrapView click", () => {
+  test("passes its timeout to the view's selector click (#112)", async () => {
+    const v = fakeView();
+    const seen: unknown[] = [];
+    v.click = async (s, o) => { seen.push([s, o]); };
+    await wrapView(v).click("#a", 1234);
+    expect(seen).toEqual([["#a", { timeout: 1234 }]]);
+  });
+});
+
 describe("wrapView close", () => {
   test("with a persistent profile, close leaves the page first so its storage is written", async () => {
     const v = fakeView();

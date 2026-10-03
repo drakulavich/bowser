@@ -91,8 +91,9 @@ export async function loadRef(session: string, ref: string) {
  *  selector instead would wait out the op timeout or hit whatever element
  *  moved into its place. So does one whose element's role or name changed
  *  since the snapshot (#80). With `enabled`, a disabled element fails too, at
- *  once, and nothing is clicked (F20). One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean; doc?: string } = {}): Promise<string> {
+ *  once, and nothing is clicked (F20). With `hit`, so does one another
+ *  element covers at its click point (#112). One daemon round trip. */
+export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean; doc?: string; hit?: boolean } = {}): Promise<string> {
   const ref = target.id;
   const selector = await c.request("resolve", [resolveRefScript(target, opts)]);
   if ((selector as { gone?: unknown } | null)?.gone === true) {
@@ -106,6 +107,13 @@ export async function liveSelector(c: DaemonConnection, target: Ref, opts: { ena
   }
   if (opts.enabled && (selector as { disabled?: unknown } | null)?.disabled === true) {
     throw new UserError(`ref '${ref}' is disabled`);
+  }
+  const covered = (selector as { covered?: { role: string; name: string; tag: string } } | null)?.covered;
+  if (covered) {
+    const by = covered.name ? `${covered.role} ${JSON.stringify(covered.name)}` : `${covered.role} <${covered.tag}>`;
+    throw new UserError(
+      `ref '${ref}' (${target.role} ${JSON.stringify(target.name)}) is covered by ${by} at its click point; take a new snapshot or close what covers it`,
+    );
   }
   if (typeof selector !== "string") {
     throw new UserError(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`);

@@ -50,7 +50,7 @@ interface DaemonOps {
   evaluate:         { args: [expr: string];                              result: unknown };
   /** `evaluate` of a ref's resolve script, after any pending navigation. */
   resolve:          { args: [expr: string];                              result: unknown };
-  click:            { args: [selector: string];                          result: void };
+  click:            { args: [selector: string, timeoutMs?: number];      result: void };
   type:             { args: [text: string];                              result: void };
   press:            { args: [key: string, modifiers?: KeyModifier[]];    result: void };
   hover:            { args: [selector: string];                          result: void };
