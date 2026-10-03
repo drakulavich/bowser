@@ -15,6 +15,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`reload` fails when the page does not load.** With the page's server down, `reload` answered
+  `reloaded <url>`, exit code 0, while WebKit had failed to load the page. It now fails the way
+  `goto` does: `bowser: Could not connect to the server.`, exit code 2. A reload that a page script
+  cancels still waits for the script's navigation. (#123)
 - **A timeout says when the action may already have reached the page.** With
   `BOWSER_OP_TIMEOUT_MS=50`, `click` on an "Add to cart" button answered `'click' timed out after
   50ms`, exit code 2, although the cart count went up, so an agent that retried added the item

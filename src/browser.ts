@@ -321,7 +321,8 @@ function navigationWatch(
 ) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
-  // A failed navigation ends the wait but does not fail the action: WebKit
+  // A failed navigation ends the wait but does not fail the action (reload's
+  // own failure does, see act): WebKit
   // reports NSURLErrorDomain -999 for routine cancellations (a page script
   // navigating right after a click), and `state` reads the real URL anyway.
   // Surfacing the last navigation error is future DaemonState work.
@@ -450,7 +451,8 @@ function navigationWatch(
     },
     /** Run `action` and wait for a navigation it started; see above.
      *  Answers what the action answered. An action that always `navigates`
-     *  waits for its landing with no grace or settle cap, as navigate does. */
+     *  waits for its landing with no grace or settle cap, and fails with
+     *  that landing's failure unless it is a -999, as navigate does (#123). */
     async act<T>(action: () => Promise<T>, navigates = false): Promise<T> {
       try {
         const before = landed;
@@ -469,7 +471,10 @@ function navigationWatch(
         // failure is the reload's own (measured, Bun 1.4.2).
         const ended = arrived !== arrivedBefore || (landed !== landedBefore && !cancelled(failure));
         if (!navigates) await awaitNavigation(before, wasLoading);
-        else if (!ended) await follow(0, Infinity);
+        else {
+          if (!ended) await follow(0, Infinity);
+          if (arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure)) throw failure;
+        }
         return result;
       } finally {
         phase = "idle";

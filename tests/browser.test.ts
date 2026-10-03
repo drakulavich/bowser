@@ -576,12 +576,42 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/elsewhere");
   });
 
-  test("reload ends at once when its own failure arrives before reload resolves", async () => {
+  test("reload fails at once when its own failure arrives before reload resolves", async () => {
     const v = fakeView({ reload: async () => { v.onNavigationFailed?.(new Error("Could not connect to the server.")); } });
     const b = wrapView(v, fast);
     const t0 = Date.now();
-    expect(await Promise.race([b.reload().then(() => "returned"), Bun.sleep(fast.settleMs * 2).then(() => "waiting")])).toBe("returned");
+    const outcome = await Promise.race([
+      b.reload().then(() => "returned", (e: Error) => e.message),
+      Bun.sleep(fast.settleMs * 2).then(() => "waiting"),
+    ]);
+    expect(outcome).toBe("Could not connect to the server.");
     expect(Date.now() - t0).toBeLessThan(fast.settleMs);
+  });
+
+  // #123: WebKit reports the reload's own failure 1-5 ms after reload() resolves.
+  test("reload fails with its own failure when it arrives after reload resolves", async () => {
+    const v = fakeView({ reload: async () => {
+      setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 3);
+    } });
+    const b = wrapView(v, fast);
+    await expect(b.reload()).rejects.toThrow("Could not connect to the server.");
+    expect(b.phase).toBe("idle");
+  });
+
+  test("reload whose script replacement fails after the cancelled -999 fails with that failure", async () => {
+    const { v, page } = pageNavView({ reload: async () => {
+      setTimeout(() => { page.navs = 1; v.onNavigationFailed?.(new Error(CANCELLED)); }, 3);
+      setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 60);
+    } });
+    const b = wrapView(v, fast);
+    await expect(b.reload()).rejects.toThrow("Could not connect to the server.");
+  });
+
+  test("reload over a cancelled -999 with nothing after it still returns", async () => {
+    const v = fakeView({ reload: async () => {
+      setTimeout(() => v.onNavigationFailed?.(new Error(CANCELLED)), 3);
+    } });
+    await wrapView(v, fast).reload();
   });
 
   test("reload waits when the cancelled navigation fails before reload resolves", async () => {
