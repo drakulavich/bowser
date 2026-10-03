@@ -518,6 +518,14 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/elsewhere");
   });
 
+  test("reload ends at once when its own failure arrives before reload resolves", async () => {
+    const v = fakeView({ reload: async () => { v.onNavigationFailed?.(new Error("Could not connect to the server.")); } });
+    const b = wrapView(v, fast);
+    const t0 = Date.now();
+    expect(await Promise.race([b.reload().then(() => "returned"), Bun.sleep(fast.settleMs * 2).then(() => "waiting")])).toBe("returned");
+    expect(Date.now() - t0).toBeLessThan(fast.settleMs);
+  });
+
   test("reload waits when the cancelled navigation fails before reload resolves", async () => {
     const { v, page } = pageNavView({ reload: async () => {
       setTimeout(() => { page.navs = 1; v.onNavigationFailed?.(new Error(CANCELLED)); }, 10);

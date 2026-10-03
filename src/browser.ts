@@ -447,11 +447,15 @@ function navigationWatch(
         // action the full settleMs. The page flag is cleared for the same reason.
         const wasLoading = view.loading;
         await ask(NAV_ARM, timing.graceMs);
+        const landedBefore = landed;
         const arrivedBefore = arrived;
         const result = await action();
         phase = "awaiting-navigation";
+        // A -999 here is the navigation the reload cancelled; any other
+        // failure is the reload's own (measured, Bun 1.4.2).
+        const ended = arrived !== arrivedBefore || (landed !== landedBefore && !cancelled(failure));
         if (!navigates) await awaitNavigation(before, wasLoading);
-        else if (arrived === arrivedBefore) await follow(0, Infinity);
+        else if (!ended) await follow(0, Infinity);
         return result;
       } finally {
         phase = "idle";
