@@ -1006,7 +1006,7 @@ export function resolveRefScript(ref: { id: string; role: string; name: string }
   // root, so a shadow root does not answer with its host.
   const hit = outside ? null : el.getRootNode().elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
   if (outside || (hit && hit !== el && !el.contains(hit))) {
-    el.scrollIntoView({ block: 'center', inline: 'center' });
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
   }${covered}
   ${CSS_PATH}
   return cssPath(el);

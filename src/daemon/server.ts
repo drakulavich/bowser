@@ -269,7 +269,7 @@ const handlers: Handlers = {
   navigate: (browser, url) => browser.navigate(url),
   evaluate: (browser, expr) => browser.evaluate(expr),
   resolve: (browser, expr) => browser.evaluate(expr),
-  click: (browser, selector) => browser.click(selector),
+  click: (browser, selector, timeoutMs) => browser.click(selector, timeoutMs),
   type: (browser, text) => browser.type(text),
   press: (browser, key, modifiers) => browser.press(key, modifiers),
   hover: (browser, selector) => browser.hover(selector),
@@ -362,7 +362,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
   /** Wait, up to `deadline`, for a navigation an earlier action left
    *  pending: an action must not start before it ends (ET-10, #78). */
   async function afterPendingNavigation(req: DaemonRequest, deadline = Infinity): Promise<DaemonResponse> {
-    if (!browser.navigationPending) return runShimmed(req);
+    if (!browser.navigationPending) return runShimmed(req, deadline);
     // Read before the wait: after it, the reply is due at once.
     const url = await browser.navigationDestination(Math.max(0, deadline - Date.now()));
     while (browser.navigationPending) {
@@ -370,7 +370,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
       if (left <= 0) return { id: req.id, ok: false, error: `page is still loading ${url}; retry later, or run 'bowser close'` };
       await Bun.sleep(Math.min(10, left));
     }
-    return runShimmed(req);
+    return runShimmed(req, deadline);
   }
 
   async function run(req: DaemonRequest): Promise<DaemonResponse> {
@@ -412,7 +412,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
    *  in the log of the document the op may leave, and the log leaves with
    *  it. The reads are page evaluates inside the daemon, not socket round
    *  trips (~0.07 ms each on WebKit, measured). */
-  async function runShimmed(req: DaemonRequest): Promise<DaemonResponse> {
+  async function runShimmed(req: DaemonRequest, deadline = Infinity): Promise<DaemonResponse> {
     if (req.op === "evaluate") {
       const drop = !shimmed;
       const res = await run({ ...req, args: [withDialogShim(String(req.args?.[0]), drop)] });
@@ -437,7 +437,11 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
     // page's answer: a document the back-forward cache restores still has
     // its shim and answer. Not left to the navigation callback alone.
     if (NAVIGATES.has(req.op)) shimmed = false;
-    const res = await run(req);
+    // Bun's click otherwise waits 30 s for a covered target, past the
+    // recovery reload, which leaves the session stuck (#112).
+    const res = await run(req.op === "click" && deadline !== Infinity
+      ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - Date.now())] }
+      : req);
     await sync();
     return res;
   }

@@ -29,7 +29,8 @@ All notable changes to this project are documented here. This project follows
   reported the original button. The lookup now checks what is at the element's centre after
   scrolling it into view, and fails at once, exit code 1, naming what is there: `ref 'eN' (button
   "Add to cart") is covered by generic <div> at its click point; take a new snapshot or close what
-  covers it`. (#112)
+  covers it`. A cover that appears after that check now fails the click at the command's budget,
+  and the session stays usable. (#112)
 
 ## [0.10.1] — 2026-09-30
 

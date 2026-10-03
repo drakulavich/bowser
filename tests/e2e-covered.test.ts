@@ -49,6 +49,32 @@ const SWAP = `<!doctype html><title>swap</title>
   }
 </script>`;
 
+/** A button under a fixed header once the page is scrolled to 280 px, on a
+ *  page that scrolls smoothly: the scroll that clears it must be done
+ *  before the hit test. */
+const SMOOTH = `<!doctype html><title>smooth</title>
+<style>html { scroll-behavior: smooth }</style>
+<header style="position: fixed; top: 0; left: 0; right: 0; height: 120px; background: #ccc; z-index: 10">Header</header>
+<div style="height: 300px"></div>
+<button id="under" onclick="document.body.dataset.clicked = 'yes'">Under</button>
+<div style="height: 3000px"></div>`;
+
+/** A button below the fold; the page's first scroll puts a backdrop over
+ *  everything, after the hit test and before the click. */
+const LATE = `<!doctype html><title>late</title>
+<div style="height: 2500px"></div>
+<button onclick="document.body.dataset.clicked = 'yes'">Late</button>
+<div style="height: 2500px"></div>
+<script>
+  addEventListener('scroll', () => {
+    if (window.covered) return;
+    window.covered = true;
+    const d = document.createElement('div');
+    d.style = 'position: fixed; inset: 0; z-index: 10';
+    document.body.append(d);
+  });
+</script>`;
+
 /** Targets whose click point is the target, a descendant, or nothing that
  *  takes pointer events: none of these may be refused. */
 const HITTABLE = `<!doctype html><title>hittable</title>
@@ -88,7 +114,7 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     process.env.BOWSER_OP_TIMEOUT_MS = "8000";
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response({ "/backdrop": BACKDROP, "/swap": SWAP }[new URL(req.url).pathname] ?? HITTABLE, {
+      fetch: (req) => new Response({ "/backdrop": BACKDROP, "/swap": SWAP, "/smooth": SMOOTH, "/late": LATE }[new URL(req.url).pathname] ?? HITTABLE, {
         headers: { "content-type": "text/html; charset=utf-8" },
       }),
     });
@@ -149,6 +175,35 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     expect(reportFailure(second).code).toBe(1);
     await Bun.sleep(1000);
     expect(await cmdEval(ctx, "JSON.stringify([window.adds, window.plus])")).toBe("[1,0]");
+  }, 30_000);
+
+  test("click on a button under a fixed header on a smooth-scrolling page scrolls it clear and clicks it", async () => {
+    await cmdOpen(ctx, `${base}/smooth`);
+    await cmdSnapshot(ctx);
+    const button = await refNamed("Under");
+    const top = Number(await cmdEval(ctx, "(scrollTo({ top: 280, behavior: 'instant' }), document.getElementById('under').getBoundingClientRect().top)"));
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(top).toBeLessThan(100);
+    await cmdClick(ctx, button);
+    expect(await cmdEval(ctx, "document.body.dataset.clicked")).toBe("yes");
+  }, 30_000);
+
+  test("a cover that appears after the hit test times the click out at the budget, and the session stays usable", async () => {
+    await cmdOpen(ctx, `${base}/late`);
+    await cmdSnapshot(ctx);
+    const button = await refNamed("Late");
+    process.env.BOWSER_OP_TIMEOUT_MS = "3000";
+    let err: Error;
+    const t0 = performance.now();
+    try {
+      err = await failure(cmdClick(ctx, button));
+    } finally {
+      process.env.BOWSER_OP_TIMEOUT_MS = "8000";
+    }
+    expect(performance.now() - t0).toBeLessThan(4000);
+    expect(err.message).toBe("'click' timed out after 3000ms");
+    expect(reportFailure(err).code).toBe(2);
+    expect(await cmdEval(ctx, "String(document.body.dataset.clicked) + ' ' + window.covered")).toBe("undefined true");
   }, 30_000);
 
   test("a target hit at itself, a descendant, its shadow content or through a pointer-events:none layer is clicked", async () => {
