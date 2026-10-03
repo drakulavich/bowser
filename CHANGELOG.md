@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **Ref commands name their element under `--json` and over MCP.** `click`, `fill`, `hover`,
+  `select`, `check` and `uncheck` add `"element":{"role":"…","name":"…"}`, the role and name the
+  snapshot gave the ref. An MCP agent got only `{"ok":true,"ref":"e724","url":…}` and could not
+  tell which of several "Add to cart" buttons it had clicked; the plain output already printed
+  `clicked e724 (button "Add to cart")`. `fill` still never returns the entered text. (#117)
+
 ### Fixed
 
 - **A ref acts only on the page whose snapshot gave it.** After `go-back` restored a page from the
