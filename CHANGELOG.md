@@ -23,6 +23,20 @@ All notable changes to this project are documented here. This project follows
   looks the ref up, and a ref from another page fails with `ref 'eN' is from a page that is no
   longer loaded; take a new snapshot`, exit code 1. That message replaces `not found` for a ref
   from before a navigation or reload; `pushState` and `#hash` changes keep the refs. (#105)
+- **`reload` returns once the reloaded page has loaded.** On a page whose server was slow to
+  answer, `reload` replied `reloaded <url>` after 0.1 s while the old document was still live. A
+  `goto` right after it failed with WebKit's `The operation couldn’t be completed.
+  (NSURLErrorDomain error -999.)`, exit code 2, and a ref from before the reload answered `not
+  found` instead of `is from a page that is no longer loaded`. `reload` now waits for its page the
+  way `goto` does, within the command's budget, and a timeout says `'reload' timed out after
+  <ms>ms waiting for the page it opened; the reload was delivered, check the page before
+  retrying`. (#116)
+- **`goto` and `open <url>` land when they cancel a navigation still loading.** When a page script
+  or a reload had started a navigation that was still loading, `goto` failed with the same
+  `NSURLErrorDomain error -999` text although its own page went on to load. It now waits for that
+  page. If something else cancels the `goto` itself, it fails with `navigate: the navigation to
+  <url> was cancelled by another navigation; run 'bowser snapshot' to see where the page is`.
+  (#116)
 - **`click` and `fill` refuse a ref another element covers.** Under a full-page backdrop, `click`
   waited until its budget ran out (exit 2), and with a short budget it left the session stuck.
   On a button the page had just swapped for a `- qty +` stepper, a second `click` pressed `+` and
