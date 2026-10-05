@@ -37,10 +37,8 @@ bowser markdown [<ref>] [--filename=f]
 `MARKDOWN_SCRIPT` in `src/page-scripts.ts` is one async expression evaluated in the page. It tries, in order:
 
 1. **A claude.ai artifact.** The page is on `claude.ai` and its path is `/public/artifacts/<uuid>`. The script fetches `/api/published_artifacts/<uuid>`. When the answer is 200 and its `type` is `text/markdown`, `content` is the result, with `source: "page"`. A React or HTML artifact, or any failed fetch, falls through to the next step.
-2. **`<link rel="alternate" type="text/markdown" href>`.** The script fetches `href` from the page, so the session's cookies apply. A 200 whose body is not an HTML document is the result, with `source: "page"`. A failure, including a CORS refusal on another origin, falls through.
-3. **Conversion** of `main, [role=main]` (the first visible match) or else `document.body`, with `source: "converted"`.
-
-Each fetch counts against the op's budget. The command never waits on a fetch longer than the remaining budget: a fetch still running when the budget is half spent is abandoned, and the script converts instead.
+2. **`<link rel="alternate" type="text/markdown" href>`.** The script fetches `href` from the page, so the session's cookies apply. A 200 is the result, with `source: "page"`. A failure, including a CORS refusal on another origin, falls through.
+3. **Conversion** of `document.querySelector("main, [role=main]")`, or else `document.body`, with `source: "converted"`.
 
 ### 3. The conversion
 
@@ -64,14 +62,13 @@ With a ref, the command converts the ref's element and its subtree (section 3) a
 
 1. **Conversion.** An e2e test on a new fixture, `tests/fixtures/markdown.html`, checks the exact Markdown for headings, a nested list, an ordered list, a data table, a layout table, `pre`, inline `code`, emphasis, an absolute and a `#` link, a heading permalink, an image with and without `alt`, a hidden element, `aria-hidden`, a `<nav>` outside `<main>`, and form controls.
 2. **`<main>`.** On the fixture the `<nav>` outside `<main>` is absent. On a copy with no `<main>`, it is present.
-3. **`rel=alternate`.** A local `Bun.serve` page with `<link rel="alternate" type="text/markdown" href="/page.md">` gives `/page.md`'s body with `"source":"page"`. When `/page.md` answers 404, or answers with an HTML body, the result is the conversion with `"source":"converted"`.
+3. **`rel=alternate`.** A local `Bun.serve` page with `<link rel="alternate" type="text/markdown" href="/page.md">` gives `/page.md`'s body with `"source":"page"`. When `/page.md` answers 404, the result is the conversion with `"source":"converted"`.
 4. **Artifact.** A live test gated like `tests/e2e-search.test.ts` (`BOWSER_E2E_NET=1`) opens the #130 example artifact and gets Markdown that starts with `# Aqara W400` and has `"source":"page"`.
 5. **Ref.** `markdown <ref>` on the fixture's `<article>` gives only the article. A ref from before a `goto` fails with `ref 'eN' is from a page that is no longer loaded; take a new snapshot`, exit 1. On a fixture page taller than the viewport, `markdown <ref>` on an element below the fold leaves `window.scrollY` at 0. On `main` the same check fails, which shows that the test catches the scroll.
 6. **Output forms.** The text form has no `### Page` wrapper. `--json` and `--filename` answer as in section 1. `tests/mcp.test.ts` lists a `markdown` tool.
-7. **Size.** On the fixture, the conversion is less than half of `snapshot`'s bytes.
-8. **Checks.** `bun run check` and `BOWSER_E2E=1 bun test` pass. CI is green.
-9. **Docs.** The README command reference, `skills/bowser/SKILL.md` and CHANGELOG `[Unreleased]` describe `markdown`, and the roadmap gets a ticked line.
-10. **Review and issues.** A Codex review ends with no open Critical or Required finding. The PR closes #130 and #131.
+7. **Checks.** `bun run check` and `BOWSER_E2E=1 bun test` pass. CI is green.
+8. **Docs.** The README command reference, `skills/bowser/SKILL.md` and CHANGELOG `[Unreleased]` describe `markdown`, and the roadmap gets a ticked line.
+9. **Review and issues.** A Codex review ends with no open Critical or Required finding. The PR closes #130 and #131.
 
 ## Out of scope
 
@@ -80,8 +77,3 @@ With a ref, the command converts the ref's element and its subtree (section 3) a
 - Iframe and shadow DOM contents.
 - Truncation or a size limit.
 - Site adapters other than claude.ai artifacts. Each gets its own issue when a real case comes up.
-
-## Possible later
-
-- Adapters for GitHub (raw README) and docs sites that serve `<path>.md` without a `rel=alternate` link.
-- A flag that drops link URLs, for pages where the agent only reads.
