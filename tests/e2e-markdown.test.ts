@@ -54,6 +54,14 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/edges.html") return html(EDGES);
         if (path === "/alt.html") return html(ALT("/page.md"));
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
+        if (path === "/alt-slow.html") return html(ALT("/slow.md"));
+        if (path === "/slow.md") { await Bun.sleep(20_000); return new Response("# Late"); }
+        if (path === "/alt-signin.html") return html(ALT("/private.md"));
+        if (path === "/private.md") return Response.redirect("/signin.html", 302);
+        if (path === "/signin.html") return html("<!doctype html><title>Sign in</title><form>Sign in</form>");
+        if (path === "/alt-shell.html") return html(ALT("/shell.md"));
+        if (path === "/shell.md") return html("<!doctype html><div id=root>Loading</div>");
+        if (path === "/alert.html") return html("<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>");
         if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
         return new Response("not found", { status: 404 });
       },
@@ -145,6 +153,37 @@ runOrSkip("e2e: markdown", () => {
   test("a rel=alternate link that answers 404 falls back to conversion", async () => {
     await cmdGoto(ctx, `${base}/alt-missing.html`);
     expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+  }, 60_000);
+
+  test("a rel=alternate link that has not answered by half the budget falls back to conversion", async () => {
+    const orig = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "4000";
+    try {
+      await cmdGoto(ctx, `${base}/alt-slow.html`);
+      const t0 = performance.now();
+      expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+      expect(performance.now() - t0).toBeLessThan(4000);
+    } finally {
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+    }
+  }, 60_000);
+
+  test("a rel=alternate link that lands on an HTML page falls back to conversion", async () => {
+    await cmdGoto(ctx, `${base}/alt-signin.html`);
+    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+    await cmdGoto(ctx, `${base}/alt-shell.html`);
+    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+  }, 60_000);
+
+  test("a dialog the page opened is reported, under --json and in the text form", async () => {
+    await cmdGoto(ctx, `${base}/alert.html`);
+    await Bun.sleep(600);
+    expect(JSON.parse(await cmdMarkdown(json))).toEqual({
+      markdown: "Alert page", source: "converted", dialogs: [{ type: "alert", message: "hello", state: "dismissed" }],
+    });
+    await cmdGoto(ctx, `${base}/alert.html`);
+    await Bun.sleep(600);
+    expect(await cmdMarkdown(ctx)).toBe('Alert page\n### Modal state\n- ["alert" dialog with message "hello"]: dismissed');
   }, 60_000);
 
   test("a ref converts only its element", async () => {
