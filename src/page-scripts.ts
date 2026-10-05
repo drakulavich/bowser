@@ -939,6 +939,109 @@ export function storageRestoreScript(
   );
 }
 
+const TO_MARKDOWN = String.raw`
+  const BT = String.fromCharCode(96);
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS', 'IFRAME', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
+  const BLOCK = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FIGURE', 'FIGCAPTION', 'FORM', 'FIELDSET', 'DETAILS', 'SUMMARY', 'ADDRESS', 'DL', 'DT', 'DD', 'LI', 'BODY', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'TABLE', 'BLOCKQUOTE', 'HR']);
+  const skipped = (el) => {
+    if (SKIP.has(el.tagName.toUpperCase()) || el.hidden || el.getAttribute('aria-hidden') === 'true') return true;
+    const s = getComputedStyle(el);
+    return s.display === 'none' || s.visibility === 'hidden';
+  };
+  const isBlock = (el) => BLOCK.has(el.tagName) || /^(block|flex|grid|table|list-item)/.test(getComputedStyle(el).display);
+  const rawText = (n) => n.nodeType === 3 ? n.nodeValue : n.nodeType === 1 && !skipped(n) ? (n.tagName === 'BR' ? '\n' : [...n.childNodes].map(rawText).join('')) : '';
+  const fence = (text, min) => BT.repeat(Math.max(min, 1 + Math.max(0, ...(text.match(new RegExp(BT + '+', 'g')) || []).map((r) => r.length))));
+  const mark = (m, text) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text); return core ? lead + m + core + m + trail : lead + trail; };
+  const inline = (n) => {
+    if (n.nodeType === 3) return n.nodeValue.replace(/\s+/g, ' ');
+    if (n.nodeType !== 1 || skipped(n)) return '';
+    const t = n.tagName;
+    const kids = () => [...n.childNodes].map(inline).join('');
+    if (t === 'BR') return '\n';
+    if (t === 'CODE') { const code = rawText(n); const f = fence(code, 1); return f + code + f; }
+    if (t === 'STRONG' || t === 'B') return mark('**', kids());
+    if (t === 'EM' || t === 'I') return mark('*', kids());
+    if (t === 'IMG') { const alt = (n.getAttribute('alt') || '').trim(); return alt ? '![' + alt + ']' : ''; }
+    if (t === 'A') {
+      const k = kids().trim();
+      if (['#', '¶', '🔗'].includes(k)) return '';
+      const href = n.getAttribute('href') || '';
+      return k && href && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + n.href + ')' : k;
+    }
+    return kids();
+  };
+  const table = (el) => {
+    const rows = [...el.rows].filter((r) => !skipped(r)).map((r) => [...r.cells].map((c) => inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|')));
+    if (!rows.length) return '';
+    const width = Math.max(...rows.map((r) => r.length));
+    const line = (r) => '| ' + [...r, ...Array(width - r.length).fill('')].join(' | ') + ' |';
+    return [line(rows[0]), '|' + ' --- |'.repeat(width), ...rows.slice(1).map(line)].join('\n');
+  };
+  const layoutTable = (el) => [...el.querySelectorAll('td, th')].some((c) => [...c.querySelectorAll('*')].some(isBlock));
+  const blocks = (n, out) => {
+    if (n.nodeType === 3) { out.push({ inline: n.nodeValue.replace(/\s+/g, ' ') }); return; }
+    if (n.nodeType !== 1 || skipped(n)) return;
+    const t = n.tagName;
+    const h = /^H([1-6])$/.exec(t);
+    if (h) { const k = inline(n).trim(); if (k) out.push('#'.repeat(+h[1]) + ' ' + k); return; }
+    if (t === 'PRE') { const code = rawText(n).replace(/\n$/, ''); const f = fence(code, 3); out.push(f + '\n' + code + '\n' + f); return; }
+    if (t === 'HR') { out.push('---'); return; }
+    if (t === 'BLOCKQUOTE') { const k = convert(n.childNodes); if (k) out.push(k.split('\n').map((l) => l ? '> ' + l : '>').join('\n')); return; }
+    if (t === 'TABLE' && n.rows.length && !layoutTable(n)) { out.push(table(n)); return; }
+    if (t === 'UL' || t === 'OL') {
+      let i = 1;
+      const items = [...n.children].filter((li) => li.tagName === 'LI' && !skipped(li)).map((li) => {
+        const marker = t === 'OL' ? (i++) + '. ' : '- ';
+        const k = convert(li.childNodes).replace(/\n\n/g, '\n').replace(/\n/g, '\n' + ' '.repeat(marker.length));
+        return k ? marker + k : '';
+      }).filter(Boolean);
+      if (items.length) out.push(items.join('\n'));
+      return;
+    }
+    if (isBlock(n)) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
+    out.push({ inline: inline(n) });
+  };
+  const convert = (nodes) => {
+    const out = [];
+    for (const c of nodes) blocks(c, out);
+    const paras = [];
+    let run = '';
+    const end = () => { const p = run.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim(); if (p) paras.push(p); run = ''; };
+    for (const x of out) {
+      if (typeof x === 'string') { end(); if (x) paras.push(x); }
+      else if (x.end) end();
+      else run += x.inline;
+    }
+    end();
+    return paras.join('\n\n');
+  };`;
+
+export function markdownScript(selector?: string): string {
+  const own = selector === undefined ? String.raw`
+  const artifact = location.hostname === 'claude.ai' && /^\/public\/artifacts\/([0-9a-f-]+)\/?$/.exec(location.pathname);
+  if (artifact) {
+    try {
+      const r = await fetch('/api/published_artifacts/' + artifact[1]);
+      const j = r.ok ? await r.json() : null;
+      if (j && j.type === 'text/markdown' && typeof j.content === 'string') return { markdown: j.content.trimEnd(), source: 'page' };
+    } catch {}
+  }
+  const link = document.querySelector('link[rel~="alternate"][type="text/markdown"][href]');
+  if (link) {
+    try {
+      const r = await fetch(link.href);
+      if (r.ok) return { markdown: (await r.text()).trimEnd(), source: 'page' };
+    } catch {}
+  }` : "";
+  const nodes = selector === undefined
+    ? `(document.querySelector('main, [role=main]') || document.body).childNodes`
+    : `[document.querySelector(${JSON.stringify(selector)})]`;
+  return String.raw`(async () => {${own}
+  ${TO_MARKDOWN}
+  return { markdown: convert(${nodes}), source: 'converted' };
+})()`;
+}
+
 // Compiles `body` without running it: whether the code parses that way.
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (body: string) => unknown;
 function parses(body: string): boolean {
@@ -974,7 +1077,7 @@ export function runCodeScript(code: string): string {
  *  an element still covered at its centre after the scroll answers
  *  { covered: { role, name, tag } } for what covers it: the native click
  *  would wait out the budget for it, or press what the page put there (#112). */
-export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean; doc?: string; hit?: boolean } = {}): string {
+export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {}): string {
   // With `enabled`, a disabled element (DISABLED, the snapshot's rule)
   // answers { disabled: true } instead, before any scroll: click, check and
   // uncheck refuse it at no extra round trip.
@@ -988,6 +1091,16 @@ export function resolveRefScript(ref: { id: string; role: string; name: string }
   if (top && top !== el && !el.contains(top)) {
     return { covered: { role: ariaRole(top) || 'generic', name: nameOf(top), tag: tagOf(top).toLowerCase() } };
   }` : "";
+  const scroll = opts.scroll === false ? "" : String.raw`
+  const r = el.getBoundingClientRect();
+  const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
+  // In view but under something else, like a fixed header: the point a
+  // click lands on belongs to another element. Asked of the element's own
+  // root, so a shadow root does not answer with its host.
+  const hit = outside ? null : el.getRootNode().elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  if (outside || (hit && hit !== el && !el.contains(hit))) {
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  }`;
   return String.raw`(() => {
   const store = window[Symbol.for('bowser.aria-refs')];
   if (store?.doc !== ${JSON.stringify(opts.doc ?? null)}) return { gone: true };
@@ -998,16 +1111,7 @@ export function resolveRefScript(ref: { id: string; role: string; name: string }
   // Named as if shown when hidden now: a hidden element's name is '', and
   // an action on a hidden ref must still go through (tests/e2e-stale-ref.test.ts).
   const name = role === 'iframe' ? '' : nameOf(el, nameHidden(el) ? el : undefined);
-  if (role !== ${JSON.stringify(ref.role)} || name !== ${JSON.stringify(ref.name)}) return { changed: { role, name } };${enabled}
-  const r = el.getBoundingClientRect();
-  const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
-  // In view but under something else, like a fixed header: the point a
-  // click lands on belongs to another element. Asked of the element's own
-  // root, so a shadow root does not answer with its host.
-  const hit = outside ? null : el.getRootNode().elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-  if (outside || (hit && hit !== el && !el.contains(hit))) {
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-  }${covered}
+  if (role !== ${JSON.stringify(ref.role)} || name !== ${JSON.stringify(ref.name)}) return { changed: { role, name } };${enabled}${scroll}${covered}
   ${CSS_PATH}
   return cssPath(el);
 })()`;

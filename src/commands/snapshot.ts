@@ -2,11 +2,11 @@
 
 import { resolve } from "node:path";
 import { str } from "../cli/parser.ts";
-import { READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.ts";
+import { markdownScript, READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.ts";
 import type { DaemonConnection } from "../daemon/protocol.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { loadState, saveState } from "../state.ts";
-import { dialogsJson, modalState, reply, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
+import { dialogsJson, liveSelector, loadRef, modalState, reply, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 export async function cmdSnapshot(
@@ -41,6 +41,24 @@ export async function cmdSnapshot(
     return ctx.json
       ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...withDialogs }, null, 2)
       : renderPage(snap, depth, modalState(c));
+  });
+}
+
+export async function cmdMarkdown(
+  ctx: CommandContext,
+  ref?: string,
+  opts: { filename?: string } = {},
+): Promise<string> {
+  const saved = ref === undefined ? undefined : await loadRef(ctx.session, ref);
+  return withPageClient(ctx, async (c) => {
+    const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
+    const { markdown, source } = (await c.request("evaluate", [markdownScript(selector)])) as { markdown: string; source: string };
+    if (opts.filename) {
+      const abs = resolve(opts.filename);
+      await Bun.write(abs, markdown + "\n");
+      return reply(ctx, { ok: true, filename: abs, source }, `wrote ${abs}`);
+    }
+    return ctx.json ? JSON.stringify({ markdown, source }) : markdown;
   });
 }
 
@@ -139,6 +157,13 @@ export const COMMANDS: Command[] = [
       filename: str(a.flags, "filename"),
       depth: str(a.flags, "depth"),
     }),
+  },
+  {
+    name: "markdown",
+    summary: "Print the page, or one ref's element, as Markdown",
+    positional: [{ name: "ref", required: false }],
+    flags: [{ name: "filename", kind: "string" }],
+    run: (ctx, a) => cmdMarkdown(ctx, a.positional[0], { filename: str(a.flags, "filename") }),
   },
   {
     name: "screenshot",

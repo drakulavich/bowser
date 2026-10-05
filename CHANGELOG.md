@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`markdown` prints the page as Markdown.** An agent that only reads a page paid for the whole
+  aria tree: `snapshot` of a claude.ai artifact is 28k bytes, the artifact's own Markdown 20k, and
+  on general pages a conversion is 17–37% of the snapshot. `markdown` returns the page's own
+  Markdown when it offers some (a claude.ai artifact's source, `<link rel="alternate"
+  type="text/markdown">`), and otherwise converts `<main>`, or the body when there is none.
+  `markdown <ref>` converts one element, so navigation and footers stay out, and does not scroll
+  the page. `--json` names the source. (#130, #131)
+
 ## [0.11.0] — 2026-10-03
 
 ### Added
