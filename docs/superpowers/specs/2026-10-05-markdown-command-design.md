@@ -56,7 +56,9 @@ Link URLs are kept. They are most of the bytes on link-heavy pages (Wikipedia 58
 
 ### 4. `markdown <ref>`
 
-With a ref, the command converts the ref's element and its subtree (section 3) and skips the source lookup. `source` is always `"converted"`. The ref goes through `liveSelector` without `enabled` or `hit`, so a ref from another document, a ref whose element is gone or changed, and the pending-navigation wait behave and fail exactly as they do for `click` (#105, #80). Then one `evaluate` converts `document.querySelector(selector)`. `resolveRefScript` may scroll the element into view, which a reading command does not need. That stays rather than adding an option for it.
+With a ref, the command converts the ref's element and its subtree (section 3) and skips the source lookup. `source` is always `"converted"`. The ref goes through `liveSelector` without `enabled` or `hit`, so a ref from another document, a ref whose element is gone or changed, and the pending-navigation wait behave and fail exactly as they do for `click` (#105, #80). Then one `evaluate` converts `document.querySelector(selector)`.
+
+`resolveRefScript` scrolls an element that is out of view or covered into view (`src/page-scripts.ts:1008-1010`). A reading command must leave the page as it was, so `liveSelector` and `resolveRefScript` gain `scroll?: boolean`, default `true`. `markdown` passes `false`, which skips that block. Every other caller is unchanged.
 
 ## Definition of done
 
@@ -64,7 +66,7 @@ With a ref, the command converts the ref's element and its subtree (section 3) a
 2. **`<main>`.** On the fixture the `<nav>` outside `<main>` is absent. On a copy with no `<main>`, it is present.
 3. **`rel=alternate`.** A local `Bun.serve` page with `<link rel="alternate" type="text/markdown" href="/page.md">` gives `/page.md`'s body with `"source":"page"`. When `/page.md` answers 404, or answers with an HTML body, the result is the conversion with `"source":"converted"`.
 4. **Artifact.** A live test gated like `tests/e2e-search.test.ts` (`BOWSER_E2E_NET=1`) opens the #130 example artifact and gets Markdown that starts with `# Aqara W400` and has `"source":"page"`.
-5. **Ref.** `markdown <ref>` on the fixture's `<article>` gives only the article. A ref from before a `goto` fails with `ref 'eN' is from a page that is no longer loaded; take a new snapshot`, exit 1.
+5. **Ref.** `markdown <ref>` on the fixture's `<article>` gives only the article. A ref from before a `goto` fails with `ref 'eN' is from a page that is no longer loaded; take a new snapshot`, exit 1. On a fixture page taller than the viewport, `markdown <ref>` on an element below the fold leaves `window.scrollY` at 0. On `main` the same check fails, which shows that the test catches the scroll.
 6. **Output forms.** The text form has no `### Page` wrapper. `--json` and `--filename` answer as in section 1. `tests/mcp.test.ts` lists a `markdown` tool.
 7. **Size.** On the fixture, the conversion is less than half of `snapshot`'s bytes.
 8. **Checks.** `bun run check` and `BOWSER_E2E=1 bun test` pass. CI is green.
