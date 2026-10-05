@@ -93,7 +93,7 @@ export async function loadRef(session: string, ref: string) {
  *  since the snapshot (#80). With `enabled`, a disabled element fails too, at
  *  once, and nothing is clicked (F20). With `hit`, so does one another
  *  element covers at its click point (#112). One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean; doc?: string; hit?: boolean } = {}): Promise<string> {
+export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {}): Promise<string> {
   const ref = target.id;
   const selector = await c.request("resolve", [resolveRefScript(target, opts)]);
   if ((selector as { gone?: unknown } | null)?.gone === true) {
