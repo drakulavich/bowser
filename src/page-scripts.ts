@@ -950,15 +950,17 @@ const TO_MARKDOWN = String.raw`
   };
   const isBlock = (el) => BLOCK.has(el.tagName) || /^(block|flex|grid|table|list-item)/.test(getComputedStyle(el).display);
   const rawText = (n) => n.nodeType === 3 ? n.nodeValue : n.nodeType === 1 && !skipped(n) ? (n.tagName === 'BR' ? '\n' : [...n.childNodes].map(rawText).join('')) : '';
+  const fence = (text, min) => BT.repeat(Math.max(min, 1 + Math.max(0, ...(text.match(new RegExp(BT + '+', 'g')) || []).map((r) => r.length))));
+  const mark = (m, text) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text); return core ? lead + m + core + m + trail : lead + trail; };
   const inline = (n) => {
     if (n.nodeType === 3) return n.nodeValue.replace(/\s+/g, ' ');
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
     const kids = () => [...n.childNodes].map(inline).join('');
     if (t === 'BR') return '\n';
-    if (t === 'CODE') return BT + rawText(n) + BT;
-    if (t === 'STRONG' || t === 'B') { const k = kids().trim(); return k ? '**' + k + '**' : ''; }
-    if (t === 'EM' || t === 'I') { const k = kids().trim(); return k ? '*' + k + '*' : ''; }
+    if (t === 'CODE') { const code = rawText(n); const f = fence(code, 1); return f + code + f; }
+    if (t === 'STRONG' || t === 'B') return mark('**', kids());
+    if (t === 'EM' || t === 'I') return mark('*', kids());
     if (t === 'IMG') { const alt = (n.getAttribute('alt') || '').trim(); return alt ? '![' + alt + ']' : ''; }
     if (t === 'A') {
       const k = kids().trim();
@@ -969,7 +971,7 @@ const TO_MARKDOWN = String.raw`
     return kids();
   };
   const table = (el) => {
-    const rows = [...el.rows].filter((r) => !skipped(r)).map((r) => [...r.cells].map((c) => inline(c).trim().replace(/\|/g, '\\|')));
+    const rows = [...el.rows].filter((r) => !skipped(r)).map((r) => [...r.cells].map((c) => inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|')));
     if (!rows.length) return '';
     const width = Math.max(...rows.map((r) => r.length));
     const line = (r) => '| ' + [...r, ...Array(width - r.length).fill('')].join(' | ') + ' |';
@@ -982,15 +984,15 @@ const TO_MARKDOWN = String.raw`
     const t = n.tagName;
     const h = /^H([1-6])$/.exec(t);
     if (h) { const k = inline(n).trim(); if (k) out.push('#'.repeat(+h[1]) + ' ' + k); return; }
-    if (t === 'PRE') { out.push(BT + BT + BT + '\n' + rawText(n).replace(/\n$/, '') + '\n' + BT + BT + BT); return; }
+    if (t === 'PRE') { const code = rawText(n).replace(/\n$/, ''); const f = fence(code, 3); out.push(f + '\n' + code + '\n' + f); return; }
     if (t === 'HR') { out.push('---'); return; }
-    if (t === 'BLOCKQUOTE') { const k = convert(n); if (k) out.push(k.split('\n').map((l) => l ? '> ' + l : '>').join('\n')); return; }
+    if (t === 'BLOCKQUOTE') { const k = convert(n.childNodes); if (k) out.push(k.split('\n').map((l) => l ? '> ' + l : '>').join('\n')); return; }
     if (t === 'TABLE' && n.rows.length && !layoutTable(n)) { out.push(table(n)); return; }
     if (t === 'UL' || t === 'OL') {
       let i = 1;
       const items = [...n.children].filter((li) => li.tagName === 'LI' && !skipped(li)).map((li) => {
         const marker = t === 'OL' ? (i++) + '. ' : '- ';
-        const k = convert(li).replace(/\n\n/g, '\n').replace(/\n/g, '\n' + ' '.repeat(marker.length));
+        const k = convert(li.childNodes).replace(/\n\n/g, '\n').replace(/\n/g, '\n' + ' '.repeat(marker.length));
         return k ? marker + k : '';
       }).filter(Boolean);
       if (items.length) out.push(items.join('\n'));
@@ -999,9 +1001,9 @@ const TO_MARKDOWN = String.raw`
     if (isBlock(n)) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
     out.push({ inline: inline(n) });
   };
-  const convert = (root) => {
+  const convert = (nodes) => {
     const out = [];
-    for (const c of root.childNodes) blocks(c, out);
+    for (const c of nodes) blocks(c, out);
     const paras = [];
     let run = '';
     const end = () => { const p = run.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim(); if (p) paras.push(p); run = ''; };
@@ -1031,12 +1033,12 @@ export function markdownScript(selector?: string): string {
       if (r.ok) return { markdown: (await r.text()).trimEnd(), source: 'page' };
     } catch {}
   }` : "";
-  const root = selector === undefined
-    ? `document.querySelector('main, [role=main]') || document.body`
-    : `document.querySelector(${JSON.stringify(selector)})`;
+  const nodes = selector === undefined
+    ? `(document.querySelector('main, [role=main]') || document.body).childNodes`
+    : `[document.querySelector(${JSON.stringify(selector)})]`;
   return String.raw`(async () => {${own}
   ${TO_MARKDOWN}
-  return { markdown: convert(${root}), source: 'converted' };
+  return { markdown: convert(${nodes}), source: 'converted' };
 })()`;
 }
 

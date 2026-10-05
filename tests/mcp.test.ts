@@ -74,6 +74,13 @@ describe("buildTools", () => {
     expect(s.properties.profile.type).toBe("string");
   });
 
+  test("markdown inputSchema: optional ref and filename", () => {
+    const s = buildTools().find((t) => t.name === "markdown")!.inputSchema;
+    expect(s.required).toEqual([]);
+    expect(s.properties.ref.type).toBe("string");
+    expect(s.properties.filename.type).toBe("string");
+  });
+
   test("select inputSchema: required positionals", () => {
     const s = buildTools().find((t) => t.name === "select")!.inputSchema;
     expect(s.required).toEqual(["ref", "value"]);

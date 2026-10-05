@@ -25,6 +25,7 @@ const html = (body: string) => new Response(body, { headers: { "content-type": "
 
 const TALL = `<!doctype html><title>tall</title><div style="height: 3000px">Top</div><article><p>Far below</p></article>`;
 const HIDDEN = `<!doctype html><title>hidden</title><p><code>shown<span hidden>secret</span></code></p><pre>a<span style="display: none">secret</span>b</pre><table><tr hidden><td>secret</td></tr></table><p>after</p>`;
+const EDGES = "<!doctype html><title>edges</title><main><h2>Heading ref</h2><p><strong>bold </strong>text and <em> it</em>alic</p><table><tr><th>A</th><th>B</th></tr><tr><td>a<br>b</td><td>c</td></tr></table><p><code>a`b</code></p><pre>before\n```\nafter</pre></main>";
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
@@ -50,6 +51,7 @@ runOrSkip("e2e: markdown", () => {
         }
         if (path === "/tall.html") return html(TALL);
         if (path === "/hidden.html") return html(HIDDEN);
+        if (path === "/edges.html") return html(EDGES);
         if (path === "/alt.html") return html(ALT("/page.md"));
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
         if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
@@ -94,6 +96,23 @@ runOrSkip("e2e: markdown", () => {
   test("hidden text inside code, pre and a table stays out, and an all-hidden table converts to nothing", async () => {
     await cmdGoto(ctx, `${base}/hidden.html`);
     expect(await cmdMarkdown(ctx)).toBe("`shown`\n\n```\nab\n```\n\nafter");
+  }, 60_000);
+
+  test("emphasis keeps the spaces at its edges, a <br> in a cell keeps the row, and code fences outgrow the backticks inside", async () => {
+    await cmdGoto(ctx, `${base}/edges.html`);
+    expect(await cmdMarkdown(ctx)).toBe([
+      "## Heading ref",
+      "**bold** text and *it*alic",
+      "| A | B |\n| --- | --- |\n| a b | c |",
+      "``a`b``",
+      "````\nbefore\n```\nafter\n````",
+    ].join("\n\n"));
+  }, 60_000);
+
+  test("a ref to a heading keeps the heading's own Markdown", async () => {
+    await cmdGoto(ctx, `${base}/edges.html`);
+    await cmdSnapshot(ctx);
+    expect(await cmdMarkdown(ctx, await refOfRole("heading"))).toBe("## Heading ref");
   }, 60_000);
 
   test("without <main>, the whole body is converted", async () => {
