@@ -945,49 +945,82 @@ const TO_MARKDOWN = String.raw`
   const BLOCK = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FIGURE', 'FIGCAPTION', 'FORM', 'FIELDSET', 'DETAILS', 'SUMMARY', 'ADDRESS', 'DL', 'DT', 'DD', 'LI', 'BODY', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'TABLE', 'BLOCKQUOTE', 'HR']);
   const skipped = (el) => {
     if (SKIP.has(el.tagName.toUpperCase()) || el.hidden || el.getAttribute('aria-hidden') === 'true') return true;
-    const s = getComputedStyle(el);
-    return s.display === 'none' || s.visibility === 'hidden';
+    return getComputedStyle(el).display === 'none';
   };
+  const shown = (t) => !t.parentElement || getComputedStyle(t.parentElement).visibility === 'visible';
   const isBlock = (el) => BLOCK.has(el.tagName) || /^(block|flex|grid|table|list-item)/.test(getComputedStyle(el).display);
-  const rawText = (n) => n.nodeType === 3 ? n.nodeValue : n.nodeType === 1 && !skipped(n) ? (n.tagName === 'BR' ? '\n' : [...n.childNodes].map(rawText).join('')) : '';
-  const fence = (text, min) => BT.repeat(Math.max(min, 1 + Math.max(0, ...(text.match(new RegExp(BT + '+', 'g')) || []).map((r) => r.length))));
-  const mark = (m, text) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text); return core ? lead + m + core + m + trail : lead + trail; };
+  const rawText = (n) => n.nodeType === 3 ? (shown(n) ? n.nodeValue : '') : n.nodeType === 1 && !skipped(n) ? (n.tagName === 'BR' ? '\n' : [...n.childNodes].map(rawText).join('')) : '';
+  const text = (t) => {
+    if (!shown(t)) return '';
+    const pre = t.parentElement && /^pre/.test(getComputedStyle(t.parentElement).whiteSpace);
+    return (pre ? t.nodeValue.replace(/[ \t]+/g, ' ') : t.nodeValue.replace(/\s+/g, ' ')).replace(/<(?=[A-Za-z\/!?])/g, '\\<');
+  };
+  const fence = (code, min) => BT.repeat(Math.max(min, 1 + Math.max(0, ...(code.match(new RegExp(BT + '+', 'g')) || []).map((r) => r.length))));
+  const url = (u) => u.replace(/[()]/g, (c) => c === '(' ? '%28' : '%29');
+  const mark = (m, s) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); return core ? lead + m + core + m + trail : lead + trail; };
   const inline = (n) => {
-    if (n.nodeType === 3) return n.nodeValue.replace(/\s+/g, ' ');
+    if (n.nodeType === 3) return text(n);
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
     const kids = () => [...n.childNodes].map(inline).join('');
     if (t === 'BR') return '\n';
+    if (t === 'DETAILS' && !n.open) { const s = [...n.children].find((c) => c.tagName === 'SUMMARY'); return s ? inline(s) : ''; }
     if (t === 'CODE') { const code = rawText(n); const f = fence(code, 1); return f + code + f; }
     if (t === 'STRONG' || t === 'B') return mark('**', kids());
     if (t === 'EM' || t === 'I') return mark('*', kids());
-    if (t === 'IMG') { const alt = (n.getAttribute('alt') || '').trim(); return alt ? '![' + alt + ']' : ''; }
+    if (t === 'DEL' || t === 'S' || t === 'STRIKE') return mark('~~', kids());
+    if (t === 'SUB' || t === 'SUP') { const k = kids().trim(); return k ? '<' + t.toLowerCase() + '>' + k + '</' + t.toLowerCase() + '>' : ''; }
+    if (t === 'IMG') {
+      if (getComputedStyle(n).visibility !== 'visible') return '';
+      const alt = (n.getAttribute('alt') || '').trim().replace(/[[\]]/g, '\\$&');
+      const src = n.currentSrc || n.src || '';
+      return alt ? '![' + alt + '](' + (src.startsWith('data:') ? '' : url(src)) + ')' : '';
+    }
     if (t === 'A') {
       const k = kids().trim();
       if (['#', '¶', '🔗'].includes(k)) return '';
       const href = n.getAttribute('href') || '';
-      return k && href && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + n.href + ')' : k;
+      return k && href && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + url(n.href) + ')' : k;
     }
     return kids();
   };
   const table = (el) => {
     const rows = [...el.rows].filter((r) => !skipped(r)).map((r) => [...r.cells].map((c) => inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|')));
-    if (!rows.length) return '';
+    if (!rows.some((r) => r.some(Boolean))) return '';
     const width = Math.max(...rows.map((r) => r.length));
     const line = (r) => '| ' + [...r, ...Array(width - r.length).fill('')].join(' | ') + ' |';
     return [line(rows[0]), '|' + ' --- |'.repeat(width), ...rows.slice(1).map(line)].join('\n');
   };
   const layoutTable = (el) => [...el.querySelectorAll('td, th')].some((c) => [...c.querySelectorAll('*')].some(isBlock));
+  const language = (pre) => {
+    const classes = [pre.className, pre.querySelector('code')?.className, pre.closest('[class*="language-"], [class*="lang-"], [class*="highlight-"]')?.className].join(' ');
+    return (/(?:^|\s)(?:language|lang|highlight)-([\w+#.-]+)/.exec(classes) || [])[1] || '';
+  };
   const blocks = (n, out) => {
-    if (n.nodeType === 3) { out.push({ inline: n.nodeValue.replace(/\s+/g, ' ') }); return; }
+    if (n.nodeType === 3) { out.push({ inline: text(n) }); return; }
     if (n.nodeType !== 1 || skipped(n)) return;
     const t = n.tagName;
     const h = /^H([1-6])$/.exec(t);
     if (h) { const k = inline(n).trim(); if (k) out.push('#'.repeat(+h[1]) + ' ' + k); return; }
-    if (t === 'PRE') { const code = rawText(n).replace(/\n$/, ''); const f = fence(code, 3); out.push(f + '\n' + code + '\n' + f); return; }
-    if (t === 'HR') { out.push('---'); return; }
+    if (t === 'PRE') { const code = rawText(n).replace(/\n$/, ''); const f = fence(code, 3); out.push(f + language(n) + '\n' + code + '\n' + f); return; }
+    if (t === 'HR') { if (getComputedStyle(n).visibility === 'visible') out.push('---'); return; }
+    if (t === 'DETAILS' && !n.open) { const s = [...n.children].find((c) => c.tagName === 'SUMMARY'); if (s) blocks(s, out); return; }
     if (t === 'BLOCKQUOTE') { const k = convert(n.childNodes); if (k) out.push(k.split('\n').map((l) => l ? '> ' + l : '>').join('\n')); return; }
-    if (t === 'TABLE' && n.rows.length && !layoutTable(n)) { out.push(table(n)); return; }
+    if (t === 'TABLE' && n.rows.length) {
+      if (n.caption && !skipped(n.caption)) out.push(inline(n.caption).trim());
+      if (!layoutTable(n)) { out.push(table(n)); return; }
+      for (const r of n.rows) {
+        if (skipped(r)) continue;
+        const cells = [...r.cells].filter((c) => !skipped(c));
+        if (cells.length === 2 && cells[0].tagName === 'TH') {
+          const key = inline(cells[0]).trim();
+          const block = cells[1].querySelector('ul, ol, pre, blockquote, table');
+          const value = block ? convert(cells[1].childNodes) : convert(cells[1].childNodes).replace(/\s*\n+\s*/g, ' ');
+          if (key || value) out.push(key && value ? key + ':' + (block ? '\n\n' : ' ') + value : key || value);
+        } else for (const c of cells) blocks(c, out);
+      }
+      return;
+    }
     if (t === 'UL' || t === 'OL') {
       let i = 1;
       const items = [...n.children].filter((li) => li.tagName === 'LI' && !skipped(li)).map((li) => {
@@ -1001,12 +1034,13 @@ const TO_MARKDOWN = String.raw`
     if (isBlock(n)) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
     out.push({ inline: inline(n) });
   };
+  const escapeStarts = (p) => p.split('\n').map((l) => l.replace(/^(#{1,6}(?=\s|$)|[-+*>](?=\s))/, '\\$1').replace(/^(\d+)([.)])(?=\s)/, '$1\\$2')).join('\n');
   const convert = (nodes) => {
     const out = [];
     for (const c of nodes) blocks(c, out);
     const paras = [];
     let run = '';
-    const end = () => { const p = run.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim(); if (p) paras.push(p); run = ''; };
+    const end = () => { const p = run.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim(); if (p) paras.push(escapeStarts(p)); run = ''; };
     for (const x of out) {
       if (typeof x === 'string') { end(); if (x) paras.push(x); }
       else if (x.end) end();
@@ -1037,9 +1071,12 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
   const nodes = selector === undefined
     ? `(document.querySelector('main, [role=main]') || document.body).childNodes`
     : `[document.querySelector(${JSON.stringify(selector)})]`;
-  return String.raw`(async () => {${own}
+  return String.raw`(async () => {
+  const result = await (async () => {${own}
   ${TO_MARKDOWN}
   return { markdown: convert(${nodes}), source: 'converted' };
+  })();
+  return { ...result, url: location.href, title: document.title };
 })()`;
 }
 
