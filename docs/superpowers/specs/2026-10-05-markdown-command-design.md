@@ -40,6 +40,8 @@ bowser markdown [<ref>] [--filename=f]
 2. **`<link rel="alternate" type="text/markdown" href>`.** The script fetches `href` from the page, so the session's cookies apply. A 200 is the result, with `source: "page"`. A failure, including a CORS refusal on another origin, falls through.
 3. **Conversion** of `document.querySelector("main, [role=main]")`, or else `document.body`, with `source: "converted"`.
 
+A fetch has no timeout of its own. One still pending when the op's budget runs out fails the command with the usual op timeout, as any slow `evaluate` does.
+
 ### 3. The conversion
 
 The walker follows the prototype in the #130 comment:
