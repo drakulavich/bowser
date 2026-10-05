@@ -24,6 +24,7 @@ const FIXTURES = join(import.meta.dir, "fixtures");
 const html = (body: string) => new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
 
 const TALL = `<!doctype html><title>tall</title><div style="height: 3000px">Top</div><article><p>Far below</p></article>`;
+const HIDDEN = `<!doctype html><title>hidden</title><p><code>shown<span hidden>secret</span></code></p><pre>a<span style="display: none">secret</span>b</pre><table><tr hidden><td>secret</td></tr></table><p>after</p>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
@@ -48,6 +49,7 @@ runOrSkip("e2e: markdown", () => {
           return html(page.replace("<main>", "<div>").replace("</main>", "</div>"));
         }
         if (path === "/tall.html") return html(TALL);
+        if (path === "/hidden.html") return html(HIDDEN);
         if (path === "/alt.html") return html(ALT("/page.md"));
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
         if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
@@ -87,6 +89,11 @@ runOrSkip("e2e: markdown", () => {
       "## Article",
       "Body text.",
     ].join("\n\n"));
+  }, 60_000);
+
+  test("hidden text inside code, pre and a table stays out, and an all-hidden table converts to nothing", async () => {
+    await cmdGoto(ctx, `${base}/hidden.html`);
+    expect(await cmdMarkdown(ctx)).toBe("`shown`\n\n```\nab\n```\n\nafter");
   }, 60_000);
 
   test("without <main>, the whole body is converted", async () => {

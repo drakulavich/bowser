@@ -949,13 +949,14 @@ const TO_MARKDOWN = String.raw`
     return s.display === 'none' || s.visibility === 'hidden';
   };
   const isBlock = (el) => BLOCK.has(el.tagName) || /^(block|flex|grid|table|list-item)/.test(getComputedStyle(el).display);
+  const rawText = (n) => n.nodeType === 3 ? n.nodeValue : n.nodeType === 1 && !skipped(n) ? (n.tagName === 'BR' ? '\n' : [...n.childNodes].map(rawText).join('')) : '';
   const inline = (n) => {
     if (n.nodeType === 3) return n.nodeValue.replace(/\s+/g, ' ');
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
     const kids = () => [...n.childNodes].map(inline).join('');
     if (t === 'BR') return '\n';
-    if (t === 'CODE') return BT + n.textContent + BT;
+    if (t === 'CODE') return BT + rawText(n) + BT;
     if (t === 'STRONG' || t === 'B') { const k = kids().trim(); return k ? '**' + k + '**' : ''; }
     if (t === 'EM' || t === 'I') { const k = kids().trim(); return k ? '*' + k + '*' : ''; }
     if (t === 'IMG') { const alt = (n.getAttribute('alt') || '').trim(); return alt ? '![' + alt + ']' : ''; }
@@ -969,6 +970,7 @@ const TO_MARKDOWN = String.raw`
   };
   const table = (el) => {
     const rows = [...el.rows].filter((r) => !skipped(r)).map((r) => [...r.cells].map((c) => inline(c).trim().replace(/\|/g, '\\|')));
+    if (!rows.length) return '';
     const width = Math.max(...rows.map((r) => r.length));
     const line = (r) => '| ' + [...r, ...Array(width - r.length).fill('')].join(' | ') + ' |';
     return [line(rows[0]), '|' + ' --- |'.repeat(width), ...rows.slice(1).map(line)].join('\n');
@@ -980,7 +982,7 @@ const TO_MARKDOWN = String.raw`
     const t = n.tagName;
     const h = /^H([1-6])$/.exec(t);
     if (h) { const k = inline(n).trim(); if (k) out.push('#'.repeat(+h[1]) + ' ' + k); return; }
-    if (t === 'PRE') { out.push(BT + BT + BT + '\n' + n.innerText.replace(/\n$/, '') + '\n' + BT + BT + BT); return; }
+    if (t === 'PRE') { out.push(BT + BT + BT + '\n' + rawText(n).replace(/\n$/, '') + '\n' + BT + BT + BT); return; }
     if (t === 'HR') { out.push('---'); return; }
     if (t === 'BLOCKQUOTE') { const k = convert(n); if (k) out.push(k.split('\n').map((l) => l ? '> ' + l : '>').join('\n')); return; }
     if (t === 'TABLE' && n.rows.length && !layoutTable(n)) { out.push(table(n)); return; }
@@ -1004,7 +1006,7 @@ const TO_MARKDOWN = String.raw`
     let run = '';
     const end = () => { const p = run.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim(); if (p) paras.push(p); run = ''; };
     for (const x of out) {
-      if (typeof x === 'string') { end(); paras.push(x); }
+      if (typeof x === 'string') { end(); if (x) paras.push(x); }
       else if (x.end) end();
       else run += x.inline;
     }
