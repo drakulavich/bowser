@@ -1014,8 +1014,9 @@ const TO_MARKDOWN = String.raw`
         const cells = [...r.cells].filter((c) => !skipped(c));
         if (cells.length === 2 && cells[0].tagName === 'TH') {
           const key = inline(cells[0]).trim();
-          const value = convert(cells[1].childNodes);
-          if (key || value) out.push(key && value ? key + ':' + (value.includes('\n') ? '\n\n' : ' ') + value : key || value);
+          const block = cells[1].querySelector('ul, ol, pre, blockquote, table');
+          const value = block ? convert(cells[1].childNodes) : convert(cells[1].childNodes).replace(/\s*\n+\s*/g, ' ');
+          if (key || value) out.push(key && value ? key + ':' + (block ? '\n\n' : ' ') + value : key || value);
         } else for (const c of cells) blocks(c, out);
       }
       return;

@@ -44,7 +44,7 @@ const FIDELITY = `<!doctype html><title>Fidelity</title><main>
 line two</div>
 <table><tr><th>Developer</th><td><div>Apple</div></td></tr><tr><th>Engine</th><td><div>WebKit</div></td></tr></table>
 </main>`;
-const REVIEW = `<!doctype html><title>review</title><main><table><tr><th>Key <details><summary>more</summary>secret</details></th><td><p>v</p></td></tr></table><div style="visibility: hidden"><img alt="hidden" src="h.png"><hr></div><table><tr><th>List</th><td><ul><li>A</li><li>B</li></ul></td></tr></table><p><img alt="pic" src="image)a.png"> <a href="x)y(z.html">link</a></p></main>`;
+const REVIEW = `<!doctype html><title>review</title><main><table><tr><th>Key <details><summary>more</summary>secret</details></th><td><p>v</p></td></tr></table><div style="visibility: hidden"><img alt="hidden" src="h.png"><hr></div><table><tr><th>List</th><td><ul><li>A</li><li>B</li></ul></td></tr><tr><th>Lines</th><td><p>one<br>two</p></td></tr></table><p><img alt="pic" src="image)a.png"> <a href="x)y(z.html">link</a></p></main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
@@ -174,6 +174,7 @@ runOrSkip("e2e: markdown", () => {
       "Key more: v",
       "List:",
       "- A\n- B",
+      "Lines: one two",
       `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`,
     ].join("\n\n"));
   }, 60_000);
