@@ -956,6 +956,7 @@ const TO_MARKDOWN = String.raw`
     return (pre ? t.nodeValue.replace(/[ \t]+/g, ' ') : t.nodeValue.replace(/\s+/g, ' ')).replace(/<(?=[A-Za-z\/!?])/g, '\\<');
   };
   const fence = (code, min) => BT.repeat(Math.max(min, 1 + Math.max(0, ...(code.match(new RegExp(BT + '+', 'g')) || []).map((r) => r.length))));
+  const url = (u) => u.replace(/[()]/g, (c) => c === '(' ? '%28' : '%29');
   const mark = (m, s) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); return core ? lead + m + core + m + trail : lead + trail; };
   const inline = (n) => {
     if (n.nodeType === 3) return text(n);
@@ -963,21 +964,23 @@ const TO_MARKDOWN = String.raw`
     const t = n.tagName;
     const kids = () => [...n.childNodes].map(inline).join('');
     if (t === 'BR') return '\n';
+    if (t === 'DETAILS' && !n.open) { const s = [...n.children].find((c) => c.tagName === 'SUMMARY'); return s ? inline(s) : ''; }
     if (t === 'CODE') { const code = rawText(n); const f = fence(code, 1); return f + code + f; }
     if (t === 'STRONG' || t === 'B') return mark('**', kids());
     if (t === 'EM' || t === 'I') return mark('*', kids());
     if (t === 'DEL' || t === 'S' || t === 'STRIKE') return mark('~~', kids());
     if (t === 'SUB' || t === 'SUP') { const k = kids().trim(); return k ? '<' + t.toLowerCase() + '>' + k + '</' + t.toLowerCase() + '>' : ''; }
     if (t === 'IMG') {
+      if (getComputedStyle(n).visibility !== 'visible') return '';
       const alt = (n.getAttribute('alt') || '').trim().replace(/[[\]]/g, '\\$&');
       const src = n.currentSrc || n.src || '';
-      return alt ? '![' + alt + '](' + (src.startsWith('data:') ? '' : src) + ')' : '';
+      return alt ? '![' + alt + '](' + (src.startsWith('data:') ? '' : url(src)) + ')' : '';
     }
     if (t === 'A') {
       const k = kids().trim();
       if (['#', '¶', '🔗'].includes(k)) return '';
       const href = n.getAttribute('href') || '';
-      return k && href && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + n.href + ')' : k;
+      return k && href && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + url(n.href) + ')' : k;
     }
     return kids();
   };
@@ -1000,7 +1003,7 @@ const TO_MARKDOWN = String.raw`
     const h = /^H([1-6])$/.exec(t);
     if (h) { const k = inline(n).trim(); if (k) out.push('#'.repeat(+h[1]) + ' ' + k); return; }
     if (t === 'PRE') { const code = rawText(n).replace(/\n$/, ''); const f = fence(code, 3); out.push(f + language(n) + '\n' + code + '\n' + f); return; }
-    if (t === 'HR') { out.push('---'); return; }
+    if (t === 'HR') { if (getComputedStyle(n).visibility === 'visible') out.push('---'); return; }
     if (t === 'DETAILS' && !n.open) { const s = [...n.children].find((c) => c.tagName === 'SUMMARY'); if (s) blocks(s, out); return; }
     if (t === 'BLOCKQUOTE') { const k = convert(n.childNodes); if (k) out.push(k.split('\n').map((l) => l ? '> ' + l : '>').join('\n')); return; }
     if (t === 'TABLE' && n.rows.length) {
@@ -1011,8 +1014,8 @@ const TO_MARKDOWN = String.raw`
         const cells = [...r.cells].filter((c) => !skipped(c));
         if (cells.length === 2 && cells[0].tagName === 'TH') {
           const key = inline(cells[0]).trim();
-          const value = convert(cells[1].childNodes).replace(/\s*\n+\s*/g, ' ');
-          if (key || value) out.push(key && value ? key + ': ' + value : key || value);
+          const value = convert(cells[1].childNodes);
+          if (key || value) out.push(key && value ? key + ':' + (value.includes('\n') ? '\n\n' : ' ') + value : key || value);
         } else for (const c of cells) blocks(c, out);
       }
       return;
