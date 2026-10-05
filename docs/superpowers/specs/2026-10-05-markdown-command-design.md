@@ -25,7 +25,7 @@ bowser markdown [<ref>] [--filename=f]
 ```
 
 - The text form prints the Markdown and nothing else, with no `### Page` wrapper, so it can be piped.
-- `--json` prints `{"markdown": "…", "source": "page" | "converted"}`.
+- `--json` prints `{"markdown": "…", "source": "page" | "converted", "url": "…", "title": "…"}`. When the result is empty, the text form says so in one line with the page's title and URL (`markdown: the page has no text ("Just a moment...", https://…)`), so a blocked page doesn't read as an empty one (#138).
 - `--filename=f` writes the Markdown to `f` and answers `wrote /abs/f`, or `{"ok":true,"filename":"/abs/f","source":…}` under `--json`, the same way `snapshot --filename` does.
 - The registry entry makes it an MCP tool, like every other command.
 - Long pages are printed in full. `--filename` is the way to keep a big page out of the agent's context.
@@ -46,11 +46,11 @@ The fetches share a timeout of half the op's budget (`AbortSignal.timeout`). A s
 
 The walker follows the prototype in the #130 comment:
 
-- **Skipped:** an element that is hidden (the `hidden` attribute, `aria-hidden="true"`, computed `display: none` or `visibility: hidden`), and `script`, `style`, `noscript`, `template`, `svg`, `canvas`, `iframe`, `button`, `input`, `select`, `textarea`. Iframe contents and shadow DOM are not walked, as in `snapshot`.
-- **Blocks:** `h1`–`h6` → `#`…`######`; paragraphs and block-level boxes become paragraphs separated by a blank line; `ul`/`ol` → `- ` / `1. `, nested by indentation; `pre` → a fenced block holding its `innerText`; `blockquote` → `> `; `hr` → `---`.
-- **Inline:** `strong`/`b` → `**…**`; `em`/`i` → `*…*`; `code` → `` `…` ``; `a[href]` → `[text](absolute href)`; an `img` with `alt` → `![alt]`; `br` → a line break. A link to `#…` or `javascript:` keeps its text without the URL. A heading permalink whose text is only `#`, `¶` or `🔗` is dropped. The prototype printed `## Basic Setup#` on bun.sh.
-- **Tables:** a `table` becomes a Markdown table when none of its cells holds a block element or another table. Otherwise it is a layout table, and its cells convert as blocks. On Hacker News the prototype printed the front page as one broken table.
-- **Whitespace:** runs of whitespace collapse to one space outside `pre`. No more than one blank line in a row.
+- **Skipped:** an element with the `hidden` attribute, `aria-hidden="true"` or computed `display: none`, and `script`, `style`, `noscript`, `template`, `svg`, `canvas`, `iframe`, `button`, `input`, `select`, `textarea`. Text is dropped where its own computed `visibility` isn't `visible`, so a visible child of a `visibility: hidden` parent stays. A closed `<details>` gives only its `summary`. Iframe contents and shadow DOM are not walked, as in `snapshot`.
+- **Blocks:** `h1`–`h6` → `#`…`######`; paragraphs and block-level boxes become paragraphs separated by a blank line; `ul`/`ol` → `- ` / `1. `, nested by indentation; `pre` → a fenced block holding its text, with the language from a `language-*`, `lang-*` or `highlight-*` class on it, its `code` or an ancestor; `blockquote` → `> `; `hr` → `---`. A paragraph line that would read as Markdown structure (`#`, `>`, `-`, `+`, `*` or `1.` at its start) gets a backslash.
+- **Inline:** `strong`/`b` → `**…**`; `em`/`i` → `*…*`; `del`/`s`/`strike` → `~~…~~` (#139), with the spaces at their edges kept outside the markers; `sub`/`sup` stay as HTML tags; `code` → a backtick span longer than any backtick run inside; `a[href]` → `[text](absolute href)`; an `img` with `alt` → `![alt](src)`, with `[]` in the alt escaped and a `data:` source left out; `br` → a line break. A `<` before a letter in text gets a backslash. A link to `#…` or `javascript:` keeps its text without the URL. A heading permalink whose text is only `#`, `¶` or `🔗` is dropped.
+- **Tables:** a `table` becomes a Markdown table when none of its cells holds a block element or another table, after its `caption` as a paragraph; a table of only empty cells gives nothing. Otherwise it is a layout table: a row of one `th` and one cell gives `key: value` (a Wikipedia infobox), and other cells convert as blocks.
+- **Whitespace:** runs of whitespace collapse to one space outside `pre` and outside text with a `pre*` `white-space`, which keeps its line breaks. No more than one blank line in a row.
 
 Link URLs are kept. They are most of the bytes on link-heavy pages (Wikipedia 58.9k with them, 30.5k without), but an agent reading a page needs them to go anywhere from it.
 

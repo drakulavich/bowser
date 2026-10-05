@@ -54,13 +54,14 @@ export async function cmdMarkdown(
   return withPageClient(ctx, async (c) => {
     const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
     const budget = opTimeoutMs();
-    const { markdown, source } = (await c.request("evaluate", [markdownScript(selector, budget ? Math.floor(budget / 2) : undefined)])) as { markdown: string; source: string };
+    const { markdown, source, url, title } = (await c.request("evaluate", [markdownScript(selector, budget ? Math.floor(budget / 2) : undefined)])) as { markdown: string; source: string; url: string; title: string };
     if (opts.filename) {
       const abs = resolve(opts.filename);
       await Bun.write(abs, markdown + "\n");
       return replyPage(ctx, c, { ok: true, filename: abs, source }, `wrote ${abs}`);
     }
-    return replyPage(ctx, c, { markdown, source }, markdown);
+    const empty = `markdown: ${ref === undefined ? "the page" : `ref '${ref}'`} has no text (${JSON.stringify(title)}, ${url})`;
+    return replyPage(ctx, c, { markdown, source, url, title }, markdown || empty);
   });
 }
 
@@ -162,7 +163,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "markdown",
-    summary: "Print the page, or one ref's element, as Markdown",
+    summary: "Print the page, or one ref's element, as Markdown to read it: far smaller than a snapshot, and without refs",
     positional: [{ name: "ref", required: false }],
     flags: [{ name: "filename", kind: "string" }],
     run: (ctx, a) => cmdMarkdown(ctx, a.positional[0], { filename: str(a.flags, "filename") }),

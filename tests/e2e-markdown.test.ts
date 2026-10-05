@@ -26,6 +26,24 @@ const html = (body: string) => new Response(body, { headers: { "content-type": "
 const TALL = `<!doctype html><title>tall</title><div style="height: 3000px">Top</div><article><p>Far below</p></article>`;
 const HIDDEN = `<!doctype html><title>hidden</title><p><code>shown<span hidden>secret</span></code></p><pre>a<span style="display: none">secret</span>b</pre><table><tr hidden><td>secret</td></tr></table><p>after</p>`;
 const EDGES = "<!doctype html><title>edges</title><main><h2>Heading ref</h2><p><strong>bold </strong>text and <em> it</em>alic</p><table><tr><th>A</th><th>B</th></tr><tr><td>a<br>b</td><td>c</td></tr></table><p><code>a`b</code></p><pre>before\n```\nafter</pre></main>";
+const FIDELITY = `<!doctype html><title>Fidelity</title><main>
+<p><del>$99</del> <s>old</s> <strike>gone</strike> $49</p>
+<table><caption>Prices</caption><tr><th>A</th></tr><tr><td>1</td></tr></table>
+<div style="visibility: hidden">hidden parent <span style="visibility: visible">shown child</span></div>
+<details><summary>More</summary><p>closed body</p></details>
+<details open><summary>Open</summary><p>open body</p></details>
+<p># not a heading</p>
+<p>1. not a list</p>
+<p>- dash and &lt;b&gt;tag</p>
+<p>H<sub>2</sub>O x<sup>2</sup></p>
+<div class="highlight-python3"><pre>print(1)</pre></div>
+<pre><code class="language-js">let a</code></pre>
+<p><img src="/a.png" alt="A [b]"> <img src="data:image/png;base64,AAAA" alt="D"></p>
+<table><tr><td></td></tr></table>
+<div style="white-space: pre">line one
+line two</div>
+<table><tr><th>Developer</th><td><div>Apple</div></td></tr><tr><th>Engine</th><td><div>WebKit</div></td></tr></table>
+</main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
@@ -54,6 +72,8 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/edges.html") return html(EDGES);
         if (path === "/alt.html") return html(ALT("/page.md"));
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
+        if (path === "/fidelity.html") return html(FIDELITY);
+        if (path === "/blank.html") return html("<!doctype html><title>Just a moment...</title><main></main>");
         if (path === "/alt-slow.html") return html(ALT("/slow.md"));
         if (path === "/slow.md") { await Bun.sleep(20_000); return new Response("# Late"); }
         if (path === "/alt-signin.html") return html(ALT("/private.md"));
@@ -94,7 +114,7 @@ runOrSkip("e2e: markdown", () => {
       "```\nline 1\n  line 2\n```",
       "> Quoted",
       "---",
-      "![Logo]",
+      `![Logo](${base}/a.png)`,
       "Email",
       "## Article",
       "Body text.",
@@ -123,6 +143,40 @@ runOrSkip("e2e: markdown", () => {
     expect(await cmdMarkdown(ctx, await refOfRole("heading"))).toBe("## Heading ref");
   }, 60_000);
 
+  test("strikethrough, captions, visibility, details, escaping, sub/sup, code language, images, empty tables, pre-wrapped text, key-value rows", async () => {
+    await cmdGoto(ctx, `${base}/fidelity.html`);
+    expect(await cmdMarkdown(ctx)).toBe([
+      "~~$99~~ ~~old~~ ~~gone~~ $49",
+      "Prices",
+      "| A |\n| --- |\n| 1 |",
+      "shown child",
+      "More",
+      "Open",
+      "open body",
+      "\\# not a heading",
+      "1\\. not a list",
+      "\\- dash and \\<b>tag",
+      "H<sub>2</sub>O x<sup>2</sup>",
+      "```python3\nprint(1)\n```",
+      "```js\nlet a\n```",
+      `![A \\[b\\]](${base}/a.png) ![D]()`,
+      "line one\nline two",
+      "Developer: Apple",
+      "Engine: WebKit",
+    ].join("\n\n"));
+  }, 60_000);
+
+  test("--json carries the page's URL and title", async () => {
+    await cmdGoto(ctx, `${base}/fixture.html`);
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ url: `${base}/fixture.html`, title: "Markdown fixture" });
+  }, 60_000);
+
+  test("an empty result says so, with the page's title and URL", async () => {
+    await cmdGoto(ctx, `${base}/blank.html`);
+    expect(await cmdMarkdown(ctx)).toBe(`markdown: the page has no text ("Just a moment...", ${base}/blank.html)`);
+    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "", source: "converted", url: `${base}/blank.html`, title: "Just a moment..." });
+  }, 60_000);
+
   test("without <main>, the whole body is converted", async () => {
     await cmdGoto(ctx, `${base}/no-main.html`);
     const md = await cmdMarkdown(ctx);
@@ -147,12 +201,12 @@ runOrSkip("e2e: markdown", () => {
 
   test("a rel=alternate Markdown link is used as is", async () => {
     await cmdGoto(ctx, `${base}/alt.html`);
-    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "# From source\n\nText.", source: "page" });
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "# From source\n\nText.", source: "page" });
   }, 60_000);
 
   test("a rel=alternate link that answers 404 falls back to conversion", async () => {
     await cmdGoto(ctx, `${base}/alt-missing.html`);
-    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
   }, 60_000);
 
   test("a rel=alternate link that has not answered by half the budget falls back to conversion", async () => {
@@ -161,7 +215,7 @@ runOrSkip("e2e: markdown", () => {
     try {
       await cmdGoto(ctx, `${base}/alt-slow.html`);
       const t0 = performance.now();
-      expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+      expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
       expect(performance.now() - t0).toBeLessThan(4000);
     } finally {
       if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
@@ -170,15 +224,15 @@ runOrSkip("e2e: markdown", () => {
 
   test("a rel=alternate link that lands on an HTML page falls back to conversion", async () => {
     await cmdGoto(ctx, `${base}/alt-signin.html`);
-    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
     await cmdGoto(ctx, `${base}/alt-shell.html`);
-    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "Rendered", source: "converted" });
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
   }, 60_000);
 
   test("a dialog the page opened is reported, under --json and in the text form", async () => {
     await cmdGoto(ctx, `${base}/alert.html`);
     await Bun.sleep(600);
-    expect(JSON.parse(await cmdMarkdown(json))).toEqual({
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({
       markdown: "Alert page", source: "converted", dialogs: [{ type: "alert", message: "hello", state: "dismissed" }],
     });
     await cmdGoto(ctx, `${base}/alert.html`);

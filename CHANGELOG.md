@@ -15,7 +15,9 @@ All notable changes to this project are documented here. This project follows
   `markdown <ref>` converts one element, so navigation and footers stay out, and does not scroll
   the page. `--json` names the source. A Markdown source that answers with HTML, or has not
   answered by half the op's budget, falls back to conversion, and dialogs the page opened are
-  reported as for other page commands. (#130, #131, #135, #136, #137)
+  reported as for other page commands. `--json` carries the page's `url` and `title`, and an empty
+  result says so with them, so a blocked page doesn't pass for an empty one. Strikethrough,
+  captions, `sub`/`sup`, code languages and infobox rows keep their meaning. (#130, #131, #135–#140)
 
 ## [0.11.0] — 2026-10-03
 
