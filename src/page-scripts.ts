@@ -1016,12 +1016,13 @@ const TO_MARKDOWN = String.raw`
     return paras.join('\n\n');
   };`;
 
-export function markdownScript(selector?: string): string {
+export function markdownScript(selector?: string, fetchMs?: number): string {
   const own = selector === undefined ? String.raw`
+  const signal = ${fetchMs ? `AbortSignal.timeout(${fetchMs})` : "undefined"};
   const artifact = location.hostname === 'claude.ai' && /^\/public\/artifacts\/([0-9a-f-]+)\/?$/.exec(location.pathname);
   if (artifact) {
     try {
-      const r = await fetch('/api/published_artifacts/' + artifact[1]);
+      const r = await fetch('/api/published_artifacts/' + artifact[1], { signal });
       const j = r.ok ? await r.json() : null;
       if (j && j.type === 'text/markdown' && typeof j.content === 'string') return { markdown: j.content.trimEnd(), source: 'page' };
     } catch {}
@@ -1029,8 +1030,8 @@ export function markdownScript(selector?: string): string {
   const link = document.querySelector('link[rel~="alternate"][type="text/markdown"][href]');
   if (link) {
     try {
-      const r = await fetch(link.href);
-      if (r.ok) return { markdown: (await r.text()).trimEnd(), source: 'page' };
+      const r = await fetch(link.href, { signal });
+      if (r.ok && !/html/i.test(r.headers.get('content-type') || '')) return { markdown: (await r.text()).trimEnd(), source: 'page' };
     } catch {}
   }` : "";
   const nodes = selector === undefined

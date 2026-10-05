@@ -6,7 +6,8 @@ import { markdownScript, READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.
 import type { DaemonConnection } from "../daemon/protocol.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { loadState, saveState } from "../state.ts";
-import { dialogsJson, liveSelector, loadRef, modalState, reply, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
+import { dialogsJson, liveSelector, loadRef, modalState, reply, replyPage, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
+import { opTimeoutMs } from "../budget.ts";
 import { UserError } from "../errors.ts";
 
 export async function cmdSnapshot(
@@ -52,13 +53,14 @@ export async function cmdMarkdown(
   const saved = ref === undefined ? undefined : await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
     const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
-    const { markdown, source } = (await c.request("evaluate", [markdownScript(selector)])) as { markdown: string; source: string };
+    const budget = opTimeoutMs();
+    const { markdown, source } = (await c.request("evaluate", [markdownScript(selector, budget ? Math.floor(budget / 2) : undefined)])) as { markdown: string; source: string };
     if (opts.filename) {
       const abs = resolve(opts.filename);
       await Bun.write(abs, markdown + "\n");
-      return reply(ctx, { ok: true, filename: abs, source }, `wrote ${abs}`);
+      return replyPage(ctx, c, { ok: true, filename: abs, source }, `wrote ${abs}`);
     }
-    return ctx.json ? JSON.stringify({ markdown, source }) : markdown;
+    return replyPage(ctx, c, { markdown, source }, markdown);
   });
 }
 

@@ -37,10 +37,10 @@ bowser markdown [<ref>] [--filename=f]
 `MARKDOWN_SCRIPT` in `src/page-scripts.ts` is one async expression evaluated in the page. It tries, in order:
 
 1. **A claude.ai artifact.** The page is on `claude.ai` and its path is `/public/artifacts/<uuid>`. The script fetches `/api/published_artifacts/<uuid>`. When the answer is 200 and its `type` is `text/markdown`, `content` is the result, with `source: "page"`. A React or HTML artifact, or any failed fetch, falls through to the next step.
-2. **`<link rel="alternate" type="text/markdown" href>`.** The script fetches `href` from the page, so the session's cookies apply. A 200 is the result, with `source: "page"`. A failure, including a CORS refusal on another origin, falls through.
+2. **`<link rel="alternate" type="text/markdown" href>`.** The script fetches `href` from the page, so the session's cookies apply. A 200 whose `content-type` is not HTML is the result, with `source: "page"`. An HTML answer (a redirect to a sign-in page, a SPA's shell) falls through (#137). A failure, including a CORS refusal on another origin, falls through.
 3. **Conversion** of `document.querySelector("main, [role=main]")`, or else `document.body`, with `source: "converted"`.
 
-A fetch has no timeout of its own. One still pending when the op's budget runs out fails the command with the usual op timeout, as any slow `evaluate` does.
+The fetches share a timeout of half the op's budget (`AbortSignal.timeout`). A source that has not answered by then falls through to conversion, so a hanging link does not fail the command (#135).
 
 ### 3. The conversion
 

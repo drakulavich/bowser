@@ -13,7 +13,9 @@ All notable changes to this project are documented here. This project follows
   Markdown when it offers some (a claude.ai artifact's source, `<link rel="alternate"
   type="text/markdown">`), and otherwise converts `<main>`, or the body when there is none.
   `markdown <ref>` converts one element, so navigation and footers stay out, and does not scroll
-  the page. `--json` names the source. (#130, #131)
+  the page. `--json` names the source. A Markdown source that answers with HTML, or has not
+  answered by half the op's budget, falls back to conversion, and dialogs the page opened are
+  reported as for other page commands. (#130, #131, #135, #136, #137)
 
 ## [0.11.0] — 2026-10-03
 
