@@ -36,6 +36,13 @@ All notable changes to this project are documented here. This project follows
   spawned with a percent-encoded path to a file that does not exist. That message no longer
   blames a persistent profile, and without `BOWSER_DAEMON_DEBUG=1` it now ends `rerun with
   BOWSER_DAEMON_DEBUG=1 to see why`. (#150)
+- **A command no longer waits for good on a daemon that stops mid-command.** Only the daemon
+  enforced `BOWSER_OP_TIMEOUT_MS`, so a daemon frozen or swapped out mid-command never sent its
+  timeout: `goto` was still waiting after 90 s, and over MCP every later call on that session
+  queued behind it. The client now gives up 2 s after the budget with `daemon for session '<s>'
+  did not answer; run 'bowser close -s <s>' to stop it` (exit 2), and the next MCP call on the
+  session fails the same way in about 1 s. A running daemon still answers first with its own
+  timeout. `BOWSER_OP_TIMEOUT_MS=0` still sets no deadline. (#155)
 
 ## [0.11.0] — 2026-10-03
 
