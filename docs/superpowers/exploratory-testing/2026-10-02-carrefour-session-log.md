@@ -98,7 +98,7 @@ Findings:
 
 Five sessions, about 110 minutes, all on the live site. The agent could build a cart every time, but three defects make that unsafe without care:
 
-1. **#112:** bowser clicks at coordinates without checking what is there. On an overlay it hangs and can lose the session; on a button the site has just swapped it presses the replacement and reports the original. A hit test in the request that resolves the ref covers both.
+1. **#112:** bowser clicks at coordinates even when something else is there. Resolving the ref already asks `elementFromPoint` what is at the element's centre, but a mismatch only scrolls the element into view, and the click goes ahead. On an overlay it hangs and can lose the session; on a button the site has just swapped it presses the replacement and reports the original. Making that check refuse the click when another element covers the target covers both.
 2. **#115:** a timed-out action may have been delivered, and the message does not say so.
 3. **#116:** `reload` returns early, and the next navigation fails with a raw WebKit error.
 
