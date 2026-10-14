@@ -122,7 +122,9 @@ session '<s>' did not answer; run 'bowser close -s <s>' to stop it` (exit 2), an
 In `tests/lifecycle.test.ts`, under `describe("ET-59: a daemon that stops answering mid-op")`, with
 a fake daemon on the session's real socket (`tests/helpers/fake-daemon.ts`) rather than a SIGSTOP of
 a real browser. Each test sets `BOWSER_OP_TIMEOUT_MS` in `process.env` and restores it. The helper
-gets one change: `answer` may return a promise, so a test can delay a reply.
+gets one change: `answer` may return a promise, so a test can delay a reply, and it may resolve to
+an error reply (`{ ok: false, error }`), which the helper writes as is instead of wrapping it in
+`ok: true`.
 
 1. **ET-59: a command fails at budget plus margin when its daemon stops answering mid-op.** The fake
    answers `ping` with `pkg.version` and never answers `evaluate`. Budget 300 ms. `run(["eval",
