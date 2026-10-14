@@ -50,7 +50,7 @@ What worked:
 - Switching delivery to NOW kept the Scheduled cart.
 
 Findings:
-- **ET-C4, confirmed, #112.** Two back-to-back `click`s on one "Add to cart" both answered `clicked eN (button "Add to cart")`, and the quantity became 2: 4 of 4 products. With 1 s between them the second was refused and the quantity stayed 1: 2 of 2. The old button stays in the DOM for under a second after the site swaps it for the stepper, so the ref resolves, and the native click at its coordinates lands on "Increase quantity". Same root as ET-C1: no hit test before the click.
+- **ET-C4, confirmed, #112.** Two back-to-back `click`s on one "Add to cart" both answered `clicked eN (button "Add to cart")`, and the quantity became 2: 4 of 4 products. With 1 s between them the second was refused and the quantity stayed 1: 2 of 2. The old button stays in the DOM for under a second after the site swaps it for the stepper, so the ref resolves, and the native click at its coordinates lands on "Increase quantity". Same root as ET-C1: resolving the ref hit-tests the element's centre, but a mismatch only scrolls it into view, and the click goes ahead.
 - **Closed, the site's:** the cart's quantity buttons have no name; the snapshot shows `button [ref]`, `combobox "2"`, `button [ref]`, and an agent can't tell minus from plus.
 
 ## S3. Bad Neighborhood
