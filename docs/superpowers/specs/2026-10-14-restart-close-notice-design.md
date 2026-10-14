@@ -31,10 +31,6 @@ Cause: the notice lives only in the restarting process's `ctx.notices` array, pr
 answer and by `runToolCall` (`src/mcp.ts`) in the tool result. A process killed before that write takes the notice
 with it. The next command meets a daemon of its own version, so it has no reason to restart or to say anything.
 
-**ET-44 (observation, 2 runs)** has the same cause: two MCP servers on one ephemeral session hand over at once
-(S2 "Two servers", `m1`, `m2`); one client gets "cookies and storage were lost", the other reads `null` with no word.
-The losing command waited for the winner's restart and then ran with an empty `notices`.
-
 ## Change
 
 Two changes, both in the commands layer. No daemon change.
@@ -104,16 +100,16 @@ sequenceDiagram
   end
 ```
 
-### 2. The notice is a file in the session directory until a surface has written it (ET-29, ET-44)
+### 2. The notice is a file in the session directory until a surface has written it (ET-29)
 
-Two files beside `upg`, both named to fit the path budget `maxSessionNameLength()` was sized for
-(`pid.99999.tmp`): `msg` holds a notice no surface has written yet, `msg.sent` the last one that was written. Each
-is written to `msg.<pid>.tmp` and renamed into place, so a reader never sees half a line.
+One file beside `upg`, `msg`, holds a notice no surface has written yet. Its name fits the path budget
+`maxSessionNameLength()` was sized for (`pid.99999.tmp`). It is written to `msg.<pid>.tmp` and renamed into place, so
+a reader never sees half a line.
 
 The restart (`restartSession`, holding `upg`):
 
-1. After its "already restarted by the holder I waited for" check and before `stopDaemon`: remove `msg.sent`, and
-   write `msg` with the notice as it would read if the reload never finishes:
+1. After its "already restarted by the holder I waited for" check and before `stopDaemon`: write `msg` with the
+   notice as it would read if the reload never finishes:
    `session '<s>' restarted for bowser <v> (was <w>): page reload at <url> was interrupted; refs cleared, run
    'bowser snapshot'` plus `; cookies and storage were lost (no --persistent)` for a session without a profile. With
    no page: `no page was open` in place of the reload clause.
@@ -128,14 +124,13 @@ when `ctx.notices` exists.
 
 - If `upg` names a live pid other than this process, a restart is still running: nothing is read and nothing is
   waited for. That restart, or the command after it, delivers the notice.
-- A command that went through `restartSession` (it restarted, or waited for another command's restart) reads `msg`,
-  or `msg.sent` if `msg` is gone. Reading `msg` first and `msg.sent` second always finds one of them, because the
-  rename between them is atomic. This is what gives the waiter of ET-44 the notice when the restarter has already
-  delivered it.
-- Any other command reads `msg` only.
+- A command that waited for another command's restart (`restartSession` returned without restarting; it now
+  returns whether it restarted) reads nothing. The restarter delivers that notice, which keeps today's behaviour of
+  exactly one notice between commands started together.
+- Every other command reads `msg`: the restarter, and any command whose first connect reached a daemon.
 - The text goes to `ctx.notices`, and a delivery callback goes to a new `ctx.acks` (`run(argv, { notices, acks })`).
-  The callback renames `msg` to `msg.sent` if `msg` still holds the text that was read; a missing `msg` is fine (a
-  concurrent command delivered it).
+  The callback removes `msg` if it still holds the text that was read; a missing `msg` is fine (a concurrent command
+  delivered it).
 
 The surfaces call the callbacks only after the notice is out:
 
@@ -152,13 +147,15 @@ stateDiagram-v2
   none --> pending: restart writes msg before the stop
   pending --> final: restart rewrites msg after the open
   pending --> none: restart throws (stop refused, open failed with no page)
-  final --> sent: a surface wrote it, then renamed msg to msg.sent
+  final --> none: a surface wrote it, then removed msg
   pending --> pending: kill (SIGKILL/TERM/INT, or the MCP client)
   final --> final: kill before the write
-  pending --> sent: next command prints it, with its answer or its error
-  final --> sent: next command prints it
-  sent --> [*]: next restart removes it, or close removes the directory
+  pending --> none: next command prints it, with its answer or its error, then removes msg
+  final --> none: next command prints it, then removes msg
+  none --> [*]
 ```
+
+`close` removes `msg` with the rest of the session directory, so a closed session never prints a stale notice.
 
 What each kill leaves, by step of the restart:
 
@@ -168,10 +165,11 @@ What each kill leaves, by step of the restart:
 | during the stop | none | fails as today with `is not open (its browser exited); run 'bowser open …'`, after the "page reload at <url> was interrupted" notice, storage loss included |
 | during the open | the new one | prints the "was interrupted" notice, storage loss included, then answers |
 | after the open, before the write | the new one | prints the final notice |
-| after the write, before the rename | the new one | prints it again: a duplicate, never a loss |
+| after the write, before the removal | the new one | prints it again: a duplicate, never a loss |
 
-A command that took part in a restart prints the notice even when another command printed it first. Two CLI
-commands started together therefore both print it (today exactly one does), and so do two MCP clients (ET-44).
+A command already waiting on `upg` when its holder is killed prints nothing: it either takes the dead lock and finds
+the new daemon, or finds no daemon and fails as today. The notice stays in `msg` for the command after it, so it is
+late by one command, not lost.
 
 ### Stale locks and budget 0
 
@@ -182,16 +180,13 @@ never waits. `close` inherits ET-35: a reused live pid in `upg` makes it wait ou
 session already does. ET-35's fix (the holder must be a bowser process) covers it. The message names the lock path,
 so a person can delete it.
 
-Not handled: a second upgrade restart that lands between a command's read of `msg` and its rename. The rename could
-then move the newer notice to `msg.sent` unread by non-participants. It needs two upgrades within one command.
+Not handled: a second upgrade restart that lands between a command's read of `msg` and its removal. The removal could
+then delete the newer notice unprinted. It needs two upgrades within one command.
 
 ### Rejected
 
 - Catching SIGTERM and SIGINT in the restart (the log's other proposal for ET-29). It misses SIGKILL (`eph`, `e3`) and
   the MCP runs, where the restart finished and only the reply was lost.
-- One file removed by whichever command prints it first (the issue's wording). A command that waited for the restart
-  polls every 50 ms and can lose the race to the restarter's own delivery, so ET-44 would stay. `msg.sent` costs one
-  rename.
 - The lock beside the session directory (`<sessions root>/<name>.upg`), so `rm` cannot take it. For a name of
   `NAME_MAX` characters, `<name>.upg.99999.tmp` does not fit one path component.
 - `close` failing at once when `upg` is held, without waiting. It turns a race the agent did not cause into a failure
@@ -236,12 +231,12 @@ Each fails before the change.
   `BOWSER_OP_TIMEOUT_MS=0`; `eval 1` answers `1` within 2 s and `notices` holds exactly the final line, not the
   "interrupted" one.
 - `the CLI marks a notice delivered only once it has printed it (ET-29)`: `msg` in a session served by a current fake
-  daemon; the CLI as its own process (`bun src/cli.ts eval 1`) prints the notice on stderr, `msg` is gone and
-  `msg.sent` holds it; a second CLI run prints no notice.
-- `a command that waited for a restart prints the notice its holder already delivered (ET-44)`: a live pid in
-  `upg`, `msg` with the provisional text, an old fake daemon. `eval 1` waits; at 300 ms a timer stops the old
-  daemon, starts a current one, writes the final text to `msg.sent`, removes `msg` (the holder printed it), then
-  removes `upg`. The waiter's `notices` hold the final line. With only `msg` read, they are empty.
+  daemon; the CLI as its own process (`bun src/cli.ts eval 1`) prints the notice on stderr and `msg` is gone; a
+  second CLI run prints no notice.
+- `a command that waited for another's restart leaves the notice to it (ET-29)`: a live pid in `upg`, `msg` with the
+  final text, an old fake daemon. `eval 1` waits; at 300 ms a timer stops the old daemon, starts a current one and
+  removes `upg`. The waiter answers `1` with empty `notices`, and `msg` is still there. This one passes today too: it
+  keeps the new reader from taking the waiter's notice, which would break `two commands at once`.
 - `tests/mcp.test.ts`, `a notice whose response could not be written stays for the next call (ET-29)`:
   `createMcpServer` with a fake `run` that pushes a notice and an ack, and a `write` that rejects; the ack is not
   called. With a `write` that resolves, it is called once.
@@ -260,21 +255,22 @@ E2E, `tests/e2e-upgrade.test.ts`, only where a real kill or a real spawn is the 
   no `state.json`, `pid` or `sock` (it may stay, empty);
   `close` exited 0; `eval` exited 0, or failed with "was closed while this command waited to restart it", or (when
   `close` stops the new daemon after `eval` reconnected) with "daemon for session '<s>' closed the connection".
-- `two commands at once restart the session once` is renamed `… and both print the notice (ET-44)`: it expects the
-  notice in both stderrs, where it now expects exactly one.
+- `two commands at once restart the session once` is unchanged: exactly one notice between them.
 
 ## Out of scope
 
 ET-30, ET-31, ET-33, ET-35, ET-36, ET-37, ET-34 (#152).
 
+ET-44 (observation: of two MCP clients handing over at once, only one sees the notice) stays as it is. A waiting
+client can only get a notice the restarter already removed if a second, delivered copy is kept, with a rule for who
+reads it, and that is more mechanism than a two-run observation is worth here.
+
 ## Definition of Done
 
 - `bun test tests/lifecycle.test.ts -t "ET-32"` passes (today: `regex "ET-32" matched 0 tests`, exit 1).
 - `bun test tests/lifecycle.test.ts -t "ET-29"` passes (today: matched 0 tests, exit 1).
-- `bun test tests/lifecycle.test.ts -t "ET-44"` passes (today: matched 0 tests, exit 1).
 - `bun test tests/mcp.test.ts -t "ET-29"` passes (today: matched 0 tests, exit 1).
 - `bun run check` passes (typecheck, lint and `bun test`; today: exit 0, 1046 pass, 318 skip, 0 fail).
 - `BOWSER_E2E=1 bun test tests/e2e-upgrade.test.ts -t "ET-32"` passes.
 - `BOWSER_E2E=1 bun test tests/e2e-upgrade.test.ts -t "ET-29"` passes.
-- `BOWSER_E2E=1 bun test tests/e2e-upgrade.test.ts -t "ET-44"` passes, and the whole of
-  `BOWSER_E2E=1 bun test tests/e2e-upgrade.test.ts` passes.
+- The whole of `BOWSER_E2E=1 bun test tests/e2e-upgrade.test.ts` passes, `two commands at once` included.
