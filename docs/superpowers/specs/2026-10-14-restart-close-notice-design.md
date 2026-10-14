@@ -136,8 +136,14 @@ The surfaces call the callbacks only after the notice is out:
 
 - CLI (`src/cli.ts`): after the `console.error` of the notices, before printing the answer or the error.
 - MCP (`src/mcp.ts`): after the `write` of the response that carries the notice succeeds. A failed write (`send`
-  catches it) and an `EPIPE` (`clientGone` exits) leave `msg` in place. A child after a handover is covered by the
-  same rule: when the old server is gone, the child's write fails.
+  catches it) and an `EPIPE` (`clientGone` exits) leave `msg` in place. A `bowser mcp` running as a handover child
+  does not call the callbacks after its write: the write lands in the pipe to the old server (`startHandover`,
+  `src/mcp.ts`) before that server writes to the client, so a server killed in between would lose the notice. The
+  child calls them when the next line arrives on its stdin, before it handles that line: the old server was alive
+  after the write. If the old server dies first, the child's stdin closes, the callbacks never run, and the session's
+  next command prints `msg`, which may be a duplicate. The old server spawns the child with `BOWSER_MCP_HANDOVER=1`
+  in its environment, which is how the child knows. A kill of the old server after that next line and before it has
+  forwarded the earlier reply is still a loss; the window is one line's forwarding.
 
 The notice's life, with the kills of S1 and S2:
 
@@ -161,11 +167,13 @@ What each kill leaves, by step of the restart:
 
 | Killed | Daemon after | What the next command does |
 |---|---|---|
-| before `msg` is written | the old one, alive | `OlderDaemon`, takes the dead lock, restarts, prints the notice |
+| before `msg` is written | the old one, alive | `OlderDaemon`, takes the dead lock, restarts, prints its own notice |
+| after `msg` is written, before `shutdown` reaches the old daemon | the old one, alive | the same: it restarts and overwrites `msg`, so one notice, its own |
 | during the stop | none | fails as today with `is not open (its browser exited); run 'bowser open …'`, after the "page reload at <url> was interrupted" notice, storage loss included |
 | during the open | the new one | prints the "was interrupted" notice, storage loss included, then answers |
-| after the open, before the write | the new one | prints the final notice |
-| after the write, before the removal | the new one | prints it again: a duplicate, never a loss |
+| after the open, before `msg` is rewritten | the new one | prints the "was interrupted" notice, though the page did reload; the storage loss it reports is true |
+| after `msg` is rewritten, before the surface writes it | the new one | prints the final notice |
+| after the surface writes it, before the removal | the new one | prints it again: a duplicate, never a loss |
 
 A command already waiting on `upg` when its holder is killed prints nothing: it either takes the dead lock and finds
 the new daemon, or finds no daemon and fails as today. The notice stays in `msg` for the command after it, so it is
@@ -239,7 +247,9 @@ Each fails before the change.
   keeps the new reader from taking the waiter's notice, which would break `two commands at once`.
 - `tests/mcp.test.ts`, `a notice whose response could not be written stays for the next call (ET-29)`:
   `createMcpServer` with a fake `run` that pushes a notice and an ack, and a `write` that rejects; the ack is not
-  called. With a `write` that resolves, it is called once.
+  called. With a `write` that resolves, it is called once. With a `write` that resolves and
+  `BOWSER_MCP_HANDOVER=1` set, it is not called after the write (a child that acked there fails here), and it is
+  called once when the next line is served, before that line's call runs.
 
 Changed: the existing unit tests that assert a restart's notice keep their text; the restart now delivers it through
 the file. `restart lock: a live holder is waited for` keeps `notices` equal to `[]` (its fake restart writes no
