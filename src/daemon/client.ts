@@ -319,14 +319,10 @@ export async function connectOrSpawn(
       }
       return checked(c, session, reply, opts);
     }
-    // A daemon that dies opening its browser never reaches its socket, so its
-    // error is invisible here. A persistent store is the likely cause when one
-    // was asked for (WebKit needs macOS 15.2+ for it), so say so.
-    const hint = opts.profile
-      ? ` with --persistent profile ${opts.profile}; the browser may not support a persistent profile here`
-      : "";
-    const log = process.env.BOWSER_DAEMON_DEBUG === "1" ? `; its output is in ${daemonLogPath(session)}` : "";
-    throw new Error(`daemon for session '${session}' did not start in time${hint}${log}`);
+    const log = process.env.BOWSER_DAEMON_DEBUG === "1"
+      ? `; its output is in ${daemonLogPath(session)}`
+      : "; rerun with BOWSER_DAEMON_DEBUG=1 to see why";
+    throw new Error(`daemon for session '${session}' did not start in time${log}`);
   }
   // Checked outside the try: its refusal must not fall into the spawn path.
   return checked(client, session, answer, opts);
@@ -337,7 +333,7 @@ export async function connectOrSpawn(
  *  beside this file. `looksLikeOurDaemon` must recognise it (tests/daemon.test.ts
  *  pins the round trip): a form it cannot read makes a live daemon look stale. */
 export function daemonCommand(session: string): string[] {
-  return [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+  return [process.execPath, Bun.fileURLToPath(new URL("./main.ts", import.meta.url)), session];
 }
 
 async function spawnDaemon(session: string, profile?: string): Promise<void> {

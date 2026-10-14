@@ -29,6 +29,14 @@ All notable changes to this project are documented here. This project follows
   cookies and storage. A running `bowser mcp` hands its calls to the installed version. A daemon
   newer than the CLI is still refused. (#145)
 
+### Fixed
+
+- **bowser works installed under a path with a space, `#` or `%`.** Every first command waited 5 s
+  and failed with `daemon for session '<name>' did not start in time`, because the daemon was
+  spawned with a percent-encoded path to a file that does not exist. That message no longer
+  blames a persistent profile, and without `BOWSER_DAEMON_DEBUG=1` it now ends `rerun with
+  BOWSER_DAEMON_DEBUG=1 to see why`. (#150)
+
 ## [0.11.0] — 2026-10-03
 
 ### Added
