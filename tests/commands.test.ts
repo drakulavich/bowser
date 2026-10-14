@@ -802,7 +802,7 @@ describe("looksLikeOurDaemon", () => {
     expect(looksLikeOurDaemon("bun /b/src/daemon/main.ts abc", "ab")).toBe(false);
   });
   test("accepts the source form", () => {
-    const main = new URL("../src/daemon/main.ts", import.meta.url).pathname;
+    const main = Bun.fileURLToPath(new URL("../src/daemon/main.ts", import.meta.url));
     expect(looksLikeOurDaemon(`${process.execPath} ${main} sess`, "sess")).toBe(true);
   });
   test("accepts the compiled form", () => {

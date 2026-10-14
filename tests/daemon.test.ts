@@ -3,9 +3,10 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { ensureSessionDir, profileDir, saveState } from "../src/state.ts";
 
@@ -38,6 +39,23 @@ describe("daemonCommand", () => {
     const line = daemonCommand("sess").join(" ");
     expect(looksLikeOurDaemon(line, "sess")).toBe(true);
     expect(looksLikeOurDaemon(line, "other")).toBe(false);
+  });
+
+  test("names a main.ts that exists under a path with a space, # or %", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "bowser-install-path-"));
+    try {
+      const dir = join(tmp, "in st#all%20");
+      const root = join(import.meta.dir, "..");
+      await cp(join(root, "src"), join(dir, "src"), { recursive: true });
+      await cp(join(root, "package.json"), join(dir, "package.json"));
+      const copy = await import(pathToFileURL(join(dir, "src", "daemon", "client.ts")).href);
+      const cmd: string[] = copy.daemonCommand("sess");
+      expect(existsSync(cmd[1]!)).toBe(true);
+      expect(looksLikeOurDaemon(cmd.join(" "), "sess")).toBe(true);
+      expect(looksLikeOurDaemon(cmd.join(" "), "other")).toBe(false);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });
 
