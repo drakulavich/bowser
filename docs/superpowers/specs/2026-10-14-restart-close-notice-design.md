@@ -52,21 +52,28 @@ waited for without a deadline").
   because another `close` removed it): `close` goes on without the lock, as today, and answers `closed session
   '<s>'`.
 - `close` keeps the lock through the stop and the "reopened while closing" guard. It then removes every entry of the
-  session directory except `upg`, then `upg`, then the directory with `rmdir`. An `ENOTEMPTY` from that `rmdir` is
-  ignored: it means a restart claimed `upg` in the gap, and that restart removes the directory itself (below).
+  session directory except `upg`, then `upg`, then the directory with `rmdir`. `ENOTEMPTY` and `ENOENT` from that
+  `rmdir` are ignored: a restart claimed `upg` in the gap. Such a restart spawns nothing (below), so what can stay is
+  an empty directory, a session never opened: `list` skips it and the next `close --all` removes it.
 - On a throw, `close` removes the lock if it still names its own pid, as the restart's `finally` does.
 - `close --all` gets this through `closeOne`. `closeLegacy` is unchanged: a legacy name has no restart.
 
-The restart learns that `close` won, in both of its paths:
+The restart learns that `close` won from one rule: after a restart or a wait for one, nothing spawns a daemon
+except the restart's own `cmdOpen`.
 
-- `OlderDaemon` path: a claim that hits `ENOENT`, or a claim that succeeds in a directory holding nothing but
-  `upg`, means the session was closed. The restart removes its lock and the empty directory (errors ignored) and
-  throws `UserError` `session '<s>' was closed while this command waited to restart it`, exit 1. It spawns nothing.
-  Today the `ENOENT` escapes as a raw error, and a claim in the gap goes on to `cmdOpen`, which recreates the
-  directory.
-- `BrowserExited` path (no daemon, another command restarting): the same error when the wait ends and the
-  directory is gone or holds nothing but `upg`. Without it, `withClient`'s second connect finds no `state.json` and
-  spawns a fresh ephemeral daemon, which is the ET-32 outcome again.
+- In `restartSession`, a claim that hits `ENOENT`, and a claim after which the session's daemon does not answer at
+  all (the "already restarted by the holder" check finds no daemon, where today it goes on to restart), return
+  without restarting. Only an `OlderDaemon` answer leads to the stop and the open. Today the `ENOENT` escapes as a
+  raw error, and a claim in the gap before `close`'s `rmdir` goes on to `cmdOpen`, which recreates the session.
+- `withClient`'s second connect, the one after `restartSession` returns, passes `spawn: false`. If no daemon
+  answers, it throws what the first connect would have: `BrowserExited` (`is not open (its browser exited); run
+  'bowser open …'`) when `state.json` exists, as after a restart killed during its stop; otherwise `UserError`
+  `session '<s>' was closed while this command waited to restart it`, exit 1. Today that connect may spawn: once
+  `close` has removed `state.json`, `connectOrSpawn` takes the session for a fresh one and starts an ephemeral
+  daemon, which is the ET-32 outcome again.
+
+The rule covers both of the restart's paths (`OlderDaemon` and `BrowserExited`), and the gap after the restart
+releases `upg` and before its command connects again, in which `close` can run to the end.
 
 The two orders, with the lock:
 
@@ -88,7 +95,8 @@ sequenceDiagram
     C->>L: claim
     R->>L: claim: held, wait
     C->>C: stop old daemon, remove the entries, then upg, then the directory
-    R->>L: claim: ENOENT, or a directory holding only upg
+    R->>L: claim: ENOENT, or an empty directory with no daemon
+    Note over R: no restart; the connect without spawn finds nothing
     Note over R: "was closed while this command waited to restart it", exit 1, nothing spawned
   end
 ```
@@ -201,8 +209,12 @@ Each fails before the change.
   session directory afterwards:
   - the timer removes the whole directory (`ENOENT` at the claim);
   - the timer removes every entry but `upg`, then `upg`, and leaves the empty directory (the gap before `close`'s
-    `rmdir`): the restart claims in a directory holding only its own `upg`;
+    `rmdir`): the restart claims there and finds no daemon (here the empty directory may stay);
   - the `BrowserExited` path: no daemon, `state.json`, the timer removes the directory.
+- `a command whose restart finished before close ran does not spawn (ET-32)`: `ctx.restart` replaced by a fake that
+  removes the session directory and returns (the restart released `upg`, then `close` ran to the end). `eval 1`
+  fails with `was closed while this command waited to restart it`, and the connector was never called with spawn
+  allowed. A second case keeps `state.json` and expects `is not open (its browser exited)`.
 - `a second close that finds the directory gone during its claim answers closed (ET-32)`: `closeOne` with the
   claim's directory removed between the existence check and `tryClaim` (the claim function injected, as
   `claimSession`'s `pause` is in its tests). Expect `closed session '<s>'`, exit 0. Today there is no claim; the test
