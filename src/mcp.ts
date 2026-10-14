@@ -514,6 +514,17 @@ function startHandover(
   const toChild = (line: string) => input.enqueue(encoder.encode(line + "\n"));
   let failed: string | undefined;
   let forwarded: Promise<void> = Promise.resolve();
+  let exited: Promise<number> = Promise.resolve(0);
+  // Sent to the child and not yet answered: answered here if it exits first.
+  const outstanding = new Map<string, string>();
+  const idOf = (line: string): string | undefined => {
+    try {
+      const id = (JSON.parse(line) as { id?: unknown }).id;
+      return id === undefined || id === null ? undefined : JSON.stringify(id);
+    } catch {
+      return undefined;
+    }
+  };
 
   const refuse = (line: string): Promise<void> | undefined => {
     let req: { id?: unknown; method?: unknown } | undefined;
@@ -544,8 +555,19 @@ function startHandover(
       if (got !== true) throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
     }
     forwarded = (async () => {
-      for (let r = await out.next(); !r.done; r = await out.next()) await write(r.value + "\n");
+      for (let r = await out.next(); !r.done; r = await out.next()) {
+        const id = idOf(r.value);
+        if (id !== undefined) outstanding.delete(id);
+        await write(r.value + "\n");
+      }
     })();
+    exited = child.exited.then(async (code) => {
+      await forwarded;
+      failed = `it exited (code ${code})`;
+      await Promise.all([...outstanding.values()].map(refuse));
+      outstanding.clear();
+      return code;
+    });
   })().catch((e: unknown) => {
     failed = e instanceof Error ? e.message : String(e);
     child?.kill();
@@ -556,6 +578,8 @@ function startHandover(
     send(line) {
       order = order.then(async () => {
         if (failed !== undefined) return refuse(line);
+        const id = idOf(line);
+        if (id !== undefined) outstanding.set(id, line);
         toChild(line);
       });
     },
@@ -563,9 +587,7 @@ function startHandover(
       await order;
       if (failed !== undefined || !child) return 0;
       input.close();
-      const code = await child.exited;
-      await forwarded;
-      return code;
+      return exited;
     },
   };
 }

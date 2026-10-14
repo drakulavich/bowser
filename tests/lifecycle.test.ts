@@ -12,7 +12,8 @@ import { join } from "node:path";
 
 import pkg from "../package.json";
 import { reportFailure, run } from "../src/cli.ts";
-import { connectOrSpawn, socketPath, type ConnectOptions } from "../src/daemon/client.ts";
+import { connectOrSpawn, OlderDaemon, socketPath, type ConnectOptions } from "../src/daemon/client.ts";
+import { restartSession } from "../src/commands/restart.ts";
 import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
 import { createSerializer } from "../src/serialize.ts";
@@ -146,6 +147,20 @@ describe("F2: a daemon from another bowser version", () => {
         code: 1,
       });
       expect(d.ops).toEqual(["ping"]);
+    } finally {
+      d.stop();
+    }
+  });
+
+  test("a restart that finds a newer daemon once it holds the lock refuses it and stops nothing", async () => {
+    const session = "ver-newer-after-lock";
+    const d = await fakeDaemon(session, daemonOf("99.0.0"));
+    try {
+      const err = await restartSession({ session, json: false, notices: [] }, new OlderDaemon("old", "0.6.1")).then(() => undefined, (e: unknown) => e);
+      expect((err as Error).message).toBe(
+        `session '${session}' is running bowser 99.0.0 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
+      );
+      expect(d.ops).not.toContain("shutdown");
     } finally {
       d.stop();
     }

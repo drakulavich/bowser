@@ -787,6 +787,20 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     expect(h.runs()).toBe(0);
   });
 
+  test("handover: a child that answers initialize and then exits leaves each call an isError", async () => {
+    const h = harness();
+    const once = 'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(0);';
+    const code = await serveLines(feed([INIT, call(7, "snapshot"), call(8, "snapshot")]), h.server, (l) => { h.out.push(l); }, {
+      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", once],
+    });
+    expect(code).toBe(0);
+    const byId = new Map(h.responses().map((r) => [r.id, r]));
+    for (const id of [7, 8]) {
+      expect(byId.get(id)?.result.isError).toBe(true);
+      expect(byId.get(id)?.result.content[0].text).toStartWith("bowser mcp could not hand over to the installed bowser 2.0.0: it exited");
+    }
+  });
+
   test("handover: with no package.json on disk, calls run in this server and nothing is spawned", async () => {
     const h = harness();
     const marker = join(tmpdir(), `bowser-handover-${process.pid}`);

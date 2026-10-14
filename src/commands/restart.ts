@@ -2,7 +2,7 @@ import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../../package.json";
 import { opTimeoutMs } from "../budget.ts";
-import { type OlderDaemon, recordedProfile } from "../daemon/client.ts";
+import { OlderDaemon, recordedProfile } from "../daemon/client.ts";
 import { claimSession } from "../daemon/pidfile.ts";
 import { loadState, sessionDir } from "../state.ts";
 import { connector, type CommandContext } from "./context.ts";
@@ -26,7 +26,9 @@ export async function restartSession(ctx: CommandContext, older: OlderDaemon): P
     try {
       (await connector(ctx)(session, { spawn: false })).close();
       return;
-    } catch {}
+    } catch (err) {
+      if (err instanceof UserError && !(err instanceof OlderDaemon)) throw err;
+    }
     const url = (await loadState(session))?.url ?? "";
     const profile = await recordedProfile(session);
     await stopDaemon(ctx, session);
