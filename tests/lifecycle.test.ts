@@ -6,18 +6,19 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import pkg from "../package.json";
 import { reportFailure, run } from "../src/cli.ts";
-import { connectOrSpawn, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, OlderDaemon, socketPath, type ConnectOptions } from "../src/daemon/client.ts";
+import { restartSession } from "../src/commands/restart.ts";
 import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
 import { createSerializer } from "../src/serialize.ts";
-import { ensureSessionDir, profileDir, saveState, sessionDir } from "../src/state.ts";
-import { daemonOf, fakeDaemon, lineSocket, SILENT } from "./helpers/fake-daemon.ts";
+import { ensureSessionDir, loadState, profileDir, saveState, sessionDir } from "../src/state.ts";
+import { daemonOf, fakeDaemon, lineSocket, SILENT, type FakeDaemon } from "./helpers/fake-daemon.ts";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 
@@ -45,6 +46,26 @@ async function failure(argv: string[]): Promise<{ stderr: string; code: number }
   }
 }
 
+/** An older daemon on the session's socket that stops on `shutdown`, and the
+ *  connector a restart reconnects through: once the old one is down, it puts
+ *  a daemon of this version on the socket, answering `state` with `url` and
+ *  `profile`, as a spawned one would. */
+async function upgrade(session: string, answer: string, page: { url?: string; profile?: string }) {
+  const url = page.url ?? "about:blank";
+  let next: FakeDaemon | undefined;
+  const old: FakeDaemon = await fakeDaemon(session, (req) => {
+    if (req.op === "shutdown") queueMicrotask(() => old.stop());
+    return daemonOf(answer)(req);
+  });
+  const current = (req: { op: string }) =>
+    req.op === "state" ? { url, title: "", profile: page.profile } : daemonOf(pkg.version)(req as Parameters<ReturnType<typeof daemonOf>>[0]);
+  const connect = async (s: string, o?: ConnectOptions) => {
+    if (old.ops.includes("shutdown") && !next) next = await fakeDaemon(session, current);
+    return connectOrSpawn(s, o);
+  };
+  return { old, next: () => next, connect, stop: () => { old.stop(); next?.stop(); } };
+}
+
 describe("F2: a daemon from another bowser version", () => {
   const cases = [
     { label: "an old daemon (no version)", answer: "pong", v: "an older version" },
@@ -52,16 +73,21 @@ describe("F2: a daemon from another bowser version", () => {
   ];
 
   for (const { label, answer, v } of cases) {
-    test(`${label}: snapshot and open exit 1 and send nothing past ping`, async () => {
+    test(`${label}: restarts an older daemon and says what was lost`, async () => {
       const session = `ver-${answer.replaceAll(".", "")}`;
-      const d = await fakeDaemon(session, daemonOf(answer));
+      await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [], updatedAt: 0, profile: null });
+      const up = await upgrade(session, answer, { url: "https://example.com/cart" });
       try {
-        const expected = `bowser: session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`;
-        expect(await failure(["snapshot", "-s", session])).toEqual({ stderr: expected, code: 1 });
-        expect(await failure(["open", "https://example.com", "-s", session])).toEqual({ stderr: expected, code: 1 });
-        expect(d.ops).toEqual(["ping", "ping"]);
+        const notices: string[] = [];
+        expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices })).toBe("1");
+        expect(notices).toEqual([
+          `session '${session}' restarted for bowser ${pkg.version} (was ${v}): page reloaded at https://example.com/cart; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
+        ]);
+        expect(up.old.ops.filter((op) => op !== "ping")).toEqual(["shutdown"]);
+        expect(up.next()?.ops).toContain("navigate");
+        expect(existsSync(join(sessionDir(session), "upg"))).toBe(false);
       } finally {
-        d.stop();
+        up.stop();
       }
     });
 
@@ -79,30 +105,218 @@ describe("F2: a daemon from another bowser version", () => {
     });
   }
 
-  test("a session with a persistent profile on disk is told to open it with --persistent (#79)", async () => {
+  test("restarts an older daemon: a persistent profile on disk is kept (#79)", async () => {
     const session = "ver-persistent";
     await mkdir(profileDir(session), { recursive: true });
-    const d = await fakeDaemon(session, daemonOf("0.6.1"));
+    const up = await upgrade(session, "0.6.1", { profile: profileDir(session) });
+    try {
+      const notices: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices })).toBe("1");
+      expect(notices).toEqual([
+        `session '${session}' restarted for bowser ${pkg.version} (was 0.6.1): no page was open; refs cleared, run 'bowser snapshot'`,
+      ]);
+      expect((await loadState(session))?.profile).toBe(profileDir(session));
+    } finally {
+      up.stop();
+    }
+  });
+
+  test("restarts an older daemon: a custom profile is kept across two upgrades (#93)", async () => {
+    const session = "ver-custom";
+    const dir = join(tmp, "custom-profile");
+    await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: dir });
+    for (const old of ["0.6.1", "0.6.2"]) {
+      const up = await upgrade(session, old, { profile: dir });
+      try {
+        const notices: string[] = [];
+        expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices })).toBe("1");
+        expect(notices[0]).not.toContain("cookies and storage were lost");
+        expect((await loadState(session))?.profile).toBe(dir);
+      } finally {
+        up.stop();
+      }
+    }
+  });
+
+  test("a newer daemon is still refused, and nothing past ping is sent", async () => {
+    const session = "ver-newer";
+    const d = await fakeDaemon(session, daemonOf("99.0.0"));
     try {
       expect(await failure(["snapshot", "-s", session])).toEqual({
-        stderr: `bowser: session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again with 'bowser open --persistent'`,
+        stderr: `bowser: session '${session}' is running bowser 99.0.0 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
         code: 1,
       });
+      expect(d.ops).toEqual(["ping"]);
     } finally {
       d.stop();
     }
   });
 
-  test("a session whose open recorded a custom profile is told to open it with --profile (#93)", async () => {
-    const session = "ver-custom";
-    const dir = join(tmp, "custom-profile");
-    await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: dir });
-    const d = await fakeDaemon(session, daemonOf("0.6.1"));
+  test("a restart that finds a newer daemon once it holds the lock refuses it and stops nothing", async () => {
+    const session = "ver-newer-after-lock";
+    const d = await fakeDaemon(session, daemonOf("99.0.0"));
     try {
-      expect((await failure(["snapshot", "-s", session])).stderr).toBe(
-        `bowser: session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again with 'bowser open --profile=${dir}'`,
+      const err = await restartSession({ session, json: false, notices: [] }, new OlderDaemon("old", "0.6.1")).then(() => undefined, (e: unknown) => e);
+      expect((err as Error).message).toBe(
+        `session '${session}' is running bowser 99.0.0 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
       );
+      expect(d.ops).not.toContain("shutdown");
     } finally {
+      d.stop();
+    }
+  });
+
+  test("a command that finds no daemon while another restarts the session waits for it (#149)", async () => {
+    const session = "ver-mid-restart";
+    await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
+    const lock = join(sessionDir(session), "upg");
+    await Bun.write(lock, String(process.ppid));
+    let next: FakeDaemon | undefined;
+    setTimeout(async () => {
+      next = await fakeDaemon(session, daemonOf(pkg.version));
+      await unlink(lock);
+    }, 300);
+    try {
+      expect(await run(["eval", "1", "-s", session])).toBe("1");
+    } finally {
+      await Bun.sleep(350);
+      next?.stop();
+    }
+  });
+
+  test("with BOWSER_OP_TIMEOUT_MS=0, a held restart lock is waited for without a deadline (#149)", async () => {
+    const session = "ver-nobudget";
+    await ensureSessionDir(session);
+    const lock = join(sessionDir(session), "upg");
+    await Bun.write(lock, String(process.ppid));
+    const old = await fakeDaemon(session, daemonOf("0.6.1"));
+    let next: FakeDaemon | undefined;
+    setTimeout(async () => {
+      old.stop();
+      await unlink(socketPath(session)).catch(() => {});
+      next = await fakeDaemon(session, daemonOf(pkg.version));
+      await unlink(lock);
+    }, 300);
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "0";
+    try {
+      expect(await run(["eval", "1", "-s", session])).toBe("1");
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+      await Bun.sleep(350);
+      old.stop();
+      next?.stop();
+    }
+  });
+
+  test("a restart whose reload fails clears the saved refs (#149)", async () => {
+    const session = "ver-noreload";
+    const ref = { id: "e1", role: "button", name: "Add", tag: "button" };
+    await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [ref], doc: "d1", updatedAt: 0, profile: null });
+    const up = await upgrade(session, "0.6.1", {});
+    try {
+      const notices: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices })).toBe("1");
+      expect(notices[0]).toContain("page did not reload at https://example.com/cart");
+      const state = await loadState(session);
+      expect(state?.refs).toEqual([]);
+      expect(state?.doc).toBeUndefined();
+    } finally {
+      up.stop();
+    }
+  });
+
+  test("a restart whose stop fails keeps the saved refs (#149)", async () => {
+    const session = "ver-nostop";
+    const ref = { id: "e1", role: "button", name: "Add", tag: "button" };
+    await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [ref], doc: "d1", updatedAt: 0, profile: null });
+    // A live pid that is not a daemon of ours: the stop refuses to signal it.
+    await Bun.write(join(sessionDir(session), "pid"), String(process.ppid));
+    const up = await upgrade(session, "0.6.1", {});
+    try {
+      const err = await run(["eval", "1", "-s", session], { connect: up.connect, notices: [] }).then(() => undefined, (e: unknown) => e);
+      expect((err as Error).message).toContain("does not look like a bowser daemon");
+      expect((await loadState(session))?.refs).toEqual([ref]);
+    } finally {
+      await unlink(join(sessionDir(session), "pid")).catch(() => {});
+      up.stop();
+    }
+  }, 10_000);
+
+  test("with no package.json on disk, an older daemon is still refused", async () => {
+    const session = "ver-noinstall";
+    const d = await fakeDaemon(session, daemonOf("0.6.1"));
+    const connect = (s: string, o?: ConnectOptions) => connectOrSpawn(s, { ...o, installedVersion: async () => undefined });
+    try {
+      const err = await run(["snapshot", "-s", session], { connect }).then(() => undefined, (e: unknown) => e);
+      expect(reportFailure(err).stderr).toBe(
+        `bowser: session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
+      );
+      expect(d.ops).toEqual(["ping"]);
+    } finally {
+      d.stop();
+    }
+  });
+
+  test("restart lock: a dead holder's lock is taken", async () => {
+    const session = "ver-deadlock";
+    const dead = Bun.spawn(["true"]);
+    await dead.exited;
+    await ensureSessionDir(session);
+    await Bun.write(join(sessionDir(session), "upg"), String(dead.pid));
+    const up = await upgrade(session, "0.6.1", {});
+    try {
+      const notices: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices })).toBe("1");
+      expect(notices).toHaveLength(1);
+      expect(existsSync(join(sessionDir(session), "upg"))).toBe(false);
+    } finally {
+      up.stop();
+    }
+  });
+
+  test("restart lock: a live holder is waited for, and the daemon it started is used", async () => {
+    const session = "ver-livelock";
+    await ensureSessionDir(session);
+    const lock = join(sessionDir(session), "upg");
+    await Bun.write(lock, String(process.ppid));
+    const old = await fakeDaemon(session, daemonOf("0.6.1"));
+    let next: FakeDaemon | undefined;
+    setTimeout(async () => {
+      old.stop();
+      await unlink(socketPath(session)).catch(() => {});
+      next = await fakeDaemon(session, daemonOf(pkg.version));
+      await unlink(lock);
+    }, 300);
+    try {
+      const notices: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { notices })).toBe("1");
+      expect(notices).toEqual([]);
+      expect(old.ops).not.toContain("shutdown");
+    } finally {
+      old.stop();
+      next?.stop();
+    }
+  });
+
+  test("restart lock: a holder that outlasts the budget fails the command and leaves the daemon alone", async () => {
+    const session = "ver-heldlock";
+    await ensureSessionDir(session);
+    const lock = join(sessionDir(session), "upg");
+    await Bun.write(lock, String(process.ppid));
+    const d = await fakeDaemon(session, daemonOf("0.6.1"));
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "300";
+    try {
+      expect(await failure(["eval", "1", "-s", session])).toEqual({
+        stderr: `bowser: session '${session}' is being restarted by pid ${process.ppid} (${lock})`,
+        code: 1,
+      });
+      expect(d.ops).not.toContain("shutdown");
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
       d.stop();
     }
   });

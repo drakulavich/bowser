@@ -3,6 +3,7 @@ import { renderCommandHelp, renderHelp, usageOf } from "./cli/help.ts";
 import { helpRequested, parse } from "./cli/parser.ts";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { failedModalState, type CommandContext } from "./commands/context.ts";
+import { restartSession } from "./commands/restart.ts";
 import { UserError } from "./errors.ts";
 
 /** `base` seeds the command context; tests inject `connect` through it. */
@@ -31,7 +32,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   if (args.positional.length < command.positional.filter((p) => p.required).length) {
     throw new UserError(`usage: bowser ${usageOf(command)}`);
   }
-  const ctx: CommandContext = { ...base, session: args.session, json: args.json, command: command.name };
+  const ctx: CommandContext = { restart: restartSession, ...base, session: args.session, json: args.json, command: command.name };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 
@@ -69,10 +70,13 @@ if (import.meta.main) {
     // was never measured.
     await runMcpServer({ run });
   } else {
+    const notices: string[] = [];
     try {
-      const out = await run(process.argv.slice(2));
+      const out = await run(process.argv.slice(2), { notices });
+      for (const n of notices) console.error(`bowser: ${n}`);
       if (out) console.log(out);
     } catch (err) {
+      for (const n of notices) console.error(`bowser: ${n}`);
       const { stderr, code } = reportFailure(err);
       console.error(stderr);
       process.exit(code);

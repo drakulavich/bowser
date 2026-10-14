@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  serveLines,
   buildTools,
   createMcpServer,
   toArgv,
@@ -204,6 +205,18 @@ describe("handleMcpRequest — tools/call", () => {
     expect(res.error).toBeUndefined();
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("no open page");
+  });
+
+  test("a restart's notice is the first line of the tool text, on success and on error (#145)", async () => {
+    const call = (run: McpDeps["run"]) => handleMcpRequest(
+      { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "snapshot", arguments: {} } },
+      { run, version: "9.9.9" },
+    ) as Promise<any>;
+    const ok = await call(async (_, base) => { base?.notices?.push("session 'default' restarted"); return "page"; });
+    expect(ok.result.content[0].text).toBe("session 'default' restarted\npage");
+    const failed = await call(async (_, base) => { base?.notices?.push("session 'default' restarted"); throw new Error("ref 'e1' is gone"); });
+    expect(failed.result.isError).toBe(true);
+    expect(failed.result.content[0].text).toBe("session 'default' restarted\nref 'e1' is gone");
   });
 
   // F38: MCP outputs are the --json JSON, for snapshot with a filename too.
@@ -746,4 +759,103 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
       }
     });
   }
+});
+
+describe("serveLines: handover to the installed bowser after an upgrade (#145)", () => {
+  const CLI = join(import.meta.dir, "..", "src", "cli.ts");
+  const INIT = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+  const call = (id: number, name: string) => JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: {} } });
+  async function* feed(lines: string[]) { for (const l of lines) yield l; }
+  function harness() {
+    const out: string[] = [];
+    let runs = 0;
+    const server = createMcpServer({ run: async () => { runs++; await Bun.sleep(50); return "old server"; }, version: "1.0.0" }, (line) => { out.push(line); });
+    return { out, server, runs: () => runs, responses: () => out.join("").trim().split("\n").map((l) => JSON.parse(l)) };
+  }
+
+  test("handover: a child that exits at once leaves each call an isError 'could not hand over'", async () => {
+    const h = harness();
+    const code = await serveLines(feed([INIT, call(7, "snapshot"), call(8, "snapshot")]), h.server, (l) => { h.out.push(l); }, {
+      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", "process.exit(3)"],
+    });
+    expect(code).toBe(0);
+    const byId = new Map(h.responses().map((r) => [r.id, r]));
+    for (const id of [7, 8]) {
+      expect(byId.get(id).result.isError).toBe(true);
+      expect(byId.get(id).result.content[0].text).toStartWith("bowser mcp could not hand over to the installed bowser 2.0.0: it exited; restart the MCP server");
+    }
+    expect(h.runs()).toBe(0);
+  });
+
+  test("handover: a child that answers initialize and then exits leaves each call an isError", async () => {
+    const h = harness();
+    const once = 'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(0);';
+    const code = await serveLines(feed([INIT, call(7, "snapshot"), call(8, "snapshot")]), h.server, (l) => { h.out.push(l); }, {
+      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", once],
+    });
+    expect(code).toBe(0);
+    const byId = new Map(h.responses().map((r) => [r.id, r]));
+    for (const id of [7, 8]) {
+      expect(byId.get(id)?.result.isError).toBe(true);
+      expect(byId.get(id)?.result.content[0].text).toStartWith("bowser mcp could not hand over to the installed bowser 2.0.0: it exited");
+    }
+  });
+
+  test("handover: stdin that ends after the child died still exits with the child's code", async () => {
+    const h = harness();
+    const once = 'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(4);';
+    async function* late() { yield INIT; yield call(7, "snapshot"); await Bun.sleep(500); }
+    const code = await serveLines(late(), h.server, (l) => { h.out.push(l); }, {
+      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", once],
+    });
+    expect(code).toBe(4);
+  });
+
+  test("handover: a cancellation sent during the handover reaches a call still running in this server (#149)", async () => {
+    const out: string[] = [];
+    let started = 0;
+    const server = createMcpServer({ run: async () => { started++; await Bun.sleep(300); return "old server"; }, version: "1.0.0" }, (line) => { out.push(line); });
+    const cancel = JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 5 } });
+    async function* lines() { yield INIT; yield call(5, "snapshot"); await Bun.sleep(50); yield call(7, "list"); yield cancel; }
+    await serveLines(lines(), server, (l) => { out.push(l); }, {
+      version: "1.0.0", installed: async () => (started > 0 ? "2.0.0" : "1.0.0"), child: [process.execPath, "-e", "process.exit(0)"],
+    });
+    const ids = out.join("").trim().split("\n").map((l) => JSON.parse(l).id);
+    expect(ids).not.toContain(5);
+  });
+
+  test("handover: with no package.json on disk, calls run in this server and nothing is spawned", async () => {
+    const h = harness();
+    const marker = join(tmpdir(), `bowser-handover-${process.pid}`);
+    await serveLines(feed([INIT, call(7, "snapshot"), call(8, "snapshot")]), h.server, (l) => { h.out.push(l); }, {
+      version: "1.0.0", installed: async () => undefined, child: [process.execPath, "-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "")`],
+    });
+    expect(h.runs()).toBe(2);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("handover: a running call and a tools/list answer first, then the installed server answers each later id once", async () => {
+    const h = harness();
+    const home = realpathSync(await mkdtemp(join(tmpdir(), "bowser-handover-home-")));
+    const prevHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const lines = [INIT, call(5, "snapshot"), JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" }), call(7, "list"), call(8, "list")];
+      async function* slow() { yield lines[0]!; yield lines[1]!; await Bun.sleep(10); yield lines[2]!; yield lines[3]!; yield lines[4]!; }
+      const code = await serveLines(slow(), h.server, (l) => { h.out.push(l); }, {
+        version: "1.0.0", installed: async () => (h.runs() > 0 ? "2.0.0" : "1.0.0"), child: [process.execPath, CLI, "mcp"],
+      });
+      expect(code).toBe(0);
+      const res = h.responses();
+      // The old server's answers (the running call, tools/list) come before any forwarded line.
+      expect(res.slice(0, 3).map((r) => r.id).sort()).toEqual([1, 5, 6]);
+      expect(res.slice(3).map((r) => r.id)).toEqual([7, 8]);
+      expect(res.find((r) => r.id === 5).result.content[0].text).toBe("old server");
+      expect(res.find((r) => r.id === 7).result.content[0].text).toBe("[]");
+      expect(res.some((r) => r.id === "bowser-handover")).toBe(false);
+    } finally {
+      process.env.HOME = prevHome;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });

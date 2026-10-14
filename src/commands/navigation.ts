@@ -185,13 +185,11 @@ async function waitGone(proc: ProcessOps, pid: number): Promise<boolean> {
   return !proc.alive(pid);
 }
 
-/** Exported for tests, which supply their own `proc` to exercise the paths that
- *  decide whether to signal a pid. `cmdClose` is the command entry point. */
-export async function closeOne(
+export async function stopDaemon(
   ctx: CommandContext,
   session: string,
   proc: ProcessOps = realProcess,
-): Promise<string> {
+): Promise<{ pid: number | null; ended: boolean }> {
   const pid = await readPid(session);
 
   // Ask the daemon to stop, whatever its version: an upgrade can leave an
@@ -242,6 +240,18 @@ export async function closeOne(
       throw new Error(`close: daemon for session '${session}' (pid ${pid}) is still running`);
     }
   }
+
+  return { pid, ended };
+}
+
+/** Exported for tests, which supply their own `proc` to exercise the paths that
+ *  decide whether to signal a pid. `cmdClose` is the command entry point. */
+export async function closeOne(
+  ctx: CommandContext,
+  session: string,
+  proc: ProcessOps = realProcess,
+): Promise<string> {
+  const { pid, ended } = await stopDaemon(ctx, session, proc);
 
   // A concurrent `open` can start a replacement daemon while the steps above
   // are waiting. Removing the directory then deletes the newcomer's socket and

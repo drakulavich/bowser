@@ -42,19 +42,21 @@ On another platform, any command that would start a session fails with the error
 
 ### Upgrading
 
-Run `bowser close --all` before you upgrade. A session keeps the daemon that started it, and after
-an upgrade every command but `close` and `list` refuses a daemon of another version:
-"session '<name>' is running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it
-again" (exit 1). For a session with the default persistent profile it says "open it again with
-'bowser open --persistent'"; when the session state records a custom profile, it says "open it
-again with 'bowser open --profile=<dir>'", quoting the path when needed. Older session state has no
-profile record, so bowser falls back to checking the default profile directory. A daemon from bowser
-0.7 or older reports no version, so `<v>` reads `an older version`.
-`close` still ends such a daemon, and `list` still lists it.
+Open sessions survive an upgrade. The first command after it finds the daemon the old bowser
+started, stops it, and opens the session again with its profile and its page. It then runs as
+asked, and prints one line on stderr first:
+"bowser: session '<name>' restarted for bowser <w> (was <v>): page reloaded at <url>; refs cleared,
+run 'bowser snapshot'". A session opened without `--persistent` or `--profile` adds "cookies and
+storage were lost (no --persistent)": those lived only in the old daemon. A ref from before the
+upgrade fails with "is from a page that is no longer loaded", so take a new snapshot.
 
-Restart any running `bowser mcp` server after an upgrade too. It starts each new daemon from the
-upgraded files, then refuses it, and closing the session does not help: "this bowser (<w>)
-differs from the installed bowser (<v>); restart the MCP server or re-run the command" (exit 1).
+A running `bowser mcp` server hands its calls over to the installed version on the first tool call
+after the upgrade, and the restart line comes first in that call's text. Its tool list stays the
+one the client got when it connected, so a new command shows up once the client restarts the
+server.
+
+A daemon newer than the bowser you run (after a downgrade) is still refused: "session '<name>' is
+running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it again" (exit 1).
 
 ### Screenshots
 
