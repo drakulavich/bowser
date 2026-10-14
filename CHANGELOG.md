@@ -19,6 +19,16 @@ All notable changes to this project are documented here. This project follows
   result says so with them, so a blocked page doesn't pass for an empty one. Strikethrough,
   captions, `sub`/`sup`, code languages and infobox rows keep their meaning. (#130, #131, #135–#140)
 
+### Changed
+
+- **An upgrade no longer breaks open sessions.** After `npm i -g`, every command but `close` and
+  `list` refused a daemon the old bowser had started until the session was closed and opened
+  again, and a running `bowser mcp` refused even the daemons it started itself until it was
+  restarted by hand. Now the first command restarts the session with its profile and page, and
+  prints one line saying so and what was lost: refs, and for a session without a profile its
+  cookies and storage. A running `bowser mcp` hands its calls to the installed version. A daemon
+  newer than the CLI is still refused. (#145)
+
 ## [0.11.0] — 2026-10-03
 
 ### Added

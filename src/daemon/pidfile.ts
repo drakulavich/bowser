@@ -82,6 +82,7 @@ export async function claimSession(
   pidFile: string,
   session: string,
   pause: (step: ClaimStep) => Promise<void> = async () => {},
+  holds: (pid: number) => Promise<boolean> = (pid) => isOurDaemon(pid, session),
 ): Promise<boolean> {
   // Bounded: each pass either claims, finds a holder, or sees the pidfile
   // change under it (a holder exited, or another newcomer removed a stale
@@ -100,7 +101,7 @@ export async function claimSession(
     // left for `close`, which removes the session directory, rather than
     // guessed to be stale.
     if (!/^\d+$/.test(holder) || pid <= 0) return false;
-    if (isAlive(pid) && (await isOurDaemon(pid, session))) return false;
+    if (isAlive(pid) && (await holds(pid))) return false;
     await pause("stale-read");
     // The newcomer that removed the stale pidfile claims now, so a removal
     // never leaves the session with no claimant.

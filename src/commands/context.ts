@@ -2,7 +2,7 @@
 // connection with its close, the empty session state, and ref lookup.
 
 import type { FlagSpec } from "../cli/parser.ts";
-import { connectOrSpawn, type ConnectOptions } from "../daemon/client.ts";
+import { connectOrSpawn, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, type Ref, type SessionState } from "../state.ts";
@@ -19,6 +19,9 @@ export interface CommandContext {
    *  tests inject a fake. `bowser mcp` never reaches it: the flag is not in
    *  its schema and toArgv puts every client value after `--`. */
   readStdin?: () => Promise<string>;
+  notices?: string[];
+  // Injected by `run`: restart.ts imports navigation.ts, which imports this module.
+  restart?: (ctx: CommandContext, older: OlderDaemon) => Promise<void>;
 }
 
 interface Positional {
@@ -65,7 +68,15 @@ export async function withClient<T>(
   fn: (c: DaemonConnection) => Promise<T>,
   opts: ConnectOptions = {},
 ): Promise<T> {
-  const client = await connector(ctx)(ctx.session, ctx.command ? { ...opts, command: ctx.command } : opts);
+  const connect = () => connector(ctx)(ctx.session, ctx.command ? { ...opts, command: ctx.command } : opts);
+  let client: DaemonConnection;
+  try {
+    client = await connect();
+  } catch (err) {
+    if (!(err instanceof OlderDaemon) || !ctx.restart) throw err;
+    await ctx.restart(ctx, err);
+    client = await connect();
+  }
   try {
     return await fn(client);
   } finally {

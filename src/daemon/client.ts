@@ -168,22 +168,30 @@ export class DaemonNotAnswering extends Error {
   }
 }
 
+export class OlderDaemon extends UserError {
+  constructor(message: string, readonly was: string) {
+    super(message);
+  }
+}
+
 /** Why a command refuses a daemon of another bowser version, found running
- *  after an upgrade: its ops and their behaviour may differ from this CLI's,
- *  and restarting it quietly would drop its page (F2). A user error (exit 1).
- *  `answer` is what it said to `ping`: its version, or "pong" from every
- *  daemon before the version was sent. */
-async function otherVersion(session: string, answer: unknown, opts: ConnectOptions): Promise<string> {
+ *  after an upgrade: its ops and their behaviour may differ from this CLI's
+ *  (F2). A user error (exit 1). `answer` is what it said to `ping`: its
+ *  version, or "pong" from every daemon before the version was sent. */
+async function otherVersion(session: string, answer: unknown, opts: ConnectOptions): Promise<UserError> {
   // A daemon is spawned from the files on disk, so after an in-place upgrade a
   // long-running process (`bowser mcp`) meets its own new daemon here.
   const installed = await (opts.installedVersion ?? installedVersion)();
   if (installed === answer && installed !== pkg.version) {
-    return `this bowser (${pkg.version}) differs from the installed bowser (${installed}); restart the MCP server or re-run the command`;
+    return new UserError(`this bowser (${pkg.version}) differs from the installed bowser (${installed}); restart the MCP server or re-run the command`);
   }
-  const v = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer) ? answer : "an older version";
+  const semver = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer);
+  const v = semver ? answer : "an older version";
   const cmd = await openCommand(session);
   const open = cmd === "bowser open" ? "open it again" : `open it again with '${cmd}'`;
-  return `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then ${open}`;
+  const message = `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then ${open}`;
+  const older = answer === "pong" || (semver && Bun.semver.order(answer, pkg.version) < 0);
+  return older && installed === pkg.version ? new OlderDaemon(message, v) : new UserError(message);
 }
 
 /** undefined where package.json is not on disk (a compiled binary). */
@@ -200,7 +208,7 @@ async function installedVersion(): Promise<string | undefined> {
 async function checked(client: DaemonClient, session: string, answer: unknown, opts: ConnectOptions): Promise<DaemonClient> {
   if (opts.anyVersion || answer === pkg.version) return client;
   client.close();
-  throw new UserError(await otherVersion(session, answer, opts));
+  throw await otherVersion(session, answer, opts);
 }
 
 /** Why a command refuses a session whose daemon ran and is gone: its page,
@@ -210,10 +218,16 @@ async function browserExited(session: string): Promise<string> {
   return `session '${session}' is not open (its browser exited); run '${await openCommand(session)}'`;
 }
 
-/** State from an older bowser has no profile record: a directory on disk decides. */
-async function openCommand(session: string): Promise<string> {
+/** The profile the session's `open` recorded, null for none. State from an
+ *  older bowser has no profile record: a directory on disk decides. */
+export async function recordedProfile(session: string): Promise<string | null> {
   const profile = (await loadState(session))?.profile;
-  if (profile === undefined) return existsSync(profileDir(session)) ? "bowser open --persistent" : "bowser open";
+  if (profile !== undefined) return profile;
+  return existsSync(profileDir(session)) ? profileDir(session) : null;
+}
+
+async function openCommand(session: string): Promise<string> {
+  const profile = await recordedProfile(session);
   if (profile === null) return "bowser open";
   if (profile === profileDir(session)) return "bowser open --persistent";
   const path = /[^A-Za-z0-9_./-]/.test(profile) ? `'${profile.replaceAll("'", "'\\''")}'` : profile;

@@ -35,7 +35,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] a
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */
-  run: (argv: string[]) => Promise<string>;
+  run: (argv: string[], base?: { notices?: string[] }) => Promise<string>;
   /** serverInfo.version. */
   version: string;
 }
@@ -205,14 +205,16 @@ function prepareToolCall(id: unknown, params: unknown): PreparedCall {
 }
 
 async function runToolCall(id: unknown, argv: string[], deps: McpDeps): Promise<object> {
+  const notices: string[] = [];
+  const first = (text: string) => [...notices, text].filter(Boolean).join("\n");
   try {
-    const out = await deps.run(argv);
-    return toolResult(id, out || "");
+    const out = await deps.run(argv, { notices });
+    return toolResult(id, first(out || ""));
   } catch (e) {
     // A failed page command still reports the dialogs it answered.
     const modal = failedModalState(e);
     const msg = e instanceof Error ? e.message : String(e);
-    return toolResult(id, modal ? `${msg}\n${modal}` : msg, true);
+    return toolResult(id, first(modal ? `${msg}\n${modal}` : msg), true);
   }
 }
 
@@ -273,7 +275,7 @@ export interface McpServer {
    *  tools/call is answered at once, and a tools/call is queued behind its
    *  session's earlier calls. */
   accept(line: string): void;
-  /** Resolves once every accepted tool call has finished. */
+  /** Resolves once every accepted line has been answered and written. */
   idle(): Promise<void>;
 }
 
@@ -307,9 +309,14 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     }
   };
 
+  function track(p: Promise<void>): void {
+    running.add(p);
+    void p.finally(() => running.delete(p));
+  }
+
   function schedule(id: unknown, params: unknown): void {
     const prepared = prepareToolCall(id, params);
-    if ("reply" in prepared) { void send(prepared.reply); return; }
+    if ("reply" in prepared) { track(send(prepared.reply)); return; }
     const { argv, session } = prepared;
     const token = { cancelled: false };
     inFlight.set(id, token);
@@ -337,7 +344,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     try {
       req = JSON.parse(line);
     } catch {
-      { void send(jsonRpcError(null, -32700, "Parse error")); return; }
+      { track(send(jsonRpcError(null, -32700, "Parse error"))); return; }
     }
     const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
     const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
@@ -349,9 +356,9 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
       return;
     }
     // Everything else never touches a daemon: answer it now.
-    void handleMcpRequest(req, deps).then((res) => {
-      if (res !== null) send(res);
-    });
+    track(handleMcpRequest(req, deps).then(async (res) => {
+      if (res !== null) await send(res);
+    }));
   }
 
   async function idle(): Promise<void> {
@@ -405,7 +412,7 @@ export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string
     process.exit(1);
   };
   process.stdout.on("error", clientGone);
-  const server = createMcpServer(d, (line) => {
+  const write = (line: string): Promise<void> => {
     return new Promise<void>((resolve, reject) => {
       try {
         process.stdout.write(line, (e) => {
@@ -418,17 +425,147 @@ export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string
         reject(e);
       }
     });
+  };
+  const server = createMcpServer(d, write);
+  const code = await serveLines(lines(Bun.stdin.stream()), server, write, {
+    version: d.version,
+    installed: installedVersion,
+    child: [process.execPath, new URL("./cli.ts", import.meta.url).pathname, "mcp"],
   });
+  if (code !== 0) process.exit(code);
+}
+
+async function* lines(stream: ReadableStream<Uint8Array>): AsyncIterable<string> {
   const decoder = new TextDecoder();
   let buf = "";
-  for await (const chunk of Bun.stdin.stream()) {
-    buf += decoder.decode(chunk as Uint8Array, { stream: true });
+  for await (const chunk of stream) {
+    buf += decoder.decode(chunk, { stream: true });
     let idx: number;
     while ((idx = buf.indexOf("\n")) !== -1) {
       const line = buf.slice(0, idx).trim();
       buf = buf.slice(idx + 1);
-      if (line) server.accept(line);
+      if (line) yield line;
     }
   }
-  await server.idle();
+}
+
+async function installedVersion(): Promise<string | undefined> {
+  try {
+    return (await Bun.file(new URL("../package.json", import.meta.url)).json()).version;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface HandoverOptions {
+  version: string;
+  installed: () => Promise<string | undefined>;
+  child: string[];
+}
+
+export async function serveLines(
+  input: AsyncIterable<string>,
+  server: McpServer,
+  write: (line: string) => void | Promise<void>,
+  opts: HandoverOptions,
+): Promise<number> {
+  let init: { id?: unknown } | undefined;
+  let handover: Handover | undefined;
+  for await (const line of input) {
+    if (handover) { handover.send(line); continue; }
+    let req: { id?: unknown; method?: unknown } | undefined;
+    try { req = JSON.parse(line); } catch {}
+    if (req?.method === "initialize") init = req;
+    if (req?.method === "tools/call") {
+      const installed = await opts.installed();
+      if (installed !== undefined && installed !== opts.version) {
+        handover = startHandover(server, write, opts.child, init, installed);
+        handover.send(line);
+        continue;
+      }
+    }
+    server.accept(line);
+  }
+  if (!handover) {
+    await server.idle();
+    return 0;
+  }
+  return handover.end();
+}
+
+interface Handover {
+  send(line: string): void;
+  end(): Promise<number>;
+}
+
+const HANDOVER_ID = "bowser-handover";
+const HANDOVER_MS = 10_000;
+
+function startHandover(
+  server: McpServer,
+  write: (line: string) => void | Promise<void>,
+  command: string[],
+  init: { id?: unknown } | undefined,
+  installed: string,
+): Handover {
+  let child: Bun.Subprocess<ReadableStream, "pipe", "inherit"> | undefined;
+  let input!: ReadableStreamDefaultController<Uint8Array>;
+  const encoder = new TextEncoder();
+  const toChild = (line: string) => input.enqueue(encoder.encode(line + "\n"));
+  let failed: string | undefined;
+  let forwarded: Promise<void> = Promise.resolve();
+
+  const refuse = (line: string): Promise<void> | undefined => {
+    let req: { id?: unknown; method?: unknown } | undefined;
+    try { req = JSON.parse(line); } catch {}
+    if (!req || req.id === undefined || req.id === null) return;
+    const text = `bowser mcp could not hand over to the installed bowser ${installed}: ${failed}; restart the MCP server`;
+    const res = req.method === "tools/call" ? toolResult(req.id, text, true) : jsonRpcError(req.id, -32603, text);
+    return Promise.resolve(write(JSON.stringify(res) + "\n"));
+  };
+
+  const ready = (async () => {
+    // The old server writes nothing after this: the child is the only writer.
+    await server.idle();
+    const stdin = new ReadableStream<Uint8Array>({ start: (c) => { input = c; } });
+    child = Bun.spawn(command, { stdin, stdout: "pipe", stderr: "inherit", env: process.env, cwd: process.cwd() });
+    const out = lines(child.stdout)[Symbol.asyncIterator]();
+    if (init) {
+      toChild(JSON.stringify({ ...init, id: HANDOVER_ID }));
+      toChild(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
+      const answered = (async () => {
+        for (let r = await out.next(); !r.done; r = await out.next()) {
+          if ((JSON.parse(r.value) as { id?: unknown }).id === HANDOVER_ID) return true;
+        }
+        return false;
+      })();
+      const timeout = Bun.sleep(HANDOVER_MS).then(() => "timeout" as const);
+      const got = await Promise.race([answered, timeout]);
+      if (got !== true) throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
+    }
+    forwarded = (async () => {
+      for (let r = await out.next(); !r.done; r = await out.next()) await write(r.value + "\n");
+    })();
+  })().catch((e: unknown) => {
+    failed = e instanceof Error ? e.message : String(e);
+    child?.kill();
+  });
+
+  let order: Promise<void> = ready;
+  return {
+    send(line) {
+      order = order.then(async () => {
+        if (failed !== undefined) return refuse(line);
+        toChild(line);
+      });
+    },
+    async end() {
+      await order;
+      if (failed !== undefined || !child) return 0;
+      input.close();
+      const code = await child.exited;
+      await forwarded;
+      return code;
+    },
+  };
 }
