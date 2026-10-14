@@ -136,14 +136,11 @@ The surfaces call the callbacks only after the notice is out:
 
 - CLI (`src/cli.ts`): after the `console.error` of the notices, before printing the answer or the error.
 - MCP (`src/mcp.ts`): after the `write` of the response that carries the notice succeeds. A failed write (`send`
-  catches it) and an `EPIPE` (`clientGone` exits) leave `msg` in place. A `bowser mcp` running as a handover child
-  does not call the callbacks after its write: the write lands in the pipe to the old server (`startHandover`,
-  `src/mcp.ts`) before that server writes to the client, so a server killed in between would lose the notice. The
-  child calls them when the next line arrives on its stdin, before it handles that line: the old server was alive
-  after the write. If the old server dies first, the child's stdin closes, the callbacks never run, and the session's
-  next command prints `msg`, which may be a duplicate. The old server spawns the child with `BOWSER_MCP_HANDOVER=1`
-  in its environment, which is how the child knows. A kill of the old server after that next line and before it has
-  forwarded the earlier reply is still a loss; the window is one line's forwarding.
+  catches it) and an `EPIPE` (`clientGone` exits, F41) leave `msg` in place. A handover child follows the same rule.
+  In the S2 runs the client killed the old server 200 to 400 ms after the call, long before the restart finished,
+  so the child's later write to its stdout, a pipe whose reader is gone, fails with `EPIPE`. `clientGone` then exits
+  before the write resolves, and the callbacks never run. The one loss left is an old server killed after the
+  child's write succeeded and before the old server forwarded that line to the client (`startHandover`).
 
 The notice's life, with the kills of S1 and S2:
 
@@ -246,10 +243,9 @@ Each fails before the change.
   removes `upg`. The waiter answers `1` with empty `notices`, and `msg` is still there. This one passes today too: it
   keeps the new reader from taking the waiter's notice, which would break `two commands at once`.
 - `tests/mcp.test.ts`, `a notice whose response could not be written stays for the next call (ET-29)`:
-  `createMcpServer` with a fake `run` that pushes a notice and an ack, and a `write` that rejects; the ack is not
-  called. With a `write` that resolves, it is called once. With a `write` that resolves and
-  `BOWSER_MCP_HANDOVER=1` set, it is not called after the write (a child that acked there fails here), and it is
-  called once when the next line is served, before that line's call runs.
+  `createMcpServer` with a fake `run` that pushes a notice and an ack, and a `write` that rejects with an `EPIPE`
+  error (`code: "EPIPE"`, as a closed stdout gives); the ack is not called and `msg` is still there. With a `write`
+  that resolves, the ack is called once and `msg` is gone.
 
 Changed: the existing unit tests that assert a restart's notice keep their text; the restart now delivers it through
 the file. `restart lock: a live holder is waited for` keeps `notices` equal to `[]` (its fake restart writes no
