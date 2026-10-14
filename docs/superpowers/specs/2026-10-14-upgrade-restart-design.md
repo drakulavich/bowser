@@ -36,12 +36,15 @@ getting that far. `close` and `list` keep `anyVersion` and never restart.
 restart lives in the commands layer, because it reuses `close` and `open` from there; the daemon
 client may not import commands (`biome.json` layering rules).
 
-1. **Lock.** Claim `<session dir>/restart.lock` with the pidfile claim from
-   `src/daemon/pidfile.ts`: `tryClaim` links a complete file holding this process's pid, and a
-   holder whose pid is dead goes through `removeStale`, which re-reads under its own lock, so two
-   commands that see the same dead pid cannot both take it. The holder check is "pid alive", not
-   `isOurDaemon`, because the holder is a command or an MCP server. If a live process holds the
-   lock, wait for the file to go (polling), then connect from the top: the new daemon answers this
+1. **Lock.** Claim `<session dir>/upg` with `claimSession` from `src/daemon/pidfile.ts`, given a
+   holder check: today it counts a live pid as a holder only if `isOurDaemon` says so, and the
+   restart passes "pid alive" instead, because the holder is a command or an MCP server. The rest
+   is reused as is: `tryClaim` links a complete file holding this process's pid, and `removeStale`
+   re-reads under its own lock, so two commands that see the same dead pid cannot both take it.
+   The name `upg` is as long as `pid`, so its temp file (`upg.<pid>.tmp`) fits the path budget
+   `maxSessionNameLength()` was sized for (`pid.99999.tmp`); `restart.lock.<pid>.tmp` would not,
+   and would fail with `ENAMETOOLONG` for the longest names. If a live process holds the lock,
+   wait for the file to go (polling), then connect from the top: the new daemon answers this
    version, and nothing restarts twice. If the op budget runs out first, fail with "session
    '<name>' is being restarted by pid <n> (<lock path>)" and leave the daemon alone. Without the
    lock, a second command's stop step can read the pidfile of the daemon the first one just
@@ -87,10 +90,10 @@ sequenceDiagram
   CLI->>Old: ping
   Old-->>CLI: "0.11.0"
   Note over CLI: before: refuse, exit 1
-  Note over CLI: take restart.lock
+  Note over CLI: take the upg lock
   CLI->>Old: shutdown, wait for its pid
   CLI->>New: open URL with the recorded profile
-  Note over CLI: release restart.lock
+  Note over CLI: release the upg lock
   CLI->>New: the command
   New-->>CLI: answer
   Note over CLI: notice first, then the answer
@@ -161,8 +164,8 @@ of the line that triggered the handover, and those bytes would be lost.
   - `click <old ref>` as the first command after the upgrade fails with "is from a page that is no
     longer loaded", after the notice, and the page's click counter stays 0;
   - two `snapshot`s started together against one old daemon both exit 0; exactly one notice is
-    printed between them, and one daemon pid is left for the session. The same holds with a
-    `restart.lock` left holding a dead pid;
+    printed between them, and one daemon pid is left for the session. The same holds with an
+    `upg` lock left holding a dead pid, and with the longest session name the HOME allows;
   - after a restart whose reload fails (the old URL now answers with a connection refusal), the
     lock file is gone and the next `snapshot` answers at once;
   - an MCP server started from the copy, whose `package.json` version is then raised, answers two
