@@ -65,10 +65,13 @@ except the restart's own `cmdOpen`.
   all (the "already restarted by the holder" check finds no daemon, where today it goes on to restart), return
   without restarting. Only an `OlderDaemon` answer leads to the stop and the open. Today the `ENOENT` escapes as a
   raw error, and a claim in the gap before `close`'s `rmdir` goes on to `cmdOpen`, which recreates the session.
-- `withClient`'s second connect, the one after `restartSession` returns, passes `spawn: false`. If no daemon
-  answers, it throws what the first connect would have: `BrowserExited` (`is not open (its browser exited); run
-  'bowser open …'`) when `state.json` exists, as after a restart killed during its stop; otherwise `UserError`
-  `session '<s>' was closed while this command waited to restart it`, exit 1. Today that connect may spawn: once
+- `withClient`'s second connect, the one after `restartSession` returns, passes `spawn: false`. With no daemon,
+  `connectOrSpawn` throws its generic `no daemon for session '<s>'` Error (`src/daemon/client.ts:291`), before any
+  `state.json` check. `withClient` catches that error at this one call and classifies it: if `state.json` exists (a
+  restart killed during its stop), it throws `BrowserExited` with `browserExited(session)`'s message (that helper in `src/daemon/client.ts` gets exported), as the first
+  connect would (`is not open (its browser exited); run 'bowser open …'`); otherwise it throws a new `UserError`,
+  `session '<s>' was closed while this command waited to restart it`, exit 1. Any other error passes through. The
+  first connect is unchanged. Today that connect may spawn: once
   `close` has removed `state.json`, `connectOrSpawn` takes the session for a fresh one and starts an ephemeral
   daemon, which is the ET-32 outcome again.
 
@@ -202,19 +205,21 @@ Each fails before the change.
 - `close waits for a restart in progress, then ends the daemon it started (ET-32)`, for `close` and `close --all`: a
   live pid (`process.ppid`) in `upg` and an old fake daemon; after 300 ms a timer stops the old one, starts a
   current one and removes `upg`. Expect `closed session '<s>'` (`closed 1 session: <s>`), `shutdown` on the current
-  daemon, no session directory. Today close answers before the timer, and the current daemon gets no `shutdown`.
+  daemon, and no `state.json`, `pid` or `sock` left (an empty directory may stay). Today close answers before the timer, and the current daemon gets no `shutdown`.
 - `a restart that waited for close fails and starts nothing (ET-32)`, three cases, each with a live pid in `upg` and
   an old fake daemon, a timer at 300 ms stopping the daemon, and `eval 1` expected to fail with `session '<s>' was
-  closed while this command waited to restart it`, exit 1, no daemon spawned by the `upgrade()` connector, and no
-  session directory afterwards:
+  closed while this command waited to restart it`, exit 1, no connect with spawn allowed, and no `state.json`, `pid`
+  or `sock` afterwards (an empty directory may stay, and `list` does not show the session):
   - the timer removes the whole directory (`ENOENT` at the claim);
   - the timer removes every entry but `upg`, then `upg`, and leaves the empty directory (the gap before `close`'s
-    `rmdir`): the restart claims there and finds no daemon (here the empty directory may stay);
+    `rmdir`): the restart claims there and finds no daemon;
   - the `BrowserExited` path: no daemon, `state.json`, the timer removes the directory.
-- `a command whose restart finished before close ran does not spawn (ET-32)`: `ctx.restart` replaced by a fake that
-  removes the session directory and returns (the restart released `upg`, then `close` ran to the end). `eval 1`
-  fails with `was closed while this command waited to restart it`, and the connector was never called with spawn
-  allowed. A second case keeps `state.json` and expects `is not open (its browser exited)`.
+- `a command whose restart finished before close ran does not spawn (ET-32)`: the first connect throws
+  `OlderDaemon`; `ctx.restart` is a fake that removes the session directory and returns (the restart released
+  `upg`, then `close` ran to the end); the injected connector records its options and, with `spawn: false`, throws
+  `no daemon for session '<s>'` as `connectOrSpawn` does. `eval 1` fails with `was closed while this command waited
+  to restart it`, exit 1, and no connect had spawn allowed after the restart. A second case keeps `state.json` and
+  expects `BrowserExited` with `is not open (its browser exited)`. Today the second connect has spawn allowed.
 - `a second close that finds the directory gone during its claim answers closed (ET-32)`: `closeOne` with the
   claim's directory removed between the existence check and `tryClaim` (the claim function injected, as
   `claimSession`'s `pause` is in its tests). Expect `closed session '<s>'`, exit 0. Today there is no claim; the test
@@ -251,7 +256,8 @@ E2E, `tests/e2e-upgrade.test.ts`, only where a real kill or a real spawn is the 
   a page whose reload is delayed 4 s, upgrade, `localstorage-get tok` SIGKILLed at 1200 ms. The next command exits
   0 with the notice on stderr, "cookies and storage were lost" included; the one after has no notice.
 - `close during the restart leaves the session closed (ET-32)`: a `--persistent` session, upgrade, `eval 1` and
-  `close` started together. Whatever the order, afterwards no daemon runs for the session and its directory is gone;
+  `close` started together. Whatever the order, afterwards no daemon runs for the session, `list` does not show it, and its directory holds
+  no `state.json`, `pid` or `sock` (it may stay, empty);
   `close` exited 0; `eval` exited 0 or failed with "was closed while this command waited to restart it".
 - `two commands at once restart the session once` is renamed `… and both print the notice (ET-44)`: it expects the
   notice in both stderrs, where it now expects exactly one.
