@@ -70,7 +70,8 @@ runs the CLI as its own process and breaks a daemon's start by putting a directo
 goes. The new tests reuse both.
 
 - `tests/daemon.test.ts`, in `describe("daemonCommand")`: "names a main.ts that exists under a
-  path with a space, # or %". It copies `src/` into a temp directory named `in st#all%20`, imports
+  path with a space, # or %". It copies `src/` and `package.json` (which `client.ts` imports) into
+  a temp directory named `in st#all%20`, imports
   that copy's `src/daemon/client.ts` by its file URL, and checks that `daemonCommand("sess")[1]`
   exists on disk and that `looksLikeOurDaemon` accepts the joined command line for `sess` only. No
   browser, so it runs in plain `bun test` and in the unit CI job. It fails today: the path holds
