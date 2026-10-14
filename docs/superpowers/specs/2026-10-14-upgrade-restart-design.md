@@ -36,11 +36,16 @@ getting that far. `close` and `list` keep `anyVersion` and never restart.
 restart lives in the commands layer, because it reuses `close` and `open` from there; the daemon
 client may not import commands (`biome.json` layering rules).
 
-1. **Lock.** Create `<session dir>/restart.lock` exclusively, holding this process's pid. If
-   another live process holds it, wait for the file to go (polling, within the op budget), then
-   connect from the top: the new daemon answers this version, and nothing restarts twice. A lock
-   whose pid is dead is removed and taken. Without the lock, a second command's stop step can read
-   the pidfile of the daemon the first one just started and end it.
+1. **Lock.** Claim `<session dir>/restart.lock` with the pidfile claim from
+   `src/daemon/pidfile.ts`: `tryClaim` links a complete file holding this process's pid, and a
+   holder whose pid is dead goes through `removeStale`, which re-reads under its own lock, so two
+   commands that see the same dead pid cannot both take it. The holder check is "pid alive", not
+   `isOurDaemon`, because the holder is a command or an MCP server. If a live process holds the
+   lock, wait for the file to go (polling), then connect from the top: the new daemon answers this
+   version, and nothing restarts twice. If the op budget runs out first, fail with "session
+   '<name>' is being restarted by pid <n> (<lock path>)" and leave the daemon alone. Without the
+   lock, a second command's stop step can read the pidfile of the daemon the first one just
+   started and end it.
 2. **Read** `state.json`: the URL and the profile (`openCommand`'s fallback for state without a
    profile record: the default profile directory if it exists).
 3. **Stop** the old daemon with the stop part of `closeOne` (`shutdown`, wait for its pid, `term` an
@@ -49,7 +54,9 @@ client may not import commands (`biome.json` layering rules).
    It spawns the new daemon with the profile, navigates, and saves state with the profile, no refs
    and no `doc`. With no URL, or `about:blank`, it opens without one. If the navigation fails, the
    session stays open on the page it reached, and the notice says the page did not reload.
-5. **Unlock**, then run the command on the new daemon.
+5. **Unlock**, then run the command on the new daemon. The lock is released on every way out of
+   steps 2 to 4, a throw included: an MCP server outlives a failed restart, and a lock naming its
+   live pid would hold every later command until its budget ran out.
 
 A command with a ref read that ref before it connected (`cmdClick` calls `loadRef` first), so it
 still finds it, but the new daemon has no document id for it (#105): it fails with "ref 'eN' is
@@ -91,15 +98,18 @@ sequenceDiagram
 
 ### 2. A running MCP server hands over to the installed version
 
-The read loop in `runMcpServer` checks every `tools/call` line before it accepts it: is
-`installedVersion()` still the server's own version? While it is, nothing changes. The first time it
-is not, the server hands over, once:
+The read loop in `runMcpServer` checks every `tools/call` line before it accepts it: does
+`installedVersion()` return a version other than the server's own? While it does not, nothing
+changes, and undefined (no `package.json` beside the code) never hands over, as in section 1. The
+first time it does, the server hands over, once:
 
 1. **Queue.** It stops accepting lines. This line, the rest of the read buffer and every later line
    go into a queue.
-2. **Drain.** It waits for `server.idle()`, so every call already running answers on stdout. After
-   that the old server writes nothing more.
-3. **Start.** It spawns `bun <installed package>/src/cli.ts mcp` with the same environment and
+2. **Drain.** It waits until every response it has scheduled is written: the `tools/call` chains
+   (`server.idle()`) and the other requests it answers at once (`tools/list`, `ping`, parse
+   errors), which `idle()` does not track today. After that the old server writes nothing more.
+3. **Start.** It spawns `process.execPath <installed package>/src/cli.ts mcp` (`bun` may not be on
+   `PATH`) with the same environment and
    working directory, stdin and stdout piped, stderr inherited. It sends the child the `initialize`
    request it saved from the client, with the id `"bowser-handover"`, then
    `notifications/initialized`, and waits up to 10 s for the reply with that id, which it drops.
@@ -151,18 +161,24 @@ of the line that triggered the handover, and those bytes would be lost.
   - `click <old ref>` as the first command after the upgrade fails with "is from a page that is no
     longer loaded", after the notice, and the page's click counter stays 0;
   - two `snapshot`s started together against one old daemon both exit 0; exactly one notice is
-    printed between them, and one daemon pid is left for the session;
+    printed between them, and one daemon pid is left for the session. The same holds with a
+    `restart.lock` left holding a dead pid;
+  - after a restart whose reload fails (the old URL now answers with a connection refusal), the
+    lock file is gone and the next `snapshot` answers at once;
   - an MCP server started from the copy, whose `package.json` version is then raised, answers two
     `tools/call` lines sent in one write through the installed version: each id gets exactly one
     response, every stdout line parses as JSON, and the first answer's text starts with the
     notice;
-  - a call that was running when the version changed answers before any forwarded line.
+  - a call that was running when the version changed answers before any forwarded line, and so
+    does a `tools/list` sent in the same write as the call that triggers the handover.
 - `bun test tests/lifecycle.test.ts -t "restarts an older daemon"` passes (today: matches 0 tests).
   The refusal cases are rewritten: an older daemon is restarted, a newer daemon is still refused, a
   process older than the installed files is still refused, `installedVersion()` undefined still
   refuses, and `close` and `list` never restart. The whole file passes.
 - `bun test tests/mcp.test.ts -t "handover"` passes (today: matches 0 tests): with a child that
-  exits at once, a queued `tools/call` gets `isError` with "could not hand over".
+  exits at once, a queued `tools/call` gets `isError` with "could not hand over"; with
+  `installedVersion()` undefined, two `tools/call`s both run in the server and nothing is
+  spawned.
 - `bun run check` passes; `tests/docs-drift.test.ts` is unchanged.
-- `rg -n "before you upgrade|Restart any running .bowser mcp" README.md` prints nothing (today:
-  lines 45 and 55).
+- `rg -n "before you upgrade|Restart any running .bowser mcp|close --all\` before" README.md skills/bowser/SKILL.md`
+  prints nothing (today: README.md lines 45 and 55, SKILL.md line 178).
