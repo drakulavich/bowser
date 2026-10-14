@@ -3,7 +3,8 @@
   "files": {
     "includes": [
       "src/**",
-      "tests/**"
+      "tests/**",
+      "!!.worktrees"
     ]
   },
   "formatter": {
@@ -258,10 +259,5 @@
         }
       }
     }
-  ],
-  "vcs": {
-    "enabled": true,
-    "clientKind": "git",
-    "useIgnoreFile": true
-  }
+  ]
 }
