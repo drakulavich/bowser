@@ -2,7 +2,7 @@
 // connection with its close, the empty session state, and ref lookup.
 
 import type { FlagSpec } from "../cli/parser.ts";
-import { connectOrSpawn, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
+import { BrowserExited, connectOrSpawn, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, type Ref, type SessionState } from "../state.ts";
@@ -21,7 +21,7 @@ export interface CommandContext {
   readStdin?: () => Promise<string>;
   notices?: string[];
   // Injected by `run`: restart.ts imports navigation.ts, which imports this module.
-  restart?: (ctx: CommandContext, older: OlderDaemon) => Promise<void>;
+  restart?: (ctx: CommandContext, err: OlderDaemon | BrowserExited) => Promise<void>;
 }
 
 interface Positional {
@@ -73,7 +73,7 @@ export async function withClient<T>(
   try {
     client = await connect();
   } catch (err) {
-    if (!(err instanceof OlderDaemon) || !ctx.restart) throw err;
+    if (!(err instanceof OlderDaemon || err instanceof BrowserExited) || !ctx.restart) throw err;
     await ctx.restart(ctx, err);
     client = await connect();
   }

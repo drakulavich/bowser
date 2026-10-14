@@ -175,7 +175,7 @@ npm install -g @drakulavich/bowser-cli   # requires Bun ≥ 1.4.2 on PATH
 
 The package runs with the `bun` on your `PATH`. npm does not enforce the Bun version, so on an older Bun a command that would start a session fails with the error "bowser requires Bun >=1.4.2 (found <version>)". Release binaries are no longer built: if you used one, run `bowser close --all` with it, delete it, then `npm i -g @drakulavich/bowser-cli`.
 
-After an upgrade, the first command restarts the session and prints "session '<name>' restarted for bowser <w> (was <v>): …; refs cleared, run 'bowser snapshot'" first (on stderr, or first in the MCP tool text). Take a new snapshot before using refs. Without `--persistent` the line adds "cookies and storage were lost": log in again.
+After an upgrade, the first command restarts the session and prints "session '<name>' restarted for bowser <w> (was <v>): …; refs cleared, run 'bowser snapshot'" first (on stderr, or first in the MCP tool text). Take a new snapshot before using refs. Without `--persistent` or `--profile` the line adds "cookies and storage were lost": log in again.
 
 bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only there. Elsewhere a command that would start a session fails with the error "bowser requires macOS (WebKit)". If you need Chromium, or Linux or Windows, use `playwright-cli`.
 

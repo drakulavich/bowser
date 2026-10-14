@@ -168,6 +168,8 @@ export class DaemonNotAnswering extends Error {
   }
 }
 
+export class BrowserExited extends UserError {}
+
 export class OlderDaemon extends UserError {
   constructor(message: string, readonly was: string) {
     super(message);
@@ -290,7 +292,7 @@ export async function connectOrSpawn(
     // A daemon ran here (it left state.json) and none answers now: its
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.
-    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new UserError(await browserExited(session));
+    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new BrowserExited(await browserExited(session));
     // Before the spawn guards: a daemon under a name too long for this HOME
     // would die claiming its pidfile, seen only as "did not start in time" (F35).
     checkNewSessionName(session);

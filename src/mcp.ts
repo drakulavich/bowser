@@ -430,7 +430,7 @@ export async function runMcpServer(deps: { run: McpDeps["run"]; version?: string
   const code = await serveLines(lines(Bun.stdin.stream()), server, write, {
     version: d.version,
     installed: installedVersion,
-    child: [process.execPath, new URL("./cli.ts", import.meta.url).pathname, "mcp"],
+    child: [process.execPath, Bun.fileURLToPath(new URL("./cli.ts", import.meta.url)), "mcp"],
   });
   if (code !== 0) process.exit(code);
 }
@@ -472,9 +472,14 @@ export async function serveLines(
   let init: { id?: unknown } | undefined;
   let handover: Handover | undefined;
   for await (const line of input) {
-    if (handover) { handover.send(line); continue; }
     let req: { id?: unknown; method?: unknown } | undefined;
     try { req = JSON.parse(line); } catch {}
+    if (handover) {
+      // A call it cancels may still be running here.
+      if (req?.method === "notifications/cancelled") server.accept(line);
+      handover.send(line);
+      continue;
+    }
     if (req?.method === "initialize") init = req;
     if (req?.method === "tools/call") {
       const installed = await opts.installed();

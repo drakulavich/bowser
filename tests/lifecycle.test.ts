@@ -166,6 +166,67 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
+  test("a command that finds no daemon while another restarts the session waits for it (#149)", async () => {
+    const session = "ver-mid-restart";
+    await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
+    const lock = join(sessionDir(session), "upg");
+    await Bun.write(lock, String(process.ppid));
+    let next: FakeDaemon | undefined;
+    setTimeout(async () => {
+      next = await fakeDaemon(session, daemonOf(pkg.version));
+      await unlink(lock);
+    }, 300);
+    try {
+      expect(await run(["eval", "1", "-s", session])).toBe("1");
+    } finally {
+      await Bun.sleep(350);
+      next?.stop();
+    }
+  });
+
+  test("with BOWSER_OP_TIMEOUT_MS=0, a held restart lock is waited for without a deadline (#149)", async () => {
+    const session = "ver-nobudget";
+    await ensureSessionDir(session);
+    const lock = join(sessionDir(session), "upg");
+    await Bun.write(lock, String(process.ppid));
+    const old = await fakeDaemon(session, daemonOf("0.6.1"));
+    let next: FakeDaemon | undefined;
+    setTimeout(async () => {
+      old.stop();
+      await unlink(socketPath(session)).catch(() => {});
+      next = await fakeDaemon(session, daemonOf(pkg.version));
+      await unlink(lock);
+    }, 300);
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "0";
+    try {
+      expect(await run(["eval", "1", "-s", session])).toBe("1");
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+      await Bun.sleep(350);
+      old.stop();
+      next?.stop();
+    }
+  });
+
+  test("a restart whose reload fails clears the saved refs (#149)", async () => {
+    const session = "ver-noreload";
+    const ref = { id: "e1", role: "button", name: "Add", tag: "button" };
+    await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [ref], doc: "d1", updatedAt: 0, profile: null });
+    const up = await upgrade(session, "0.6.1", {});
+    try {
+      const notices: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices })).toBe("1");
+      expect(notices[0]).toContain("page did not reload at https://example.com/cart");
+      const state = await loadState(session);
+      expect(state?.refs).toEqual([]);
+      expect(state?.doc).toBeUndefined();
+    } finally {
+      up.stop();
+    }
+  });
+
   test("with no package.json on disk, an older daemon is still refused", async () => {
     const session = "ver-noinstall";
     const d = await fakeDaemon(session, daemonOf("0.6.1"));

@@ -811,6 +811,19 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     expect(code).toBe(4);
   });
 
+  test("handover: a cancellation sent during the handover reaches a call still running in this server (#149)", async () => {
+    const out: string[] = [];
+    let started = 0;
+    const server = createMcpServer({ run: async () => { started++; await Bun.sleep(300); return "old server"; }, version: "1.0.0" }, (line) => { out.push(line); });
+    const cancel = JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 5 } });
+    async function* lines() { yield INIT; yield call(5, "snapshot"); await Bun.sleep(50); yield call(7, "list"); yield cancel; }
+    await serveLines(lines(), server, (l) => { out.push(l); }, {
+      version: "1.0.0", installed: async () => (started > 0 ? "2.0.0" : "1.0.0"), child: [process.execPath, "-e", "process.exit(0)"],
+    });
+    const ids = out.join("").trim().split("\n").map((l) => JSON.parse(l).id);
+    expect(ids).not.toContain(5);
+  });
+
   test("handover: with no package.json on disk, calls run in this server and nothing is spawned", async () => {
     const h = harness();
     const marker = join(tmpdir(), `bowser-handover-${process.pid}`);
