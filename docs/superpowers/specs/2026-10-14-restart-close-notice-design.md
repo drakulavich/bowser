@@ -258,7 +258,8 @@ E2E, `tests/e2e-upgrade.test.ts`, only where a real kill or a real spawn is the 
 - `close during the restart leaves the session closed (ET-32)`: a `--persistent` session, upgrade, `eval 1` and
   `close` started together. Whatever the order, afterwards no daemon runs for the session, `list` does not show it, and its directory holds
   no `state.json`, `pid` or `sock` (it may stay, empty);
-  `close` exited 0; `eval` exited 0 or failed with "was closed while this command waited to restart it".
+  `close` exited 0; `eval` exited 0, or failed with "was closed while this command waited to restart it", or (when
+  `close` stops the new daemon after `eval` reconnected) with "daemon for session '<s>' closed the connection".
 - `two commands at once restart the session once` is renamed `… and both print the notice (ET-44)`: it expects the
   notice in both stderrs, where it now expects exactly one.
 
