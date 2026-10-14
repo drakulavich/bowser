@@ -801,6 +801,16 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     }
   });
 
+  test("handover: stdin that ends after the child died still exits with the child's code", async () => {
+    const h = harness();
+    const once = 'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(4);';
+    async function* late() { yield INIT; yield call(7, "snapshot"); await Bun.sleep(500); }
+    const code = await serveLines(late(), h.server, (l) => { h.out.push(l); }, {
+      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", once],
+    });
+    expect(code).toBe(4);
+  });
+
   test("handover: with no package.json on disk, calls run in this server and nothing is spawned", async () => {
     const h = harness();
     const marker = join(tmpdir(), `bowser-handover-${process.pid}`);

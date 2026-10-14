@@ -585,8 +585,9 @@ function startHandover(
     },
     async end() {
       await order;
-      if (failed !== undefined || !child) return 0;
-      input.close();
+      if (!child) return 0;
+      // Throws once the child has exited: Bun has cancelled its stdin.
+      try { input.close(); } catch {}
       return exited;
     },
   };
