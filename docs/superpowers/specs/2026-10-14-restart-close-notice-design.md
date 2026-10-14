@@ -153,7 +153,8 @@ stateDiagram-v2
   final --> none: a surface wrote it, then removed msg
   pending --> pending: kill (SIGKILL/TERM/INT, or the MCP client)
   final --> final: kill before the write
-  pending --> none: next command prints it, with its answer or its error, then removes msg
+  pending --> pending: old daemon still alive, so the next command restarts and overwrites msg
+  pending --> none: old daemon stopped, so the next command prints it, with its answer or its error, then removes msg
   final --> none: next command prints it, then removes msg
   none --> [*]
 ```
@@ -172,8 +173,10 @@ What each kill leaves, by step of the restart:
 | after `msg` is rewritten, before the surface writes it | the new one | prints the final notice |
 | after the surface writes it, before the removal | the new one | prints it again: a duplicate, never a loss |
 
-A command already waiting on `upg` when its holder is killed prints nothing: it either takes the dead lock and finds
-the new daemon, or finds no daemon and fails as today. The notice stays in `msg` for the command after it, so it is
+A command already waiting on `upg` when its holder is killed takes the dead lock. If the old daemon is still alive
+(killed before `shutdown` reached it), the waiter gets `OlderDaemon`, becomes the restarter, overwrites `msg` and
+prints its own notice; the command after it prints none. Otherwise it finds the new daemon or no daemon, prints
+nothing, and either answers or fails as today. The notice then stays in `msg` for the command after it, so it is
 late by one command, not lost.
 
 ### Stale locks and budget 0
@@ -241,7 +244,11 @@ Each fails before the change.
 - `a command that waited for another's restart leaves the notice to it (ET-29)`: a live pid in `upg`, `msg` with the
   final text, an old fake daemon. `eval 1` waits; at 300 ms a timer stops the old daemon, starts a current one and
   removes `upg`. The waiter answers `1` with empty `notices`, and `msg` is still there. This one passes today too: it
-  keeps the new reader from taking the waiter's notice, which would break `two commands at once`.
+  keeps the new reader from taking the waiter's notice, which would break `two commands at once`. A second case
+  kills the holder before the stop: a dead pid in `upg`, `msg` with the provisional text, the old fake daemon still
+  up. `eval 1` (on the `upgrade()` connector) restarts it, and its `notices` hold exactly its own final line; after
+  its acks run, the next command gets none. Today it gets the notice from memory, so this case also passes before the
+  change; it guards the overwrite.
 - `tests/mcp.test.ts`, `a notice whose response could not be written stays for the next call (ET-29)`:
   `createMcpServer` with a fake `run` that pushes a notice and an ack, and a `write` that rejects with an `EPIPE`
   error (`code: "EPIPE"`, as a closed stdout gives); the ack is not called and `msg` is still there. With a `write`
