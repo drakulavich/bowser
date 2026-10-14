@@ -43,9 +43,9 @@ export async function restartSession(ctx: CommandContext, err: OlderDaemon | Bro
     }
     const saved = await loadState(session);
     const url = saved?.url ?? "";
-    if (saved) await saveState({ ...saved, refs: [], doc: undefined });
     const profile = await recordedProfile(session);
     await stopDaemon(ctx, session);
+    if (saved) await saveState({ ...saved, refs: [], doc: undefined });
     const page = url && url !== "about:blank" ? url : undefined;
     let reload = page ? `page reloaded at ${page}` : "no page was open";
     try {

@@ -227,6 +227,23 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
+  test("a restart whose stop fails keeps the saved refs (#149)", async () => {
+    const session = "ver-nostop";
+    const ref = { id: "e1", role: "button", name: "Add", tag: "button" };
+    await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [ref], doc: "d1", updatedAt: 0, profile: null });
+    // A live pid that is not a daemon of ours: the stop refuses to signal it.
+    await Bun.write(join(sessionDir(session), "pid"), String(process.ppid));
+    const up = await upgrade(session, "0.6.1", {});
+    try {
+      const err = await run(["eval", "1", "-s", session], { connect: up.connect, notices: [] }).then(() => undefined, (e: unknown) => e);
+      expect((err as Error).message).toContain("does not look like a bowser daemon");
+      expect((await loadState(session))?.refs).toEqual([ref]);
+    } finally {
+      await unlink(join(sessionDir(session), "pid")).catch(() => {});
+      up.stop();
+    }
+  }, 10_000);
+
   test("with no package.json on disk, an older daemon is still refused", async () => {
     const session = "ver-noinstall";
     const d = await fakeDaemon(session, daemonOf("0.6.1"));
