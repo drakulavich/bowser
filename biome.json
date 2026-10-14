@@ -3,7 +3,8 @@
   "files": {
     "includes": [
       "src/**",
-      "tests/**"
+      "tests/**",
+      "!!.worktrees"
     ]
   },
   "formatter": {
