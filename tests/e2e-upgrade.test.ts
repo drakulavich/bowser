@@ -30,6 +30,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
   let server: ReturnType<typeof Bun.serve>;
   let base: string;
   let hits = 0;
+  let slow = false;
   const sessions: string[] = [];
   const session = (name: string): string => {
     const s = `up-${name}-${process.pid}`;
@@ -71,9 +72,10 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     await mkdir(home);
     server = Bun.serve({
       port: 0,
-      fetch(req) {
+      async fetch(req) {
         const path = new URL(req.url).pathname;
         if (path === "/hit") { hits++; return new Response("ok"); }
+        if (path === "/slow" && slow) await Bun.sleep(4000);
         if (path === "/cart") return html(`<title>Cart</title><button onclick="fetch('/hit')">Add</button>`);
         return html("<title>Home</title><h1>Home</h1>");
       },
@@ -176,6 +178,45 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     const t0 = Date.now();
     await run(CLI, s, ["eval", "1"]);
     expect(Date.now() - t0).toBeLessThan(5000);
+  }, 60_000);
+
+  test("a first command killed during the reload leaves the notice for the next command (ET-29)", async () => {
+    const old = await copyAt("old-g", "0.0.1");
+    const s = session("killed");
+    slow = false;
+    await ok(old, s, ["open", `${base}/slow`]);
+    await ok(old, s, ["localstorage-set", "tok", "7"]);
+    slow = true;
+    try {
+      const proc = Bun.spawn([process.execPath, CLI, `-s=${s}`, "localstorage-get", "tok"], {
+        env: { ...process.env, HOME: home }, stdin: "ignore", stdout: "ignore", stderr: "ignore",
+      });
+      await Bun.sleep(1200);
+      proc.kill("SIGKILL");
+      await proc.exited;
+      const next = await run(CLI, s, ["eval", "1"]);
+      expect(next.code).toBe(0);
+      expect(next.err).toBe(notice(s, "0.0.1", `page reload at ${base}/slow was interrupted; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`));
+      const after = await run(CLI, s, ["eval", "1"]);
+      expect(after).toEqual({ code: 0, out: "1", err: "" });
+    } finally {
+      slow = false;
+    }
+  }, 60_000);
+
+  test("close during the restart leaves the session closed (ET-32)", async () => {
+    const old = await copyAt("old-h", "0.0.1");
+    const s = session("closing");
+    const dir = join(home, ".bowser", "sessions", s);
+    await ok(old, s, ["open", `${base}/`, "--persistent"]);
+    const [ev, cl] = await Promise.all([run(CLI, s, ["eval", "1"]), run(CLI, s, ["close"])]);
+    expect(cl.code).toBe(0);
+    if (ev.code !== 0) {
+      expect(ev.err).toMatch(new RegExp(`was closed while this command waited to restart it|daemon for session '${s}' closed the connection`));
+    }
+    expect(await daemonPids(s)).toHaveLength(0);
+    expect((await run(CLI, s, ["list"])).out).not.toContain(s);
+    expect(["state.json", "pid", "sock"].filter((f) => existsSync(join(dir, f)))).toEqual([]);
   }, 60_000);
 
   test("a running bowser mcp hands over to the installed version after an upgrade", async () => {
