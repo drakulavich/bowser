@@ -865,3 +865,18 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     }
   });
 });
+
+test("close removes a session whose restart lock is corrupt (#152)", async () => {
+  const session = "corrupt-upg";
+  await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
+  await Bun.write(join(sessionDir(session), "upg"), "nope");
+  const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+  process.env.BOWSER_OP_TIMEOUT_MS = "300";
+  try {
+    expect(await run(["close", "-s", session])).toBe(`closed session '${session}'`);
+    expect(existsSync(sessionDir(session))).toBe(false);
+  } finally {
+    if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+    else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+  }
+});

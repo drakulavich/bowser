@@ -36,6 +36,8 @@ export async function claimRestartLock(session: string, claim = claimSession): P
       if (code === "ENOENT" || code === "ENAMETOOLONG") return false;
       throw e;
     }
+    // claimSession leaves a corrupt lock for `close`, which removes the directory.
+    if (corrupt(lock)) return false;
     if (Date.now() > deadline) throw beingRestarted(session);
     await Bun.sleep(50);
   }
@@ -67,6 +69,16 @@ export function readNotice(session: string): string {
 
 export function removeNotice(session: string): void {
   try { unlinkSync(msgPath(session)); } catch {}
+}
+
+function corrupt(lock: string): boolean {
+  let held: string;
+  try {
+    held = readFileSync(lock, "utf8").trim();
+  } catch {
+    return false;
+  }
+  return !/^\d+$/.test(held) || Number(held) <= 0;
 }
 
 function readTrimmed(path: string): string {
