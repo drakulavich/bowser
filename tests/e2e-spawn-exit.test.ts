@@ -68,6 +68,7 @@ runOrSkip("e2e: BOWSER_DAEMON_DEBUG writes the daemon's output to a log, never t
   let origHome: string | undefined;
   const ok = `debug-pipe-${process.pid}`;
   const broken = `debug-broken-${process.pid}`;
+  const hinted = `debug-hint-${process.pid}`;
   const EOF_MS = 10_000;
 
   beforeAll(async () => {
@@ -77,7 +78,7 @@ runOrSkip("e2e: BOWSER_DAEMON_DEBUG writes the daemon's output to a log, never t
   });
 
   afterAll(async () => {
-    for (const session of [ok, broken]) {
+    for (const session of [ok, broken, hinted]) {
       try { await cmdClose({ session, json: true }); } catch {}
       await killDaemons(session);
     }
@@ -115,5 +116,17 @@ runOrSkip("e2e: BOWSER_DAEMON_DEBUG writes the daemon's output to a log, never t
     expect(code).toBe(2);
     expect(err).toContain(`did not start in time; its output is in ${daemonLogPath(broken)}`);
     expect(await Bun.file(daemonLogPath(broken)).text()).toContain("EADDRINUSE");
+  }, EOF_MS + 10_000);
+
+  test("says to rerun with BOWSER_DAEMON_DEBUG=1 when the daemon fails to start", async () => {
+    await mkdir(join(sessionDir(hinted), "sock", "x"), { recursive: true });
+    const { BOWSER_DAEMON_DEBUG: _, ...env } = process.env;
+    const proc = Bun.spawn([process.execPath, CLI, `-s=${hinted}`, "open", "data:text/html,x", "--persistent"], {
+      env, stdout: "pipe", stderr: "pipe",
+    });
+    const [err, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    expect(code).toBe(2);
+    expect(err).toContain("did not start in time; rerun with BOWSER_DAEMON_DEBUG=1 to see why");
+    expect(err).not.toContain("may not support");
   }, EOF_MS + 10_000);
 });

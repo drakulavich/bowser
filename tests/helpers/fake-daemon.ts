@@ -1,7 +1,8 @@
 // A stand-in daemon on a session's real socket, for tests of what the CLI
 // does with the daemon it finds there: an older one after an upgrade (F2), a
 // silent one (F3), and the timing of `list` (F32). It records every op it
-// receives. `answer` returns the reply's result, or `SILENT` to never reply.
+// receives. `answer` returns the reply's result, `SILENT` to never reply, or
+// an error reply (`{ ok: false, error }`), written as is; or a promise of one.
 
 import type { Socket, SocketHandler } from "bun";
 import { ensureSessionDir } from "../../src/state.ts";
@@ -17,6 +18,12 @@ export interface FakeDaemon {
 
 type Answer = (req: { id: number; op: string; args?: unknown[] }) => unknown;
 
+function reply(s: LineSocket, id: number, result: unknown): void {
+  if (result === SILENT) return;
+  const failed = typeof result === "object" && result !== null && (result as { ok?: unknown }).ok === false;
+  s.write(JSON.stringify(failed ? { id, ...result } : result === undefined ? { id, ok: true } : { id, ok: true, result }) + "\n");
+}
+
 export async function fakeDaemon(session: string, answer: Answer): Promise<FakeDaemon> {
   await ensureSessionDir(session);
   const ops: string[] = [];
@@ -26,8 +33,10 @@ export async function fakeDaemon(session: string, answer: Answer): Promise<FakeD
       const req = JSON.parse(line) as { id: number; op: string; args?: unknown[] };
       ops.push(req.op);
       const result = answer(req);
-      if (result === SILENT) return;
-      s.write(JSON.stringify(result === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result }) + "\n");
+      // Written at once when not a promise: `upgrade` stops the daemon in a
+      // microtask right after its `shutdown` reply.
+      if (result instanceof Promise) void result.then((r) => reply(s, req.id, r));
+      else reply(s, req.id, result);
     }),
   });
   return { ops, stop: () => server.stop(true) };

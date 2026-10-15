@@ -27,7 +27,24 @@ All notable changes to this project are documented here. This project follows
   restarted by hand. Now the first command restarts the session with its profile and page, and
   prints one line saying so and what was lost: refs, and for a session without a profile its
   cookies and storage. A running `bowser mcp` hands its calls to the installed version. A daemon
-  newer than the CLI is still refused. (#145)
+  newer than the CLI is still refused. A `close` that runs during the restart waits for it, and the
+  session stays closed. If the command that restarts is killed before it prints that line, the next
+  command prints it. (#145, #152)
+
+### Fixed
+
+- **bowser works installed under a path with a space, `#` or `%`.** Every first command waited 5 s
+  and failed with `daemon for session '<name>' did not start in time`, because the daemon was
+  spawned with a percent-encoded path to a file that does not exist. That message no longer
+  blames a persistent profile, and without `BOWSER_DAEMON_DEBUG=1` it now ends `rerun with
+  BOWSER_DAEMON_DEBUG=1 to see why`. (#150)
+- **A command no longer waits for good on a daemon that stops mid-command.** Only the daemon
+  enforced `BOWSER_OP_TIMEOUT_MS`, so a daemon frozen or swapped out mid-command never sent its
+  timeout: `goto` was still waiting after 90 s, and over MCP every later call on that session
+  queued behind it. The client now gives up 2 s after the budget with `daemon for session '<s>'
+  did not answer; run 'bowser close -s <s>' to stop it` (exit 2), and the next MCP call on the
+  session fails the same way in about 1 s. A running daemon still answers first with its own
+  timeout. `BOWSER_OP_TIMEOUT_MS=0` still sets no deadline. (#155)
 
 ## [0.11.0] — 2026-10-03
 

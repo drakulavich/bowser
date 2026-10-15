@@ -18,6 +18,7 @@ import { closeOne } from "../src/commands/navigation.ts";
 import { restartSession } from "../src/commands/restart.ts";
 import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
+import { createMcpServer } from "../src/mcp.ts";
 import { createSerializer } from "../src/serialize.ts";
 import { ensureSessionDir, loadState, profileDir, saveState, sessionDir } from "../src/state.ts";
 import { daemonOf, fakeDaemon, lineSocket, SILENT, type FakeDaemon } from "./helpers/fake-daemon.ts";
@@ -513,6 +514,98 @@ describe("F21: a timeout names the command", () => {
       server.stop(true);
     }
   });
+});
+
+describe("ET-59: a daemon that stops answering mid-op", () => {
+  async function withBudget<T>(ms: string, fn: () => Promise<T>): Promise<T> {
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = ms;
+    try {
+      return await fn();
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+    }
+  }
+
+  const notAnswering = (s: string) => `daemon for session '${s}' did not answer; run 'bowser close -s ${s}' to stop it`;
+
+  test("ET-59: a command fails at budget plus margin when its daemon stops answering mid-op", async () => {
+    const session = "et59stuck";
+    const d = await fakeDaemon(session, (req) => (req.op === "evaluate" ? SILENT : daemonOf(pkg.version)(req)));
+    try {
+      const t0 = Date.now();
+      const result = await withBudget("300", () => failure(["eval", "1", "-s", session]));
+      const elapsed = Date.now() - t0;
+      expect(result).toEqual({ stderr: `bowser: ${notAnswering(session)}`, code: 2 });
+      expect(elapsed).toBeGreaterThanOrEqual(2300);
+      expect(elapsed).toBeLessThan(3300);
+    } finally {
+      d.stop();
+    }
+  }, 10_000);
+
+  test("ET-59: the daemon's own late timeout reply wins over the client deadline", async () => {
+    const session = "et59late";
+    const d = await fakeDaemon(session, (req) =>
+      req.op === "evaluate"
+        ? Bun.sleep(1300).then(() => ({ ok: false, error: "'eval' timed out after 300ms" }))
+        : daemonOf(pkg.version)(req));
+    try {
+      expect(await withBudget("300", () => failure(["eval", "1", "-s", session]))).toEqual({
+        stderr: "bowser: 'eval' timed out after 300ms",
+        code: 2,
+      });
+    } finally {
+      d.stop();
+    }
+  });
+
+  test("ET-59: budget 0 sets no client deadline", async () => {
+    const session = "et59zero";
+    const d = await fakeDaemon(session, (req) =>
+      req.op === "evaluate" ? Bun.sleep(2500).then(() => 1) : daemonOf(pkg.version)(req));
+    try {
+      expect(await withBudget("0", () => run(["eval", "1", "-s", session]))).toBe("1");
+    } finally {
+      d.stop();
+    }
+  });
+
+  test("ET-59: over MCP, the next call on the session answers after the frozen one fails", async () => {
+    const session = "et59mcp";
+    let frozen = false;
+    const d = await fakeDaemon(session, (req) => {
+      if (req.op === "evaluate") frozen = true;
+      return frozen ? SILENT : daemonOf(pkg.version)(req);
+    });
+    const answered: Array<{ at: number; res: { id: number; result: { isError?: boolean; content: Array<{ text: string }> } } }> = [];
+    const server = createMcpServer({ version: pkg.version, run }, (line) => {
+      answered.push({ at: Date.now(), res: JSON.parse(line) });
+    });
+    const call = (id: number) =>
+      server.accept(JSON.stringify({
+        jsonrpc: "2.0", id, method: "tools/call",
+        params: { name: "eval", arguments: { expression: "1", session } },
+      }));
+    try {
+      const t0 = Date.now();
+      await withBudget("300", async () => {
+        call(1);
+        call(2);
+        await server.idle();
+      });
+      expect(answered.map((a) => a.res.id)).toEqual([1, 2]);
+      for (const { res } of answered) {
+        expect(res.result.isError).toBe(true);
+        expect(res.result.content[0]!.text).toBe(notAnswering(session));
+      }
+      expect(answered[0]!.at - t0).toBeLessThan(3300);
+      expect(answered[1]!.at - answered[0]!.at).toBeLessThan(1500);
+    } finally {
+      d.stop();
+    }
+  }, 10_000);
 });
 
 describe("#152: close against an upgrade restart, and the restart's notice", () => {

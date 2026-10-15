@@ -33,6 +33,7 @@ export class DaemonClient implements DaemonConnection {
   private nextId = 1;
   private pending = new Map<number, { resolve: (result: unknown) => void; reject: (err: Error) => void }>();
   private closed = false;
+  private notAnswering = false;
   private reported: DialogReport[] = [];
   private report = false;
   private start: number | undefined;
@@ -108,20 +109,35 @@ export class DaemonClient implements DaemonConnection {
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>> {
     const [op, args = []] = params;
     if (!this.sock) throw new Error("client not connected");
-    if (this.closed) return Promise.reject(new Error(this.closedMessage));
+    if (this.closed) return Promise.reject(this.notAnswering ? new DaemonNotAnswering(this.session) : new Error(this.closedMessage));
     const id = this.nextId++;
     const budget = opTimeoutMs();
     if (op !== "ping") this.start ??= Date.now();
+    const timed = budget > 0 && this.start !== undefined;
     const line = JSON.stringify({
       id, op, args,
       ...(this.report ? { report: true } : {}),
       ...(this.command ? { cmd: this.command } : {}),
-      ...(budget > 0 && this.start !== undefined ? { budgetMs: budget - (Date.now() - this.start), budgetTotalMs: budget } : {}),
+      ...(timed ? { budgetMs: budget - (Date.now() - this.start!), budgetTotalMs: budget } : {}),
     }) + "\n";
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve: (result) => resolve(result as ResultOf<O>), reject });
+      // Cleared on every settle: a pending timer keeps the CLI alive after it printed.
+      const timer = timed ? setTimeout(() => this.giveUp(), this.start! + budget + CLIENT_MARGIN_MS - Date.now()) : undefined;
+      this.pending.set(id, {
+        resolve: (result) => { clearTimeout(timer); resolve(result as ResultOf<O>); },
+        reject: (err) => { clearTimeout(timer); reject(err); },
+      });
       socketWriteAll(this.sock! as unknown as WritableSocket, line);
     });
+  }
+
+  private giveUp(): void {
+    this.notAnswering = true;
+    this.closed = true;
+    const waiting = [...this.pending.values()];
+    this.pending.clear();
+    for (const { reject } of waiting) reject(new DaemonNotAnswering(this.session));
+    this.sock?.end();
   }
 
   close(): void {
@@ -134,6 +150,8 @@ export class DaemonClient implements DaemonConnection {
  *  unreachable. It answers in microseconds when it is alive at all: `ping` is
  *  on the daemon's urgent lane, so even a busy one replies immediately. */
 const HEALTH_PING_MS = 1000;
+
+const CLIENT_MARGIN_MS = 2000;
 
 /** How a command reaches its daemon. `spawn: false` refuses to start one;
  *  `profile` is the persistent store a daemon spawned now opens with (a
@@ -325,14 +343,10 @@ export async function connectOrSpawn(
       }
       return checked(c, session, reply, opts);
     }
-    // A daemon that dies opening its browser never reaches its socket, so its
-    // error is invisible here. A persistent store is the likely cause when one
-    // was asked for (WebKit needs macOS 15.2+ for it), so say so.
-    const hint = opts.profile
-      ? ` with --persistent profile ${opts.profile}; the browser may not support a persistent profile here`
-      : "";
-    const log = process.env.BOWSER_DAEMON_DEBUG === "1" ? `; its output is in ${daemonLogPath(session)}` : "";
-    throw new Error(`daemon for session '${session}' did not start in time${hint}${log}`);
+    const log = process.env.BOWSER_DAEMON_DEBUG === "1"
+      ? `; its output is in ${daemonLogPath(session)}`
+      : "; rerun with BOWSER_DAEMON_DEBUG=1 to see why";
+    throw new Error(`daemon for session '${session}' did not start in time${log}`);
   }
   // Checked outside the try: its refusal must not fall into the spawn path.
   return checked(client, session, answer, opts);
@@ -343,7 +357,7 @@ export async function connectOrSpawn(
  *  beside this file. `looksLikeOurDaemon` must recognise it (tests/daemon.test.ts
  *  pins the round trip): a form it cannot read makes a live daemon look stale. */
 export function daemonCommand(session: string): string[] {
-  return [process.execPath, new URL("./main.ts", import.meta.url).pathname, session];
+  return [process.execPath, Bun.fileURLToPath(new URL("./main.ts", import.meta.url)), session];
 }
 
 async function spawnDaemon(session: string, profile?: string): Promise<void> {

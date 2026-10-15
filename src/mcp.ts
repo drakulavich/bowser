@@ -293,7 +293,7 @@ export interface McpServer {
  *  never runs; for a running call it means its result is dropped. Either way
  *  the call gets no response, per the MCP spec. A daemon op that has started
  *  is NOT undone: `run()` has no way to stop it, and the session's next call
- *  still waits for it to finish.
+ *  waits for it to finish, or for its deadline: the budget plus 2 s (ET-59).
  *
  *  STDOUT: each response goes out as one `write(JSON + "\n")` call. A stream
  *  keeps the chunks of separate write() calls whole and in call order, so
