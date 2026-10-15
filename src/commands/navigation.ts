@@ -1,13 +1,14 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
-import { readFile, readdir, rm, unlink } from "node:fs/promises";
+import { readFile, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
-import { isAlive, isOurDaemon } from "../daemon/pidfile.ts";
+import { claimSession, isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
   ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
 } from "../state.ts";
+import { claimRestartLock, LOCK, releaseRestartLock } from "./restart-lock.ts";
 import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
@@ -250,7 +251,18 @@ export async function closeOne(
   ctx: CommandContext,
   session: string,
   proc: ProcessOps = realProcess,
+  claim = claimSession,
 ): Promise<string> {
+  // An upgrade restart holds the lock from its stop to its open (ET-32).
+  const locked = await claimRestartLock(session, claim);
+  try {
+    return await closeLocked(ctx, session, proc, locked);
+  } finally {
+    if (locked) releaseRestartLock(session);
+  }
+}
+
+async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOps, locked: boolean): Promise<string> {
   const { pid, ended } = await stopDaemon(ctx, session, proc);
 
   // A concurrent `open` can start a replacement daemon while the steps above
@@ -265,7 +277,19 @@ export async function closeOne(
 
   // The directory outlives nothing now: keeping it is what let closed sessions
   // accumulate, and after close there is no state left in it worth reading.
-  await rm(sessionDir(session), { recursive: true, force: true });
+  const dir = sessionDir(session);
+  if (locked) {
+    // The lock goes last, so a restart waiting on it finds no daemon to restart.
+    const entries = await readdir(dir).catch(() => [] as string[]);
+    await Promise.all(entries.filter((e) => e !== LOCK).map((e) => rm(join(dir, e), { recursive: true, force: true })));
+    releaseRestartLock(session);
+    await rmdir(dir).catch((e: { code?: string }) => {
+      // A restart claimed the lock in between: it spawns nothing.
+      if (e.code !== "ENOENT" && e.code !== "ENOTEMPTY") throw e;
+    });
+  } else {
+    await rm(dir, { recursive: true, force: true });
+  }
 
   const text = ended
     ? `closed session '${session}' (ended unreachable daemon ${pid})`

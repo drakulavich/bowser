@@ -1,72 +1,68 @@
-import { readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import pkg from "../../package.json";
 import { opTimeoutMs } from "../budget.ts";
 import { BrowserExited, OlderDaemon, recordedProfile } from "../daemon/client.ts";
-import { claimSession, isAlive } from "../daemon/pidfile.ts";
-import { loadState, saveState, sessionDir } from "../state.ts";
+import { loadState, saveState } from "../state.ts";
 import { connector, type CommandContext } from "./context.ts";
 import { cmdOpen, stopDaemon } from "./navigation.ts";
+import {
+  beingRestarted, claimRestartLock, otherHolder, releaseRestartLock, removeNotice, writeNotice,
+} from "./restart-lock.ts";
 import { UserError } from "../errors.ts";
 
-// As long as `pid`: its claim's temp file, `upg.<pid>.tmp`, must fit the path
-// budget maxSessionNameLength() was sized for (`pid.99999.tmp`).
-const LOCK = "upg";
-
-export async function restartSession(ctx: CommandContext, err: OlderDaemon | BrowserExited): Promise<void> {
+/** Whether this command restarted the session. False when it waited for
+ *  another command's restart, or found the session closed. */
+export async function restartSession(ctx: CommandContext, err: OlderDaemon | BrowserExited): Promise<boolean> {
   const session = ctx.session;
-  const lock = join(sessionDir(session), LOCK);
-  const budget = opTimeoutMs();
-  const deadline = budget ? Date.now() + budget : Infinity;
-  const timedOut = () => new UserError(`session '${session}' is being restarted by pid ${holder(lock)} (${lock})`);
   // No daemon, because another command is restarting it: wait for that one.
   if (err instanceof BrowserExited) {
-    const held = () => { const pid = Number(holder(lock)); return pid > 0 && isAlive(pid); };
-    if (!held()) throw err;
-    while (held()) {
-      if (Date.now() > deadline) throw timedOut();
+    if (otherHolder(session) === null) throw err;
+    const budget = opTimeoutMs();
+    const deadline = budget ? Date.now() + budget : Infinity;
+    while (otherHolder(session) !== null) {
+      if (Date.now() > deadline) throw beingRestarted(session);
       await Bun.sleep(50);
     }
-    return;
+    return false;
   }
-  while (!(await claimSession(lock, session, undefined, async () => true))) {
-    if (Date.now() > deadline) throw timedOut();
-    await Bun.sleep(50);
-  }
+  if (!(await claimRestartLock(session))) return false;
   try {
-    // The holder this command waited for may have restarted it already.
+    // The holder this command waited for may have restarted it already, or a
+    // `close` may have ended it: only an older daemon is restarted.
     try {
       (await connector(ctx)(session, { spawn: false })).close();
-      return;
+      return false;
     } catch (err) {
-      if (err instanceof UserError && !(err instanceof OlderDaemon)) throw err;
+      if (!(err instanceof OlderDaemon)) {
+        if (err instanceof UserError) throw err;
+        return false;
+      }
     }
     const saved = await loadState(session);
     const url = saved?.url ?? "";
     const profile = await recordedProfile(session);
-    await stopDaemon(ctx, session);
-    if (saved) await saveState({ ...saved, refs: [], doc: undefined });
     const page = url && url !== "about:blank" ? url : undefined;
-    let reload = page ? `page reloaded at ${page}` : "no page was open";
-    try {
-      await cmdOpen({ ...ctx, json: false, command: "open" }, page, profile === null ? {} : { profile });
-    } catch (err) {
-      if (!page) throw err;
-      reload = `page did not reload at ${page} (${err instanceof Error ? err.message : String(err)})`;
-    }
     const lost = profile === null ? "; cookies and storage were lost (no --persistent)" : "";
-    ctx.notices?.push(`session '${session}' restarted for bowser ${pkg.version} (was ${err.was}): ${reload}; refs cleared, run 'bowser snapshot'${lost}`);
-  } finally {
-    if (holder(lock) === String(process.pid)) {
-      try { unlinkSync(lock); } catch {}
+    const notice = (reload: string) =>
+      `session '${session}' restarted for bowser ${pkg.version} (was ${err.was}): ${reload}; refs cleared, run 'bowser snapshot'${lost}`;
+    // Left behind if this process is killed before a surface prints it (ET-29).
+    writeNotice(session, notice(page ? `page reload at ${page} was interrupted` : "no page was open"));
+    try {
+      await stopDaemon(ctx, session);
+      if (saved) await saveState({ ...saved, refs: [], doc: undefined });
+      let reload = page ? `page reloaded at ${page}` : "no page was open";
+      try {
+        await cmdOpen({ ...ctx, notices: undefined, acks: undefined, json: false, command: "open" }, page, profile === null ? {} : { profile });
+      } catch (err) {
+        if (!page) throw err;
+        reload = `page did not reload at ${page} (${err instanceof Error ? err.message : String(err)})`;
+      }
+      writeNotice(session, notice(reload));
+    } catch (err) {
+      removeNotice(session);
+      throw err;
     }
-  }
-}
-
-function holder(lock: string): string {
-  try {
-    return readFileSync(lock, "utf8").trim();
-  } catch {
-    return "";
+    return true;
+  } finally {
+    releaseRestartLock(session);
   }
 }

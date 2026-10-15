@@ -35,7 +35,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] a
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */
-  run: (argv: string[], base?: { notices?: string[] }) => Promise<string>;
+  run: (argv: string[], base?: { notices?: string[]; acks?: (() => void)[] }) => Promise<string>;
   /** serverInfo.version. */
   version: string;
 }
@@ -204,24 +204,26 @@ function prepareToolCall(id: unknown, params: unknown): PreparedCall {
   return { argv, session };
 }
 
-async function runToolCall(id: unknown, argv: string[], deps: McpDeps): Promise<object> {
+/** The response, and what to call once it is written: `acks` mark its notices delivered. */
+async function runToolCall(id: unknown, argv: string[], deps: McpDeps): Promise<{ res: object; acks: (() => void)[] }> {
   const notices: string[] = [];
+  const acks: (() => void)[] = [];
   const first = (text: string) => [...notices, text].filter(Boolean).join("\n");
   try {
-    const out = await deps.run(argv, { notices });
-    return toolResult(id, first(out || ""));
+    const out = await deps.run(argv, { notices, acks });
+    return { res: toolResult(id, first(out || "")), acks };
   } catch (e) {
     // A failed page command still reports the dialogs it answered.
     const modal = failedModalState(e);
     const msg = e instanceof Error ? e.message : String(e);
-    return toolResult(id, first(modal ? `${msg}\n${modal}` : msg), true);
+    return { res: toolResult(id, first(modal ? `${msg}\n${modal}` : msg), true), acks };
   }
 }
 
 async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
   const prepared = prepareToolCall(id, params);
   if ("reply" in prepared) return prepared.reply;
-  return runToolCall(id, prepared.argv, deps);
+  return (await runToolCall(id, prepared.argv, deps)).res;
 }
 
 /** Process one parsed JSON-RPC message. Returns the response object, or null for
@@ -299,17 +301,19 @@ export interface McpServer {
 export function createMcpServer(deps: McpDeps, write: (line: string) => void | Promise<void>): McpServer {
   const chains = new Map<string, Promise<void>>();
   const inFlight = new Map<unknown, { cancelled: boolean }>();
-  const running = new Set<Promise<void>>();
+  const running = new Set<Promise<unknown>>();
 
-  const send = async (res: object): Promise<void> => {
+  const send = async (res: object): Promise<boolean> => {
     try {
       await write(JSON.stringify(res) + "\n");
+      return true;
     } catch (e) {
       console.error(`bowser mcp: could not write a response: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     }
   };
 
-  function track(p: Promise<void>): void {
+  function track(p: Promise<unknown>): void {
     running.add(p);
     void p.finally(() => running.delete(p));
   }
@@ -324,11 +328,11 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     const tail: Promise<void> = prev
       .then(async () => {
         if (token.cancelled) return;
-        const res = await runToolCall(id, argv, deps);
+        const { res, acks } = await runToolCall(id, argv, deps);
         // Keep this session's chain behind stdout completion. If the peer
         // closed its pipe, the write callback reports EPIPE before a queued
         // command can start and cause another side effect.
-        if (!token.cancelled) await send(res);
+        if (!token.cancelled && (await send(res))) for (const ack of acks) ack();
       })
       .finally(() => {
         if (inFlight.get(id) === token) inFlight.delete(id);

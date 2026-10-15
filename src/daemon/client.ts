@@ -170,6 +170,12 @@ export class DaemonNotAnswering extends Error {
 
 export class BrowserExited extends UserError {}
 
+export class NoDaemon extends Error {
+  constructor(session: string) {
+    super(`no daemon for session '${session}'`);
+  }
+}
+
 export class OlderDaemon extends UserError {
   constructor(message: string, readonly was: string) {
     super(message);
@@ -216,7 +222,7 @@ async function checked(client: DaemonClient, session: string, answer: unknown, o
 /** Why a command refuses a session whose daemon ran and is gone: its page,
  *  refs and, for `--persistent`, its store went with it, and a new daemon
  *  started quietly would be an empty in-memory browser. A user error (exit 1). */
-async function browserExited(session: string): Promise<string> {
+export async function browserExited(session: string): Promise<string> {
   return `session '${session}' is not open (its browser exited); run '${await openCommand(session)}'`;
 }
 
@@ -288,7 +294,7 @@ export async function connectOrSpawn(
     // would no longer be addressable by its pidfile. Reported before the
     // spawn: false case, so `close` can tell it from a stale socket (F3).
     if (connected) throw new DaemonNotAnswering(session);
-    if (opts.spawn === false) throw new Error(`no daemon for session '${session}'`);
+    if (opts.spawn === false) throw new NoDaemon(session);
     // A daemon ran here (it left state.json) and none answers now: its
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.

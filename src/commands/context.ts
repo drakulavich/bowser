@@ -2,10 +2,11 @@
 // connection with its close, the empty session state, and ref lookup.
 
 import type { FlagSpec } from "../cli/parser.ts";
-import { BrowserExited, connectOrSpawn, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
+import { BrowserExited, browserExited, connectOrSpawn, NoDaemon, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
-import { loadState, resolveRef, saveState, type Ref, type SessionState } from "../state.ts";
+import { loadState, resolveRef, saveState, statePath, type Ref, type SessionState } from "../state.ts";
+import { otherHolder, readNotice, removeNotice } from "./restart-lock.ts";
 import { UserError } from "../errors.ts";
 
 export interface CommandContext {
@@ -20,8 +21,10 @@ export interface CommandContext {
    *  its schema and toArgv puts every client value after `--`. */
   readStdin?: () => Promise<string>;
   notices?: string[];
+  /** One per notice: the surface calls it once the notice is out. */
+  acks?: (() => void)[];
   // Injected by `run`: restart.ts imports navigation.ts, which imports this module.
-  restart?: (ctx: CommandContext, err: OlderDaemon | BrowserExited) => Promise<void>;
+  restart?: (ctx: CommandContext, err: OlderDaemon | BrowserExited) => Promise<boolean>;
 }
 
 interface Positional {
@@ -68,20 +71,45 @@ export async function withClient<T>(
   fn: (c: DaemonConnection) => Promise<T>,
   opts: ConnectOptions = {},
 ): Promise<T> {
-  const connect = () => connector(ctx)(ctx.session, ctx.command ? { ...opts, command: ctx.command } : opts);
+  const connect = (o: ConnectOptions) => connector(ctx)(ctx.session, ctx.command ? { ...o, command: ctx.command } : o);
   let client: DaemonConnection;
+  let read = true;
   try {
-    client = await connect();
+    client = await connect(opts);
   } catch (err) {
     if (!(err instanceof OlderDaemon || err instanceof BrowserExited) || !ctx.restart) throw err;
-    await ctx.restart(ctx, err);
-    client = await connect();
+    // The notice of a restart this command only waited for is its restarter's to print.
+    read = await ctx.restart(ctx, err);
+    client = await reconnect(ctx, () => connect({ ...opts, spawn: false }));
+  } finally {
+    if (read) takeNotice(ctx);
   }
   try {
     return await fn(client);
   } finally {
     client.close();
   }
+}
+
+/** After a restart nothing spawns: a daemon missing now was ended by `close`,
+ *  or by a kill during the restart's stop (#152). */
+async function reconnect(ctx: CommandContext, connect: () => Promise<DaemonConnection>): Promise<DaemonConnection> {
+  try {
+    return await connect();
+  } catch (err) {
+    if (!(err instanceof NoDaemon)) throw err;
+    if (await Bun.file(statePath(ctx.session)).exists()) throw new BrowserExited(await browserExited(ctx.session));
+    throw new UserError(`session '${ctx.session}' was closed while this command waited to restart it`);
+  }
+}
+
+/** The notice a restart left in the session (ET-29), unless a restart is still running. */
+function takeNotice(ctx: CommandContext): void {
+  if (!ctx.notices || otherHolder(ctx.session) !== null) return;
+  const text = readNotice(ctx.session);
+  if (!text || ctx.notices.includes(text)) return;
+  ctx.notices.push(text);
+  ctx.acks?.push(() => { if (readNotice(ctx.session) === text) removeNotice(ctx.session); });
 }
 
 export function emptyState(name: string): SessionState {
