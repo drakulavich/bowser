@@ -13,7 +13,7 @@ import { UserError } from "../errors.ts";
 export const LOCK = "upg";
 const MSG = "msg";
 
-export const lockPath = (session: string) => join(sessionDir(session), LOCK);
+const lockPath = (session: string) => join(sessionDir(session), LOCK);
 const msgPath = (session: string) => join(sessionDir(session), MSG);
 
 export function beingRestarted(session: string): UserError {
