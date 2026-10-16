@@ -22,7 +22,8 @@ export function beingRestarted(session: string): UserError {
 }
 
 /** Claims the session's lock, waiting while a live pid holds it, up to the op
- *  budget (no deadline at 0). False when the session directory is gone. */
+ *  budget (no deadline at 0). False when the session directory is gone or the
+ *  lock is corrupt. */
 export async function claimRestartLock(session: string, claim = claimSession): Promise<boolean> {
   const lock = lockPath(session);
   const budget = opTimeoutMs();

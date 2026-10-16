@@ -280,7 +280,10 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
   const dir = sessionDir(session);
   if (locked) {
     // The lock goes last, so a restart waiting on it finds no daemon to restart.
-    const entries = await readdir(dir).catch(() => [] as string[]);
+    const entries = await readdir(dir).catch((e: { code?: string }) => {
+      if (e.code === "ENOENT") return [] as string[];
+      throw e;
+    });
     await Promise.all(entries.filter((e) => e !== LOCK).map((e) => rm(join(dir, e), { recursive: true, force: true })));
     releaseRestartLock(session);
     await rmdir(dir).catch((e: { code?: string }) => {
