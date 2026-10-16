@@ -27,7 +27,9 @@ All notable changes to this project are documented here. This project follows
   restarted by hand. Now the first command restarts the session with its profile and page, and
   prints one line saying so and what was lost: refs, and for a session without a profile its
   cookies and storage. A running `bowser mcp` hands its calls to the installed version. A daemon
-  newer than the CLI is still refused. (#145)
+  newer than the CLI is still refused. A `close` that runs during the restart waits for it, and the
+  session stays closed. If the command that restarts is killed before it prints that line, the next
+  command prints it. (#145, #152)
 
 ### Fixed
 

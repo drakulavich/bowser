@@ -6,13 +6,15 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, unlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import pkg from "../package.json";
 import { reportFailure, run } from "../src/cli.ts";
-import { connectOrSpawn, OlderDaemon, socketPath, type ConnectOptions } from "../src/daemon/client.ts";
+import { connectOrSpawn, NoDaemon, OlderDaemon, socketPath, type ConnectOptions } from "../src/daemon/client.ts";
+import { claimSession } from "../src/daemon/pidfile.ts";
+import { closeOne } from "../src/commands/navigation.ts";
 import { restartSession } from "../src/commands/restart.ts";
 import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
@@ -318,6 +320,7 @@ describe("F2: a daemon from another bowser version", () => {
     } finally {
       if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
       else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+      await unlink(lock);
       d.stop();
     }
   });
@@ -603,4 +606,277 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
       d.stop();
     }
   }, 10_000);
+});
+
+describe("#152: close against an upgrade restart, and the restart's notice", () => {
+  let home: string;
+  beforeAll(async () => {
+    home = await mkdtemp(join(tmp, "et-"));
+    process.env.HOME = home;
+  });
+  afterAll(() => {
+    process.env.HOME = tmp;
+  });
+
+  const lockOf = (s: string) => join(sessionDir(s), "upg");
+  const msgOf = (s: string) => join(sessionDir(s), "msg");
+  const left = (s: string) => ["state.json", "pid", "sock"].filter((f) => existsSync(join(sessionDir(s), f)));
+  const notice = (s: string, reload: string) =>
+    `session '${s}' restarted for bowser ${pkg.version} (was 0.6.1): ${reload}; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`;
+  const closedWhileWaiting = (s: string) => `bowser: session '${s}' was closed while this command waited to restart it`;
+  async function deadPid(): Promise<number> {
+    const p = Bun.spawn(["true"]);
+    await p.exited;
+    return p.pid;
+  }
+  /** A connector that records the options of every connect. */
+  function recording() {
+    const calls: ConnectOptions[] = [];
+    return { calls, connect: (s: string, o: ConnectOptions = {}) => { calls.push(o); return connectOrSpawn(s, o); } };
+  }
+  async function failing(argv: string[], base: Parameters<typeof run>[1]) {
+    return run(argv, base).then((out) => ({ stderr: `no failure: ${out}`, code: 0 }), reportFailure);
+  }
+
+  for (const all of [false, true]) {
+    test(`${all ? "close --all" : "close"} waits for a restart in progress, then ends the daemon it started (ET-32)`, async () => {
+      const session = all ? "et32-wait-all" : "et32-wait";
+      await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
+      await Bun.write(lockOf(session), String(process.ppid));
+      const old = await fakeDaemon(session, daemonOf("0.6.1"));
+      let next: FakeDaemon | undefined;
+      setTimeout(async () => {
+        old.stop();
+        await unlink(socketPath(session)).catch(() => {});
+        next = await fakeDaemon(session, daemonOf(pkg.version));
+        await unlink(lockOf(session));
+      }, 300);
+      try {
+        const out = await run(all ? ["close", "--all"] : ["close", "-s", session]);
+        expect(out).toBe(all ? `closed 1 session: ${session}` : `closed session '${session}'`);
+        expect(next?.ops).toContain("shutdown");
+        expect(old.ops).not.toContain("shutdown");
+        expect(left(session)).toEqual([]);
+      } finally {
+        old.stop();
+        next?.stop();
+      }
+    });
+  }
+
+  const waitedForClose: { label: string; noDaemon?: true; close: (s: string) => Promise<void> }[] = [
+    { label: "the directory is gone at the claim", close: (s) => rm(sessionDir(s), { recursive: true, force: true }) },
+    {
+      label: "the claim lands in the empty directory before close's rmdir",
+      close: async (s) => {
+        const dir = sessionDir(s);
+        for (const e of await readdir(dir)) if (e !== "upg") await rm(join(dir, e), { recursive: true, force: true });
+        await unlink(join(dir, "upg"));
+      },
+    },
+    { label: "no daemon (BrowserExited)", noDaemon: true, close: (s) => rm(sessionDir(s), { recursive: true, force: true }) },
+  ];
+  for (const [i, c] of waitedForClose.entries()) {
+    test(`a restart that waited for close fails and starts nothing (ET-32): ${c.label}`, async () => {
+      const session = `et32-closed-${i}`;
+      await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
+      await Bun.write(lockOf(session), String(process.ppid));
+      const old = c.noDaemon ? undefined : await fakeDaemon(session, daemonOf("0.6.1"));
+      setTimeout(async () => {
+        old?.stop();
+        await c.close(session);
+      }, 300);
+      const r = recording();
+      try {
+        expect(await failing(["eval", "1", "-s", session], { connect: r.connect })).toEqual({ stderr: closedWhileWaiting(session), code: 1 });
+        expect(r.calls.slice(1).every((o) => o.spawn === false)).toBe(true);
+        expect(left(session)).toEqual([]);
+        expect(await run(["list"])).not.toContain(session);
+      } finally {
+        old?.stop();
+      }
+    });
+  }
+
+  for (const keepState of [false, true]) {
+    test(`a command whose restart finished before close ran does not spawn (ET-32)${keepState ? ": state.json left" : ""}`, async () => {
+      const session = keepState ? "et32-gap-state" : "et32-gap";
+      await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
+      const calls: ConnectOptions[] = [];
+      const connect = async (s: string, o: ConnectOptions = {}) => {
+        calls.push(o);
+        if (calls.length === 1) throw new OlderDaemon("old", "0.6.1");
+        if (o.spawn === false) throw new NoDaemon(s);
+        throw new Error("spawn allowed");
+      };
+      const restart = async () => {
+        if (!keepState) await rm(sessionDir(session), { recursive: true, force: true });
+        return true;
+      };
+      const { stderr, code } = await failing(["eval", "1", "-s", session], { connect, restart, notices: [] });
+      expect(code).toBe(1);
+      if (keepState) expect(stderr).toContain(`bowser: session '${session}' is not open (its browser exited)`);
+      else expect(stderr).toBe(closedWhileWaiting(session));
+      expect(calls.slice(1).map((o) => o.spawn)).toEqual([false]);
+    });
+  }
+
+  test("a second close that finds the directory gone during its claim answers closed (ET-32)", async () => {
+    const session = "et32-second";
+    await ensureSessionDir(session);
+    let claimed = false;
+    const claim: typeof claimSession = async (...args) => {
+      claimed = true;
+      await rm(sessionDir(session), { recursive: true, force: true });
+      return claimSession(...args);
+    };
+    expect(await closeOne({ session, json: false }, session, undefined, claim)).toBe(`closed session '${session}'`);
+    expect(claimed).toBe(true);
+  });
+
+  test("a restart that never finishes leaves its notice for the next command (ET-29)", async () => {
+    const session = "et29-hung";
+    const url = "https://example.com/cart";
+    await saveState({ name: session, url, title: "", refs: [], updatedAt: 0, profile: null });
+    const old: FakeDaemon = await fakeDaemon(session, (req) => {
+      if (req.op === "shutdown") queueMicrotask(() => old.stop());
+      return daemonOf("0.6.1")(req);
+    });
+    let hung = false;
+    const hang = (s: string, o?: ConnectOptions) => {
+      if (!old.ops.includes("shutdown") || o?.spawn === false) return connectOrSpawn(s, o);
+      hung = true;
+      return new Promise<never>(() => {});
+    };
+    void run(["eval", "1", "-s", session], { connect: hang, notices: [] });
+    while (!hung) await Bun.sleep(10);
+    await Bun.write(lockOf(session), String(await deadPid()));
+    const current = await fakeDaemon(session, daemonOf(pkg.version));
+    try {
+      const notices: string[] = [];
+      const acks: (() => void)[] = [];
+      expect(await run(["eval", "1", "-s", session], { notices, acks })).toBe("1");
+      expect(notices).toEqual([notice(session, `page reload at ${url} was interrupted`)]);
+      for (const ack of acks) ack();
+      const after: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { notices: after })).toBe("1");
+      expect(after).toEqual([]);
+    } finally {
+      current.stop();
+    }
+  });
+
+  test("a command that finds no daemon after a killed restart prints the notice with its error (ET-29)", async () => {
+    const session = "et29-nodaemon";
+    const text = notice(session, "page reload at https://example.com/ was interrupted");
+    await saveState({ name: session, url: "https://example.com/", title: "", refs: [], updatedAt: 0, profile: null });
+    await Bun.write(msgOf(session), text);
+    await Bun.write(lockOf(session), String(await deadPid()));
+    const notices: string[] = [];
+    const { stderr, code } = await failing(["localstorage-get", "tok", "-s", session], { notices, acks: [] });
+    expect(stderr).toContain(`session '${session}' is not open (its browser exited)`);
+    expect(code).toBe(1);
+    expect(notices).toEqual([text]);
+  });
+
+  test("a restart prints its notice once and never waits on its own lock (ET-29)", async () => {
+    const session = "et29-own";
+    const url = "https://example.com/cart";
+    await saveState({ name: session, url, title: "", refs: [], updatedAt: 0, profile: null });
+    const up = await upgrade(session, "0.6.1", { url });
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "0";
+    try {
+      const notices: string[] = [];
+      const started = performance.now();
+      expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices, acks: [] })).toBe("1");
+      expect(performance.now() - started).toBeLessThan(2000);
+      expect(notices).toEqual([notice(session, `page reloaded at ${url}`)]);
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+      up.stop();
+    }
+  });
+
+  test("the CLI marks a notice delivered only once it has printed it (ET-29)", async () => {
+    const session = "et29-cli";
+    const text = notice(session, "no page was open");
+    await ensureSessionDir(session);
+    await Bun.write(msgOf(session), text);
+    const d = await fakeDaemon(session, daemonOf(pkg.version));
+    const cli = async () => {
+      const proc = Bun.spawn([process.execPath, CLI, "eval", "1", "-s", session], { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
+      const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      return { out, err };
+    };
+    try {
+      expect(await cli()).toEqual({ out: "1\n", err: `bowser: ${text}\n` });
+      expect(existsSync(msgOf(session))).toBe(false);
+      expect(await cli()).toEqual({ out: "1\n", err: "" });
+    } finally {
+      d.stop();
+    }
+  });
+
+  test("a command that waited for another's restart leaves the notice to it (ET-29)", async () => {
+    const session = "et29-waiter";
+    const text = notice(session, "no page was open");
+    await ensureSessionDir(session);
+    await Bun.write(msgOf(session), text);
+    await Bun.write(lockOf(session), String(process.ppid));
+    const old = await fakeDaemon(session, daemonOf("0.6.1"));
+    let next: FakeDaemon | undefined;
+    setTimeout(async () => {
+      old.stop();
+      await unlink(socketPath(session)).catch(() => {});
+      next = await fakeDaemon(session, daemonOf(pkg.version));
+      await unlink(lockOf(session));
+    }, 300);
+    try {
+      const notices: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { notices, acks: [] })).toBe("1");
+      expect(notices).toEqual([]);
+      expect(await Bun.file(msgOf(session)).text()).toBe(text);
+    } finally {
+      old.stop();
+      next?.stop();
+    }
+  });
+
+  test("a command that takes over a dead holder's restart prints only its own notice (ET-29)", async () => {
+    const session = "et29-takeover";
+    const url = "https://example.com/cart";
+    await saveState({ name: session, url, title: "", refs: [], updatedAt: 0, profile: null });
+    await Bun.write(msgOf(session), notice(session, `page reload at ${url} was interrupted`));
+    await Bun.write(lockOf(session), String(await deadPid()));
+    const up = await upgrade(session, "0.6.1", { url });
+    try {
+      const notices: string[] = [];
+      const acks: (() => void)[] = [];
+      expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices, acks })).toBe("1");
+      expect(notices).toEqual([notice(session, `page reloaded at ${url}`)]);
+      for (const ack of acks) ack();
+      const after: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices: after })).toBe("1");
+      expect(after).toEqual([]);
+    } finally {
+      up.stop();
+    }
+  });
+});
+
+test("close removes a session whose restart lock is corrupt (#152)", async () => {
+  const session = "corrupt-upg";
+  await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
+  await Bun.write(join(sessionDir(session), "upg"), "nope");
+  const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+  process.env.BOWSER_OP_TIMEOUT_MS = "300";
+  try {
+    expect(await run(["close", "-s", session])).toBe(`closed session '${session}'`);
+    expect(existsSync(sessionDir(session))).toBe(false);
+  } finally {
+    if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+    else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+  }
 });

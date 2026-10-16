@@ -71,12 +71,17 @@ if (import.meta.main) {
     await runMcpServer({ run });
   } else {
     const notices: string[] = [];
-    try {
-      const out = await run(process.argv.slice(2), { notices });
+    const acks: (() => void)[] = [];
+    const notify = () => {
       for (const n of notices) console.error(`bowser: ${n}`);
+      for (const ack of acks) ack();
+    };
+    try {
+      const out = await run(process.argv.slice(2), { notices, acks });
+      notify();
       if (out) console.log(out);
     } catch (err) {
-      for (const n of notices) console.error(`bowser: ${n}`);
+      notify();
       const { stderr, code } = reportFailure(err);
       console.error(stderr);
       process.exit(code);

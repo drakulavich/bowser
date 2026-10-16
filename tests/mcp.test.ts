@@ -859,3 +859,31 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     }
   });
 });
+
+describe("a restart's notice is delivered only by a written response (#152)", () => {
+  const call = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "eval", arguments: { expression: "1" } } });
+  const deps = (acked: { n: number }): McpDeps => ({
+    run: async (_argv, base) => {
+      base?.notices?.push("session 'default' restarted");
+      base?.acks?.push(() => { acked.n++; });
+      return "1";
+    },
+    version: "9.9.9",
+  });
+
+  test("a notice whose response could not be written stays for the next call (ET-29)", async () => {
+    const acked = { n: 0 };
+    const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+    const server = createMcpServer(deps(acked), () => Promise.reject(epipe));
+    server.accept(call);
+    await server.idle();
+    expect(acked.n).toBe(0);
+  });
+
+  test("a notice whose response was written is acked once (ET-29)", async () => {
+    const acked = { n: 0 };
+    const res = await serve([call], deps(acked));
+    expect(res[0].result.content[0].text).toBe("session 'default' restarted\n1");
+    expect(acked.n).toBe(1);
+  });
+});
