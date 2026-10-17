@@ -641,6 +641,8 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
   for (const all of [false, true]) {
     test(`${all ? "close --all" : "close"} waits for a restart in progress, then ends the daemon it started (ET-32)`, async () => {
       const session = all ? "et32-wait-all" : "et32-wait";
+      // close --all sees every session in HOME, and the other tests leave theirs.
+      process.env.HOME = await mkdtemp(join(tmp, "et32-"));
       await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
       await Bun.write(lockOf(session), String(process.ppid));
       const old = await fakeDaemon(session, daemonOf("0.6.1"));
@@ -660,6 +662,7 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       } finally {
         old.stop();
         next?.stop();
+        process.env.HOME = home;
       }
     });
   }

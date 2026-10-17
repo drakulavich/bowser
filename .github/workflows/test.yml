@@ -24,7 +24,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
-      - run: bun test
+      - run: bun run test
 
   e2e-webkit:
     name: e2e (WebKit, macOS)
