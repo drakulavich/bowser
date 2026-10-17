@@ -4,7 +4,7 @@
 // daemon here is a fake on the session's real socket, driven through `run()`
 // or the CLI as its own process. No browser.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -614,6 +614,9 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     home = await mkdtemp(join(tmp, "et-"));
     process.env.HOME = home;
   });
+  afterEach(() => {
+    process.env.HOME = home;
+  });
   afterAll(() => {
     process.env.HOME = tmp;
   });
@@ -641,6 +644,8 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
   for (const all of [false, true]) {
     test(`${all ? "close --all" : "close"} waits for a restart in progress, then ends the daemon it started (ET-32)`, async () => {
       const session = all ? "et32-wait-all" : "et32-wait";
+      // close --all sees every session in HOME, and the other tests leave theirs.
+      process.env.HOME = await mkdtemp(join(tmp, "et32-"));
       await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
       await Bun.write(lockOf(session), String(process.ppid));
       const old = await fakeDaemon(session, daemonOf("0.6.1"));

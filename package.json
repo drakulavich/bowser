@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "bun run src/cli.ts",
-    "test": "bun test",
+    "test": "bun test --randomize",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "biome ci && knip --include files,exports,types",
     "check": "bun run typecheck && bun run lint && bun run test"
