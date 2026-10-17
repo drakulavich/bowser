@@ -4,7 +4,7 @@
 // daemon here is a fake on the session's real socket, driven through `run()`
 // or the CLI as its own process. No browser.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -614,6 +614,9 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     home = await mkdtemp(join(tmp, "et-"));
     process.env.HOME = home;
   });
+  afterEach(() => {
+    process.env.HOME = home;
+  });
   afterAll(() => {
     process.env.HOME = tmp;
   });
@@ -662,7 +665,6 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       } finally {
         old.stop();
         next?.stop();
-        process.env.HOME = home;
       }
     });
   }
