@@ -89,6 +89,18 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     return ctx;
   };
 
+  /** A fresh session (url "") whose commands get `budgetMs`. The daemon starts
+   *  with the default budget, so a slow first `state` does not fail the open
+   *  (#164); each request's own budget still caps it at `budgetMs`. */
+  const openFresh = async (session: string, budgetMs: number): Promise<CommandContext> => {
+    delete process.env.BOWSER_OP_TIMEOUT_MS;
+    sessions.push(session);
+    const ctx: CommandContext = { session, json: false };
+    await cmdOpen(ctx);
+    process.env.BOWSER_OP_TIMEOUT_MS = String(budgetMs);
+    return ctx;
+  };
+
   /** How long `fn` took, and what it threw, if anything. */
   const timed = async (fn: () => Promise<unknown>): Promise<{ ms: number; error?: string }> => {
     const t0 = performance.now();
@@ -275,10 +287,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   // command failed at its budget until `close`.
   test("#48: after a first goto from about:blank whose server never answers, recovery frees the session", async () => {
     const budget = 1000;
-    process.env.BOWSER_OP_TIMEOUT_MS = String(budget);
-    const ctx: CommandContext = { session: "hangfirst", json: false };
-    sessions.push(ctx.session);
-    await cmdOpen(ctx);
+    const ctx = await openFresh("hangfirst", budget);
 
     const stuck = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/never`));
     expect(stuck.error).toBe(`'goto' timed out after ${budget}ms (in its 'navigate' step)`);
@@ -307,10 +316,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   // stuck evaluate ~3.2 s after it runs (measured on a bare WebView).
   test("#67: after an eval that never settles in a fresh session, recovery frees the session", async () => {
     const budget = 1000;
-    process.env.BOWSER_OP_TIMEOUT_MS = String(budget);
-    const ctx: CommandContext = { session: "hangfresh", json: false };
-    sessions.push(ctx.session);
-    await cmdOpen(ctx);
+    const ctx = await openFresh("hangfresh", budget);
 
     const stuck = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
     expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
