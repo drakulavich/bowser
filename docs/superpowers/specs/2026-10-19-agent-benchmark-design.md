@@ -23,25 +23,36 @@ tools installed can rerun it.
 Each run is one `claude -p` process:
 
     claude -p "<task prompt>" --model claude-sonnet-5-5 --output-format stream-json --verbose \
-      --setting-sources project --strict-mcp-config --disable-slash-commands \
-      --allowedTools "Bash(<tool>:*)" --max-turns 40 --no-session-persistence
+      --setting-sources project --strict-mcp-config --tools Bash,Skill \
+      --allowedTools "Bash(<tool>:*)" Skill --max-turns 40 --no-session-persistence
 
-- It runs in a fresh temp dir whose `.claude/skills/<tool>/SKILL.md` is the tool's own skill
-  (bowser's from `skills/bowser/`, playwright-cli's from the path `playwright-cli --help` prints).
-  The skill loads the way it does for a real user: its description up front, its body when the
-  agent opens it.
-- `--setting-sources project` keeps the user's plugins, skills, hooks and MCP servers out. The
-  stream's `init` message lists the tools, skills, plugins and MCP servers the run saw; the runner
-  fails the run if it lists anything beyond Bash and the one skill.
-- Bash is allowed only for the tool under test, so the agent cannot fetch a page with `curl`.
+- It runs in a fresh temp dir whose `.claude/skills/<tool>/` is a copy of the tool's own skill
+  directory (bowser's `skills/bowser/`, playwright-cli's from the path `playwright-cli --help`
+  prints). The skill loads the way it does for a real user: its description up front, its body
+  when the agent opens it.
+- `--setting-sources project` keeps the user's plugins, skills, hooks and MCP servers out, and
+  `--tools Bash,Skill` leaves the agent no other tool (no `WebFetch`, no `Read`). The stream's
+  `init` message lists the tools, skills, plugins and MCP servers the run saw. The runner fails the
+  run on a tool beyond Bash and Skill, an MCP server, a plugin not built into Claude Code, the
+  other tool's skill, a skill from the user's `~/.claude/skills` or `~/.agents/skills`, or its own
+  skill missing. Claude Code's bundled skills (`simplify`, `loop` and so on) are the same for both
+  tools and stay.
+- `Skill` is in `--allowedTools` because playwright-cli's skill declares `allowed-tools`, and in
+  `-p` mode opening such a skill is otherwise denied. A run whose Skill call errors fails as
+  "skill failed to load".
+- Bash is pre-approved only for the tool under test, so the agent cannot fetch a page with `curl`.
+  Claude Code still runs read-only commands such as `grep` and `head`, which playwright-cli's
+  agents use on the snapshot files it writes; their output counts as tool output.
 - The task prompt is the same for both tools and does not name either one. It says to use the
-  browser skill and to end with a line `ANSWER: <value>`.
-- Each run uses its own session name (`-s bench-<task>-<rep>`) and closes it at the end, whatever
-  the outcome, so no browser outlives its run.
+  browser skill, to pass `-s=bench-<task>-<rep>` to every browser command (both tools take this
+  form), and to end with a line `ANSWER: <value>`.
+- After each run the runner closes that session and `default`, in case the agent dropped `-s`.
+  It refuses to start while either tool has a session open, so it never closes one of the user's.
 
-Whether the user's global `CLAUDE.md` and rules still reach a `--setting-sources project` run is
-not known yet. The first pilot task answers it (see Tasks). If they do, the runner points
-`CLAUDE_CONFIG_DIR` at a temp dir that holds only the credentials.
+The user's global `CLAUDE.md` and rules do not reach these runs. In the pilot, asked whether its
+instructions contain "Signals without noise", a phrase from the user's global rules, the agent
+answered no; asked for the language its instructions set (the user's settings say Russian), it
+answered NONE.
 
 ### The tasks
 
@@ -87,9 +98,9 @@ One JSONL row per run, from the stream's final `result` message plus the runner'
 | `costUsd`, `durationMs`, `numTurns` | `result.total_cost_usd`, `result.duration_ms`, `result.num_turns` |
 | `bashCalls`, `toolOutputBytes` | counted from the stream's Bash tool results |
 
-A row is about 450 bytes, so a full run (10 tasks × 2 tools × 3 reps = 60 rows) is about 27 KB
-and is committed. A stream is about 100 KB, so 60 of them (about 6 MB) stay in the gitignored
-`.bench/streams/` for debugging and are not committed. Both sizes are estimates until the pilot.
+A row is 387 bytes in the pilot, so a full run (10 tasks × 2 tools × 3 reps = 60 rows) is about
+23 KB and is committed. A pilot stream is 27 to 39 KB, so 60 of them (about 2 MB, more for longer
+tasks) stay in the gitignored `.bench/streams/` for debugging and are not committed.
 
 `toolOutputBytes` is the number the tool itself controls: what the agent read back from the
 browser. Total tokens and cost also include the model's own reasoning and the skill, which is
@@ -123,21 +134,23 @@ at most two browsers are open. Expected wall time is 45 to 90 minutes on this Ma
 
 ## Tasks
 
-1. Pilot: run `login` once per tool with `--reps 1`. Check from the stream that the isolation
-   check works, whether the user's `CLAUDE.md` reached the run (compare input tokens with and
-   without `CLAUDE_CONFIG_DIR`), and the row and stream sizes. Fix the runner before going on.
-2. `bench/tasks.ts`, `bench/check.ts` (answer check and isolation check) with unit tests on
-   recorded `result` and `init` messages.
-3. `bench/run.ts` (runner, filters, `--dry-run`) and `bench/report.ts`.
-4. The full run, after the user agrees to the load.
-5. `docs/benchmark.md`, the README line, and a CHANGELOG entry.
+- [x] Pilot: run `login` once per tool with `--reps 1`. Check from the stream that the isolation
+  check works, whether the user's global rules reached the run (a phrase from them, asked for
+  directly), and the row and stream sizes. Fix the runner before going on. The first pilot found
+  two runner bugs, fixed above: playwright-cli's skill was denied, and the user's own
+  `playwright-cli` skill name failed the isolation check.
+- [x] `bench/tasks.ts`, `bench/check.ts` (answer check and isolation check) with unit tests on
+  recorded `result` and `init` messages.
+- [x] `bench/run.ts` (runner, filters, `--dry-run`) and `bench/report.ts`.
+- [ ] The full run, after the user agrees to the load.
+- [ ] `docs/benchmark.md`, the README line, `bench/README.md` and a CHANGELOG entry.
 
 ## Definition of Done
 
 - `bun bench/run.ts --dry-run` prints 60 planned runs: 10 tasks × 2 tools × 3 reps.
 - `bun test bench/` passes, and covers: an `ANSWER:` that matches, one that does not, a missing
   one, a run that hit max turns, and the isolation check failing on an `init` message with an extra
-  MCP server, an extra skill, or a plugin.
+  MCP server, an extra skill, or a plugin, and on a Skill call that came back as an error.
 - `bench/results/<date>.jsonl` holds 60 rows, each with every field in the table above.
 - `docs/benchmark.md` exists, generated by `bun bench/report.ts` from that file, and names the
   date, model, Claude Code version and both tool versions.
