@@ -9,6 +9,13 @@
 // fixtures (tests/fixtures/snapshot-*.html; playwright-cli 0.1.13, Edge, same
 // way), for rules the other pages miss.
 //
+// The raw captures were never committed (.superpowers/ is gitignored). To
+// re-capture a golden: serve tests/fixtures over http, run
+// `bunx @playwright/cli@0.1.13 open <url> --browser=msedge`, repeat its test's
+// commands below with playwright-cli's refs (`resize 1280 720` first for
+// kitchen-sink), run `snapshot`, and save the yaml tree as the golden. Then
+// redo the probe.yaml edit and check that every Deviation line still matches.
+//
 // Documented deviations, WebKit against the Edge captures (each swaps named
 // golden lines, see Deviation; the golden files stay playwright-cli's text):
 // - todo-app-added: a mouse click does not focus a <button> on macOS, so

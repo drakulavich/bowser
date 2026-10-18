@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import pkg from "../package.json";
 import { maxSessionNameLength } from "../src/state.ts";
+import { LOCK } from "../src/commands/restart-lock.ts";
 import { killDaemons, daemonPids } from "./helpers/daemons.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -143,7 +144,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       if (lockedBy) {
         const dead = Bun.spawn(["true"]);
         await dead.exited;
-        await Bun.write(join(home, ".bowser", "sessions", s, "upg"), String(dead.pid));
+        await Bun.write(join(home, ".bowser", "sessions", s, LOCK), String(dead.pid));
       }
       const [a, b] = await Promise.all([run(CLI, s, ["snapshot"]), run(CLI, s, ["snapshot"])]);
       expect([a.code, b.code]).toEqual([0, 0]);
@@ -174,7 +175,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     gone.stop(true);
     const r = await run(CLI, s, ["eval", "1"]);
     expect(r.err).toContain(`page did not reload at ${url}`);
-    expect(existsSync(join(home, ".bowser", "sessions", s, "upg"))).toBe(false);
+    expect(existsSync(join(home, ".bowser", "sessions", s, LOCK))).toBe(false);
     const t0 = Date.now();
     await run(CLI, s, ["eval", "1"]);
     expect(Date.now() - t0).toBeLessThan(5000);

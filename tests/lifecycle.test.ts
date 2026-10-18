@@ -16,12 +16,13 @@ import { connectOrSpawn, NoDaemon, OlderDaemon, socketPath, type ConnectOptions 
 import { claimSession } from "../src/daemon/pidfile.ts";
 import { closeOne } from "../src/commands/navigation.ts";
 import { restartSession } from "../src/commands/restart.ts";
-import type { DaemonRequest, DaemonResponse } from "../src/daemon/protocol.ts";
+import { LOCK, MSG } from "../src/commands/restart-lock.ts";
+import type { DaemonRequest, DaemonResponse, PageState } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
 import { createMcpServer } from "../src/mcp.ts";
 import { createSerializer } from "../src/serialize.ts";
 import { ensureSessionDir, loadState, profileDir, saveState, sessionDir } from "../src/state.ts";
-import { daemonOf, fakeDaemon, lineSocket, SILENT, type FakeDaemon } from "./helpers/fake-daemon.ts";
+import { daemonOf, fakeDaemon, lineSocket, SILENT, type Answer, type FakeDaemon } from "./helpers/fake-daemon.ts";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 
@@ -60,8 +61,8 @@ async function upgrade(session: string, answer: string, page: { url?: string; pr
     if (req.op === "shutdown") queueMicrotask(() => old.stop());
     return daemonOf(answer)(req);
   });
-  const current = (req: { op: string }) =>
-    req.op === "state" ? { url, title: "", profile: page.profile } : daemonOf(pkg.version)(req as Parameters<ReturnType<typeof daemonOf>>[0]);
+  const current: Answer = (req) =>
+    req.op === "state" ? { url, title: "", profile: page.profile } satisfies PageState : daemonOf(pkg.version)(req);
   const connect = async (s: string, o?: ConnectOptions) => {
     if (old.ops.includes("shutdown") && !next) next = await fakeDaemon(session, current);
     return connectOrSpawn(s, o);
@@ -88,7 +89,7 @@ describe("F2: a daemon from another bowser version", () => {
         ]);
         expect(up.old.ops.filter((op) => op !== "ping")).toEqual(["shutdown"]);
         expect(up.next()?.ops).toContain("navigate");
-        expect(existsSync(join(sessionDir(session), "upg"))).toBe(false);
+        expect(existsSync(join(sessionDir(session), LOCK))).toBe(false);
       } finally {
         up.stop();
       }
@@ -172,7 +173,7 @@ describe("F2: a daemon from another bowser version", () => {
   test("a command that finds no daemon while another restarts the session waits for it (#149)", async () => {
     const session = "ver-mid-restart";
     await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
-    const lock = join(sessionDir(session), "upg");
+    const lock = join(sessionDir(session), LOCK);
     await Bun.write(lock, String(process.ppid));
     let next: FakeDaemon | undefined;
     setTimeout(async () => {
@@ -190,7 +191,7 @@ describe("F2: a daemon from another bowser version", () => {
   test("with BOWSER_OP_TIMEOUT_MS=0, a held restart lock is waited for without a deadline (#149)", async () => {
     const session = "ver-nobudget";
     await ensureSessionDir(session);
-    const lock = join(sessionDir(session), "upg");
+    const lock = join(sessionDir(session), LOCK);
     await Bun.write(lock, String(process.ppid));
     const old = await fakeDaemon(session, daemonOf("0.6.1"));
     let next: FakeDaemon | undefined;
@@ -267,13 +268,13 @@ describe("F2: a daemon from another bowser version", () => {
     const dead = Bun.spawn(["true"]);
     await dead.exited;
     await ensureSessionDir(session);
-    await Bun.write(join(sessionDir(session), "upg"), String(dead.pid));
+    await Bun.write(join(sessionDir(session), LOCK), String(dead.pid));
     const up = await upgrade(session, "0.6.1", {});
     try {
       const notices: string[] = [];
       expect(await run(["eval", "1", "-s", session], { connect: up.connect, notices })).toBe("1");
       expect(notices).toHaveLength(1);
-      expect(existsSync(join(sessionDir(session), "upg"))).toBe(false);
+      expect(existsSync(join(sessionDir(session), LOCK))).toBe(false);
     } finally {
       up.stop();
     }
@@ -282,7 +283,7 @@ describe("F2: a daemon from another bowser version", () => {
   test("restart lock: a live holder is waited for, and the daemon it started is used", async () => {
     const session = "ver-livelock";
     await ensureSessionDir(session);
-    const lock = join(sessionDir(session), "upg");
+    const lock = join(sessionDir(session), LOCK);
     await Bun.write(lock, String(process.ppid));
     const old = await fakeDaemon(session, daemonOf("0.6.1"));
     let next: FakeDaemon | undefined;
@@ -306,7 +307,7 @@ describe("F2: a daemon from another bowser version", () => {
   test("restart lock: a holder that outlasts the budget fails the command and leaves the daemon alone", async () => {
     const session = "ver-heldlock";
     await ensureSessionDir(session);
-    const lock = join(sessionDir(session), "upg");
+    const lock = join(sessionDir(session), LOCK);
     await Bun.write(lock, String(process.ppid));
     const d = await fakeDaemon(session, daemonOf("0.6.1"));
     const prev = process.env.BOWSER_OP_TIMEOUT_MS;
@@ -621,8 +622,8 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     process.env.HOME = tmp;
   });
 
-  const lockOf = (s: string) => join(sessionDir(s), "upg");
-  const msgOf = (s: string) => join(sessionDir(s), "msg");
+  const lockOf = (s: string) => join(sessionDir(s), LOCK);
+  const msgOf = (s: string) => join(sessionDir(s), MSG);
   const left = (s: string) => ["state.json", "pid", "sock"].filter((f) => existsSync(join(sessionDir(s), f)));
   const notice = (s: string, reload: string) =>
     `session '${s}' restarted for bowser ${pkg.version} (was 0.6.1): ${reload}; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`;
@@ -675,8 +676,8 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       label: "the claim lands in the empty directory before close's rmdir",
       close: async (s) => {
         const dir = sessionDir(s);
-        for (const e of await readdir(dir)) if (e !== "upg") await rm(join(dir, e), { recursive: true, force: true });
-        await unlink(join(dir, "upg"));
+        for (const e of await readdir(dir)) if (e !== LOCK) await rm(join(dir, e), { recursive: true, force: true });
+        await unlink(join(dir, LOCK));
       },
     },
     { label: "no daemon (BrowserExited)", noDaemon: true, close: (s) => rm(sessionDir(s), { recursive: true, force: true }) },
@@ -874,7 +875,7 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
 test("close removes a session whose restart lock is corrupt (#152)", async () => {
   const session = "corrupt-upg";
   await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
-  await Bun.write(join(sessionDir(session), "upg"), "nope");
+  await Bun.write(join(sessionDir(session), LOCK), "nope");
   const prev = process.env.BOWSER_OP_TIMEOUT_MS;
   process.env.BOWSER_OP_TIMEOUT_MS = "300";
   try {
