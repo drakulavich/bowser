@@ -1,6 +1,6 @@
 // Command-layer tests with a fake daemon client. No real browser needed.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import pkg from "../package.json";
@@ -670,107 +670,99 @@ describe("close", () => {
     }
   });
 
-  // Names made before the naming rule existed still sit under the sessions
-  // root. `sessionDir` refuses them, and so did `close --all`, leaving them
-  // behind forever.
-  test("--all removes a directory whose name predates the naming rule", async () => {
-    const legacy = join(tmp, ".bowser", "sessions", " m11-1 m12-2");
-    await mkdir(legacy, { recursive: true });
-    const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
-    expect(out).toContain(" m11-1 m12-2");
-    expect(out).not.toContain("failed");
-    expect(existsSync(legacy)).toBe(false);
-  });
+  // Each test gets its own HOME: --all closes whatever else is there.
+  describe("--all", () => {
+    beforeEach(async () => { process.env.HOME = await mkdtemp(join(tmp, "all-")); });
+    afterEach(() => { process.env.HOME = tmp; });
+    const closedIn = (text: string) => /closed \d+ sessions?: ([^;\n]+)/.exec(text)?.[1]?.split(", ").sort();
 
-  // F35: a directory whose name is now too long for this HOME (left by an
-  // older bowser, whose daemon could not claim it) is still listed as dead,
-  // and close and close --all still remove it.
-  test("close, list and close --all handle a directory whose name is too long for this HOME", async () => {
-    const prevHome = process.env.HOME;
-    process.env.HOME = await longHome(tmp, 900);
-    try {
-      const name = "n".repeat(maxSessionNameLength() + 5);
-      const dir = join(sessionsRoot(), name);
-      await mkdir(dir);
-      expect(await cmdList({ ...ctx({ json: true }), connect: unreachable })).toBe("[]");
-      expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`closed session '${name}'`);
-      expect(existsSync(dir)).toBe(false);
-      await mkdir(dir);
-      expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe(`closed 1 session: ${name}`);
-      expect(existsSync(dir)).toBe(false);
-    } finally {
-      process.env.HOME = prevHome;
-    }
-  });
+    // Names made before the naming rule existed still sit under the sessions
+    // root. `sessionDir` refuses them, and so did `close --all`, leaving them
+    // behind forever.
+    test("--all removes a directory whose name predates the naming rule", async () => {
+      const legacy = join(sessionsRoot(), " m11-1 m12-2");
+      await mkdir(legacy, { recursive: true });
+      const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
+      expect(out).toBe("closed 1 session:  m11-1 m12-2");
+      expect(existsSync(legacy)).toBe(false);
+    });
 
-  test("--all keeps a legacy directory whose recorded pid is alive", async () => {
-    // Its daemon can no longer be identified by name, so it is never signalled
-    // and its directory stays for a person to deal with.
-    const legacy = join(tmp, ".bowser", "sessions", "team one");
-    await mkdir(legacy, { recursive: true });
-    await Bun.write(join(legacy, "pid"), String(process.pid));
-    try {
+    // F35: a directory whose name is now too long for this HOME (left by an
+    // older bowser, whose daemon could not claim it) is still listed as dead,
+    // and close and close --all still remove it.
+    test("close, list and close --all handle a directory whose name is too long for this HOME", async () => {
+      const prevHome = process.env.HOME;
+      process.env.HOME = await longHome(tmp, 900);
+      try {
+        const name = "n".repeat(maxSessionNameLength() + 5);
+        const dir = join(sessionsRoot(), name);
+        await mkdir(dir);
+        expect(await cmdList({ ...ctx({ json: true }), connect: unreachable })).toBe("[]");
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`closed session '${name}'`);
+        expect(existsSync(dir)).toBe(false);
+        await mkdir(dir);
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe(`closed 1 session: ${name}`);
+        expect(existsSync(dir)).toBe(false);
+      } finally {
+        process.env.HOME = prevHome;
+      }
+    });
+
+    test("--all keeps a legacy directory whose recorded pid is alive", async () => {
+      // Its daemon can no longer be identified by name, so it is never signalled
+      // and its directory stays for a person to deal with.
+      const legacy = join(sessionsRoot(), "team one");
+      await mkdir(legacy, { recursive: true });
+      await Bun.write(join(legacy, "pid"), String(process.pid));
       const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
       await expect(call).rejects.toThrow(`- team one: close: pid ${process.pid} recorded for legacy session "team one" is running`);
       expect(existsSync(legacy)).toBe(true);
-    } finally {
-      await rm(legacy, { recursive: true, force: true }); // or every later --all sees it fail
-    }
-  });
+    });
 
-  test("--all keeps a legacy directory with an unaccounted socket", async () => {
-    const legacy = join(tmp, ".bowser", "sessions", "old session");
-    await mkdir(legacy, { recursive: true });
-    await Bun.write(join(legacy, "sock"), "");
-    try {
+    test("--all keeps a legacy directory with an unaccounted socket", async () => {
+      const legacy = join(sessionsRoot(), "old session");
+      await mkdir(legacy, { recursive: true });
+      await Bun.write(join(legacy, "sock"), "");
       const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
       await expect(call).rejects.toThrow('- old session: close: legacy session "old session" has no pidfile but still has a socket');
       expect(existsSync(legacy)).toBe(true);
-    } finally {
-      await rm(legacy, { recursive: true, force: true });
-    }
-  });
+    });
 
-  // F31: a session --all could not close fails the command, exit 2, as a
-  // single `close` of it does; the rest are still tried and listed.
-  test("--all with a session that fails: tries every session, names the reason, exits 2", async () => {
-    await saveState({ name: "ok31", url: "x", title: "", refs: [], updatedAt: Date.now() });
-    await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
-    await ensureSessionDir("stale31");
-    await Bun.write(pidPath("stale31"), "4242");
-    const proc = procOps({ alive: (pid) => pid === 4242 });
-    try {
+    // F31: a session --all could not close fails the command, exit 2, as a
+    // single `close` of it does; the rest are still tried and listed.
+    test("--all with a session that fails: tries every session, names the reason, exits 2", async () => {
+      await saveState({ name: "ok31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+      await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+      await ensureSessionDir("stale31");
+      await Bun.write(pidPath("stale31"), "4242");
+      const proc = procOps({ alive: (pid) => pid === 4242 });
       for (const json of [false, true]) {
         if (!existsSync(sessionDir("zz31"))) await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
         const err = await cmdClose({ ...ctx({ json }), connect: async () => fakeClient({}) }, { all: true }, proc)
           .then(() => undefined, (e: unknown) => e);
         const msg = (err as Error).message;
         // Under --json too: an error is plain text on stderr, like every other.
-        expect(msg).toContain("- stale31: close: pid 4242 recorded for session 'stale31' is running but does not look like a bowser daemon");
-        // Other tests' sessions share this HOME, so only ours are checked.
-        expect(msg).toMatch(/^close --all: closed \d+ sessions?: [^\n]*\bzz31\b/);
-        if (!json) expect(msg).toMatch(/^close --all: closed [^\n]*\bok31\b/);
+        expect(msg).toStartWith("close --all: closed ");
+        expect(msg).toContain("; failed 1 session:\n- stale31: close: pid 4242 recorded for session 'stale31' is running but does not look like a bowser daemon");
+        expect(closedIn(msg)).toEqual(json ? ["zz31"] : ["ok31", "zz31"]);
         expect(reportFailure(err).code).toBe(2);
         expect(existsSync(sessionDir("zz31"))).toBe(false);
         expect(existsSync(sessionDir("stale31"))).toBe(true);
       }
-    } finally {
-      await rm(sessionDir("stale31"), { recursive: true, force: true }); // or every later --all fails
-    }
-  });
+    });
 
-  test("--all closes every session under the sessions root", async () => {
-    // Seed two sessions on disk (saveState creates ~/.bowser/sessions/<name>/).
-    await saveState({ name: "a", url: "x", title: "", refs: [], updatedAt: Date.now() });
-    await saveState({ name: "b", url: "y", title: "", refs: [], updatedAt: Date.now() });
-    const c = fakeClient({});
-    const out = await cmdClose({ ...ctx(), connect: async () => c }, { all: true });
-    expect(out).toMatch(/^closed \d+ sessions?: /);
-    expect(out).toContain("a");
-    expect(out).toContain("b");
-    // and left nothing behind
-    expect(existsSync(sessionDir("a"))).toBe(false);
-    expect(existsSync(sessionDir("b"))).toBe(false);
+    test("--all closes every session under the sessions root", async () => {
+      // Seed two sessions on disk (saveState creates ~/.bowser/sessions/<name>/).
+      await saveState({ name: "a", url: "x", title: "", refs: [], updatedAt: Date.now() });
+      await saveState({ name: "b", url: "y", title: "", refs: [], updatedAt: Date.now() });
+      const c = fakeClient({});
+      const out = await cmdClose({ ...ctx(), connect: async () => c }, { all: true });
+      expect(out).toStartWith("closed 2 sessions: ");
+      expect(closedIn(out)).toEqual(["a", "b"]);
+      // and left nothing behind
+      expect(existsSync(sessionDir("a"))).toBe(false);
+      expect(existsSync(sessionDir("b"))).toBe(false);
+    });
   });
 });
 

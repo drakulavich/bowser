@@ -11,7 +11,7 @@ import { UserError } from "../errors.ts";
 // As long as `pid`: their temp files, `upg.<pid>.tmp` and `msg.<pid>.tmp`,
 // must fit the path budget maxSessionNameLength() was sized for (`pid.99999.tmp`).
 export const LOCK = "upg";
-const MSG = "msg";
+export const MSG = "msg";
 
 const lockPath = (session: string) => join(sessionDir(session), LOCK);
 const msgPath = (session: string) => join(sessionDir(session), MSG);

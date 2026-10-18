@@ -8,6 +8,7 @@ import type { Socket, SocketHandler } from "bun";
 import { ensureSessionDir } from "../../src/state.ts";
 import { socketPath } from "../../src/daemon/client.ts";
 import { lineReader } from "../../src/socket-lines.ts";
+import type { DaemonResponse, Op, ResultOf } from "../../src/daemon/protocol.ts";
 
 export const SILENT = Symbol("silent");
 
@@ -16,12 +17,14 @@ export interface FakeDaemon {
   stop(): void;
 }
 
-type Answer = (req: { id: number; op: string; args?: unknown[] }) => unknown;
+type Request = { id: number; op: Op; args?: unknown[] };
+export type Answer = (req: Request) => unknown;
 
 function reply(s: LineSocket, id: number, result: unknown): void {
   if (result === SILENT) return;
   const failed = typeof result === "object" && result !== null && (result as { ok?: unknown }).ok === false;
-  s.write(JSON.stringify(failed ? { id, ...result } : result === undefined ? { id, ok: true } : { id, ok: true, result }) + "\n");
+  const res: DaemonResponse = failed ? { id, ...(result as { ok: false; error: string }) } : result === undefined ? { id, ok: true } : { id, ok: true, result };
+  s.write(JSON.stringify(res) + "\n");
 }
 
 export async function fakeDaemon(session: string, answer: Answer): Promise<FakeDaemon> {
@@ -30,7 +33,7 @@ export async function fakeDaemon(session: string, answer: Answer): Promise<FakeD
   const server = Bun.listen({
     unix: socketPath(session),
     socket: lineSocket((s, line) => {
-      const req = JSON.parse(line) as { id: number; op: string; args?: unknown[] };
+      const req = JSON.parse(line) as Request;
       ops.push(req.op);
       const result = answer(req);
       // Written at once when not a promise: `upgrade` stops the daemon in a
@@ -60,5 +63,7 @@ export function lineSocket(onLine: (s: LineSocket, line: string) => void): Socke
 /** A daemon of a given version: `ping` answers `version` ("pong" is every
  *  daemon through 0.7), `state` a blank page, `evaluate` 1. */
 export function daemonOf(version: string): Answer {
-  return (req) => (req.op === "ping" ? version : req.op === "state" ? { url: "about:blank", title: "" } : req.op === "evaluate" ? 1 : undefined);
+  return (req) => (req.op === "ping" ? version satisfies ResultOf<"ping">
+    : req.op === "state" ? { url: "about:blank", title: "" } satisfies ResultOf<"state">
+    : req.op === "evaluate" ? 1 : undefined);
 }
