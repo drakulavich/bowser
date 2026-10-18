@@ -10,6 +10,7 @@ import { prompt, TASKS, type Task } from "./tasks.ts";
 const MODEL = "claude-sonnet-5-5";
 const MAX_TURNS = 40;
 const RUN_TIMEOUT_MS = 5 * 60_000;
+const KILL_GRACE_MS = 10_000;
 const ROOT = resolve(import.meta.dir, "..");
 
 const { values: args } = parseArgs({
@@ -55,9 +56,8 @@ async function toolVersion(tool: Tool): Promise<string> {
   return `${version}+${await sh(["git", "rev-parse", "--short", "HEAD"], ROOT)}`;
 }
 
-// Closes a run's session, and the default one in case the agent dropped -s.
-const close = (tool: Tool, session: string): string[][] =>
-  [session, "default"].map((s) => (tool === "bowser" ? ["bowser", "close", s] : ["playwright-cli", `-s=${s}`, "close"]));
+const close = (tool: Tool, session: string): string[] =>
+  tool === "bowser" ? ["bowser", "close", session] : ["playwright-cli", `-s=${session}`, "close"];
 const list: Record<Tool, string[]> = { bowser: ["bowser", "list"], "playwright-cli": ["playwright-cli", "list"] };
 
 const userSkills = [join(homedir(), ".claude/skills"), join(homedir(), ".agents/skills")].flatMap((d) => {
@@ -87,11 +87,24 @@ async function runOne({ task, tool, rep }: Run, skill: string, version: string):
     ],
     { cwd, stdout: "pipe", stderr: "pipe" },
   );
-  const timer = setTimeout(() => p.kill(), RUN_TIMEOUT_MS);
-  const raw = await new Response(p.stdout).text();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    p.kill("SIGTERM");
+    setTimeout(() => p.kill("SIGKILL"), KILL_GRACE_MS).unref();
+  }, RUN_TIMEOUT_MS);
+  const chunks: Uint8Array[] = [];
+  const reader = p.stdout.getReader();
+  const reading = (async () => {
+    for (let r = await reader.read(); !r.done; r = await reader.read()) chunks.push(r.value);
+  })();
   await p.exited;
   clearTimeout(timer);
-  for (const cmd of close(tool, session)) await sh(cmd, cwd);
+  // A child that outlives claude can hold the pipe open: stop reading after a grace period.
+  await Promise.race([reading, Bun.sleep(KILL_GRACE_MS)]);
+  await reader.cancel().catch(() => {});
+  const raw = Buffer.concat(chunks).toString();
+  await sh(close(tool, session), cwd);
   rmSync(cwd, { recursive: true, force: true });
   await Bun.write(join(streamsDir, `${tool}-${task.id}-${rep}.jsonl`), raw);
 
@@ -105,19 +118,22 @@ async function runOne({ task, tool, rep }: Run, skill: string, version: string):
   const init = stream.find((m) => m.type === "system" && m.subtype === "init");
   const result = stream.find((m) => m.type === "result");
   const leak = !init ? "no init message" : skillFailed(stream) ? "skill failed to load" : isolation(init, tool, userSkills);
-  const verdict = leak
-    ? { pass: false, failReason: `isolation: ${leak}` }
-    : result
-      ? judge(task, result)
-      : { pass: false, failReason: Date.now() - started >= RUN_TIMEOUT_MS ? "timeout" : "no result message" };
+  const verdict = timedOut
+    ? { pass: false, failReason: "timeout" }
+    : leak
+      ? { pass: false, failReason: `isolation: ${leak}` }
+      : result
+        ? judge(task, result)
+        : { pass: false, failReason: "no result message" };
   const u = result?.usage ?? {};
   const row = {
     task: task.id, tool, rep, ts: new Date(started).toISOString(),
-    toolVersion: version, model: init?.model, claudeVersion: init?.claude_code_version,
-    ...verdict,
-    inputTokens: u.input_tokens, cacheReadTokens: u.cache_read_input_tokens,
-    cacheCreationTokens: u.cache_creation_input_tokens, outputTokens: u.output_tokens,
-    costUsd: result?.total_cost_usd, durationMs: result?.duration_ms ?? Date.now() - started, numTurns: result?.num_turns,
+    toolVersion: version, model: init?.model ?? null, claudeVersion: init?.claude_code_version ?? null,
+    answer: null, failReason: null, ...verdict,
+    inputTokens: u.input_tokens ?? null, cacheReadTokens: u.cache_read_input_tokens ?? null,
+    cacheCreationTokens: u.cache_creation_input_tokens ?? null, outputTokens: u.output_tokens ?? null,
+    costUsd: result?.total_cost_usd ?? null, durationMs: result?.duration_ms ?? Date.now() - started,
+    numTurns: result?.num_turns ?? null,
     ...streamCounts(stream),
   };
   appendFileSync(resultsFile, `${JSON.stringify(row)}\n`);
@@ -133,4 +149,8 @@ await Promise.all(
     for (const r of plan(tool)) await runOne(r, skill, version);
   }),
 );
+for (const tool of tools) {
+  const open = await sh(list[tool]);
+  if (open && open !== "(no browsers)") console.log(`${tool} still has sessions open, not closed by the runner:\n${open}`);
+}
 console.log(`results: ${resultsFile}`);

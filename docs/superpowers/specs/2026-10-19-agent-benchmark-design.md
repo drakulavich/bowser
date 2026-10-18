@@ -46,8 +46,12 @@ Each run is one `claude -p` process:
 - The task prompt is the same for both tools and does not name either one. It says to use the
   browser skill, to pass `-s=bench-<task>-<rep>` to every browser command (both tools take this
   form), and to end with a line `ANSWER: <value>`.
-- After each run the runner closes that session and `default`, in case the agent dropped `-s`.
-  It refuses to start while either tool has a session open, so it never closes one of the user's.
+- After each run the runner closes that run's session, and only that one. It refuses to start while
+  either tool has a session open, and at the end it lists any session still open (one an agent
+  opened without `-s`, or the user's) instead of closing it.
+- A run that passes 5 minutes is killed (SIGTERM, then SIGKILL 10 s later) and fails as
+  "timeout", even if it printed a result first. A row writes `null` for a field the run never
+  produced, so every row has every field.
 
 The user's global `CLAUDE.md` and rules do not reach these runs. In the pilot, asked whether its
 instructions contain "Signals without noise", a phrase from the user's global rules, the agent

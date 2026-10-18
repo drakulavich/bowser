@@ -46,7 +46,7 @@ const cell = (task: string, tool: string): Cell => {
 const lines = [
   "# Agent benchmark: bowser and playwright-cli",
   "",
-  `Measured ${one((r) => r.ts.slice(0, 10))} with ${one((r) => r.model)} in Claude Code ${one((r) => r.claudeVersion)}:`,
+  `Measured ${one((r) => new Date(r.ts).toLocaleDateString("sv"))} with ${one((r) => r.model)} in Claude Code ${one((r) => r.claudeVersion)}:`,
   ...tools.map((t) => `- ${t} ${versionOf(t)}`),
   "",
   "Each task ran in a fresh `claude -p` with only that tool's own skill installed and Bash allowed only for the tool.",
