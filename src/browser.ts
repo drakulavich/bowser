@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  CANCEL_PENDING_NAVIGATION, KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  CANCEL_PENDING_NAVIGATION, KEY_CODES, KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD,
   hoverScript, keyCommandScript, readable, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
@@ -274,14 +274,15 @@ const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
  *  WebKit to commit localStorage: twice its 500 ms transaction window. */
 const STORAGE_COMMIT_WAIT_MS = 1000;
 
-/** The key `view.press` is given for a key name (F11). Bun maps a named key to
- *  a WebKit editing command where one exists, and "Tab" becomes "insert tab":
- *  a `\t` lands in the field and no keydown fires. The tab character is sent
- *  as a raw key event instead: focus moves as the browser's own Tab moves it,
- *  and the page sees a trusted keydown with key "Tab" (measured on WebKit,
- *  Bun 1.4.2). Every other key passes through. */
-function pressKey(key: string): string {
-  return key === "Tab" ? "\t" : key;
+/** Bun turns a bare named key into a WebKit editing command that fires no
+ *  keydown (F11, #168), so its macOS character goes as a raw key event. With a
+ *  modifier the named key fires its keydown; only Tab is swapped then. */
+const RAW_KEYS: Record<string, string> = {
+  Tab: "\t", Enter: "\r", Backspace: "\x7f", Delete: "\uF728",
+  ArrowUp: "\uF700", ArrowDown: "\uF701", ArrowLeft: "\uF702", ArrowRight: "\uF703",
+};
+function pressKey(key: string, modifiers: KeyModifier[]): string {
+  return (key === "Tab" || modifiers.length === 0) ? RAW_KEYS[key] ?? key : key;
 }
 
 /** The editing command macOS runs for a menu shortcut, which Bun.WebView
@@ -602,7 +603,9 @@ export function wrapView(
     press: (key, modifiers = []) => guard(nav.act(async () => {
       const command = menuCommand(key, modifiers);
       if (command) await evaluate(KEY_WATCH);
-      await view.press(pressKey(key), modifiers.length ? { modifiers } : undefined);
+      const sent = pressKey(key, modifiers);
+      if (sent !== key) await evaluate(KEY_CODES);
+      await view.press(sent, modifiers.length ? { modifiers } : undefined);
       if (command) await evaluate(keyCommandScript(command));
     })),
     // A page's change or mouse handler can navigate, so the page-script
