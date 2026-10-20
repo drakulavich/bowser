@@ -45,6 +45,11 @@ All notable changes to this project are documented here. This project follows
   did not answer; run 'bowser close -s <s>' to stop it` (exit 2), and the next MCP call on the
   session fails the same way in about 1 s. A running daemon still answers first with its own
   timeout. `BOWSER_OP_TIMEOUT_MS=0` still sets no deadline. (#155)
+- **`press Enter`, `Backspace`, `Delete` and the arrows fire the page's keydown.** WebKit ran them
+  as editing commands with no key event, so a form still submitted, but a page that listens for
+  the key did nothing: on React's TodoMVC, `fill` then `press Enter` added no todo. The page now
+  gets a trusted keydown with the key's usual `keyCode` (13 for Enter), and the field changes as
+  before. `Tab` keydowns carry keyCode 9 too. (#168)
 
 ## [0.11.0] — 2026-10-03
 

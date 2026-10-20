@@ -104,6 +104,30 @@ runOrSkip("e2e: actions on WebKit", () => {
     });
   });
 
+  describe("#168: a bare named key fires its keydown", () => {
+    test("with the key's own keyCode, which React's TodoMVC tests for Enter", async () => {
+      await cmdClick(ctx, await ref("A"));
+      await js("(window.codes = [], document.addEventListener('keydown', (e) => codes.push(e.key + ':' + e.keyCode + ':' + e.which)), 0)");
+      for (const key of ["Enter", "Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab"]) await cmdPress(ctx, key);
+      expect(await js("window.codes")).toBe(JSON.stringify([
+        "Enter:13:13", "Backspace:8:8", "Delete:46:46", "ArrowLeft:37:37",
+        "ArrowRight:39:39", "ArrowUp:38:38", "ArrowDown:40:40", "Tab:9:9",
+      ]));
+      expect(await log()).toBe(JSON.stringify([
+        "click:a", "keydown:Enter:true", "keydown:Backspace:true", "keydown:Delete:true", "keydown:ArrowLeft:true",
+        "keydown:ArrowRight:true", "keydown:ArrowUp:true", "keydown:ArrowDown:true", "keydown:Tab:true",
+      ]));
+    });
+
+    test("and the arrows, Delete and Backspace still edit the field", async () => {
+      await cmdClick(ctx, await ref("A"));
+      await cmdType(ctx, "hello");
+      for (const key of ["ArrowLeft", "ArrowLeft", "Delete", "Backspace", "ArrowUp"]) await cmdPress(ctx, key);
+      await cmdType(ctx, "x");
+      expect(await js("a.value")).toBe(`"xheo"`);
+    });
+  });
+
   // #55: playwright-cli's key combinations, read back from the page. The
   // expected results are what playwright-cli 0.1.13 does on WebKit, macOS.
   describe("#55: press with modifiers", () => {
