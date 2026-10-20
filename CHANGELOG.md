@@ -21,6 +21,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Changed
 
+- **The agent skill is a quarter of its size.** `SKILL.md` goes from 21 KB to 5 KB; every flag,
+  error message and edge case moves unchanged to `references/`, which it links. In the agent
+  benchmark (#167) bowser's runs used 412k tokens instead of 667k over ten tasks, against 443k
+  for playwright-cli.
 - **bowser needs Bun ≥ 1.4.3.** On an older Bun a command that would start a session fails with
   `bowser requires Bun >=1.4.3 (found <version>)` (exit 1).
 - **An upgrade no longer breaks open sessions.** After `npm i -g`, every command but `close` and
