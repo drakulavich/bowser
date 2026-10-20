@@ -294,13 +294,17 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/submitted");
   });
 
-  test("press Tab sends the tab character, which WebKit takes as a key event that moves focus (F11)", async () => {
+  test("a bare named key goes as its macOS character, which WebKit takes as a key event (F11, #168)", async () => {
     const v = fakeView();
     const b = wrapView(v, fast);
     await b.press("Tab");
     await b.press("Enter");
+    await b.press("ArrowDown");
+    await b.press("Escape");
     await b.press("t");
-    expect(v.calls.filter(([op]) => op === "press")).toEqual([["press", ["\t"]], ["press", ["Enter"]], ["press", ["t"]]]);
+    expect(v.calls.filter(([op]) => op === "press")).toEqual([
+      ["press", ["\t"]], ["press", ["\r"]], ["press", ["\uF701"]], ["press", ["Escape"]], ["press", ["t"]],
+    ]);
   });
 
   // #55: WebKit gets a modifier with the key, and Tab stays the tab character.

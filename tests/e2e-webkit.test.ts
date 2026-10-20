@@ -120,7 +120,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
     await waitForEval("document.getElementById('submitted').textContent", "submitted:Ada Lovelace");
   }, 60_000);
 
-  test.todo("press dispatches a bubbling keydown to document: WebKit's native press submits the form but fires no keydown listener (Bun.WebView.press limitation)", async () => {
+  test("press Enter dispatches a bubbling keydown to document (#168)", async () => {
     expect(await evalText("document.getElementById('keys').textContent")).toContain("Enter;");
   }, 60_000);
 

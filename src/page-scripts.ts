@@ -784,6 +784,21 @@ export const NAV_ARM = String.raw`(() => {
 export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
+// A raw key event (pressKey in browser.ts) has keyCode 65 whatever its key
+// (Bun 1.4.4); pages that test keyCode, like React's TodoMVC, ignore it (#168).
+export const KEY_CODES = String.raw`(() => {
+  const KEY = Symbol.for('bowser.keyCodes');
+  if (window[KEY]) return;
+  window[KEY] = true;
+  const codes = { Tab: 9, Enter: 13, Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
+  const fix = (e) => {
+    const code = codes[e.key];
+    if (code && e.keyCode !== code) for (const p of ['keyCode', 'which']) Object.defineProperty(e, p, { value: code });
+  };
+  addEventListener('keydown', fix, true);
+  addEventListener('keyup', fix, true);
+})()`;
+
 // `press Meta+a` and friends (#55). Bun.WebView sends Meta+A/Z to WebKit as
 // key events only; on macOS those shortcuts are menu commands, which the page
 // never gets (measured, Bun 1.4.2). KEY_WATCH keeps the next keydown, seen
