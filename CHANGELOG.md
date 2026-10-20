@@ -21,6 +21,8 @@ All notable changes to this project are documented here. This project follows
 
 ### Changed
 
+- **bowser needs Bun ≥ 1.4.3.** On an older Bun a command that would start a session fails with
+  `bowser requires Bun >=1.4.3 (found <version>)` (exit 1).
 - **An upgrade no longer breaks open sessions.** After `npm i -g`, every command but `close` and
   `list` refused a daemon the old bowser had started until the session was closed and opened
   again, and a running `bowser mcp` refused even the daemons it started itself until it was
