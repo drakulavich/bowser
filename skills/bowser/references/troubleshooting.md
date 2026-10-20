@@ -32,7 +32,7 @@
 
 ## Install and upgrades
 
-The package runs with the `bun` on your `PATH`. npm does not enforce the Bun version, so on an older Bun a command that would start a session fails with the error "bowser requires Bun >=1.4.2 (found <version>)". Release binaries are no longer built: if you used one, run `bowser close --all` with it, delete it, then `npm i -g @drakulavich/bowser-cli`.
+The package runs with the `bun` on your `PATH`. npm does not enforce the Bun version, so on an older Bun a command that would start a session fails with the error "bowser requires Bun >=1.4.3 (found <version>)". Release binaries are no longer built: if you used one, run `bowser close --all` with it, delete it, then `npm i -g @drakulavich/bowser-cli`.
 
 After an upgrade, the first command restarts the session and prints "session '<name>' restarted for bowser <w> (was <v>): …; refs cleared, run 'bowser snapshot'" first (on stderr, or first in the MCP tool text). Take a new snapshot before using refs. Without `--persistent` or `--profile` the line adds "cookies and storage were lost": log in again.
 
