@@ -46,7 +46,7 @@ To read a page rather than act on it, `bowser markdown` costs a fraction of a sn
 | `bowser close [name]` / `close --all` | End a session, or all of them |
 | `bowser mcp` | Serve every command as an MCP tool over stdio |
 
-Global flags: `-s=<name>` (session, default `default`), `--json`, `--help`. Quote arguments with spaces.
+Global flags: `-s=<name>` (session, default `default`), `--json`, `-h`/`--help`. Quote arguments with spaces.
 
 ## Snapshot
 
