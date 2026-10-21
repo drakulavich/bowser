@@ -122,8 +122,8 @@ replaced by the measured totals and a link to the page, whatever they show.
 ### Repetitions and load
 
 Three reps per task and tool, 60 runs. The two tools run side by side, one run at a time each, so
-at most two browsers are open. Expected wall time is 45 to 90 minutes on this Mac (a claim: 1 to
-3 minutes per run, not yet measured). A `--task`, `--tool` and `--reps` filter runs a subset, and
+at most two browsers are open. The full run on 2026-10-21 took 11 minutes on this Mac and cost $2.75
+(the estimate here was 45 to 90 minutes). A `--task`, `--tool` and `--reps` filter runs a subset, and
 `--dry-run` prints the run plan without starting anything.
 
 ## Non-goals
@@ -146,8 +146,8 @@ at most two browsers are open. Expected wall time is 45 to 90 minutes on this Ma
 - [x] `bench/tasks.ts`, `bench/check.ts` (answer check and isolation check) with unit tests on
   recorded `result` and `init` messages.
 - [x] `bench/run.ts` (runner, filters, `--dry-run`) and `bench/report.ts`.
-- [ ] The full run, after the user agrees to the load.
-- [ ] `docs/benchmark.md`, the README line, `bench/README.md` and a CHANGELOG entry.
+- [x] The full run, after the user agrees to the load.
+- [x] `docs/benchmark.md`, the README line, `bench/README.md` and a CHANGELOG entry.
 
 ## Definition of Done
 

@@ -12,7 +12,7 @@ Built on [`Bun.WebView`](https://bun.com/docs/runtime/webview) (new in Bun 1.3.1
 What sets it apart from `playwright-cli`:
 
 - **Bun-native.** Runs on Bun, no Node or Playwright install.
-- **Token-efficient.** Capabilities are shell commands, not MCP tool schemas. A skill description of a few hundred tokens covers the whole API.
+- **Fewer tokens than playwright-cli.** In the [agent benchmark](docs/benchmark.md) (10 browser tasks, 3 runs each, Claude Sonnet 5.5, 2026-10-21), an agent used 413k tokens and $0.41 with bowser against 445k and $0.51 with playwright-cli, summed over the per-task medians. Both passed all 30 runs.
 - **Persistent sessions.** Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
 ## Install

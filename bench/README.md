@@ -13,4 +13,4 @@ open in either tool (the runner refuses to start otherwise).
     bun bench/report.ts bench/results/<date>.jsonl
 
 Rows append to `bench/results/<date>.jsonl`; full agent streams go to the gitignored
-`.bench/streams/<date>/`. A full run costs at least $3.40 of Claude usage: the pilot paid $0.05 to $0.07 per run on `login`, the shortest task.
+`.bench/streams/<date>/`. The full run on 2026-10-21 cost $2.75 of Claude usage and took 11 minutes.
