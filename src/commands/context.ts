@@ -74,15 +74,16 @@ export async function withClient<T>(
   const connect = (o: ConnectOptions) => connector(ctx)(ctx.session, ctx.command ? { ...o, command: ctx.command } : o);
   let client: DaemonConnection;
   let read = true;
+  let restarted = false;
   try {
     client = await connect(opts);
   } catch (err) {
     if (!(err instanceof OlderDaemon || err instanceof BrowserExited) || !ctx.restart) throw err;
     // The notice of a restart this command only waited for is its restarter's to print.
-    read = await ctx.restart(ctx, err);
+    read = restarted = await ctx.restart(ctx, err);
     client = await reconnect(ctx, () => connect({ ...opts, spawn: false }));
   } finally {
-    if (read) takeNotice(ctx);
+    if (read) takeNotice(ctx, restarted);
   }
   try {
     return await fn(client);
@@ -103,9 +104,10 @@ async function reconnect(ctx: CommandContext, connect: () => Promise<DaemonConne
   }
 }
 
-/** The notice a restart left in the session (ET-29), unless a restart is still running. */
-function takeNotice(ctx: CommandContext): void {
-  if (!ctx.notices || otherHolder(ctx.session) !== null) return;
+/** The notice a restart left in the session (ET-29), unless a restart is still running.
+ *  The restarter takes its own even when a command it held off now holds the lock (#171). */
+function takeNotice(ctx: CommandContext, own: boolean): void {
+  if (!ctx.notices || (!own && otherHolder(ctx.session) !== null)) return;
   const text = readNotice(ctx.session);
   if (!text || ctx.notices.includes(text)) return;
   ctx.notices.push(text);
