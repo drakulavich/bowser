@@ -30,9 +30,9 @@ bun install
 bun link                     # exposes `bowser` on $PATH
 ```
 
-Bun ≥ 1.4.2 must be on your `PATH`: the npm package runs `src/cli.ts` with the `bun` it finds there.
+Bun ≥ 1.4.3 must be on your `PATH`: the npm package runs `src/cli.ts` with the `bun` it finds there.
 npm does not enforce that, so on an older Bun a command that would start a session fails with the
-error "bowser requires Bun >=1.4.2 (found <version>)" (exit 1).
+error "bowser requires Bun >=1.4.3 (found <version>)" (exit 1).
 
 bowser is distributed only through npm and from source; releases no longer attach binaries. If you
 used a release binary, run `bowser close --all` with it, delete it, then
