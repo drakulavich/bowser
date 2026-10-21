@@ -396,7 +396,8 @@ function navigationWatch(
     // One read at the end of the window, not a poll: each read is an
     // evaluate, and fewer of them means fewer chances to race the commit.
     if (landed !== before) return;
-    const seen = await count(timing.graceMs);
+    // A page busy right after the action answers late, not "no navigation" (#170).
+    const seen = await count(timing.settleMs);
     if (seen < 1) return;
     await follow(seen, timing.settleMs);
   };
