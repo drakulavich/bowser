@@ -15,5 +15,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["bun-types"]
   },
-  "include": ["src/**/*", "tests/**/*", "scripts/**/*"]
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "bench/**/*"]
 }

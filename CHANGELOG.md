@@ -7,6 +7,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- **An agent benchmark against playwright-cli.** `bench/` gives ten browser tasks to the same
+  Claude Code agent once with each tool and records tokens, cost, time and pass or fail;
+  `docs/benchmark.md` holds the results. On 2026-10-21 bowser used 413k tokens and $0.41 over
+  the ten tasks, playwright-cli 445k and $0.51, with all 30 runs passing for each. (#146)
 - **`markdown` prints the page as Markdown.** An agent that only reads a page paid for the whole
   aria tree: `snapshot` of a claude.ai artifact is 28k bytes, the artifact's own Markdown 20k, and
   on general pages a conversion is 17–37% of the snapshot. `markdown` returns the page's own
