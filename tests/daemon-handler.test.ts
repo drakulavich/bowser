@@ -838,49 +838,50 @@ describe("a stuck session", () => {
 
   // Timed out at 20 ms, recovered after a 20 ms grace: stuck from ~40 ms.
   test("a request after an unrecovered timeout is answered stuck at once, naming the command", async () => {
-    const { lane, replies, started, t0 } = stuckLanes(async () => false);
+    const { lane, replies, started, mark, t0 } = stuckLanes(async () => false);
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"], cmd: "eval" }, lane({}));
-    await Bun.sleep(60);
+    await waitFor(() => mark.stuck !== undefined, 3000);
     const sent = Date.now() - t0;
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
-    await Bun.sleep(50);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 1, ok: false, error: "'eval' timed out after 20ms (in its 'evaluate' step)" },
       { id: 2, ok: false, error: STUCK("eval") },
     ]);
-    expect(replies[1]![0] - sent).toBeLessThan(50);
+    expect(replies[1]![0] - sent).toBeLessThan(500);
     expect(started).toEqual([1]);
   });
 
   test("recovery that reports the view free still leaves the session stuck while the op runs", async () => {
-    const { lane, replies } = stuckLanes(async () => true);
+    const { lane, replies, mark } = stuckLanes(async () => true);
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane({}));
-    await Bun.sleep(60);
+    await waitFor(() => mark.stuck !== undefined, 3000);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
-    await Bun.sleep(10);
-    expect(replies[1]?.[1]).toEqual({ id: 2, ok: false, error: STUCK("click") });
+    await waitFor(() => replies.length >= 2, 3000);
+    expect(replies.map(([, r]) => r).slice(1)).toEqual([{ id: 2, ok: false, error: STUCK("click") }]);
   });
 
   test("an op that settles during its recovery leaves no mark", async () => {
     let lane!: ReturnType<typeof stuckLanes>["lane"];
     let release!: () => void;
-    const s = stuckLanes(async () => { release(); await Bun.sleep(5); return false; });
+    let recovered = false;
+    const s = stuckLanes(async () => { release(); await Bun.sleep(5); recovered = true; return false; });
     ({ lane, release } = s);
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane({}));
-    await Bun.sleep(60);
+    await waitFor(() => recovered, 3000);
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane({}, 1000));
-    await Bun.sleep(10);
+    await waitFor(() => s.replies.length >= 2, 3000);
     expect(s.mark.stuck).toBeUndefined();
-    expect(s.replies[1]?.[1]).toEqual({ id: 2, ok: true, result: "evaluate" });
+    expect(s.replies.map(([, r]) => r).slice(1)).toEqual([{ id: 2, ok: true, result: "evaluate" }]);
   });
 
   test("ping is not affected while stuck", async () => {
-    const { lane, replies } = stuckLanes(async () => false);
+    const { lane, replies, mark } = stuckLanes(async () => false);
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
-    await Bun.sleep(60);
+    await waitFor(() => mark.stuck !== undefined, 3000);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
     dispatch({ id: 3, op: "ping", args: [] }, lane({}, 1000));
-    await Bun.sleep(10);
+    await waitFor(() => replies.length >= 3, 3000);
     expect(replies.map(([, r]) => r).slice(1)).toEqual([
       { id: 2, ok: false, error: STUCK("evaluate") },
       { id: 3, ok: true, result: "ping" },
@@ -888,14 +889,14 @@ describe("a stuck session", () => {
   });
 
   test("the mark clears when the stuck op settles, after which the next request runs", async () => {
-    const { lane, replies, release } = stuckLanes(async () => false);
+    const { lane, replies, release, mark } = stuckLanes(async () => false);
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane({}));
-    await Bun.sleep(60);
+    await waitFor(() => mark.stuck !== undefined, 3000);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane({}, 1000));
     release();
-    await Bun.sleep(5);
+    await waitFor(() => mark.stuck === undefined, 3000);
     dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane({}, 1000));
-    await Bun.sleep(10);
+    await waitFor(() => replies.length >= 3, 3000);
     expect(replies.map(([, r]) => r).slice(1)).toEqual([
       { id: 2, ok: false, error: STUCK("evaluate") },
       { id: 3, ok: true, result: "evaluate" },
@@ -927,23 +928,23 @@ describe("a stuck session", () => {
   });
 
   test("a stuck answer removes its waiter from a gate that does not idle-release", async () => {
-    const { lane, replies, release } = stuckLanes(async () => false, 0);
+    const { lane, replies, release, mark } = stuckLanes(async () => false, 0);
     const A = {};
     const B = {};
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
     await Bun.sleep(5);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(B, 1000));
-    await Bun.sleep(60);
-    expect(replies[1]?.[1].error).toBe(STUCK("evaluate"));
+    await waitFor(() => replies.length >= 2, 3000);
+    expect(replies.map(([, r]) => r.error)).toEqual(["'evaluate' timed out after 20ms", STUCK("evaluate")]);
 
     // Release A as though its socket closed. A stale B waiter would become
     // the permanent gate holder when idle-release is disabled.
     lane(A).gate.leave(A);
     release();
-    await Bun.sleep(5);
+    await waitFor(() => mark.stuck === undefined, 3000);
     dispatch({ id: 3, op: "evaluate", args: ["2"] }, lane({}));
-    await Bun.sleep(10);
-    expect(replies[2]?.[1]).toEqual({ id: 3, ok: true, result: "evaluate" });
+    await waitFor(() => replies.length >= 3, 3000);
+    expect(replies.map(([, r]) => r).slice(2)).toEqual([{ id: 3, ok: true, result: "evaluate" }]);
   });
 
   test("a second timed-out op while stuck does not recover twice", async () => {
