@@ -30,6 +30,14 @@ const RELABEL = `<!doctype html><title>relabel</title>
 <button id="save">Save <span style="display:none">Delete</span></button>
 <button id="send">Send <b>now</b></button>`;
 
+const FORM = `<!doctype html><title>form</title>
+<form id="f"><input id="name" aria-label="Name"> <select id="color" aria-label="Color"><option>red</option><option>blue</option></select>
+<input id="agree" type="checkbox" aria-label="Agree"> <button>Submit</button></form>
+<p id="submitted"></p>
+<button id="hoverme" onmouseover="document.getElementById('hovered').textContent = 'hovered'">Hover me</button>
+<p id="hovered"></p>
+<script>f.onsubmit = (e) => { e.preventDefault(); document.getElementById("submitted").textContent = "submitted:" + document.getElementById("name").value; };</script>`;
+
 const stale = (ref: string) => `ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`;
 const gone = (ref: string) => `ref '${ref}' is from a page that is no longer loaded; take a new snapshot`;
 
@@ -57,7 +65,6 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     process.env.HOME = tmp;
     const pages: Record<string, string> = {
       "/todo-app.html": "todo-app.html",
-      "/kitchen-sink.html": "kitchen-sink.html",
     };
     server = Bun.serve({
       port: 0,
@@ -68,9 +75,8 @@ runOrSkip("e2e: a stale ref fails at once", () => {
         const doc = { "/doc-a": docPage("A", "/doc-b"), "/doc-b": docPage("B", "/doc-a"), "/doc-pending": docPage("A", "/doc-slow"), "/doc-slow": docPage("S", "/doc-a") }[path];
         if (path === "/doc-slow") await Bun.sleep(14_000);
         if (doc) return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8" } });
-        if (new URL(req.url).pathname === "/relabel.html") {
-          return new Response(RELABEL, { headers: { "content-type": "text/html; charset=utf-8" } });
-        }
+        const inline = { "/relabel.html": RELABEL, "/form.html": FORM }[path];
+        if (inline) return new Response(inline, { headers: { "content-type": "text/html; charset=utf-8" } });
         const file = pages[new URL(req.url).pathname];
         if (!file) return new Response("not found", { status: 404 });
         return new Response(Bun.file(join(FIXTURES, file)), {
@@ -139,10 +145,10 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   }, 60_000);
 
   test("after goto, a ref from the previous document fails with the message", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     const submit = await refNamed("Submit");
-    await cmdGoto(ctx, `${base}/kitchen-sink.html`);
+    await cmdGoto(ctx, `${base}/form.html`);
     const t0 = performance.now();
     await expect(cmdClick(ctx, submit)).rejects.toThrow(gone(submit));
     expect(performance.now() - t0).toBeLessThan(1000);
@@ -159,7 +165,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   }, 60_000);
 
   test("after reload, a ref from the previous document fails with the message", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     const name = await refNamed("Name");
     await cmdHistory(ctx, "reload");
@@ -172,7 +178,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   const OLD_STORE = "(window[Symbol.for('bowser.aria-refs')] = { refs: new WeakMap(), last: 5 }, 'planted')";
 
   test("snapshot on a page with a previous version's ref store works and continues its numbering", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdEval(ctx, OLD_STORE);
     await cmdSnapshot(ctx);
     const ids = (await loadState(ctx.session))!.refs.map((r) => Number(r.id.slice(1)));
@@ -181,10 +187,10 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   }, 60_000);
 
   test("an action on a page with a previous version's ref store is refused as from another page, exit 1", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     const submit = await refNamed("Submit");
-    await cmdGoto(ctx, `${base}/kitchen-sink.html`);
+    await cmdGoto(ctx, `${base}/form.html`);
     await cmdEval(ctx, OLD_STORE);
     await expect(cmdClick(ctx, submit)).rejects.toThrow(gone(submit));
     const p = Bun.spawn({
@@ -199,7 +205,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   }, 60_000);
 
   test("a hidden element is not stale: its ref keeps today's behaviour", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     const agree = await refNamed("Agree");
     const hover = await refNamed("Hover me");
@@ -246,7 +252,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   }, 60_000);
 
   test("refs from the current snapshot work for click, fill, hover, select, check and uncheck", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     await cmdFill(ctx, await refNamed("Name"), "ada");
     await cmdClick(ctx, await refNamed("Submit"));
@@ -308,10 +314,10 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   }, 60_000);
 
   test("#105: a ref is refused on a document whose own snapshot was never saved", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     const submit = await refNamed("Submit");
-    await cmdGoto(ctx, `${base}/kitchen-sink.html`);
+    await cmdGoto(ctx, `${base}/form.html`);
     // A snapshot whose evaluate ran in the page and whose save was lost.
     await cmdEval(ctx, SNAPSHOT_SCRIPT);
     await expect(cmdClick(ctx, submit)).rejects.toThrow(gone(submit));
@@ -319,7 +325,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   }, 60_000);
 
   test("#105: pushState and a hash change keep the document, so its refs still work", async () => {
-    await cmdOpen(ctx, `${base}/kitchen-sink.html`);
+    await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     const hover = await refNamed("Hover me");
     await cmdEval(ctx, "(history.pushState({}, '', '/other'), location.hash = 'x', location.href)");
