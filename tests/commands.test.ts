@@ -28,6 +28,7 @@ import {
   cmdSessionStorageList, cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
+import { killDaemons } from "./helpers/daemons.ts";
 import { longHome } from "./helpers/long-home.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 import { lineSocket } from "./helpers/fake-daemon.ts";
@@ -1374,8 +1375,7 @@ describe("actions refuse a ref of the wrong kind", () => {
       expect(code).toBe(1);
     } finally {
       // Without the guard the CLI spawns a real daemon; do not leave it running.
-      const pid = Number(await inHome(() => Bun.file(pidPath("kind")).text()).catch(() => ""));
-      if (pid > 0) try { process.kill(pid); } catch {}
+      await killDaemons("kind");
       await rm(home, { recursive: true, force: true });
     }
   });
@@ -2114,8 +2114,7 @@ describe("fill --stdin", () => {
       expect(code).toBe(1);
       expect(existsSync(await inHome(async () => pidPath("stdin")))).toBe(false);
     } finally {
-      const pid = Number(await inHome(() => Bun.file(pidPath("stdin")).text()).catch(() => ""));
-      if (pid > 0) try { process.kill(pid); } catch {}
+      await killDaemons("stdin");
       await rm(home, { recursive: true, force: true });
     }
   });
