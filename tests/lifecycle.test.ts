@@ -805,6 +805,31 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     }
   });
 
+  test("a restart prints its notice while another command holds the lock to check the daemon (#171)", async () => {
+    const session = "et29-checker";
+    const text = notice(session, "no page was open");
+    await ensureSessionDir(session);
+    const d = await fakeDaemon(session, daemonOf(pkg.version));
+    let calls = 0;
+    const connect = (s: string, o?: ConnectOptions) => {
+      if (++calls === 1) throw new OlderDaemon("old", "0.6.1");
+      return connectOrSpawn(s, o);
+    };
+    // The restart is done and its lock released; the second command claimed it.
+    const restart = async () => {
+      await Bun.write(msgOf(session), text);
+      await Bun.write(lockOf(session), String(process.ppid));
+      return true;
+    };
+    try {
+      const notices: string[] = [];
+      expect(await run(["eval", "1", "-s", session], { connect, restart, notices, acks: [] })).toBe("1");
+      expect(notices).toEqual([text]);
+    } finally {
+      d.stop();
+    }
+  });
+
   test("the CLI marks a notice delivered only once it has printed it (ET-29)", async () => {
     const session = "et29-cli";
     const text = notice(session, "no page was open");
