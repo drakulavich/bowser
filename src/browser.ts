@@ -217,17 +217,17 @@ function openKicker(): Kicker {
 /** `guard(p)` answers what `p` answered. Once guarded calls have been pending
  *  for afterMs without a break, it opens the kicker and kicks the host every
  *  KICK_MS until none is pending. Without `stalls` it is the identity. */
-function stallGuard(stalls: StallKick | undefined) {
+function stallGuard(stalls: StallKick | undefined, clock: Clock) {
   const afterMs = stalls?.afterMs ?? STALL_MS;
   let kicker: Kicker | undefined;
   let pending = 0;
   let since = 0;
-  let timer: ReturnType<typeof setInterval> | undefined;
+  let timer: unknown;
   let evaluating = false;
   let resizing = false;
   const kick = () => {
     if (!kicker) {
-      if (!stalls || Date.now() - since < afterMs) return;
+      if (!stalls || clock.now() - since < afterMs) return;
       try {
         kicker = stalls.open();
       } catch {
@@ -242,20 +242,24 @@ function stallGuard(stalls: StallKick | undefined) {
       kicker.resize(KICKER_SIZE, KICKER_SIZE).catch(() => {}).finally(() => { resizing = false; });
     }
   };
+  const tick = () => {
+    kick();
+    timer = clock.setTimeout(tick, KICK_MS);
+  };
   return {
     guard<T>(p: Promise<T>): Promise<T> {
       if (!stalls) return p;
       if (pending++ === 0) {
-        since = Date.now();
-        timer = setInterval(kick, KICK_MS);
+        since = clock.now();
+        timer = clock.setTimeout(tick, KICK_MS);
       }
       return p.finally(() => {
-        if (--pending === 0) clearInterval(timer);
+        if (--pending === 0) clock.clearTimeout(timer);
       });
     },
     get opened() { return kicker !== undefined; },
     close() {
-      clearInterval(timer);
+      clock.clearTimeout(timer);
       kicker?.close?.();
     },
   };
@@ -270,7 +274,7 @@ export interface NavTiming {
 }
 const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 
-/** What the navigation watch reads the time from and waits on. */
+/** What wrapView reads the time from and waits on. */
 export interface Clock {
   now(): number;
   setTimeout(fn: () => void, ms: number): unknown;
@@ -584,7 +588,7 @@ export function wrapView(
   clock: Clock = REAL_CLOCK,
 ): Browser {
   let navigated: () => void = () => {};
-  const stall = stallGuard(stalls);
+  const stall = stallGuard(stalls, clock);
   const { guard } = stall;
   // One evaluate at a time per view: WebKit throws ERR_INVALID_STATE for a
   // second while one is pending. The daemon's serializer runs one op at a

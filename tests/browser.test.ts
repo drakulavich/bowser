@@ -157,8 +157,6 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     };
     return k;
   }
-  const within = <T>(p: Promise<T>, ms: number) =>
-    Promise.race([p.then(() => "settled", () => "rejected"), Bun.sleep(ms).then(() => "pending")]);
   /** How wrapView gets the kicker: opened on demand, counted. */
   function lazy(k: ReturnType<typeof fakeKicker>, afterMs = 150) {
     const stalls = { opens: 0, afterMs, open: () => { stalls.opens++; return k; } };
@@ -168,16 +166,20 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   test("a navigate whose reply stalls settles", async () => {
     const host = fakeHost();
     const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
-    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)));
-    expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("settled");
+    const clock = manualClock();
+    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long"))).toBe(200);
     expect(b.url).toBe("data:text/html,long");
   });
 
   test("its failure still reaches the caller", async () => {
     const host = fakeHost();
     const v = fakeView({ navigate: () => new Promise<void>((_, no) => { host.message(); host.stall(() => no(new Error("nav failed"))); }) });
-    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)));
-    expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("rejected");
+    const clock = manualClock();
+    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
+    const nav = b.navigate("data:text/html,long");
+    expect(await clock.settledAt(nav)).toBe(200);
+    await expect(nav).rejects.toThrow("nav failed");
   });
 
   // The residual of a navigate-only kick: `state` reads location.href, which
@@ -185,9 +187,12 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   test("an evaluate whose reply stalls settles, with its result", async () => {
     const host = fakeHost();
     const v = fakeView({ evaluate: (expr) => new Promise((r) => { host.message(); host.stall(() => r(`long ${expr}`)); }) });
-    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)));
-    expect(await within(b.realUrl(), 1000)).toBe("settled");
-    expect(await b.evaluate("x")).toBe("long x");
+    const clock = manualClock();
+    const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
+    expect(await clock.fulfilledAt(b.realUrl())).toBe(200);
+    const ev = b.evaluate("x");
+    await clock.fulfilledAt(ev);
+    expect(await ev).toBe("long x");
   });
 
   test("a navigation an action started lands although its event stalls", async () => {
@@ -195,9 +200,8 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const v = fakeView({ click: async () => { host.message(); v.loading = true; host.stall(() => v.land("https://x/next")); } });
     const clock = manualClock();
     const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, lazy(fakeKicker(host)), clock);
-    const clicked = b.click("a");
-    await waitFor(() => b.url === "https://x/next", 3000);
-    expect(await clock.settledAt(clicked)).toBeLessThan(5000);
+    expect(await clock.fulfilledAt(b.click("a"))).toBeLessThan(5000);
+    expect(b.url).toBe("https://x/next");
   });
 
   test("a kick whose own reply stalls does not stop the kicking", async () => {
@@ -207,20 +211,22 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
       navigate: () => new Promise<void>((r) => { host.message(); host.stall(() => host.stall(r)); }),
     });
     const k = fakeKicker(host, { evaluate: true });
-    const b = wrapView(v, fast, undefined, 0, lazy(k));
-    expect(await within(b.navigate("data:text/html,long"), 1000)).toBe("settled");
+    const clock = manualClock();
+    const b = wrapView(v, fast, undefined, 0, lazy(k), clock);
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long"))).toBe(300);
     expect(k.calls).toContain("resize 1x1");
   });
 
   test("kicks only while a call is pending, and close closes the kicker", async () => {
     const host = fakeHost();
     const k = fakeKicker(host);
-    const b = wrapView(fakeView({ navigate: () => Bun.sleep(400) }), fast, undefined, 0, lazy(k));
-    await b.navigate("https://slow/");
+    const clock = manualClock();
+    const b = wrapView(fakeView({ navigate: () => new Promise<void>((r) => { clock.setTimeout(r, 400); }) }), fast, undefined, 0, lazy(k), clock);
+    await clock.fulfilledAt(b.navigate("https://slow/"));
     const kicks = k.calls.length;
     expect(kicks).toBeGreaterThan(0);
     // Negative check: no kick once nothing is pending.
-    await Bun.sleep(250);
+    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 250); }));
     expect(k.calls.length).toBe(kicks);
     await b.close();
     expect(k.closed).toBe(true);
@@ -231,14 +237,15 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   test("calls that answer within afterMs open no kicker", async () => {
     const host = fakeHost();
     const stalls = lazy(fakeKicker(host));
-    const v = fakeView({ navigate: async (url) => { await Bun.sleep(50); v.land(url); } });
-    const b = wrapView(v, fast, undefined, 0, stalls);
-    await b.navigate("https://x/a");
-    await b.evaluate("1");
-    await b.click("a");
-    await b.screenshot().catch(() => {});
+    const clock = manualClock();
+    const v = fakeView({ navigate: async (url) => { await new Promise<void>((r) => { clock.setTimeout(r, 50); }); v.land(url); } });
+    const b = wrapView(v, fast, undefined, 0, stalls, clock);
+    await clock.fulfilledAt(b.navigate("https://x/a"));
+    await clock.fulfilledAt(b.evaluate("1"));
+    await clock.fulfilledAt(b.click("a"));
+    await clock.settledAt(b.screenshot().catch(() => {}));
     // Negative check: no kicker opens after afterMs has passed.
-    await Bun.sleep(300);
+    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 300); }));
     await b.close();
     expect(stalls.opens).toBe(0);
     expect(b.kickerOpened).toBe(false);
@@ -249,14 +256,12 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const k = fakeKicker(host);
     const stalls = lazy(k, 300);
     const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
-    const b = wrapView(v, fast, undefined, 0, stalls);
-    const first = b.navigate("data:text/html,long-1");
-    // Negative check: no kicker before afterMs.
-    await Bun.sleep(200);
-    expect(stalls.opens).toBe(0);
-    expect(await within(first, 1000)).toBe("settled");
+    const clock = manualClock();
+    const b = wrapView(v, fast, undefined, 0, stalls, clock);
+    // Settling at 300, not at the first kick (100), is the check that no kicker opens before afterMs.
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long-1"))).toBe(300);
     expect(b.kickerOpened).toBe(true);
-    expect(await within(b.navigate("data:text/html,long-2"), 1000)).toBe("settled");
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long-2"))).toBe(400);
     expect(stalls.opens).toBe(1);
     expect(k.closed).toBe(false);
     await b.close();
@@ -297,18 +302,15 @@ describe("wrapView navigation watch", () => {
     const v = fakeView();
     v.press = async (k) => { v.calls.push(["press", [k]]); clock.setTimeout(() => v.land("https://x/submitted"), 10); };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.press("Enter"));
+    await clock.fulfilledAt(b.press("Enter"));
     expect(b.url).toBe("https://x/submitted");
   });
 
   test("a bare named key goes as its macOS character, which WebKit takes as a key event (F11, #168)", async () => {
     const v = fakeView();
-    const b = wrapView(v, fast);
-    await b.press("Tab");
-    await b.press("Enter");
-    await b.press("ArrowDown");
-    await b.press("Escape");
-    await b.press("t");
+    const clock = manualClock();
+    const b = onClock(v, fast, clock);
+    for (const key of ["Tab", "Enter", "ArrowDown", "Escape", "t"]) await clock.fulfilledAt(b.press(key));
     expect(v.calls.filter(([op]) => op === "press")).toEqual([
       ["press", ["\t"]], ["press", ["\r"]], ["press", ["\uF701"]], ["press", ["Escape"]], ["press", ["t"]],
     ]);
@@ -317,9 +319,10 @@ describe("wrapView navigation watch", () => {
   // #55: WebKit gets a modifier with the key, and Tab stays the tab character.
   test("press with modifiers passes them to the view", async () => {
     const v = fakeView();
-    const b = wrapView(v, fast);
-    await b.press("Tab", ["Shift"]);
-    await b.press("ArrowLeft", ["Meta"]);
+    const clock = manualClock();
+    const b = onClock(v, fast, clock);
+    await clock.fulfilledAt(b.press("Tab", ["Shift"]));
+    await clock.fulfilledAt(b.press("ArrowLeft", ["Meta"]));
     expect(v.calls.filter(([op]) => op === "press")).toEqual([
       ["press", ["\t", { modifiers: ["Shift"] }]],
       ["press", ["ArrowLeft", { modifiers: ["Meta"] }]],
@@ -337,8 +340,8 @@ describe("wrapView navigation watch", () => {
   ] as const) {
     test(`${mods.join("+")}+${key} runs ${command} after the key, when the page let the keydown through`, async () => {
       const v = fakeView();
-      const b = wrapView(v, fast);
-      await b.press(key, [...mods]);
+      const clock = manualClock();
+      await clock.fulfilledAt(onClock(v, fast, clock).press(key, [...mods]));
       const seen = v.calls.filter(([op, args]) => op === "press" || (op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT));
       expect(seen).toEqual([
         ["evaluate", [KEY_WATCH]],
@@ -350,10 +353,11 @@ describe("wrapView navigation watch", () => {
 
   test("other combinations run no command: Control+a, Shift+Meta+a, Meta+c", async () => {
     const v = fakeView();
-    const b = wrapView(v, fast);
-    await b.press("a", ["Control"]);
-    await b.press("a", ["Shift", "Meta"]);
-    await b.press("c", ["Meta"]);
+    const clock = manualClock();
+    const b = onClock(v, fast, clock);
+    await clock.fulfilledAt(b.press("a", ["Control"]));
+    await clock.fulfilledAt(b.press("a", ["Shift", "Meta"]));
+    await clock.fulfilledAt(b.press("c", ["Meta"]));
     expect(v.calls.filter(([op, args]) => op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT)).toEqual([]);
   });
 
@@ -362,7 +366,7 @@ describe("wrapView navigation watch", () => {
     const clock = manualClock();
     v.press = async (k) => { v.calls.push(["press", [k]]); clock.setTimeout(() => v.land("https://x/next"), 10); };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.press("Tab"));
+    await clock.fulfilledAt(b.press("Tab"));
     expect(b.url).toBe("https://x/next");
   });
 
@@ -845,23 +849,26 @@ describe("a navigation a previous command left pending", () => {
     expect(v.url).toBe("https://x/answered");
   });
 
-  test("every ACTS op waits; evaluate and the navigating ops do not", async () => {
-    for (const op of ACTS) {
+  for (const op of ACTS) {
+    test(`${op} waits for a pending navigation, as every ACTS op does`, async () => {
       const v = submitted();
       const handle = createHandler(wrapView(v, slow));
       await handle({ id: 1, op: "click", args: ["#send"] });
       const res = await handle({ id: 2, op, args: ACT_ARGS[op] ?? [] }, Date.now() + 30);
-      expect([op, res.error]).toEqual([op, stillLoading("https://x/never")]);
-    }
-    for (const op of ["evaluate", "reload", "back", "navigate"] as const) {
+      expect(res.error).toBe(stillLoading("https://x/never"));
+    });
+  }
+
+  for (const op of ["evaluate", "reload", "back", "navigate"] as const) {
+    test(`${op} does not wait for a pending navigation`, async () => {
       const v = submitted();
       v.reload = async () => { setTimeout(() => v.land(v.url), 5); };
       const handle = createHandler(wrapView(v, slow));
       await handle({ id: 1, op: "click", args: ["#send"] });
       const res = await handle({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, Date.now() + 30);
-      expect([op, res.error]).toEqual([op, undefined]);
-    }
-  });
+      expect(res.error).toBeUndefined();
+    });
+  }
 });
 
 describe("wrapView interrupt", () => {
@@ -1092,7 +1099,7 @@ describe("wrapView watchNavigation", () => {
     v.click = async () => { v.loading = true; clock.setTimeout(() => { seen.push("landed"); v.land("https://x/2"); }, 60); };
     const b = onClock(v, { graceMs: 40, settleMs: 300 }, clock);
     b.watchNavigation(() => seen.push("navigation"));
-    await clock.settledAt(b.click("a"));
+    await clock.fulfilledAt(b.click("a"));
     expect(seen).toEqual(["navigation", "landed", "navigation"]);
   });
 });
