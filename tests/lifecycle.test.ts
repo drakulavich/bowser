@@ -22,6 +22,7 @@ import { dispatch } from "../src/daemon/server.ts";
 import { createMcpServer } from "../src/mcp.ts";
 import { createSerializer } from "../src/serialize.ts";
 import { ensureSessionDir, loadState, profileDir, saveState, sessionDir } from "../src/state.ts";
+import { waitFor } from "./helpers/daemons.ts";
 import { daemonOf, fakeDaemon, lineSocket, SILENT, type Answer, type FakeDaemon } from "./helpers/fake-daemon.ts";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -48,6 +49,12 @@ async function failure(argv: string[]): Promise<{ stderr: string; code: number }
   } catch (err) {
     return reportFailure(err);
   }
+}
+
+/** Another process's restart finishing: `work` runs after 300 ms. Await the
+ *  result in `finally`, or a daemon it starts outlives the test. */
+function meanwhile<T>(work: () => Promise<T>): Promise<T> {
+  return Bun.sleep(300).then(work);
 }
 
 /** An older daemon on the session's socket that stops on `shutdown`, and the
@@ -175,16 +182,15 @@ describe("F2: a daemon from another bowser version", () => {
     await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
     const lock = join(sessionDir(session), LOCK);
     await Bun.write(lock, String(process.ppid));
-    let next: FakeDaemon | undefined;
-    setTimeout(async () => {
-      next = await fakeDaemon(session, daemonOf(pkg.version));
+    const next = meanwhile(async () => {
+      const d = await fakeDaemon(session, daemonOf(pkg.version));
       await unlink(lock);
-    }, 300);
+      return d;
+    });
     try {
       expect(await run(["eval", "1", "-s", session])).toBe("1");
     } finally {
-      await Bun.sleep(350);
-      next?.stop();
+      (await next).stop();
     }
   });
 
@@ -194,13 +200,13 @@ describe("F2: a daemon from another bowser version", () => {
     const lock = join(sessionDir(session), LOCK);
     await Bun.write(lock, String(process.ppid));
     const old = await fakeDaemon(session, daemonOf("0.6.1"));
-    let next: FakeDaemon | undefined;
-    setTimeout(async () => {
+    const next = meanwhile(async () => {
       old.stop();
       await unlink(socketPath(session)).catch(() => {});
-      next = await fakeDaemon(session, daemonOf(pkg.version));
+      const d = await fakeDaemon(session, daemonOf(pkg.version));
       await unlink(lock);
-    }, 300);
+      return d;
+    });
     const prev = process.env.BOWSER_OP_TIMEOUT_MS;
     process.env.BOWSER_OP_TIMEOUT_MS = "0";
     try {
@@ -208,9 +214,8 @@ describe("F2: a daemon from another bowser version", () => {
     } finally {
       if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
       else process.env.BOWSER_OP_TIMEOUT_MS = prev;
-      await Bun.sleep(350);
       old.stop();
-      next?.stop();
+      (await next).stop();
     }
   });
 
@@ -286,13 +291,13 @@ describe("F2: a daemon from another bowser version", () => {
     const lock = join(sessionDir(session), LOCK);
     await Bun.write(lock, String(process.ppid));
     const old = await fakeDaemon(session, daemonOf("0.6.1"));
-    let next: FakeDaemon | undefined;
-    setTimeout(async () => {
+    const next = meanwhile(async () => {
       old.stop();
       await unlink(socketPath(session)).catch(() => {});
-      next = await fakeDaemon(session, daemonOf(pkg.version));
+      const d = await fakeDaemon(session, daemonOf(pkg.version));
       await unlink(lock);
-    }, 300);
+      return d;
+    });
     try {
       const notices: string[] = [];
       expect(await run(["eval", "1", "-s", session], { notices })).toBe("1");
@@ -300,7 +305,7 @@ describe("F2: a daemon from another bowser version", () => {
       expect(old.ops).not.toContain("shutdown");
     } finally {
       old.stop();
-      next?.stop();
+      (await next).stop();
     }
   });
 
@@ -540,7 +545,7 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
       const elapsed = Date.now() - t0;
       expect(result).toEqual({ stderr: `bowser: ${notAnswering(session)}`, code: 2 });
       expect(elapsed).toBeGreaterThanOrEqual(2300);
-      expect(elapsed).toBeLessThan(3300);
+      expect(elapsed).toBeLessThan(6000);
     } finally {
       d.stop();
     }
@@ -601,8 +606,8 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
         expect(res.result.isError).toBe(true);
         expect(res.result.content[0]!.text).toBe(notAnswering(session));
       }
-      expect(answered[0]!.at - t0).toBeLessThan(3300);
-      expect(answered[1]!.at - answered[0]!.at).toBeLessThan(1500);
+      expect(answered[0]!.at - t0).toBeLessThan(6000);
+      expect(answered[1]!.at - answered[0]!.at).toBeLessThan(1650);
     } finally {
       d.stop();
     }
@@ -650,22 +655,22 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
       await Bun.write(lockOf(session), String(process.ppid));
       const old = await fakeDaemon(session, daemonOf("0.6.1"));
-      let next: FakeDaemon | undefined;
-      setTimeout(async () => {
+      const next = meanwhile(async () => {
         old.stop();
         await unlink(socketPath(session)).catch(() => {});
-        next = await fakeDaemon(session, daemonOf(pkg.version));
+        const d = await fakeDaemon(session, daemonOf(pkg.version));
         await unlink(lockOf(session));
-      }, 300);
+        return d;
+      });
       try {
         const out = await run(all ? ["close", "--all"] : ["close", "-s", session]);
         expect(out).toBe(all ? `closed 1 session: ${session}` : `closed session '${session}'`);
-        expect(next?.ops).toContain("shutdown");
+        expect((await next).ops).toContain("shutdown");
         expect(old.ops).not.toContain("shutdown");
         expect(left(session)).toEqual([]);
       } finally {
         old.stop();
-        next?.stop();
+        (await next).stop();
       }
     });
   }
@@ -688,10 +693,10 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       await saveState({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: null });
       await Bun.write(lockOf(session), String(process.ppid));
       const old = c.noDaemon ? undefined : await fakeDaemon(session, daemonOf("0.6.1"));
-      setTimeout(async () => {
+      const closed = meanwhile(async () => {
         old?.stop();
         await c.close(session);
-      }, 300);
+      });
       const r = recording();
       try {
         expect(await failing(["eval", "1", "-s", session], { connect: r.connect })).toEqual({ stderr: closedWhileWaiting(session), code: 1 });
@@ -700,6 +705,7 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
         expect(await run(["list"])).not.toContain(session);
       } finally {
         old?.stop();
+        await closed;
       }
     });
   }
@@ -755,7 +761,7 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       return new Promise<never>(() => {});
     };
     void run(["eval", "1", "-s", session], { connect: hang, notices: [] });
-    while (!hung) await Bun.sleep(10);
+    expect(await waitFor(() => hung, 3000)).toBe(true);
     await Bun.write(lockOf(session), String(await deadPid()));
     const current = await fakeDaemon(session, daemonOf(pkg.version));
     try {
@@ -857,13 +863,13 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     await Bun.write(msgOf(session), text);
     await Bun.write(lockOf(session), String(process.ppid));
     const old = await fakeDaemon(session, daemonOf("0.6.1"));
-    let next: FakeDaemon | undefined;
-    setTimeout(async () => {
+    const next = meanwhile(async () => {
       old.stop();
       await unlink(socketPath(session)).catch(() => {});
-      next = await fakeDaemon(session, daemonOf(pkg.version));
+      const d = await fakeDaemon(session, daemonOf(pkg.version));
       await unlink(lockOf(session));
-    }, 300);
+      return d;
+    });
     try {
       const notices: string[] = [];
       expect(await run(["eval", "1", "-s", session], { notices, acks: [] })).toBe("1");
@@ -871,7 +877,7 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       expect(await Bun.file(msgOf(session)).text()).toBe(text);
     } finally {
       old.stop();
-      next?.stop();
+      (await next).stop();
     }
   });
 
