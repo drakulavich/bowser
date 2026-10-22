@@ -168,7 +168,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
-    expect(await clock.settledAt(b.navigate("data:text/html,long"))).toBe(200);
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long"))).toBe(200);
     expect(b.url).toBe("data:text/html,long");
   });
 
@@ -189,9 +189,9 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const v = fakeView({ evaluate: (expr) => new Promise((r) => { host.message(); host.stall(() => r(`long ${expr}`)); }) });
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
-    expect(await clock.settledAt(b.realUrl())).toBe(200);
+    expect(await clock.fulfilledAt(b.realUrl())).toBe(200);
     const ev = b.evaluate("x");
-    await clock.settledAt(ev);
+    await clock.fulfilledAt(ev);
     expect(await ev).toBe("long x");
   });
 
@@ -200,7 +200,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const v = fakeView({ click: async () => { host.message(); v.loading = true; host.stall(() => v.land("https://x/next")); } });
     const clock = manualClock();
     const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, lazy(fakeKicker(host)), clock);
-    expect(await clock.settledAt(b.click("a"))).toBeLessThan(5000);
+    expect(await clock.fulfilledAt(b.click("a"))).toBeLessThan(5000);
     expect(b.url).toBe("https://x/next");
   });
 
@@ -213,7 +213,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const k = fakeKicker(host, { evaluate: true });
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, lazy(k), clock);
-    expect(await clock.settledAt(b.navigate("data:text/html,long"))).toBe(300);
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long"))).toBe(300);
     expect(k.calls).toContain("resize 1x1");
   });
 
@@ -222,7 +222,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const k = fakeKicker(host);
     const clock = manualClock();
     const b = wrapView(fakeView({ navigate: () => new Promise<void>((r) => { clock.setTimeout(r, 400); }) }), fast, undefined, 0, lazy(k), clock);
-    await clock.settledAt(b.navigate("https://slow/"));
+    await clock.fulfilledAt(b.navigate("https://slow/"));
     const kicks = k.calls.length;
     expect(kicks).toBeGreaterThan(0);
     // Negative check: no kick once nothing is pending.
@@ -240,9 +240,9 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const clock = manualClock();
     const v = fakeView({ navigate: async (url) => { await new Promise<void>((r) => { clock.setTimeout(r, 50); }); v.land(url); } });
     const b = wrapView(v, fast, undefined, 0, stalls, clock);
-    await clock.settledAt(b.navigate("https://x/a"));
-    await clock.settledAt(b.evaluate("1"));
-    await clock.settledAt(b.click("a"));
+    await clock.fulfilledAt(b.navigate("https://x/a"));
+    await clock.fulfilledAt(b.evaluate("1"));
+    await clock.fulfilledAt(b.click("a"));
     await clock.settledAt(b.screenshot().catch(() => {}));
     // Negative check: no kicker opens after afterMs has passed.
     await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 300); }));
@@ -259,9 +259,9 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, stalls, clock);
     // Settling at 300, not at the first kick (100), is the check that no kicker opens before afterMs.
-    expect(await clock.settledAt(b.navigate("data:text/html,long-1"))).toBe(300);
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long-1"))).toBe(300);
     expect(b.kickerOpened).toBe(true);
-    expect(await clock.settledAt(b.navigate("data:text/html,long-2"))).toBe(400);
+    expect(await clock.fulfilledAt(b.navigate("data:text/html,long-2"))).toBe(400);
     expect(stalls.opens).toBe(1);
     expect(k.closed).toBe(false);
     await b.close();
@@ -302,7 +302,7 @@ describe("wrapView navigation watch", () => {
     const v = fakeView();
     v.press = async (k) => { v.calls.push(["press", [k]]); clock.setTimeout(() => v.land("https://x/submitted"), 10); };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.press("Enter"));
+    await clock.fulfilledAt(b.press("Enter"));
     expect(b.url).toBe("https://x/submitted");
   });
 
@@ -310,7 +310,7 @@ describe("wrapView navigation watch", () => {
     const v = fakeView();
     const clock = manualClock();
     const b = onClock(v, fast, clock);
-    for (const key of ["Tab", "Enter", "ArrowDown", "Escape", "t"]) await clock.settledAt(b.press(key));
+    for (const key of ["Tab", "Enter", "ArrowDown", "Escape", "t"]) await clock.fulfilledAt(b.press(key));
     expect(v.calls.filter(([op]) => op === "press")).toEqual([
       ["press", ["\t"]], ["press", ["\r"]], ["press", ["\uF701"]], ["press", ["Escape"]], ["press", ["t"]],
     ]);
@@ -321,8 +321,8 @@ describe("wrapView navigation watch", () => {
     const v = fakeView();
     const clock = manualClock();
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.press("Tab", ["Shift"]));
-    await clock.settledAt(b.press("ArrowLeft", ["Meta"]));
+    await clock.fulfilledAt(b.press("Tab", ["Shift"]));
+    await clock.fulfilledAt(b.press("ArrowLeft", ["Meta"]));
     expect(v.calls.filter(([op]) => op === "press")).toEqual([
       ["press", ["\t", { modifiers: ["Shift"] }]],
       ["press", ["ArrowLeft", { modifiers: ["Meta"] }]],
@@ -341,7 +341,7 @@ describe("wrapView navigation watch", () => {
     test(`${mods.join("+")}+${key} runs ${command} after the key, when the page let the keydown through`, async () => {
       const v = fakeView();
       const clock = manualClock();
-      await clock.settledAt(onClock(v, fast, clock).press(key, [...mods]));
+      await clock.fulfilledAt(onClock(v, fast, clock).press(key, [...mods]));
       const seen = v.calls.filter(([op, args]) => op === "press" || (op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT));
       expect(seen).toEqual([
         ["evaluate", [KEY_WATCH]],
@@ -355,9 +355,9 @@ describe("wrapView navigation watch", () => {
     const v = fakeView();
     const clock = manualClock();
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.press("a", ["Control"]));
-    await clock.settledAt(b.press("a", ["Shift", "Meta"]));
-    await clock.settledAt(b.press("c", ["Meta"]));
+    await clock.fulfilledAt(b.press("a", ["Control"]));
+    await clock.fulfilledAt(b.press("a", ["Shift", "Meta"]));
+    await clock.fulfilledAt(b.press("c", ["Meta"]));
     expect(v.calls.filter(([op, args]) => op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT)).toEqual([]);
   });
 
@@ -366,7 +366,7 @@ describe("wrapView navigation watch", () => {
     const clock = manualClock();
     v.press = async (k) => { v.calls.push(["press", [k]]); clock.setTimeout(() => v.land("https://x/next"), 10); };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.press("Tab"));
+    await clock.fulfilledAt(b.press("Tab"));
     expect(b.url).toBe("https://x/next");
   });
 
@@ -1099,7 +1099,7 @@ describe("wrapView watchNavigation", () => {
     v.click = async () => { v.loading = true; clock.setTimeout(() => { seen.push("landed"); v.land("https://x/2"); }, 60); };
     const b = onClock(v, { graceMs: 40, settleMs: 300 }, clock);
     b.watchNavigation(() => seen.push("navigation"));
-    await clock.settledAt(b.click("a"));
+    await clock.fulfilledAt(b.click("a"));
     expect(seen).toEqual(["navigation", "landed", "navigation"]);
   });
 });

@@ -28,5 +28,11 @@ export function manualClock() {
         t.fn();
       }
     },
+    /** As settledAt, but a rejected `p` fails the caller. */
+    async fulfilledAt(p: Promise<unknown>, capMs?: number): Promise<number> {
+      const at = await this.settledAt(p, capMs);
+      await p;
+      return at;
+    },
   };
 }
