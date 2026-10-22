@@ -64,7 +64,9 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
           return html(`<title>Cart</title><button onclick="${add}">Add</button>
             <button onclick="${add} const t = Date.now(); while (Date.now() - t < 1000);">Slow add</button>`);
         }
-        return html(`<title>Home</title><a href="/never">Never</a> <a href="/slow">Slow</a>`);
+        // "Never, busy": the page's script runs for 300 ms right after the click (#170).
+        return html(`<title>Home</title><a href="/never">Never</a> <a href="/slow">Slow</a>
+          <a href="/never" onclick="setTimeout(() => { const t = Date.now(); while (Date.now() - t < 300); })">Never, busy</a>`);
       },
     });
     base = server.url.toString().replace(/\/$/, "");
@@ -128,8 +130,7 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
       const link = refOf(await ok(s, ["snapshot"], budget), "link", "Never");
 
       const click = await run(s, ["click", link], budget);
-      expect(click.code).toBe(2);
-      expect(click.err).toContain(`'click' timed out after ${budget}ms`);
+      expect(click).toMatchObject({ code: 2, err: expect.stringContaining(`'click' timed out after ${budget}ms`) });
 
       const next = await run(s, ["eval", "location.href + ' ' + (window.before ?? 'reloaded')"], budget);
       expect(next.ms).toBeLessThan(budget + 500);
@@ -139,6 +140,16 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
       await closesFast(s);
     }
   }, 120_000);
+
+  test("#170: a click to a server that never answers times out even when the page is busy right after it", async () => {
+    const budget = 3000;
+    const s = session("busy-nav");
+    await ok(s, ["open", `${base}/`], budget);
+    const link = refOf(await ok(s, ["snapshot"], budget), "link", "Never, busy");
+    const click = await run(s, ["click", link], budget);
+    expect(click).toMatchObject({ code: 2, err: expect.stringContaining(`'click' timed out after ${budget}ms`) });
+    await closesFast(s);
+  }, 60_000);
 
   // The page cannot resolve the promise itself: the reload replaced its
   // document, and a timer there never fires. WebKit frees the evaluate ~4 s

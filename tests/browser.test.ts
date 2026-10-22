@@ -493,7 +493,7 @@ describe("wrapView navigation watch", () => {
         log.push(`start ${expr === NAV_COUNT ? "count" : expr === NAV_ARM ? "arm" : expr}`);
         pending = true;
         try {
-          if (expr === NAV_COUNT) { await Bun.sleep(300); return 0; }
+          if (expr === NAV_COUNT) { await Bun.sleep(400); return 0; }
           return expr === "1" ? 1 : undefined;
         } finally {
           pending = false;
@@ -501,11 +501,11 @@ describe("wrapView navigation watch", () => {
         }
       },
     });
-    const b = wrapView(v, { graceMs: 100, settleMs: 1000 });
+    const b = wrapView(v, { graceMs: 100, settleMs: 150 });
     const t0 = Date.now();
     await b.click("#btn");
-    // act stopped waiting for the slow read at its 100 ms bound.
-    expect(Date.now() - t0).toBeLessThan(290);
+    // act stopped waiting for the slow read at its settleMs bound, after the grace.
+    expect(Date.now() - t0).toBeLessThan(390);
     expect(await b.evaluate("1")).toBe(1);
     expect(log).toEqual(["start arm", "end arm", "start count", "end count", "start 1", "end 1"]);
   });
