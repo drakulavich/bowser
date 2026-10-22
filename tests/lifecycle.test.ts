@@ -429,21 +429,30 @@ describe("F3: close of a silent daemon with no pidfile", () => {
 });
 
 describe("F32: list", () => {
-  /** `bowser list` as its own process: its stdout and wall time. */
-  async function timedList(): Promise<{ out: string; ms: number }> {
+  /** `bowser list` as its own process under `home`: its stdout, its wall
+   *  time, and how long it lived after its last output. */
+  async function timedList(home = tmp): Promise<{ out: string; ms: number; afterOutput: number }> {
     const started = performance.now();
-    const proc = Bun.spawn([process.execPath, CLI, "list"], { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" });
-    const [out] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return { out, ms: performance.now() - started };
+    const proc = Bun.spawn([process.execPath, CLI, "list"], { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
+    let out = "";
+    let printed = started;
+    const decoder = new TextDecoder();
+    for await (const chunk of proc.stdout) {
+      out += decoder.decode(chunk);
+      printed = performance.now();
+    }
+    await proc.exited;
+    const exited = performance.now();
+    return { out, ms: exited - started, afterOutput: exited - printed };
   }
 
   test("with a live session, exits as soon as it has printed", async () => {
     const d = await fakeDaemon("live32", daemonOf(pkg.version));
     try {
-      await timedList(); // warm the module cache
-      const { out, ms } = await timedList();
+      const { out, afterOutput } = await timedList();
       expect(out.split("\n")).toContain("live32");
-      expect(ms).toBeLessThan(500);
+      // Right: about 0 ms; wrong: a 1000 ms timer left pending after the print.
+      expect(afterOutput).toBeLessThan(500);
     } finally {
       d.stop();
       await rm(sessionDir("live32"), { recursive: true, force: true });
@@ -453,9 +462,11 @@ describe("F32: list", () => {
   test("a daemon that never answers is not listed, within the probe bound", async () => {
     const d = await fakeDaemon("mute32", () => SILENT);
     try {
-      const { out, ms } = await timedList();
-      expect(out.split("\n")).not.toContain("mute32");
-      expect(ms).toBeLessThan(1800);
+      // Concurrent, so both pay the same startup under load.
+      const [mute, empty] = await Promise.all([timedList(), timedList(await mkdtemp(join(tmp, "empty32-")))]);
+      expect(mute.out.split("\n")).not.toContain("mute32");
+      // Right: one HEALTH_PING_MS (1000) over an empty list; wrong: a second probe, 2000.
+      expect(mute.ms - empty.ms).toBeLessThan(1500);
     } finally {
       d.stop();
       await rm(sessionDir("mute32"), { recursive: true, force: true });
