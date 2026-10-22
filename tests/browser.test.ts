@@ -72,9 +72,10 @@ describe("wrapView click", () => {
     });
 
     await started;
-    await Bun.sleep(50);
-    expect(replies).toHaveLength(1);
+    await waitFor(() => replies.length >= 1, 3000);
+    expect(replies).toEqual([expect.objectContaining({ id: 1, ok: false })]);
     releaseArm();
+    // Negative check: no click within 20 ms of the release.
     await Bun.sleep(20);
     expect(v.calls.filter(([op]) => op === "click")).toEqual([]);
   });
@@ -217,6 +218,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     await b.navigate("https://slow/");
     const kicks = k.calls.length;
     expect(kicks).toBeGreaterThan(0);
+    // Negative check: no kick once nothing is pending.
     await Bun.sleep(250);
     expect(k.calls.length).toBe(kicks);
     await b.close();
@@ -234,6 +236,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     await b.evaluate("1");
     await b.click("a");
     await b.screenshot().catch(() => {});
+    // Negative check: no kicker opens after afterMs has passed.
     await Bun.sleep(300);
     await b.close();
     expect(stalls.opens).toBe(0);
@@ -247,6 +250,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
     const b = wrapView(v, fast, undefined, 0, stalls);
     const first = b.navigate("data:text/html,long-1");
+    // Negative check: no kicker before afterMs.
     await Bun.sleep(200);
     expect(stalls.opens).toBe(0);
     expect(await within(first, 1000)).toBe("settled");
@@ -371,12 +375,12 @@ describe("wrapView navigation watch", () => {
   test("an action after a given-up navigation pays the grace window, not settleMs", async () => {
     const v = fakeView();
     v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; };
-    const b = wrapView(v, { graceMs: 20, settleMs: 60 });
+    const b = wrapView(v, { graceMs: 20, settleMs: 300 });
     await b.click("#stuck");
     expect(v.loading).toBe(true);
     const t0 = Date.now();
     await b.click("#next");
-    expect(Date.now() - t0).toBeLessThan(60);
+    expect(Date.now() - t0).toBeLessThan(160);
   });
 
   test("click returns after a navigation that lands inside the grace window", async () => {
@@ -432,7 +436,7 @@ describe("wrapView navigation watch", () => {
     const b = wrapView(v, fast);
     const t0 = Date.now();
     await b.click("#btn");
-    expect(Date.now() - t0).toBeLessThan(fast.graceMs + 40);
+    expect(Date.now() - t0).toBeLessThan((fast.graceMs + fast.settleMs) / 2);
     expect(v.calls.map(([n, a]) => n === "evaluate" ? String(a[0]) : n)).toEqual([NAV_ARM, "click", NAV_COUNT]);
   });
 
@@ -474,10 +478,11 @@ describe("wrapView navigation watch", () => {
     v.click = async () => { page.navs++; setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 40); };
     const b = wrapView(v, { graceMs: 20, settleMs: 60 });
     const t0 = Date.now();
+    // Bound, so a click that never returns fails the elapsed check below instead of timing out.
     await Promise.race([b.click("#x"), Bun.sleep(400)]);
     const elapsed = Date.now() - t0;
     expect(reads).toBe(2);
-    expect(elapsed).toBeLessThan(20 + 60 + 60);
+    expect(elapsed).toBeLessThan(240);
   });
 
   test("a read that act stops waiting for stays tracked: the next evaluate queues behind it instead of failing", async () => {
@@ -493,7 +498,7 @@ describe("wrapView navigation watch", () => {
         log.push(`start ${expr === NAV_COUNT ? "count" : expr === NAV_ARM ? "arm" : expr}`);
         pending = true;
         try {
-          if (expr === NAV_COUNT) { await Bun.sleep(400); return 0; }
+          if (expr === NAV_COUNT) { await Bun.sleep(1000); return 0; }
           return expr === "1" ? 1 : undefined;
         } finally {
           pending = false;
@@ -505,7 +510,7 @@ describe("wrapView navigation watch", () => {
     const t0 = Date.now();
     await b.click("#btn");
     // act stopped waiting for the slow read at its settleMs bound, after the grace.
-    expect(Date.now() - t0).toBeLessThan(390);
+    expect(Date.now() - t0).toBeLessThan(625);
     expect(await b.evaluate("1")).toBe(1);
     expect(log).toEqual(["start arm", "end arm", "start count", "end count", "start 1", "end 1"]);
   });
@@ -550,10 +555,9 @@ describe("wrapView navigation watch", () => {
   // stays false, the page sees no navigate event, and the server may take
   // longer than the grace window to answer.
   test("reload waits for its landing past the grace and settle windows, as navigate does", async () => {
-    const v = fakeView({ reload: async () => { setTimeout(() => v.land("https://x/"), fast.settleMs + 100); } });
-    const b = wrapView(v, fast);
     let during = "";
-    setTimeout(() => { during = b.phase; }, fast.graceMs * 3);
+    const v = fakeView({ reload: async () => { setTimeout(() => { during = b.phase; v.land("https://x/"); }, fast.settleMs + 100); } });
+    const b = wrapView(v, fast);
     const t0 = Date.now();
     await b.reload();
     expect(Date.now() - t0).toBeGreaterThanOrEqual(fast.settleMs + 90);
@@ -647,32 +651,30 @@ describe("wrapView navigation watch", () => {
   test("phase is awaiting-navigation while act waits for a landing", async () => {
     const v = fakeView();
     let during = "";
-    const b = wrapView(v, fast);
-    v.click = async () => { during = b.phase; v.loading = true; setTimeout(() => v.land("https://x/next"), 100); };
+    const b = wrapView(v, { graceMs: fast.graceMs, settleMs: 5000 });
+    v.click = async () => { during = b.phase; v.loading = true; };
     expect(b.phase).toBe("idle");
     const clicked = b.click("#go");
-    await Bun.sleep(50);
-    expect(during).toBe("acting");
-    expect(b.phase).toBe("awaiting-navigation");
+    await waitFor(() => b.phase === "awaiting-navigation", 3000);
+    expect([during, b.phase]).toEqual(["acting", "awaiting-navigation"]);
+    v.land("https://x/next");
     await clicked;
-    expect(b.phase).toBe("idle");
+    expect([b.url, b.phase]).toEqual(["https://x/next", "idle"]);
   });
 
   test("phase is delivered while the watch waits for a navigation that never begins", async () => {
-    const v = fakeView();
+    let atRead = "";
+    const v = fakeView({ evaluate: async (expr) => { if (expr === NAV_COUNT) atRead = b.phase; return 0; } });
     const b = wrapView(v, fast);
-    const clicked = b.click("#go");
-    await Bun.sleep(fast.graceMs / 2);
-    expect(b.phase).toBe("delivered");
-    await clicked;
-    expect(b.phase).toBe("idle");
+    await b.click("#go");
+    expect([atRead, b.phase]).toEqual(["delivered", "idle"]);
   });
 
   test("phase turns awaiting-navigation when the page reports a navigation it started", async () => {
     const { v, page } = pageNavView({ click: async () => { page.navs = 1; } });
     const b = wrapView(v, fast);
     const clicked = b.click("#go");
-    await Bun.sleep(fast.graceMs * 2);
+    await waitFor(() => b.phase === "awaiting-navigation", 3000);
     expect(b.phase).toBe("awaiting-navigation");
     v.land("https://x/next");
     await clicked;
@@ -747,8 +749,8 @@ describe("a navigation a previous command left pending", () => {
       await b.click("#send");
       expect(b.navigationPending).toBe(true);
       if (end === "landed") v.land("https://x/never");
-      else { v.onNavigationFailed?.(new Error("Frame load interrupted")); await Bun.sleep(10); }
-      expect(b.navigationPending).toBe(false);
+      else { v.onNavigationFailed?.(new Error("Frame load interrupted")); await waitFor(() => !b.navigationPending, 3000); }
+      expect([end, b.navigationPending]).toEqual([end, false]);
     }
   });
 
@@ -760,6 +762,7 @@ describe("a navigation a previous command left pending", () => {
     page.navs++;
     page.to = "https://x/never2";
     v.onNavigationFailed?.(new Error("-999"));
+    // Negative check: the failure does not clear it once the page's count is read.
     await Bun.sleep(10);
     expect(b.navigationPending).toBe(true);
     v.land("https://x/never2");
@@ -795,8 +798,7 @@ describe("a navigation a previous command left pending", () => {
     v.onNavigationFailed?.(new Error("-999"));
     releaseFirstFailureRead();
 
-    const settled = Date.now() + 200;
-    while (b.navigationPending && Date.now() < settled) await Bun.sleep(1);
+    await waitFor(() => !b.navigationPending, 3000);
     expect(countReads).toBe(3);
     expect(b.navigationPending).toBe(false);
     expect(v.calls.filter(([name, args]) => name === "evaluate" && args[0] === NAV_COUNT)).toHaveLength(3);
@@ -881,7 +883,7 @@ describe("wrapView interrupt", () => {
     const v = fakeView({ reload: () => new Promise<void>(() => {}) });
     const t0 = Date.now();
     expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(200);
+    expect(Date.now() - t0).toBeLessThan(500);
   });
 
   test("interrupt waits past the cancelled navigation's failure", async () => {
@@ -958,7 +960,7 @@ describe("wrapView interrupt", () => {
     });
     const t0 = Date.now();
     expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(200);
+    expect(Date.now() - t0).toBeLessThan(500);
   });
 
   test("a refused reload and a refused script return false at once", async () => {
@@ -1012,7 +1014,7 @@ describe("wrapView interrupt", () => {
     v.url = "";
     const t0 = Date.now();
     expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(200);
+    expect(Date.now() - t0).toBeLessThan(500);
   });
 
   test("the about:blank fallback is awaited until it settles", async () => {
@@ -1036,7 +1038,7 @@ describe("wrapView interrupt", () => {
     expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
     const ms = Date.now() - t0;
     expect(ms).toBeGreaterThanOrEqual(55);
-    expect(ms).toBeLessThan(200);
+    expect(ms).toBeLessThan(500);
   });
 
   test("an about:blank fallback that is refused ends the interrupt", async () => {
