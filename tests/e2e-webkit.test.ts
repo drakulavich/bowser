@@ -6,8 +6,8 @@
 // macOS only (WebKit is). Run with:
 //   BOWSER_E2E=1 bun test tests/e2e-webkit.test.ts
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,6 +29,29 @@ import { loadState } from "../src/state.ts";
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.skip;
 
+const HOME_PAGE = `<!doctype html><html><head><title>Agent Loop</title></head><body><main>
+<form id="f">
+  <input id="name" type="text" aria-label="Name" autocomplete="off" />
+  <select id="color" aria-label="Color"><option value="red">red</option><option value="blue">blue</option></select>
+  <input id="agree" type="checkbox" aria-label="Agree" />
+  <button id="submit" type="submit">Submit</button>
+</form>
+<p id="submitted"></p>
+<button id="hoverme" type="button">Hover me</button>
+<p id="hovered"></p>
+<p id="keys"></p>
+<p id="size"></p>
+<a href="/two">Page two</a>
+</main><script>
+  const $ = (id) => document.getElementById(id);
+  $("f").addEventListener("submit", (e) => { e.preventDefault(); $("submitted").textContent = "submitted:" + $("name").value; });
+  $("color").addEventListener("change", (e) => { $("submitted").textContent = "color:" + e.target.value; });
+  $("hoverme").addEventListener("mouseover", () => { $("hovered").textContent = "hovered"; });
+  document.addEventListener("keydown", (e) => { $("keys").textContent += e.key + ";"; });
+  addEventListener("resize", () => { $("size").textContent = innerWidth + "x" + innerHeight; });
+</script></body></html>`;
+const PAGE_TWO = `<!doctype html><html><head><title>Page Two</title></head><body><main><h1>Two</h1><a href="/">Back home</a></main></body></html>`;
+
 runOrSkip("e2e: WebKit agent loop", () => {
   let tmp: string;
   let origHome: string | undefined;
@@ -45,12 +68,10 @@ runOrSkip("e2e: WebKit agent loop", () => {
     tmp = await mkdtemp(join(tmpdir(), "bowser-webkit-"));
     process.env.HOME = tmp;
 
-    const sink = await readFile(join(import.meta.dir, "fixtures/kitchen-sink.html"), "utf8");
-    const two = `<!doctype html><html><head><title>Page Two</title></head><body><main><h1>Two</h1><a href="/">Back home</a></main></body></html>`;
     const s = Bun.serve({
       port: 0,
       fetch(req) {
-        const body = new URL(req.url).pathname === "/two" ? two : sink;
+        const body = new URL(req.url).pathname === "/two" ? PAGE_TWO : HOME_PAGE;
         return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
       },
     });
@@ -65,6 +86,11 @@ runOrSkip("e2e: WebKit agent loop", () => {
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });
+
+  // A fresh page per test, so each one runs alone and in any order.
+  beforeEach(async () => {
+    await cmdOpen(ctx, base);
+  }, 60_000);
 
   /** Ref id for the most recent snapshot's element with this accessible name. */
   async function refNamed(name: string): Promise<string> {
@@ -93,7 +119,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
     const out = JSON.parse(await cmdOpen(ctx, base)) as { ok: boolean; url: string; title: string };
     expect(out.ok).toBe(true);
     expect(out.url).toBe(base);
-    expect(out.title).toBe("Kitchen Sink");
+    expect(out.title).toBe("Agent Loop");
   }, 60_000);
 
   test("snapshot lists every interactive element with a ref", async () => {
@@ -121,6 +147,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
   }, 60_000);
 
   test("press Enter dispatches a bubbling keydown to document (#168)", async () => {
+    await cmdPress(ctx, "Enter");
     expect(await evalText("document.getElementById('keys').textContent")).toContain("Enter;");
   }, 60_000);
 
@@ -164,26 +191,22 @@ runOrSkip("e2e: WebKit agent loop", () => {
     expect(await evalText("location.pathname")).toBe("/two");
 
     await cmdHistory(ctx, "back");
-    await waitForEval("document.title", "Kitchen Sink");
+    await waitForEval("document.title", "Agent Loop");
 
     await cmdHistory(ctx, "forward");
     await waitForEval("document.title", "Page Two");
 
     const gone = JSON.parse(await cmdGoto(ctx, base)) as { url: string };
     expect(gone.url).toBe(base);
-    await waitForEval("document.title", "Kitchen Sink");
+    await waitForEval("document.title", "Agent Loop");
     // The daemon persists the title it resolved (WebKit fallback path); check the stored one too.
-    expect((await loadState(session))?.title).toBe("Kitchen Sink");
+    expect((await loadState(session))?.title).toBe("Agent Loop");
   }, 90_000);
 
   test("click reports the post-navigation url", async () => {
-    await cmdGoto(ctx, base);
-    await waitForEval("document.title", "Kitchen Sink");
     await cmdSnapshot(text);
     const out = JSON.parse(await cmdClick(ctx, await refNamed("Page two"))) as { url: string };
     expect(out.url).toBe(base + "two");
-    await cmdGoto(ctx, base);
-    await waitForEval("document.title", "Kitchen Sink");
   }, 60_000);
 
   test("reload reloads the current page", async () => {
@@ -195,10 +218,6 @@ runOrSkip("e2e: WebKit agent loop", () => {
     // reload, so waiting on it would prove nothing.
     await waitForEval("performance.getEntriesByType('navigation')[0].type", "reload");
     expect(await evalText("document.title")).toBe("Page Two");
-    // Restore the shared session to the Kitchen Sink page: later tests in
-    // this file (localStorage/sessionStorage/eval) assume it's loaded.
-    await cmdGoto(ctx, base);
-    await waitForEval("document.title", "Kitchen Sink");
   }, 60_000);
 
   test("reload then goto: reload waits for its navigation to land", async () => {
@@ -208,7 +227,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
     expect(out.url.endsWith("/two") || (await evalText("location.pathname")) === "/two").toBe(true);
 
     await cmdHistory(ctx, "back");
-    await waitForEval("document.title", "Kitchen Sink");
+    await waitForEval("document.title", "Agent Loop");
 
     await cmdHistory(ctx, "forward");
     await waitForEval("document.title", "Page Two");
@@ -220,7 +239,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
 
     const gone = JSON.parse(await cmdGoto(ctx, base)) as { url: string };
     expect(gone.url).toBe(base);
-    await waitForEval("document.title", "Kitchen Sink");
+    await waitForEval("document.title", "Agent Loop");
   }, 90_000);
 
   // F15: WebKit read `localhost:<port>` as a scheme and timed out, and
@@ -231,7 +250,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
       expect(out.url).toBe(`http://${host}:${port}/two`);
       await waitForEval("document.title", "Page Two");
       await cmdGoto(ctx, base);
-      await waitForEval("document.title", "Kitchen Sink");
+      await waitForEval("document.title", "Agent Loop");
     }
   }, 60_000);
 
@@ -256,7 +275,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
 
   test("eval and run-code return page values", async () => {
     expect(await evalText("1 + 1")).toBe("2");
-    expect(await cmdRunCode(text, "const t = document.title; return t.toUpperCase();")).toBe("KITCHEN SINK");
+    expect(await cmdRunCode(text, "const t = document.title; return t.toUpperCase();")).toBe("AGENT LOOP");
   }, 60_000);
 
   // Spec F18, option 1: one expression is evaluated as one; anything else is
@@ -264,18 +283,20 @@ runOrSkip("e2e: WebKit agent loop", () => {
   test("run-code: an IIFE prints its value, await works in a body, a function exits 1", async () => {
     expect(await cmdRunCode(text, "(() => { return 5 })()")).toBe("5");
     expect(await cmdRunCode(text, "await new Promise(r => setTimeout(r, 100)); return 1")).toBe("1");
-    expect(await cmdRunCode(text, "document.title")).toBe("Kitchen Sink");
+    expect(await cmdRunCode(text, "document.title")).toBe("Agent Loop");
     const err = await cmdRunCode(text, "async page => { return await page.title() }").then(() => null, (e: Error) => e);
     expect(err?.message).toBe("run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return");
     expect(reportFailure(err).code).toBe(1);
   }, 60_000);
 
   test("list shows the session; close --all ends it", async () => {
-    expect(JSON.parse(await cmdList(ctx)) as string[]).toContain(session);
-    const out = JSON.parse(await cmdClose(ctx, { all: true })) as { ok: boolean; closed: string[] };
+    const own: CommandContext = { session: "wk-close", json: true };
+    await cmdOpen(own, base);
+    expect(JSON.parse(await cmdList(own)) as string[]).toContain("wk-close");
+    const out = JSON.parse(await cmdClose(own, { all: true })) as { ok: boolean; closed: string[] };
     expect(out.ok).toBe(true);
-    expect(out.closed).toContain(session);
+    expect(out.closed).toContain("wk-close");
     // close removes the session directory, so nothing is left to load.
-    expect(await loadState(session)).toBeNull();
+    expect(await loadState("wk-close")).toBeNull();
   }, 60_000);
 });

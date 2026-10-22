@@ -162,21 +162,11 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     return r.id;
   };
 
-  test("fresh todo app prints playwright-cli's tree", async () => {
+  // One test: refs and [active] depend on the capture's whole command sequence.
+  test("todo app: fresh, after fill + click Add, after check, prints playwright-cli's trees with sticky refs", async () => {
     await cmdOpen(ctx, `${base}/todo-app.html`);
     expect(tree(await cmdSnapshot(ctx))).toBe(await golden("todo-app"));
-  }, 60_000);
 
-  // A ref carries no saved selector: ref commands act on the element the
-  // page resolves now (liveSelector), and a saved one would only tempt a
-  // command to use it (#51 item 4).
-  test("the saved refs carry no selector", async () => {
-    const refs = (await loadState(ctx.session))!.refs;
-    expect(refs.length).toBeGreaterThan(0);
-    for (const r of refs) expect(Object.keys(r)).not.toContain("selector");
-  }, 60_000);
-
-  test("fill + click Add through the new refs prints the added tree with sticky refs", async () => {
     // Same commands as the capture: fill e4, click e5.
     expect(await refNamed("New todo")).toBe("e4");
     expect(await refNamed("Add")).toBe("e5");
@@ -194,22 +184,36 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     // Sticky: unchanged elements keep their refs, new ones continue the counter.
     expect(await refNamed("Clear completed")).toBe("e10");
     expect(await refNamed("Toggle buy milk")).toBe("e12");
-  }, 60_000);
 
-  test("check refuses the listitem ref and leaves the todo unchecked", async () => {
-    // e11 is the listitem around "buy milk" (see todo-app-added.yaml).
-    await expect(cmdCheck(ctx, "e11")).rejects.toThrow("ref 'e11' is not a checkbox or radio button (listitem)");
-    const after = tree(await cmdSnapshot(ctx));
-    expect(after).toContain('\n      - checkbox "Toggle buy milk" [ref=e12]\n');
-  }, 60_000);
-
-  test("check through the new ref prints the toggled tree", async () => {
     await cmdCheck(ctx, "e12");
     // playwright-cli's check clicks the checkbox, which takes focus and is then
     // replaced by the re-render, leaving focus on <body>. bowser's check toggles
     // through el.click(), which moves no focus; on WebKit Add never took focus,
     // so focus is on <body> too and the golden matches as is.
     expect(tree(await cmdSnapshot(ctx))).toBe(await golden("todo-app-toggled"));
+  }, 60_000);
+
+  // A ref carries no saved selector: ref commands act on the element the
+  // page resolves now (liveSelector), and a saved one would only tempt a
+  // command to use it (#51 item 4).
+  test("the saved refs carry no selector", async () => {
+    await cmdOpen(ctx, `${base}/todo-app.html`);
+    await cmdSnapshot(ctx);
+    const refs = (await loadState(ctx.session))!.refs;
+    expect(refs.length).toBeGreaterThan(0);
+    for (const r of refs) expect(Object.keys(r)).not.toContain("selector");
+  }, 60_000);
+
+  test("check refuses the listitem ref and leaves the todo unchecked", async () => {
+    await cmdOpen(ctx, `${base}/todo-app.html`);
+    await cmdSnapshot(ctx);
+    await cmdFill(ctx, await refNamed("New todo"), "buy milk");
+    await cmdClick(ctx, await refNamed("Add"));
+    await cmdSnapshot(ctx);
+    // e11 is the listitem around "buy milk" (see todo-app-added.yaml).
+    await expect(cmdCheck(ctx, "e11")).rejects.toThrow("ref 'e11' is not a checkbox or radio button (listitem)");
+    const after = tree(await cmdSnapshot(ctx));
+    expect(after).toContain('\n      - checkbox "Toggle buy milk" [ref=e12]\n');
   }, 60_000);
 
   test("kitchen sink at 1280x720 prints playwright-cli's tree, refs restarting at e1", async () => {
