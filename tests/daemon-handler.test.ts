@@ -1443,15 +1443,17 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
   const stillLoading = "page is still loading https://x/; retry later, or run 'bowser close'";
 
   test("fails with 'page is still loading' before its own timer, which counts queue time and budgetMs", async () => {
-    for (const [timeoutMs, budgetMs] of [[200, undefined], [0, 200], [1000, 200]] as const) {
+    for (const [timeoutMs, budgetMs] of [[600, undefined], [0, 600], [3000, 600]] as const) {
       const b = fakeBrowser({ navigationPending: true });
       const replies: Array<[number, DaemonResponse]> = [];
       const t0 = Date.now();
       const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs, reply: (r: DaemonResponse) => { replies.push([Date.now() - t0, r]); } };
-      lane.serialize(() => Bun.sleep(80), "evaluate");
+      lane.serialize(() => Bun.sleep(300), "evaluate");
       dispatch({ id: 1, op: "click", args: ["#b"], cmd: "fill", ...(budgetMs ? { budgetMs } : {}) }, lane);
-      await waitFor(() => replies.length >= 1, 3000);
+      await waitFor(() => replies.length >= 1, 5000);
       expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: stillLoading }]);
+      // ~550 ms from dispatch; from the end of the queue it would be ~850, past budgetMs ~2950.
+      expect(replies[0]![0]).toBeLessThan(700);
       expect(actions(b)).toEqual([]);
     }
   });
