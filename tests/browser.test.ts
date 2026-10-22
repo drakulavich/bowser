@@ -882,8 +882,8 @@ describe("wrapView interrupt", () => {
   test("a reload that never settles ends the interrupt at settleMs", async () => {
     const v = fakeView({ reload: () => new Promise<void>(() => {}) });
     const t0 = Date.now();
-    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(500);
+    expect(await wrapView(v, { graceMs: 20, settleMs: 300 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(450);
   });
 
   test("interrupt waits past the cancelled navigation's failure", async () => {
@@ -959,8 +959,8 @@ describe("wrapView interrupt", () => {
       evaluate: () => new Promise(() => {}),
     });
     const t0 = Date.now();
-    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(500);
+    expect(await wrapView(v, { graceMs: 20, settleMs: 300 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(450);
   });
 
   test("a refused reload and a refused script return false at once", async () => {
@@ -1013,8 +1013,8 @@ describe("wrapView interrupt", () => {
     });
     v.url = "";
     const t0 = Date.now();
-    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(500);
+    expect(await wrapView(v, { graceMs: 20, settleMs: 300 }).interrupt()).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(750);
   });
 
   test("the about:blank fallback is awaited until it settles", async () => {
@@ -1035,10 +1035,10 @@ describe("wrapView interrupt", () => {
     });
     v.url = "";
     const t0 = Date.now();
-    expect(await wrapView(v, { graceMs: 20, settleMs: 60 }).interrupt()).toBe(false);
+    expect(await wrapView(v, { graceMs: 20, settleMs: 300 }).interrupt()).toBe(false);
     const ms = Date.now() - t0;
-    expect(ms).toBeGreaterThanOrEqual(55);
-    expect(ms).toBeLessThan(500);
+    expect(ms).toBeGreaterThanOrEqual(295);
+    expect(ms).toBeLessThan(450);
   });
 
   test("an about:blank fallback that is refused ends the interrupt", async () => {
