@@ -270,6 +270,18 @@ export interface NavTiming {
 }
 const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 
+/** What the navigation watch reads the time from and waits on. */
+export interface Clock {
+  now(): number;
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(timer: unknown): void;
+}
+const REAL_CLOCK: Clock = {
+  now: () => Date.now(),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+};
+
 /** How long `close` waits, after leaving a persistent profile's page, for
  *  WebKit to commit localStorage: twice its 500 ms transaction window. */
 const STORAGE_COMMIT_WAIT_MS = 1000;
@@ -319,6 +331,7 @@ function navigationWatch(
   timing: NavTiming,
   onNavigation: () => void,
   evaluate: (expr: string) => Promise<unknown>,
+  clock: Clock,
 ) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
@@ -338,7 +351,7 @@ function navigationWatch(
     failure = error;
     if (phase === "idle" && pendingAt === landed - 1) void replaced();
   };
-  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const sleep = (ms: number) => new Promise<void>((r) => { clock.setTimeout(r, ms); });
   /** Evaluate a watch script, waiting at most `ms`: a page that cannot
    *  answer in time, or at all, reads as "no". Every page read in `act` goes
    *  through here, so none can hold it past its deadline. Only the waiting
@@ -346,16 +359,16 @@ function navigationWatch(
    *  for it rather than failing. */
   const ask = async (expr: string, ms: number): Promise<unknown> => {
     if (!(ms > 0)) return undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: unknown;
     try {
       return await Promise.race([
         evaluate(expr),
-        new Promise<undefined>((r) => { timer = setTimeout(() => r(undefined), ms); }),
+        new Promise<undefined>((r) => { timer = clock.setTimeout(() => r(undefined), ms); }),
       ]);
     } catch {
       return undefined;
     } finally {
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
     }
   };
   /** How many cross-document navigations the page started since NAV_ARM;
@@ -368,8 +381,8 @@ function navigationWatch(
    *  success, or a second landing after the -999 of the navigation it
    *  cancelled. */
   const freed = async (before: number, arrivedBefore: number): Promise<boolean> => {
-    const began = Date.now();
-    while (Date.now() - began < timing.settleMs) {
+    const began = clock.now();
+    while (clock.now() - began < timing.settleMs) {
       if (arrived !== arrivedBefore || landed - before >= 2) return true;
       await sleep(10);
     }
@@ -377,14 +390,14 @@ function navigationWatch(
   };
   /** Wait for a landing after `before`, while `still()` holds, up to settleMs. */
   const settle = async (before: number, still: () => boolean): Promise<void> => {
-    const began = Date.now();
-    while (landed === before && still() && Date.now() - began < timing.settleMs) await sleep(10);
+    const began = clock.now();
+    while (landed === before && still() && clock.now() - began < timing.settleMs) await sleep(10);
   };
   /** After an action: wait for a navigation that begins within graceMs to
    *  land, up to settleMs. `before` and `wasLoading` are read before it. */
   const awaitNavigation = async (before: number, wasLoading: boolean): Promise<void> => {
-    const start = Date.now();
-    while (Date.now() - start < timing.graceMs) {
+    const start = clock.now();
+    while (clock.now() - start < timing.graceMs) {
       if (landed !== before) return;
       if (view.loading && !wasLoading) {
         phase = "awaiting-navigation";
@@ -411,14 +424,14 @@ function navigationWatch(
     // A failure ends the wait unless the page started another navigation
     // since: a script navigating again cancels the first with -999 while
     // the second still loads, and that second one is what the action led to.
-    const began = Date.now();
+    const began = clock.now();
     let base = landed;
     const baseArrived = arrived;
-    while (Date.now() - began < capMs) {
+    while (clock.now() - began < capMs) {
       if (arrived !== baseArrived) return;
       if (landed !== base) {
         // setTimeout treats Infinity as 1 ms.
-        const now = await count(Math.min(began + capMs - Date.now(), timing.settleMs));
+        const now = await count(Math.min(began + capMs - clock.now(), timing.settleMs));
         if (now <= pendingSeen) return;
         pendingSeen = now;
         base = landed;
@@ -513,11 +526,11 @@ function navigationWatch(
         // The call goes to the view, not wrapView's queue: if an evaluate
         // is pending WebKit refuses this one at once, where the queue
         // would run it later over whatever page is there then.
-        let timer: ReturnType<typeof setTimeout> | undefined;
+        let timer: unknown;
         const leave = Promise.resolve().then(() => view.evaluate(LEAVE_INITIAL_DOCUMENT)).then(() => true, () => false);
-        const leaveBound = new Promise<false>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
+        const leaveBound = new Promise<false>((r) => { timer = clock.setTimeout(() => r(false), timing.settleMs); });
         const left = await Promise.race([leave, leaveBound]);
-        clearTimeout(timer);
+        clock.clearTimeout(timer);
         if (left) {
           await settle(before, () => true);
           return landed !== before;
@@ -530,18 +543,18 @@ function navigationWatch(
           // WebKit and the lane moves on (the next op may then be refused).
           const navigate = view.navigate("about:blank").then(() => true, () => false);
           timer = undefined;
-          const bound = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
+          const bound = new Promise<boolean>((r) => { timer = clock.setTimeout(() => r(false), timing.settleMs); });
           const ok = await Promise.race([navigate, bound]);
-          clearTimeout(timer);
+          clock.clearTimeout(timer);
           return ok;
         }
       }
       if (typeof view.reload !== "function") return false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      let timer: unknown;
       const reloadAttempt = Promise.resolve().then(() => view.reload!()).then(() => "ok" as const, () => "failed" as const);
-      const reloadBound = new Promise<"timeout">((r) => { timer = setTimeout(() => r("timeout"), timing.settleMs); });
+      const reloadBound = new Promise<"timeout">((r) => { timer = clock.setTimeout(() => r("timeout"), timing.settleMs); });
       const reloadResult = await Promise.race([reloadAttempt, reloadBound]);
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       if (reloadResult === "timeout") return false;
       if (reloadResult === "failed") {
         // Refused while a selector click is hung on a pending page
@@ -549,9 +562,9 @@ function navigationWatch(
         // the view, as above: wrapView's queue may be held by that page.
         const sent = view.evaluate(CANCEL_PENDING_NAVIGATION).then(() => true, () => false);
         timer = undefined;
-        const bound = new Promise<boolean>((r) => { timer = setTimeout(() => r(false), timing.settleMs); });
+        const bound = new Promise<boolean>((r) => { timer = clock.setTimeout(() => r(false), timing.settleMs); });
         const ok = await Promise.race([sent, bound]);
-        clearTimeout(timer);
+        clock.clearTimeout(timer);
         if (!ok) return false;
       }
       return freed(before, arrivedBefore);
@@ -568,6 +581,7 @@ export function wrapView(
   profile?: string,
   commitWaitMs = STORAGE_COMMIT_WAIT_MS,
   stalls?: StallKick,
+  clock: Clock = REAL_CLOCK,
 ): Browser {
   let navigated: () => void = () => {};
   const stall = stallGuard(stalls);
@@ -585,7 +599,7 @@ export function wrapView(
     inflight = run.catch(() => {});
     return run;
   };
-  const nav = navigationWatch(view, timing, () => navigated(), evaluate);
+  const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
 
   return {
     get url() { return view.url; },
