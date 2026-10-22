@@ -214,7 +214,7 @@ describe("createHandler", () => {
     const b = fakeBrowser();
     try {
       await createHandler(b)(req("shutdown")).then((res) => { order.push(`reply:${res.ok}`); });
-      await new Promise((r) => setTimeout(r, 20));
+      await waitFor(() => order.length >= 2, 3000);
     } finally {
       process.exit = realExit;
     }
@@ -251,12 +251,12 @@ test("an urgent op answers while a queued op is wedged", async () => {
 
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
   dispatch({ id: 2, op: "ping", args: [] } as DaemonRequest, lane);
-  await Bun.sleep(20);
+  await waitFor(() => replies.length >= 1, 3000);
 
   // ping answered; click is still stuck behind its own wedge.
   expect(replies).toEqual(["ping"]);
   release();
-  await Bun.sleep(20);
+  await waitFor(() => replies.length >= 2, 3000);
   expect(replies).toEqual(["ping", "click"]);
 });
 
@@ -273,7 +273,7 @@ test("a queued op that overruns its budget answers with a timeout error", async 
     reply: (res: DaemonResponse) => { replies.push(res); },
   };
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
-  await Bun.sleep(40);
+  await waitFor(() => replies.length >= 1, 3000);
   expect(replies).toEqual([
     { id: 1, ok: false, error: "'click' timed out after 5ms" },
   ]);
@@ -285,7 +285,7 @@ test("a timeout while awaiting navigation says the click was delivered", async (
   const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r: DaemonResponse) => { replies.push(r); } };
   dispatch({ id: 1, op: "click", args: ["#go"], cmd: "click" }, lane);
   dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
-  await Bun.sleep(60);
+  await waitFor(() => replies.length >= 2, 3000);
   expect(replies).toEqual([
     { id: 1, ok: false, error: "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying" },
     { id: 2, ok: false, error: "'fill' timed out after 20ms waiting for the page its click opened; the click was delivered but the fill did not finish, check the page before retrying" },
@@ -320,7 +320,7 @@ describe("a timeout says how far the action got, per phase", () => {
       const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r: DaemonResponse) => { replies.push(r); } };
       dispatch({ id: 1, op: "click", args: ["#go"], cmd: "click" }, lane);
       dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
-      await Bun.sleep(60);
+      await waitFor(() => replies.length >= 2, 3000);
       expect(replies).toEqual([{ id: 1, ok: false, error: own }, { id: 2, ok: false, error: step }]);
     });
   }
@@ -335,15 +335,19 @@ test("an op that overruns its budget: the timeout reply carries the reports queu
   // An op that prints nothing reads the page's confirm and leaves it queued.
   await handle(req("evaluate", ["window.confirm('sure?')"]));
   const replies: DaemonResponse[] = [];
-  const lane = { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r: DaemonResponse) => { replies.push(r); }, timedOut: handle.timedOut };
+  const settled: number[] = [];
+  const lane = {
+    handle: async (r: DaemonRequest) => { const res = await handle(r); settled.push(r.id); return res; },
+    serialize: createSerializer(), timeoutMs: 20, reply: (r: DaemonResponse) => { replies.push(r); }, timedOut: handle.timedOut,
+  };
   dispatch({ id: 1, op: "click", args: ["#go"], report: true }, lane);
-  await Bun.sleep(80);
+  await waitFor(() => replies.length >= 1, 3000);
   expect(replies).toEqual([{
     id: 1, ok: false, error: "'click' timed out after 20ms",
     dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
   }]);
   release();
-  await Bun.sleep(20);
+  await waitFor(() => settled.length >= 1, 3000);
   // The late op's report was not spent on a reply nobody reads.
   expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
     { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
@@ -357,7 +361,7 @@ test("a timed-out request that prints nothing leaves the queued reports alone", 
   await handle(req("evaluate", ["window.confirm('sure?')"]));
   const replies: DaemonResponse[] = [];
   dispatch({ id: 1, op: "click", args: ["#go"] }, { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r) => { replies.push(r); }, timedOut: handle.timedOut });
-  await Bun.sleep(60);
+  await waitFor(() => replies.length >= 1, 3000);
   expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 20ms" }]);
   expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
     { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
@@ -383,10 +387,11 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
 
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
   dispatch({ id: 2, op: "type", args: ["hi"] } as DaemonRequest, lane);
+  // Negative check: type must not answer while click holds the lane.
   await Bun.sleep(20);
   expect(replies).toEqual([]);
   release();
-  await Bun.sleep(20);
+  await waitFor(() => replies.length >= 2, 3000);
   expect(replies).toEqual(["click", "type"]);
 });
 
@@ -414,9 +419,9 @@ describe("the queue-time budget", () => {
       reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
-    await Bun.sleep(50);
+    await Bun.sleep(50); // the scenario: op 2 arrives 50 ms after op 1
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
-    await Bun.sleep(900);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 1, ok: false, error: "'click' timed out after 400ms" },
       { id: 2, ok: false, error: QUEUED("evaluate", 400, "click") },
@@ -426,6 +431,7 @@ describe("the queue-time budget", () => {
     // 800. The threshold sits between them.
     expect(replies[1]![0]).toBeLessThan(625);
     release();
+    // Negative check: the dropped request must not run once the lane frees.
     await Bun.sleep(20);
     // Its client was already told it failed, so it is dropped, not run late.
     expect(ran).toEqual([1]);
@@ -441,7 +447,7 @@ describe("the queue-time budget", () => {
     };
     dispatch({ id: 1, op: "click", args: ["#x"], cmd: "click" }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["1"], cmd: "snapshot" }, lane);
-    await Bun.sleep(80);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(replies).toEqual([
       { id: 1, ok: false, error: "'click' timed out after 30ms" },
       {
@@ -464,7 +470,7 @@ describe("the queue-time budget", () => {
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
-    await Bun.sleep(80);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(replies).toEqual([
       { id: 1, ok: true, result: "click" },
       { id: 2, ok: true, result: "evaluate" },
@@ -512,9 +518,9 @@ describe("the queue-time budget", () => {
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
-    await Bun.sleep(40);
+    await waitFor(() => replies.length >= 2, 3000);
     dispatch({ id: 3, op: "ping", args: [] }, lane);
-    await Bun.sleep(5);
+    await waitFor(() => replies.length >= 3, 3000);
     expect(replies.map((r) => r.id)).toEqual([1, 2, 3]);
     expect(replies[2]).toEqual({ id: 3, ok: true, result: "ping" });
   });
@@ -523,11 +529,12 @@ describe("the queue-time budget", () => {
     const events: string[] = [];
     let release!: () => void;
     const stuck = new Promise<void>((r) => { release = r; });
+    let settled = false;
     let recovered!: () => void;
     const lane = {
       handle: async (req: DaemonRequest) => {
         events.push(`run ${req.op}`);
-        if (req.id === 1) await stuck;
+        if (req.id === 1) { await stuck; settled = true; }
         return { id: req.id, ok: true as const };
       },
       serialize: createSerializer(),
@@ -541,43 +548,53 @@ describe("the queue-time budget", () => {
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane);
     // Timed out at 20 ms, still stuck when the grace (the 20 ms budget,
     // under RECOVERY_GRACE_MS) ends at 40: the recovery runs.
-    await Bun.sleep(60);
+    await waitFor(() => events.includes("recover"), 3000);
     // The interrupt frees the stuck op, as reload() does a stuck evaluate.
     release();
-    await Bun.sleep(5);
+    await waitFor(() => settled, 3000);
     // Queued now, with a fresh budget: it waits for the recovery to finish,
     // so it never overlaps the reload's navigation.
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
+    // Negative check: op 2 must not run before the recovery ends.
     await Bun.sleep(5);
     expect(events).toEqual(["run evaluate", "reply 1 false", "recover"]);
     recovered();
-    await Bun.sleep(5);
+    await waitFor(() => events.includes("reply 2 true"), 3000);
     expect(events).toEqual(["run evaluate", "reply 1 false", "recover", "recovered", "run evaluate", "reply 2 true"]);
   });
 
   test("an op that settles within the grace after its timeout is not recovered, and the next op does not wait out the grace", async () => {
     let recoveries = 0;
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
     const replies: Array<[number, DaemonResponse]> = [];
-    const t0 = Date.now();
+    const BUDGET = 300;
     const lane = {
       handle: async (req: DaemonRequest) => {
-        // Slow, not stuck: overruns its 100 ms budget by 20 ms.
-        if (req.id === 1) await Bun.sleep(120);
+        if (req.id === 1) await slow;
         return { id: req.id, ok: true as const };
       },
       serialize: createSerializer(),
-      timeoutMs: 100,
-      reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+      timeoutMs: BUDGET,
+      reply: (res: DaemonResponse) => { replies.push([Date.now(), res]); },
       recover: async () => { recoveries++; return false; },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
-    await Bun.sleep(110); // after the first op timed out, with a budget to spare
+    await waitFor(() => replies.length >= 1, 3000);
+    // Queued behind the timed-out op, which then settles within its grace
+    // (the budget, under RECOVERY_GRACE_MS): slow, not stuck.
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
-    await Bun.sleep(200);
+    const settledAt = Date.now();
+    release();
+    await waitFor(() => replies.length >= 2, 3000);
     expect(recoveries).toBe(0);
-    expect(replies.map(([, r]) => r.ok)).toEqual([false, true]);
-    // Answered once the first op settled (~120 ms), not after the grace (200).
-    expect(replies[1]![0]).toBeLessThan(190);
+    expect(replies.map(([, r]) => r)).toEqual([
+      { id: 1, ok: false, error: `'click' timed out after ${BUDGET}ms` },
+      { id: 2, ok: true },
+    ]);
+    // Answered once the first op settled, not when its grace ends, up to
+    // BUDGET later. The threshold sits between them.
+    expect(replies[1]![0] - settledAt).toBeLessThan(BUDGET / 2);
   });
 
   test("an op still stuck when the grace ends is recovered once", async () => {
@@ -590,9 +607,10 @@ describe("the queue-time budget", () => {
       recover: async () => { recoveries++; return false; },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    // Negative checks: none before the grace ends, and no second one after.
     await Bun.sleep(45);
     expect(recoveries).toBe(0); // timed out at 30, grace until 60
-    await Bun.sleep(60);
+    await waitFor(() => recoveries >= 1, 3000);
     expect(recoveries).toBe(1);
     await Bun.sleep(60);
     expect(recoveries).toBe(1);
@@ -616,6 +634,7 @@ describe("the queue-time budget", () => {
       recover: async () => { recoveries++; return true; },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
+    // Negative check: no recovery while delivered, nor after the op settles at 100.
     await Bun.sleep(150);
     expect(recoveries).toBe(0);
   });
@@ -632,10 +651,10 @@ describe("the queue-time budget", () => {
       recover: async () => { recoveries++; return false; },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
-    await Bun.sleep(80); // timed out at 20, grace ended at 40
+    await Bun.sleep(80); // negative check: timed out at 20, grace ended at 40
     expect(recoveries).toBe(0);
     phase = "awaiting-navigation";
-    await Bun.sleep(60);
+    await waitFor(() => recoveries >= 1, 3000);
     expect(recoveries).toBe(1);
   });
 
@@ -651,6 +670,8 @@ describe("the queue-time budget", () => {
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     dispatch({ id: 2, op: "click", args: ["#y"] }, lane);
     dispatch({ id: 3, op: "click", args: ["#z"] }, lane);
+    await waitFor(() => recoveries >= 1, 3000);
+    // Negative check: the queued ops' grace (10 ms) has passed with no recovery of their own.
     await Bun.sleep(40);
     expect(recoveries).toBe(1);
   });
@@ -684,12 +705,12 @@ describe("the session gate", () => {
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B));
     dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane(A));
-    await Bun.sleep(10);
+    await waitFor(() => started.length >= 1, 3000);
     release();
-    await Bun.sleep(10);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(started).toEqual([1, 3]);
     gate.leave(A);
-    await Bun.sleep(10);
+    await waitFor(() => replies.length >= 3, 3000);
     expect(started).toEqual([1, 3, 2]);
     expect(replies.map((r) => r.id)).toEqual([1, 3, 2]);
   });
@@ -701,16 +722,15 @@ describe("the session gate", () => {
     }, 0);
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane({}));
     dispatch({ id: 2, op: "ping", args: [] }, lane({}));
-    await Bun.sleep(10);
+    await waitFor(() => replies.length >= 1, 3000);
     expect(replies).toEqual([{ id: 2, ok: true, result: "ping" }]);
   });
 
   test("a request that times out at the gate says so", async () => {
     const { lane, replies } = lanes(() => new Promise<DaemonResponse>(() => {}), 50);
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane({}));
-    await Bun.sleep(5);
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane({}));
-    await Bun.sleep(80);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(replies).toEqual([
       { id: 1, ok: false, error: "'evaluate' timed out after 50ms" },
       { id: 2, ok: false, error: WAITING("evaluate", 50) },
@@ -728,19 +748,19 @@ describe("the session gate", () => {
     }, 20, 0);
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
-    await Bun.sleep(30);
+    await waitFor(() => replies.length >= 1, 3000);
     gate.leave(A);
     const B = {};
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B, 30));
     dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane(B, 0));
-    await Bun.sleep(50);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(replies).toEqual([
       { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
       { id: 2, ok: false, error: "'evaluate' timed out after 30ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)" },
     ]);
     expect(started).toEqual([1]);
     release();
-    await Bun.sleep(10);
+    await waitFor(() => started.length >= 2, 3000);
     expect(started).toEqual([1, 3]);
   });
 
@@ -758,12 +778,13 @@ describe("the session gate", () => {
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(A));
     dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane({}));
-    await Bun.sleep(5);
+    await waitFor(() => started.length >= 1, 3000);
     gate.leave(A);
     release();
+    // Negative check: op 3 must not start while op 2 runs its 20 ms.
     await Bun.sleep(10);
     expect(started).toEqual([1, 2]);
-    await Bun.sleep(30);
+    await waitFor(() => started.length >= 3, 3000);
     expect(started).toEqual([1, 2, 3]);
   });
 
@@ -771,7 +792,7 @@ describe("the session gate", () => {
     const started: number[] = [];
     let hold!: () => void;
     const held = new Promise<void>((r) => { hold = r; });
-    const { gate, lane } = lanes(async (req) => {
+    const { gate, lane, replies } = lanes(async (req) => {
       started.push(req.id);
       if (req.id === 1) await held;
       return { id: req.id, ok: true as const };
@@ -780,11 +801,11 @@ describe("the session gate", () => {
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane({}, 20));
     dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane({}));
-    await Bun.sleep(40);
+    await waitFor(() => replies.length >= 1, 3000);
     hold();
     gate.leave(A);
     // B's connection stays open; its turn passes after the idle time, not never.
-    await Bun.sleep(80);
+    await waitFor(() => started.length >= 2, 3000);
     expect(started).toEqual([1, 3]);
   });
 
@@ -800,10 +821,11 @@ describe("the session gate", () => {
     const A = {}, B = {};
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A, 0));
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B));
-    await Bun.sleep(5);
     gate.leave(B);
     release();
     gate.leave(A);
+    await waitFor(() => replies.length >= 1, 3000);
+    // Negative check: op 2 must not run once the gate frees.
     await Bun.sleep(80);
     expect(started).toEqual([1]);
     expect(replies.map((r) => r.id)).toEqual([1]);
@@ -1381,10 +1403,11 @@ describe("the command budget (budgetMs)", () => {
     const replies: Array<[number, DaemonResponse]> = [];
     const t0 = Date.now();
     dispatch({ id: 1, op: "type", args: ["hi"], cmd: "fill", budgetMs: 50 }, lane(replies, t0));
-    await Bun.sleep(300);
+    await waitFor(() => replies.length >= 1, 3000);
     // The message names the command's budget, not what was left of it.
     expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'fill' timed out after 1000ms (in its 'type' step)" }]);
-    expect(replies[0]![0]).toBeLessThan(200);
+    // At budgetMs (50), not at the daemon's 1000 ms; the threshold sits between them.
+    expect(replies[0]![0]).toBeLessThan(500);
   });
 
   test("budgetMs <= 0 fails at once with the timeout message", async () => {
@@ -1400,7 +1423,7 @@ describe("the command budget (budgetMs)", () => {
     const replies: Array<[number, DaemonResponse]> = [];
     dispatch({ id: 1, op: "click", args: ["#b"], cmd: "fill", budgetMs: 50, budgetTotalMs: 3000 }, lane(replies, Date.now(), 30_000));
     dispatch({ id: 2, op: "click", args: ["#b"], cmd: "fill", budgetMs: 0, budgetTotalMs: 3000 }, lane(replies, Date.now(), 30_000));
-    await Bun.sleep(300);
+    await waitFor(() => replies.length >= 2, 3000);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 2, ok: false, error: "'fill' timed out after 3000ms (in its 'click' step)" },
       { id: 1, ok: false, error: "'fill' timed out after 3000ms (in its 'click' step)" },
@@ -1411,7 +1434,7 @@ describe("the command budget (budgetMs)", () => {
     const replies: Array<[number, DaemonResponse]> = [];
     const t0 = Date.now();
     dispatch({ id: 1, op: "click", args: ["#x"], budgetMs: 50 }, lane(replies, t0, 0));
-    await Bun.sleep(300);
+    await waitFor(() => replies.length >= 1, 3000);
     expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'click' timed out after 50ms" }]);
   });
 });
@@ -1420,16 +1443,17 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
   const stillLoading = "page is still loading https://x/; retry later, or run 'bowser close'";
 
   test("fails with 'page is still loading' before its own timer, which counts queue time and budgetMs", async () => {
-    for (const [timeoutMs, budgetMs] of [[200, undefined], [0, 200], [1000, 200]] as const) {
+    for (const [timeoutMs, budgetMs] of [[600, undefined], [0, 600], [3000, 600]] as const) {
       const b = fakeBrowser({ navigationPending: true });
       const replies: Array<[number, DaemonResponse]> = [];
       const t0 = Date.now();
       const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs, reply: (r: DaemonResponse) => { replies.push([Date.now() - t0, r]); } };
-      lane.serialize(() => Bun.sleep(80), "evaluate");
+      lane.serialize(() => Bun.sleep(300), "evaluate");
       dispatch({ id: 1, op: "click", args: ["#b"], cmd: "fill", ...(budgetMs ? { budgetMs } : {}) }, lane);
-      await Bun.sleep(400);
+      await waitFor(() => replies.length >= 1, 5000);
       expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: stillLoading }]);
-      expect(replies[0]![0]).toBeLessThan(200);
+      // ~550 ms from dispatch; from the end of the queue it would be ~850, past budgetMs ~2950.
+      expect(replies[0]![0]).toBeLessThan(700);
       expect(actions(b)).toEqual([]);
     }
   });
@@ -1440,10 +1464,11 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
     Object.defineProperty(b, "navigationPending", { get: () => pending });
     const replies: DaemonResponse[] = [];
     dispatch({ id: 1, op: "click", args: ["#b"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 0, reply: (r) => { replies.push(r); } });
+    // Negative check: no answer while the navigation is pending.
     await Bun.sleep(100);
     expect(replies).toEqual([]);
     pending = false;
-    await Bun.sleep(50);
+    await waitFor(() => replies.length >= 1, 3000);
     expect(replies).toEqual([{ id: 1, ok: true }]);
     expect(actions(b)).toEqual([["click", ["#b"]]]);
   });
@@ -1454,11 +1479,12 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
     Object.defineProperty(b, "navigationPending", { get: () => pending });
     const replies: DaemonResponse[] = [];
     dispatch({ id: 1, op: "resolve", args: ["resolve-script"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 0, reply: (r) => { replies.push(r); } });
+    // Negative check: no answer and no evaluate while the navigation is pending.
     await Bun.sleep(100);
     expect(replies).toEqual([]);
     expect(b.calls).toEqual([]);
     pending = false;
-    await Bun.sleep(50);
+    await waitFor(() => replies.length >= 1, 3000);
     expect(replies).toEqual([{ id: 1, ok: true, result: 42 }]);
     expect(b.calls).toEqual([["evaluate", ["resolve-script"]]]);
   });
@@ -1467,7 +1493,7 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
     const b = fakeBrowser({ navigationPending: true });
     const replies: DaemonResponse[] = [];
     dispatch({ id: 1, op: "resolve", args: ["resolve-script"], budgetMs: 100 }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 1000, reply: (r) => { replies.push(r); } });
-    await Bun.sleep(300);
+    await waitFor(() => replies.length >= 1, 3000);
     expect(replies).toEqual([{ id: 1, ok: false, error: stillLoading }]);
     expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
   });
