@@ -545,7 +545,8 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
       const elapsed = Date.now() - t0;
       expect(result).toEqual({ stderr: `bowser: ${notAnswering(session)}`, code: 2 });
       expect(elapsed).toBeGreaterThanOrEqual(2300);
-      expect(elapsed).toBeLessThan(6000);
+      // 300 + CLIENT_MARGIN_MS = 2300; the margin added twice would be 4300.
+      expect(elapsed).toBeLessThan(3300);
     } finally {
       d.stop();
     }
@@ -606,7 +607,7 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
         expect(res.result.isError).toBe(true);
         expect(res.result.content[0]!.text).toBe(notAnswering(session));
       }
-      expect(answered[0]!.at - t0).toBeLessThan(6000);
+      expect(answered[0]!.at - t0).toBeLessThan(3300);
       expect(answered[1]!.at - answered[0]!.at).toBeLessThan(1650);
     } finally {
       d.stop();
