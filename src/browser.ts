@@ -280,7 +280,7 @@ export interface Clock {
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(timer: unknown): void;
 }
-const REAL_CLOCK: Clock = {
+export const REAL_CLOCK: Clock = {
   now: () => Date.now(),
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),

@@ -19,7 +19,7 @@
 import { unlink } from "node:fs/promises";
 import { readFileSync, unlinkSync } from "node:fs";
 import pkg from "../../package.json";
-import { openBrowser, type ActPhase, type Browser } from "../browser.ts";
+import { openBrowser, REAL_CLOCK, type ActPhase, type Browser, type Clock } from "../browser.ts";
 import { createSerializer, type Serializer } from "../serialize.ts";
 import { createGate, type Gate } from "./gate.ts";
 import { opTimeoutMs } from "../budget.ts";
@@ -350,7 +350,7 @@ function fromPage(raw: unknown): unknown {
  *
  *  `state` defaults to `{}` so call sites that pass only a browser keep
  *  compiling unchanged. */
-export function createHandler(browser: Browser, state: DaemonState = {}): Handler {
+export function createHandler(browser: Browser, state: DaemonState = {}, clock: Clock = REAL_CLOCK): Handler {
   // Whether the page has the shim, as far as the daemon knows. False after a
   // navigation, which also means the page's answer must be dropped.
   let shimmed = false;
@@ -393,11 +393,11 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
   async function afterPendingNavigation(req: DaemonRequest, deadline = Infinity): Promise<DaemonResponse> {
     if (!browser.navigationPending) return runShimmed(req, deadline);
     // Read before the wait: after it, the reply is due at once.
-    const url = await browser.navigationDestination(Math.max(0, deadline - Date.now()));
+    const url = await browser.navigationDestination(Math.max(0, deadline - clock.now()));
     while (browser.navigationPending) {
-      const left = deadline - Date.now();
+      const left = deadline - clock.now();
       if (left <= 0) return { id: req.id, ok: false, error: `page is still loading ${url}; retry later, or run 'bowser close'` };
-      await Bun.sleep(Math.min(10, left));
+      await new Promise<void>((r) => { clock.setTimeout(r, Math.min(10, left)); });
     }
     return runShimmed(req, deadline);
   }
@@ -469,7 +469,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}): Handle
     // Bun's click otherwise waits 30 s for a covered target, past the
     // recovery reload, which leaves the session stuck (#112).
     const res = await run(req.op === "click" && deadline !== Infinity
-      ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - Date.now())] }
+      ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - clock.now())] }
       : req);
     await sync();
     return res;
