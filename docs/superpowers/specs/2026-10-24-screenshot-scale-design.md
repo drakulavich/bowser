@@ -20,7 +20,29 @@ down and can refuse, but cannot make one larger.
 scaled by `N / devicePixelRatio`, which is `innerWidth·N × innerHeight·N` up to rounding, or the command
 fails. Without the flag the file is what it is today.
 
-- `N` must match `^(\d+(\.\d*)?|\.\d+)$` and be above 0. Anything else (`0`, `-1`, `abc`, `0x2`, ` `, and
+- `N` must match `^(\d+(\.\d*)?|\.\d+)# screenshot --scale: a PNG of the size the caller asked for (#191)
+
+## Problem
+
+`bowser screenshot` writes the PNG at the pixel ratio the window happens to have. On a Retina Mac,
+`bowser resize 1200 1200` then `bowser screenshot` wrote 2400×2400 (`devicePixelRatio` 2); on a screen at
+ratio 1 the same two commands write 1200×1200. An agent that renders an image for a post asks for 2× and
+gets whatever the machine gives, with nothing in the reply to say which.
+
+`Bun.WebView` with the WebKit backend cannot render above the screen's ratio: neither the constructor nor
+`view.resize(width, height)` takes a scale (`bun-types` 1.4.4), and `maxCaptureHeight`
+(`src/commands/snapshot.ts`) already records that no option lowers it either. So bowser can scale a capture
+down and can refuse, but cannot make one larger.
+
+## Change
+
+### The flag
+
+`screenshot` takes `--scale=<N>`, a decimal number above 0, fractions allowed. The PNG is then the capture
+scaled by `N / devicePixelRatio`, which is `innerWidth·N × innerHeight·N` up to rounding, or the command
+fails. Without the flag the file is what it is today.
+
+- `N` , and `Number(N)` must be finite and above 0. Anything else (a run of 400 nines, which `Number` turns into `Infinity` and JSON into `null`, `0`, `-1`, `abc`, `0x2`, ` `, and
   the empty value of `--scale=`, which the parser passes through as `""` as it does for `--filename=`):
   `UserError` `screenshot: --scale must be a number above 0, got '<raw>'`, exit 1, before any request to the
   daemon.
@@ -102,7 +124,7 @@ README section on screenshots gets two sentences: the default size follows the s
 
 Unit, in `tests/commands.test.ts` under `describe("screenshot --scale")`, with `fakeClient`:
 
-1. **a scale that is not a number above 0 is a usage error.** `0`, `-1`, `abc`, `0x2`, ` ` and `""` each
+1. **a scale that is not a number above 0 is a usage error.** `0`, `-1`, `abc`, `0x2`, ` `, `""` and 400 nines each
    fail with the usage message, exit 1, and the fake records no request.
 2. **`--scale=` reaches the command as an empty value.** `run(["screenshot", "--scale=", "-s", s])` prints
    `screenshot: --scale must be a number above 0, got ''`, exit 1. Guards the parser's pass-through.
