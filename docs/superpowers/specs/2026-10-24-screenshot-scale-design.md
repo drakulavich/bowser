@@ -28,8 +28,12 @@ fails. Without the flag the file is what it is today.
   `screenshot: --scale=<N> needs a display at pixel ratio <N> or more; this one is <dpr>`, exit 1, nothing
   written.
 - `N` equal to the ratio: the capture as is, no re-encode.
-- `N` below it: the capture scaled down with `Bun.Image` (`resize(w, h, { fit: "fill" })`, then `.png()`).
-  No new dependency. Measured by hand on the #191 card: 2400×2400 to 1200×1200 in 124 ms, text sharp.
+- `N` below it: the capture scaled down with `Bun.Image`
+  (`new Bun.Image(bytes).resize(w, h, { fit: "fill" }).png().bytes()`). No new dependency. Measured by hand
+  on the #191 card: 2400×2400 to 1200×1200 in 124 ms, text sharp.
+- A side that rounds below 1 pixel (a 1-pixel viewport at `--scale=0.4`) is kept at 1. `Bun.Image` turns
+  `resize(0, 0)` into 1×1 on its own (checked on Bun 1.4.4); the spec makes it explicit with
+  `Math.max(1, …)`, and the reply says the size the file really has.
 
 The flag is declared `kind: "string"` like `--filename` and parsed in `cmdScreenshot`. MCP builds the
 `screenshot` tool's properties from the command's flags (`src/mcp.ts:72`), so the tool gets `scale` with no
@@ -53,17 +57,18 @@ flowchart LR
   F --> G["wrote path (W×H)"]
 ```
 
-- Protocol (`src/daemon/protocol.ts`): `screenshot` args become `[path?: string, scale?: number]`. With a
-  path, the result is `{ path: string; width: number; height: number }`, the size of the file written, or
-  `{ dpr: number }` when `scale` is above the ratio and nothing was written. A daemon of an older version
-  is restarted before it gets the new args (#145), so no version check is needed.
+- Protocol (`src/daemon/protocol.ts`): `screenshot` args become `[path?: string, scale?: number]`; the
+  result gains one case, `{ path: string } | { dpr: number } | string`, where `{ dpr }` means `scale` is
+  above the ratio and nothing was written. A daemon of an older version is restarted before it gets the new
+  args (#145), so no version check is needed.
 - Daemon (`src/daemon/server.ts`): with `scale`, evaluate `READ_VIEWPORT` (`src/page-scripts.ts`) for the
   ratio, refuse as above, capture, and if `scale` differs from the ratio scale the PNG to
-  `round(pngWidth·scale/dpr) × round(pngHeight·scale/dpr)`, where `pngWidth` and `pngHeight` come from the
-  capture's IHDR. Taking the size from the capture rather than from `innerWidth` means the target always
-  matches what was captured. The reply's width and height are read from the PNG written.
+  `max(1, round(pngWidth·scale/dpr)) × max(1, round(pngHeight·scale/dpr))`, where `pngWidth` and
+  `pngHeight` come from the capture's IHDR. Taking the size from the capture rather than from `innerWidth`
+  means the target always matches what was captured. A failed capture throws as today.
 - CLI (`cmdScreenshot`): sends `[abs, scale]` (or `[abs]` without the flag), turns a `{ dpr }` reply into the
-  `UserError`, and prints the size from the reply.
+  `UserError`, then reads the width and height from the IHDR of the file it named (bytes 16 to 23) and
+  prints them. The CLI and the daemon share the file system, so the reply needs no size of its own.
 - The capture-limit path stays as it is: `cmdScreenshot` already catches a failed capture and asks
   `tooLargeToCapture` for the #69 advice. `--scale` cannot lower WebKit's limit, since the capture happens at
   the screen's ratio before any scaling, so the same viewport fails the same way with or without the flag and
@@ -74,7 +79,18 @@ flowchart LR
 
 Every `screenshot`, with or without the flag, answers `wrote <abs> (<W>×<H>)` and, under `--json`,
 `{ ok: true, filename, width, height }`. The agent then needs no `sips` or `file` to check the result.
-The existing unit tests that expect the exact `wrote <abs>` line change with it.
+
+Existing tests that change with it, since `bun run check` runs them all:
+
+- `tests/commands.test.ts` (`describe("screenshot")`): the `wrote <abs>` lines and the exact `--json`
+  object gain the size; every fake capture there is the real 1×1 `PNG_B64`, so they read `(1×1)`.
+- `tests/mcp.test.ts:460` and `:472`: the expected `{ ok, filename }` gains `width: 1, height: 1`.
+- `tests/e2e.test.ts:81`: `wrote ${file}` gains the size, read from the file in the test.
+- `tests/protocol.test.ts:14`: the annotated result type gains `{ dpr: number }`.
+- `tests/helpers/fake-client.ts:52`: today any non-string answer of a `screenshot` handler is dropped and an
+  empty file is written. A `{ dpr }` answer is then returned as is and writes nothing; a string is still the
+  PNG to write. Without this, test 4 below cannot fail. With no handler, the fake writes a real 1×1 PNG instead of an empty file, so the CLI has an IHDR
+  to read; `tests/helpers/mcp-fake-daemon.ts`, which passes no handler, relies on that for the MCP tests above.
 
 ### Docs
 
@@ -95,28 +111,32 @@ Unit, in `tests/commands.test.ts` under `describe("screenshot --scale")`, with `
    `--scale=2` gives `screenshot: --scale=2 needs a display at pixel ratio 2 or more; this one is 1`, exit 1.
 5. **a viewport too large to capture keeps its advice under --scale.** The #69 case (failing capture,
    viewport `[16384, 16384, 2]`) with `--scale=1` gives the same `UserError` as without the flag.
-6. **the reply names the file's size.** A fake `screenshot` answering `{ path, width: 1600, height: 1200 }`
-   gives `wrote <abs> (1600×1200)`, with and without `--scale`, and `--json` gives `width: 1600,
-   height: 1200`.
+6. **the reply names the file's size.** A fake `screenshot` answering a real 3×2 PNG (built with
+   `Bun.Image`) gives `wrote <abs> (3×2)`, with and without `--scale`, and `--json` gives `width: 3,
+   height: 2`.
 
 Daemon, in `tests/daemon-handler.test.ts` under `describe("createHandler")`, with a fake browser whose
 `screenshot` returns a real 4×4 PNG built with `Bun.Image` and whose `evaluate` answers `READ_VIEWPORT`
 with ratio 2:
 
 7. **screenshot --scale below the ratio writes the scaled PNG.** `[path, 1]` writes a PNG whose IHDR
-   says 2×2 and replies `{ path, width: 2, height: 2 }`.
+   says 2×2 and replies `{ path }`. `[path, 0.1]` writes 1×1.
 8. **screenshot --scale equal to the ratio writes the capture's bytes.** `[path, 2]` writes the
    capture byte for byte.
 9. **screenshot --scale above the ratio writes nothing.** `[path, 3]` replies `{ dpr: 2 }`, the file
    does not exist, and the fake browser recorded no capture.
+10. **screenshot --scale keeps a failed capture's error.** A fake browser whose capture throws
+    `An unknown error occurred`: `[path, 1]` rejects with that message and writes nothing. With test 5, this
+    covers the #69 path on both sides, since the #69 e2e test returns early below ratio 2
+    (`tests/e2e.test.ts:114`).
 
 E2E, in `tests/e2e.test.ts`, gated by `BOWSER_E2E=1` (CI runs it on `macos-latest`):
 
-10. On a local page, `resize 300 200`, `screenshot --scale=1`: the file's IHDR says 300×200 and the reply
+11. On a local page, `resize 300 200`, `screenshot --scale=1`: the file's IHDR says 300×200 and the reply
     says `(300×200)`.
-11. `screenshot --scale=<dpr+1>`, with `dpr` read by `eval devicePixelRatio`: exit 1, the message above, no
+12. `screenshot --scale=<dpr+1>`, with `dpr` read by `eval devicePixelRatio`: exit 1, the message above, no
     file.
-12. Plain `screenshot`: the size in the reply equals the file's IHDR. The test logs `devicePixelRatio`, which
+13. Plain `screenshot`: the size in the reply equals the file's IHDR. The test logs `devicePixelRatio`, which
     answers #191's open question about the ratio of a window on a Mac without a Retina display (the CI
     runner).
 
@@ -133,7 +153,7 @@ E2E, in `tests/e2e.test.ts`, gated by `BOWSER_E2E=1` (CI runs it on `macos-lates
 
 - `bun test tests/commands.test.ts -t 'screenshot --scale'`: tests 1 to 6 by name pass, none fail. Today:
   `regex "screenshot --scale" matched 0 tests`.
-- `bun test tests/daemon-handler.test.ts -t 'screenshot --scale'`: tests 7, 8 and 9 by name pass, none fail. Today: matched 0 tests.
+- `bun test tests/daemon-handler.test.ts -t 'screenshot --scale'`: tests 7 to 10 by name pass, none fail. Today: matched 0 tests.
 - `bowser screenshot --scale=1` on an open session writes a PNG of the viewport's CSS size and prints its
   size. Today: `bowser: unknown flag: --scale`, exit 1.
 - `grep -c -- "--scale" README.md skills/bowser/SKILL.md`: at least 1 for each file. Today: 0 and 0.
