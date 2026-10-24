@@ -746,16 +746,20 @@ describe("a navigation a previous command left pending", () => {
   }
   const stillLoading = (url: string) => `page is still loading ${url}; retry later, or run 'bowser close'`;
   const clicks = (v: Fake) => v.calls.filter(([n]) => n === "click").map(([, a]) => a[0]);
+  /** Settles once `cond` holds, polling on `clock`; settledAt throws if it never does. */
+  const until = (clock: ReturnType<typeof manualClock>, cond: () => boolean) =>
+    clock.fulfilledAt(new Promise<void>((r) => { const poll = () => cond() ? r() : clock.setTimeout(poll, 1); poll(); }));
 
   test("is pending after act gives up on it, until a landing or a failure", async () => {
     for (const end of ["landed", "failed"] as const) {
       const v = submitted();
-      const b = wrapView(v, slow);
+      const clock = manualClock();
+      const b = onClock(v, slow, clock);
       expect(b.navigationPending).toBe(false);
-      await b.click("#send");
+      await clock.fulfilledAt(b.click("#send"));
       expect(b.navigationPending).toBe(true);
       if (end === "landed") v.land("https://x/never");
-      else { v.onNavigationFailed?.(new Error("Frame load interrupted")); await waitFor(() => !b.navigationPending, 3000); }
+      else { v.onNavigationFailed?.(new Error("Frame load interrupted")); await until(clock, () => !b.navigationPending); }
       expect([end, b.navigationPending]).toEqual([end, false]);
     }
   });
@@ -763,13 +767,14 @@ describe("a navigation a previous command left pending", () => {
   test("stays pending when a script replaces it after the watch ended, until the replacement lands (#98)", async () => {
     const { v, page } = pageNavView();
     v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; page.to = "https://x/never"; };
-    const b = wrapView(v, slow);
-    await b.click("#send");
+    const clock = manualClock();
+    const b = onClock(v, slow, clock);
+    await clock.fulfilledAt(b.click("#send"));
     page.navs++;
     page.to = "https://x/never2";
     v.onNavigationFailed?.(new Error("-999"));
     // Negative check: the failure does not clear it once the page's count is read.
-    await Bun.sleep(10);
+    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 100); }));
     expect(b.navigationPending).toBe(true);
     v.land("https://x/never2");
     expect(b.navigationPending).toBe(false);
@@ -795,8 +800,9 @@ describe("a navigation a previous command left pending", () => {
       },
     });
     v.click = async () => { page.navs++; };
-    const b = wrapView(v, slow);
-    await b.click("#send");
+    const clock = manualClock();
+    const b = onClock(v, slow, clock);
+    await clock.fulfilledAt(b.click("#send"));
 
     v.onNavigationFailed?.(new Error("-999"));
     await firstFailureReadStarted;
@@ -804,7 +810,7 @@ describe("a navigation a previous command left pending", () => {
     v.onNavigationFailed?.(new Error("-999"));
     releaseFirstFailureRead();
 
-    await waitFor(() => !b.navigationPending, 3000);
+    await until(clock, () => !b.navigationPending);
     expect(countReads).toBe(3);
     expect(b.navigationPending).toBe(false);
     expect(v.calls.filter(([name, args]) => name === "evaluate" && args[0] === NAV_COUNT)).toHaveLength(3);
@@ -812,38 +818,49 @@ describe("a navigation a previous command left pending", () => {
 
   test("an action that navigates nowhere leaves nothing pending", async () => {
     const v = submitted();
-    const b = wrapView(v, slow);
-    await b.click("#other");
+    const clock = manualClock();
+    const b = onClock(v, slow, clock);
+    await clock.fulfilledAt(b.click("#other"));
     expect(b.navigationPending).toBe(false);
   });
 
+  /** createHandler and its view on one manual clock; `send` drives the clock until the reply. */
+  function onHandler(v: Fake) {
+    const clock = manualClock();
+    const handle = createHandler(onClock(v, slow, clock), {}, clock);
+    const send = async (req: Parameters<typeof handle>[0], inMs?: number) => {
+      const reply = handle(req, inMs === undefined ? undefined : clock.now() + inMs);
+      await clock.fulfilledAt(reply);
+      return reply;
+    };
+    return { clock, send };
+  }
+
   test("an action waits for a navigation a previous command left pending, then fails with 'page is still loading'", async () => {
     const v = submitted();
-    const handle = createHandler(wrapView(v, slow));
-    expect((await handle({ id: 1, op: "click", args: ["#send"] })).ok).toBe(true);
-    const t0 = Date.now();
-    const res = await handle({ id: 2, op: "click", args: ["#b"] }, t0 + 150);
-    const elapsed = Date.now() - t0;
+    const { clock, send } = onHandler(v);
+    expect((await send({ id: 1, op: "click", args: ["#send"] })).ok).toBe(true);
+    const t0 = clock.now();
+    const res = await send({ id: 2, op: "click", args: ["#b"] }, 150);
     expect(res).toEqual({ id: 2, ok: false, error: stillLoading("https://x/never") });
-    expect(elapsed).toBeGreaterThanOrEqual(140);
-    expect(elapsed).toBeLessThan(400);
+    expect(clock.now() - t0).toBe(150);
     expect(clicks(v)).toEqual(["#send"]);
   });
 
   test("a page that cannot say where its navigation goes is named by the view's url", async () => {
     const v = submitted(null);
-    const handle = createHandler(wrapView(v, slow));
-    await handle({ id: 1, op: "click", args: ["#send"] });
-    const res = await handle({ id: 2, op: "click", args: ["#b"] }, Date.now() + 50);
+    const { send } = onHandler(v);
+    await send({ id: 1, op: "click", args: ["#send"] });
+    const res = await send({ id: 2, op: "click", args: ["#b"] }, 50);
     expect(res.error).toBe(stillLoading("https://x/"));
   });
 
   test("an action waits for a pending navigation that lands, then acts on the new page", async () => {
     const v = submitted();
-    const handle = createHandler(wrapView(v, slow));
-    await handle({ id: 1, op: "click", args: ["#send"] });
-    setTimeout(() => v.land("https://x/answered"), 100);
-    const res = await handle({ id: 2, op: "click", args: ["#b"] }, Date.now() + 2000);
+    const { clock, send } = onHandler(v);
+    await send({ id: 1, op: "click", args: ["#send"] });
+    clock.setTimeout(() => v.land("https://x/answered"), 100);
+    const res = await send({ id: 2, op: "click", args: ["#b"] }, 2000);
     expect(res.ok).toBe(true);
     expect(clicks(v)).toEqual(["#send", "#b"]);
     expect(v.url).toBe("https://x/answered");
@@ -852,9 +869,9 @@ describe("a navigation a previous command left pending", () => {
   for (const op of ACTS) {
     test(`${op} waits for a pending navigation, as every ACTS op does`, async () => {
       const v = submitted();
-      const handle = createHandler(wrapView(v, slow));
-      await handle({ id: 1, op: "click", args: ["#send"] });
-      const res = await handle({ id: 2, op, args: ACT_ARGS[op] ?? [] }, Date.now() + 30);
+      const { send } = onHandler(v);
+      await send({ id: 1, op: "click", args: ["#send"] });
+      const res = await send({ id: 2, op, args: ACT_ARGS[op] ?? [] }, 30);
       expect(res.error).toBe(stillLoading("https://x/never"));
     });
   }
@@ -862,10 +879,10 @@ describe("a navigation a previous command left pending", () => {
   for (const op of ["evaluate", "reload", "back", "navigate"] as const) {
     test(`${op} does not wait for a pending navigation`, async () => {
       const v = submitted();
-      v.reload = async () => { setTimeout(() => v.land(v.url), 5); };
-      const handle = createHandler(wrapView(v, slow));
-      await handle({ id: 1, op: "click", args: ["#send"] });
-      const res = await handle({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, Date.now() + 30);
+      const { clock, send } = onHandler(v);
+      v.reload = async () => { clock.setTimeout(() => v.land(v.url), 5); };
+      await send({ id: 1, op: "click", args: ["#send"] });
+      const res = await send({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, 30);
       expect(res.error).toBeUndefined();
     });
   }
