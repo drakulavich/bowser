@@ -14,7 +14,7 @@ The full notes behind the command table in `SKILL.md`.
 | `bowser press <key>` | Press a keyboard key or a combination: `Tab` moves focus to the next field, `Shift+Tab` back; `Meta+a` selects all (macOS keys: `Control+a` goes to the line start). Modifiers: `Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`. No `F1`–`F12`, lone modifiers or key codes (`KeyA`): those fail with `usage:`. `Meta+c/x/v` do not reach the clipboard |
 | `bowser select <ref> <value>` | Choose a `<select>` option by value or label (the first match in document order); no match fails with exit 1 and changes nothing |
 | `bowser check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox/radio. A `[disabled]` one fails (exit 1); `uncheck` on a checked radio fails (exit 1): select another option in its group. `aria-checked="mixed"` counts as unchecked for `check`, checked for `uncheck` |
-| `bowser screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
+| `bowser screenshot [--filename=f] [--scale=N]` | Screenshot of the viewport (PNG); no full-page capture |
 | `bowser resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 |
 | `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides). Ends a daemon of another bowser version too. Exits 2 and keeps the session when it cannot confirm the browser stopped |
 | `bowser close --all` | Close every open session; if one fails, the rest are still closed and it exits 2 naming each failure with its reason |
@@ -50,7 +50,7 @@ words after `--` included. A missing argument fails with the command's usage lin
 
 ## Screenshots
 
-Screenshots are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). The reply names the absolute path written, as `snapshot --filename`'s does. A capture is the viewport only, like `playwright-cli` without `--full-page`; there is no full-page or element capture. `resize` first to capture more. WebKit cannot capture a viewport whose pixels fill 4 GiB (at pixel ratio 2, `resize 16384 16384` is too large and `16384 16383` fits); `screenshot` then exits 1 and names the size to resize to.
+Screenshots are written as PNG files. Use `--filename` to set the output path, or the default `screenshot-<session>.png` (auto-increments if the file exists). The reply names the absolute path written, as `snapshot --filename`'s does, and the PNG's size in pixels (`wrote /…/out.png (1600×1200)`, `{"ok":true,"filename":"/…/out.png","width":1600,"height":1200}`). The size follows the display's pixel ratio; `--scale=N` fixes it at `innerWidth·N × innerHeight·N` by scaling the capture down, and exits 1 without writing when N is above the display's ratio. A capture is the viewport only, like `playwright-cli` without `--full-page`; there is no full-page or element capture. `resize` first to capture more. WebKit cannot capture a viewport whose pixels fill 4 GiB (at pixel ratio 2, `resize 16384 16384` is too large and `16384 16383` fits); `screenshot` then exits 1 and names the size to resize to.
 
 ## MCP
 

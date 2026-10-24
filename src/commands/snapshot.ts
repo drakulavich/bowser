@@ -159,7 +159,7 @@ export async function cmdScreenshot(
     if (typeof res === "object" && "dpr" in res) {
       throw new UserError(`screenshot: --scale=${scale} needs a display at pixel ratio ${scale} or more; this one is ${res.dpr}`);
     }
-    const [width, height] = pngSize(new Uint8Array(await Bun.file(abs).arrayBuffer()));
+    const [width, height] = pngSize(new Uint8Array(await Bun.file(abs).slice(0, 24).arrayBuffer()));
     // The absolute path, for the same reason as snapshot --filename.
     return reply(ctx, { ok: true, filename: abs, width, height }, `wrote ${abs} (${width}×${height})`);
   });
