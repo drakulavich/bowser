@@ -59,8 +59,9 @@ interface DaemonOps {
   /** false: the element is a checked radio, left checked (F20). */
   uncheck:          { args: [selector: string];                          result: boolean };
   /** With a path the daemon writes the PNG and returns `{ path }`; without
-   *  one it returns base64 (reserved for a future --stdout). */
-  screenshot:       { args: [path?: string];                             result: { path: string } | string };
+   *  one it returns base64 (reserved for a future --stdout). A `scale` above
+   *  the window's pixel ratio writes nothing and returns `{ dpr }` (#191). */
+  screenshot:       { args: [path?: string, scale?: number];             result: { path: string } | { dpr: number } | string };
   resize:           { args: [width: number, height: number];             result: void };
   back:             { args: [];                                          result: void };
   forward:          { args: [];                                          result: void };
@@ -127,4 +128,10 @@ export interface DaemonConnection {
   /** This command prints dialog reports: ask the daemon for them. */
   reportDialogs(): void;
   close(): void;
+}
+
+/** Width and height from a PNG's IHDR, big-endian at bytes 16 and 20. */
+export function pngSize(png: Uint8Array): [number, number] {
+  const v = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  return [v.getUint32(16), v.getUint32(20)];
 }

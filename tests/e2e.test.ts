@@ -78,8 +78,11 @@ runOrSkip("e2e: real browser", () => {
     await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(html)}`);
     const file = join(tmp, "e2e-shot.png");
     const out = await cmdScreenshot({ session, json: false }, { filename: file });
-    expect(out).toBe(`wrote ${file}`);
     const bytes = new Uint8Array(await Bun.file(file).arrayBuffer());
+    const ihdr = new DataView(bytes.buffer);
+    expect(out).toBe(`wrote ${file} (${ihdr.getUint32(16)}×${ihdr.getUint32(20)})`);
+    // #191: the pixel ratio a window gets on this machine (a CI runner has no Retina display).
+    console.log(`devicePixelRatio: ${await cmdEval({ session, json: false }, "devicePixelRatio")}`);
     expect(isLikelyPng(bytes)).toBe(true);
     expect(bytes.length).toBeGreaterThan(1000); // a real capture, not a stub
   }, 30_000);
@@ -98,6 +101,30 @@ runOrSkip("e2e: real browser", () => {
     const [vw, vh, dpr] = JSON.parse(await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])")) as number[];
     expect([w, h]).toEqual([Math.round(vw! * dpr!), Math.round(vh! * dpr!)]);
     expect(h).toBeLessThan(5000 * dpr!);
+  }, 30_000);
+
+  test("screenshot --scale=1 writes the viewport's CSS size", async () => {
+    await cmdOpen({ session, json: false }, dataUrl);
+    await cmdResize({ session, json: false }, "300", "200");
+    try {
+      const file = join(tmp, "e2e-scale1.png");
+      const out = await cmdScreenshot({ session, json: false }, { filename: file, scale: "1" });
+      const png = new DataView(await Bun.file(file).arrayBuffer());
+      expect([png.getUint32(16), png.getUint32(20)]).toEqual([300, 200]);
+      expect(out).toBe(`wrote ${file} (300×200)`);
+    } finally {
+      await cmdResize({ session, json: false }, "800", "600");
+    }
+  }, 30_000);
+
+  test("screenshot --scale above the display's ratio fails and writes nothing", async () => {
+    await cmdOpen({ session, json: false }, dataUrl);
+    const dpr = Number(await cmdEval({ session, json: false }, "devicePixelRatio"));
+    const file = join(tmp, "e2e-scale-high.png");
+    const err = await cmdScreenshot({ session, json: false }, { filename: file, scale: String(dpr + 1) }).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(`screenshot: --scale=${dpr + 1} needs a display at pixel ratio ${dpr + 1} or more; this one is ${dpr}`);
+    expect(reportFailure(err).code).toBe(1);
+    expect(await Bun.file(file).exists()).toBe(false);
   }, 30_000);
 
   // #69: at the largest viewport resize accepts, WebKit's capture fails with

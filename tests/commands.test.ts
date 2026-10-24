@@ -1537,7 +1537,7 @@ describe("screenshot", () => {
     const tmpFile = join(tmp, `shot-${Date.now()}.png`);
     const c = fakeClient({ screenshot: () => PNG_B64 });
     const out = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: tmpFile });
-    expect(out).toBe(`wrote ${tmpFile}`);
+    expect(out).toBe(`wrote ${tmpFile} (1×1)`);
     const written = new Uint8Array(await Bun.file(tmpFile).arrayBuffer());
     expect([...written.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   });
@@ -1551,7 +1551,7 @@ describe("screenshot", () => {
       const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
       // The absolute path it wrote (F37): a relative one says nothing to a
       // caller that does not know this process's cwd.
-      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotdefault.png")}`);
+      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotdefault.png")} (1×1)`);
       expect(await Bun.file(join(tmp, "screenshot-shotdefault.png")).exists()).toBe(true);
     } finally {
       process.chdir(origCwd);
@@ -1564,7 +1564,7 @@ describe("screenshot", () => {
     try {
       const c = fakeClient({ screenshot: () => PNG_B64 });
       const out = await cmdScreenshot({ ...ctx({ json: true }), connect: async () => c }, { filename: "rel-shot.png" });
-      expect(JSON.parse(out)).toEqual({ ok: true, filename: join(realpathSync(tmp), "rel-shot.png") });
+      expect(JSON.parse(out)).toEqual({ ok: true, filename: join(realpathSync(tmp), "rel-shot.png"), width: 1, height: 1 });
     } finally {
       process.chdir(origCwd);
     }
@@ -1578,7 +1578,7 @@ describe("screenshot", () => {
       await Bun.write(join(tmp, "screenshot-shotinc.png"), "existing");
       const c = fakeClient({ screenshot: () => PNG_B64 });
       const out = await cmdScreenshot({ session, json: false, connect: async () => c }, {});
-      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotinc-1.png")}`);
+      expect(out).toBe(`wrote ${join(realpathSync(tmp), "screenshot-shotinc-1.png")} (1×1)`);
       expect(await Bun.file(join(tmp, "screenshot-shotinc-1.png")).exists()).toBe(true);
     } finally {
       process.chdir(origCwd);
@@ -1602,6 +1602,73 @@ describe("screenshot", () => {
       expect(call[1][0]).toBe(join(process.cwd(), "rel.png"));
     } finally {
       process.chdir(origCwd);
+    }
+  });
+});
+
+describe("screenshot --scale", () => {
+  const ONE_PX = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const pngB64 = async (w: number, h: number) =>
+    Buffer.from(await new Bun.Image(ONE_PX).resize(w, h, { fit: "fill" }).png().bytes()).toString("base64");
+  const shoot = (c: ReturnType<typeof fakeClient>, scale: string | undefined, json = false, file = join(tmp, "scaled.png")) =>
+    cmdScreenshot({ ...ctx({ json }), connect: async () => c }, { filename: file, scale });
+
+  test("a scale that is not a number above 0 is a usage error", async () => {
+    for (const raw of ["0", "-1", "abc", "0x2", " ", "", "9".repeat(400)]) {
+      const c = fakeClient({ screenshot: () => pngB64(1, 1) });
+      const err = await shoot(c, raw).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UserError);
+      expect((err as Error).message).toBe(`screenshot: --scale must be a number above 0, got '${raw}'`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(c.calls).toEqual([]);
+    }
+  });
+
+  test("--scale= reaches the command as an empty value", async () => {
+    const err = await run(["screenshot", "--scale=", "-s", session], { connect: async () => fakeClient({}) })
+      .catch((e: unknown) => e);
+    expect((err as Error).message).toBe("screenshot: --scale must be a number above 0, got ''");
+    expect(reportFailure(err).code).toBe(1);
+  });
+
+  test("the scale goes to the daemon", async () => {
+    const c = fakeClient({ screenshot: () => pngB64(1, 1) });
+    await shoot(c, "1.5");
+    expect(c.calls.find(([op]) => op === "screenshot")![1]).toEqual([join(tmp, "scaled.png"), 1.5]);
+  });
+
+  test("a scale the display cannot give is refused", async () => {
+    const c = fakeClient({ screenshot: () => ({ dpr: 1 }) });
+    const file = join(tmp, "refused.png");
+    const err = await shoot(c, "2", false, file).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UserError);
+    expect((err as Error).message).toBe("screenshot: --scale=2 needs a display at pixel ratio 2 or more; this one is 1");
+    expect(reportFailure(err).code).toBe(1);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  test("a viewport too large to capture keeps its advice under --scale", async () => {
+    const c = fakeClient({
+      screenshot: () => { throw new Error("An unknown error occurred"); },
+      evaluate: (expr: string) => (expr === READ_VIEWPORT ? [16384, 16384, 2] : undefined),
+    });
+    const err = await shoot(c, "1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UserError);
+    expect((err as Error).message).toBe(
+      "screenshot: WebKit cannot capture a 16384x16384 viewport at pixel ratio 2 (its pixels would fill 4 GiB); " +
+      "run 'bowser resize 16384 16383' or smaller",
+    );
+  });
+
+  test("the reply names the file's size", async () => {
+    const file = join(tmp, "scaled.png");
+    for (const scale of [undefined, "1"]) {
+      expect(await shoot(fakeClient({ screenshot: () => pngB64(3, 2) }), scale)).toBe(`wrote ${file} (3×2)`);
+      expect(JSON.parse(await shoot(fakeClient({ screenshot: () => pngB64(3, 2) }), scale, true)))
+        .toEqual({ ok: true, filename: file, width: 3, height: 2 });
     }
   });
 });

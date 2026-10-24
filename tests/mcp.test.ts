@@ -457,7 +457,7 @@ describe("bowser mcp resolves file outputs against a writable directory", () => 
       const res = await callIn(locked, tmpDir, {});
       expect(res.isError).toBeFalsy();
       const expected = join(tmpDir, "bowser-mcp", "screenshot-m37.png");
-      expect(JSON.parse(res.text)).toEqual({ ok: true, filename: expected });
+      expect(JSON.parse(res.text)).toEqual({ ok: true, filename: expected, width: 1, height: 1 });
       expect(existsSync(expected)).toBe(true);
     } finally {
       chmodSync(locked, 0o755);
@@ -469,7 +469,7 @@ describe("bowser mcp resolves file outputs against a writable directory", () => 
     const tmpDir = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-root-")));
     try {
       const res = await callIn("/", tmpDir, {});
-      expect(JSON.parse(res.text)).toEqual({ ok: true, filename: join(tmpDir, "bowser-mcp", "screenshot-m37.png") });
+      expect(JSON.parse(res.text)).toEqual({ ok: true, filename: join(tmpDir, "bowser-mcp", "screenshot-m37.png"), width: 1, height: 1 });
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -479,10 +479,10 @@ describe("bowser mcp resolves file outputs against a writable directory", () => 
     const root = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-keep-")));
     try {
       const rel = await callIn(root, root, { filename: "shot.png" });
-      expect(JSON.parse(rel.text)).toEqual({ ok: true, filename: join(root, "shot.png") });
+      expect(JSON.parse(rel.text)).toEqual({ ok: true, filename: join(root, "shot.png"), width: 1, height: 1 });
       const target = join(root, "abs", "given.png");
       const abs = await callIn("/", root, { filename: target });
-      expect(JSON.parse(abs.text)).toEqual({ ok: true, filename: target });
+      expect(JSON.parse(abs.text)).toEqual({ ok: true, filename: target, width: 1, height: 1 });
       expect(existsSync(target)).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });

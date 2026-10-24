@@ -34,7 +34,7 @@ To read a page rather than act on it, `bowser markdown` costs a fraction of a sn
 | `bowser select <ref> <value>` | Choose a `<select>` option by value or label |
 | `bowser check <ref>` / `uncheck <ref>` | Checkbox or radio |
 | `bowser dialog-accept [text]` / `dialog-dismiss` | Answer the next dialog; run it before the action |
-| `bowser screenshot [--filename=f]` | PNG of the viewport |
+| `bowser screenshot [--filename=f] [--scale=N]` | PNG of the viewport; `--scale` fixes its pixel size at the viewport times N, or fails above the display's ratio |
 | `bowser resize <width> <height>` | Set the viewport size |
 | `bowser go-back` / `go-forward` / `reload` | Navigation |
 | `bowser eval <expression>` | Evaluate JS in the page and print the result |
