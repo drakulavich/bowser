@@ -9,9 +9,10 @@
 // screenshot is not a plain overridable handler: the real daemon's contract
 // is "write the file when given a path", regardless of where the bytes came
 // from, so that write happens here unconditionally rather than only in the
-// default. A test-supplied `screenshot` handler only supplies the base64
-// bytes — used when it returns a string, treated as "" otherwise — and can
-// never skip the write.
+// default. A test-supplied `screenshot` handler supplies the base64 bytes,
+// or returns `{ dpr }` for the daemon refusing a --scale, which writes
+// nothing. With no handler the bytes are a real 1×1 PNG, since the command
+// reads the written file's size.
 //
 // `opts.dialogs` is what the connection's dialogs() reports, as if the
 // daemon's replies had carried them — but only once the command has called
@@ -20,6 +21,9 @@
 
 import pkg from "../../package.json";
 import type { ArgsOf, DaemonConnection, DialogReport, Op, ResultOf } from "../../src/daemon/protocol.ts";
+
+const ONE_PX_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 export type FakeHandlers = {
   [O in Op]?: (...args: ArgsOf<O>) => ResultOf<O> | Promise<ResultOf<O>>;
@@ -50,8 +54,9 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
         currentTitle = "Fake " + currentUrl;
       }
       if (op === "screenshot") {
-        const path = args[0] as string | undefined;
-        const raw = handlers.screenshot ? await handlers.screenshot(path) : undefined;
+        const [path, scale] = args as ArgsOf<"screenshot">;
+        const raw = handlers.screenshot ? await handlers.screenshot(path, scale) : ONE_PX_PNG;
+        if (typeof raw === "object" && "dpr" in raw) return raw as never;
         const b64 = typeof raw === "string" ? raw : "";
         if (path) {
           await Bun.write(path, Buffer.from(b64, "base64"));

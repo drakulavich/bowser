@@ -63,8 +63,12 @@ running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it aga
 Screenshots are written as PNG files. `bowser screenshot --filename out.png` writes
 to `out.png` (relative paths resolve against your current directory); without
 `--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
-if that file already exists. The reply names the absolute path written (`wrote /…/out.png`,
-`{"ok":true,"filename":"/…/out.png"}`), as does `snapshot --filename`. A capture is the
+if that file already exists. The reply names the absolute path written and the PNG's size in pixels
+(`wrote /…/out.png (1600×1200)`, `{"ok":true,"filename":"/…/out.png","width":1600,"height":1200}`);
+`snapshot --filename` names the path too. The size follows the display's pixel ratio: an 800×600 viewport
+is 1600×1200 on a Retina display and 800×600 on one at ratio 1. `--scale=N` fixes it at
+`innerWidth·N × innerHeight·N` by scaling the capture down, or fails with exit code 1 when N is above
+the display's ratio, since bowser cannot render more pixels than the display has. A capture is the
 viewport, as in `playwright-cli` without `--full-page`: bowser has no full-page or
 element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `resize` to capture more.
 WebKit cannot capture a viewport whose pixels fill 4 GiB. On a Retina display (pixel ratio 2)
@@ -207,7 +211,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `select <ref> <value>` | Choose a `<select>` option: the first, in document order, whose value or label is `<value>` (`select e3 Red` picks `<option value="r">Red</option>`). With no such option it fails at once with `ref 'eN' has no option "<value>"` (exit 1) and the select keeps its value; `playwright-cli` waits out its timeout |
 | `check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox or radio button. A disabled one fails like `click`. `uncheck` on a checked radio fails with `ref 'eN' is a radio button; select another option in its group to uncheck it`, exit 1; on an unchecked one it succeeds and does nothing. An `aria-checked="mixed"` checkbox is unchecked for `check` (one click, as in `playwright-cli`) and checked for `uncheck`, which clicks it until it reads `false` (`playwright-cli` leaves it mixed) |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
-| `screenshot [--filename=f]` | Screenshot of the viewport (PNG); no full-page capture |
+| `screenshot [--filename=f] [--scale=N]` | Screenshot of the viewport (PNG); no full-page capture |
 | `resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 (`Bun.WebView`'s limit) |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |

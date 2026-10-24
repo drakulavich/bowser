@@ -26,12 +26,12 @@ import { opTimeoutMs } from "../budget.ts";
 import { lineReader } from "../socket-lines.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
-  IS_URGENT,
+  IS_URGENT, pngSize,
   type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type DialogState, type Op, type PageState, type ResultOf,
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
 import { claimSession } from "./pidfile.ts";
-import { dialogAnswerScript, dialogSyncScript, withDialogShim } from "../page-scripts.ts";
+import { dialogAnswerScript, dialogSyncScript, READ_VIEWPORT, withDialogShim } from "../page-scripts.ts";
 
 /** What the daemon knows that the page cannot be asked for. `url` and `title`
  *  are deliberately NOT here: they are read live from the page on every
@@ -301,13 +301,20 @@ const handlers: Handlers = {
   select: (browser, selector, value) => browser.select(selector, value),
   check: async (browser, selector) => { await browser.setChecked(selector, true); },
   uncheck: (browser, selector) => browser.setChecked(selector, false),
-  screenshot: async (browser, path) => {
+  screenshot: async (browser, path, scale) => {
     // When the CLI passes an absolute path, the daemon writes the PNG itself
     // so the ~140 KB base64 never crosses the socket. With no path, return
     // base64 — reserved for a future --stdout / programmatic caller.
+    let dpr: number | undefined;
+    if (scale !== undefined) {
+      dpr = ((await browser.evaluate(READ_VIEWPORT)) as [number, number, number])[2];
+      if (scale > dpr) return { dpr };
+    }
     const b64 = await browser.screenshot();
     if (path) {
-      await Bun.write(path, Buffer.from(b64, "base64"));
+      let png: Uint8Array = Buffer.from(b64, "base64");
+      if (dpr !== undefined && scale !== dpr) png = await scalePng(png, scale! / dpr);
+      await Bun.write(path, png);
       return { path };
     }
     return b64;
@@ -317,6 +324,13 @@ const handlers: Handlers = {
   forward: (browser) => browser.forward(),
   reload: (browser) => browser.reload(),
 };
+
+/** The PNG resized by `factor`, each side at least 1 pixel. */
+async function scalePng(png: Uint8Array, factor: number): Promise<Uint8Array> {
+  const [w, h] = pngSize(png);
+  const side = (n: number) => Math.max(1, Math.round(n * factor));
+  return new Bun.Image(png).resize(side(w), side(h), { fit: "fill" }).png().bytes();
+}
 
 /** What WebKit answers every evaluate and click with once the page's web
  *  process has died twice: the first time the engine relaunches it and

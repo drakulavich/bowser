@@ -3,7 +3,7 @@
 import { resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import { markdownScript, READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.ts";
-import type { DaemonConnection } from "../daemon/protocol.ts";
+import { pngSize, type DaemonConnection } from "../daemon/protocol.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { loadState, saveState } from "../state.ts";
 import { dialogsJson, liveSelector, loadRef, modalState, reply, replyPage, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
@@ -126,10 +126,20 @@ async function tooLargeToCapture(c: DaemonConnection): Promise<UserError | undef
   }
 }
 
+/** --scale as a number, or a UserError: a decimal, finite and above 0. */
+function parseScale(raw: string): number {
+  const n = Number(raw);
+  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(raw) || !Number.isFinite(n) || n <= 0) {
+    throw new UserError(`screenshot: --scale must be a number above 0, got '${raw}'`);
+  }
+  return n;
+}
+
 export async function cmdScreenshot(
   ctx: CommandContext,
-  opts: { filename?: string } = {},
+  opts: { filename?: string; scale?: string } = {},
 ): Promise<string> {
+  const scale = opts.scale === undefined ? undefined : parseScale(opts.scale);
   // The viewport only, as playwright-cli without --full-page. The default name auto-increments so repeated screenshots
   // don't clobber each other; an explicit --filename writes exactly there.
   const filename =
@@ -140,13 +150,18 @@ export async function cmdScreenshot(
   // shipped back over the socket — so we hand it an absolute target path.
   const abs = resolve(process.cwd(), filename);
   return withClient(ctx, async (c) => {
+    let res;
     try {
-      await c.request("screenshot", [abs]);
+      res = await c.request("screenshot", scale === undefined ? [abs] : [abs, scale]);
     } catch (err) {
       throw (await tooLargeToCapture(c)) ?? err;
     }
+    if (typeof res === "object" && "dpr" in res) {
+      throw new UserError(`screenshot: --scale=${scale} needs a display at pixel ratio ${scale} or more; this one is ${res.dpr}`);
+    }
+    const [width, height] = pngSize(new Uint8Array(await Bun.file(abs).arrayBuffer()));
     // The absolute path, for the same reason as snapshot --filename.
-    return reply(ctx, { ok: true, filename: abs }, `wrote ${abs}`);
+    return reply(ctx, { ok: true, filename: abs, width, height }, `wrote ${abs} (${width}×${height})`);
   });
 }
 
@@ -172,7 +187,7 @@ export const COMMANDS: Command[] = [
     name: "screenshot",
     summary: "Save a PNG screenshot of the viewport",
     positional: [],
-    flags: [{ name: "filename", kind: "string" }],
-    run: (ctx, a) => cmdScreenshot(ctx, { filename: str(a.flags, "filename") }),
+    flags: [{ name: "filename", kind: "string" }, { name: "scale", kind: "string" }],
+    run: (ctx, a) => cmdScreenshot(ctx, { filename: str(a.flags, "filename"), scale: str(a.flags, "scale") }),
   },
 ];

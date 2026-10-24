@@ -144,6 +144,65 @@ describe("createHandler", () => {
     }
   });
 
+  describe("screenshot --scale", () => {
+    const ONE_PX = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const ihdr = (b: Uint8Array) => { const v = new DataView(b.buffer, b.byteOffset); return [v.getUint32(16), v.getUint32(20)]; };
+    /** A browser at pixel ratio 2 whose capture is a real 4×4 PNG; `captures` counts the captures. */
+    async function atRatio2(capture?: () => Promise<string>) {
+      const png = Buffer.from(await new Bun.Image(ONE_PX).resize(4, 4, { fit: "fill" }).png().bytes());
+      const seen = { captures: 0 };
+      const b = fakeBrowser({
+        evaluate: async () => [2, 2, 2],
+        screenshot: async () => { seen.captures++; return capture ? capture() : png.toString("base64"); },
+      });
+      return { b, seen };
+    }
+    async function inDir(fn: (path: string) => Promise<void>) {
+      const dir = await mkdtemp(join(tmpdir(), "bowser-handler-"));
+      try { await fn(join(dir, "shot.png")); } finally { await rm(dir, { recursive: true, force: true }); }
+    }
+
+    test("screenshot --scale below the ratio writes the scaled PNG", async () => {
+      await inDir(async (path) => {
+        const { b } = await atRatio2();
+        expect(await createHandler(b)(req("screenshot", [path, 1]))).toEqual({ id: 7, ok: true, result: { path } });
+        expect(ihdr(new Uint8Array(await readFile(path)))).toEqual([2, 2]);
+        await createHandler(b)(req("screenshot", [path, 0.1]));
+        expect(ihdr(new Uint8Array(await readFile(path)))).toEqual([1, 1]);
+      });
+    });
+
+    test("screenshot --scale equal to the ratio writes the capture's bytes", async () => {
+      await inDir(async (path) => {
+        // A greyscale PNG from another encoder: any re-encode by Bun.Image changes its bytes.
+        const { b } = await atRatio2(async () => ONE_PX.toString("base64"));
+        await createHandler(b)(req("screenshot", [path, 2]));
+        expect(Buffer.from(await readFile(path)).equals(ONE_PX)).toBe(true);
+      });
+    });
+
+    test("screenshot --scale above the ratio writes nothing", async () => {
+      await inDir(async (path) => {
+        const { b, seen } = await atRatio2();
+        expect(await createHandler(b)(req("screenshot", [path, 3]))).toEqual({ id: 7, ok: true, result: { dpr: 2 } });
+        expect(await Bun.file(path).exists()).toBe(false);
+        expect(seen.captures).toBe(0);
+      });
+    });
+
+    test("screenshot --scale keeps a failed capture's error", async () => {
+      await inDir(async (path) => {
+        const { b } = await atRatio2(async () => { throw new Error("An unknown error occurred"); });
+        const res = await createHandler(b)(req("screenshot", [path, 1]));
+        expect(res).toMatchObject({ ok: false, error: expect.stringContaining("An unknown error occurred") });
+        expect(await Bun.file(path).exists()).toBe(false);
+      });
+    });
+  });
+
   test("a click is given the time left until its budget's timer, so a cover that appears late fails it there (#112)", async () => {
     const b = fakeBrowser();
     const deadline = Date.now() + 1000;
