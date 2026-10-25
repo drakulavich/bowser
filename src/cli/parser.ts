@@ -46,7 +46,7 @@ export function helpRequested(schemas: Schemas, argv: string[]): boolean {
   }
 }
 
-/** An unknown flag or command throws, unless the same argv asks for help:
+/** An unknown flag or command throws, unless the same argv asks for help or the version:
  *  then nothing runs, so the first such error is dropped. An unknown flag
  *  consumes no value, so `close --bogus -h` is help. */
 export function parse(schemas: Schemas, argv: string[]): Parsed {
@@ -129,7 +129,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
     i++;
   }
 
-  if (error && !out.help) throw error;
+  if (error && !out.help && !out.version) throw error;
   return out;
 }
 

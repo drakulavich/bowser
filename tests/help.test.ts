@@ -249,8 +249,8 @@ describe("--version", () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  test("mcp --version prints it too, and starts no server", async () => {
-    const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp", "--version"], {
+  test("mcp --version prints it too, beside an unknown flag, and starts no server", async () => {
+    const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp", "--version", "--bogus"], {
       env: { ...process.env, HOME: "/nonexistent-bowser-home" },
       stdin: "ignore",
       stdout: "pipe",
