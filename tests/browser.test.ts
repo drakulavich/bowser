@@ -816,6 +816,44 @@ describe("a navigation a previous command left pending", () => {
     expect(v.calls.filter(([name, args]) => name === "evaluate" && args[0] === NAV_COUNT)).toHaveLength(3);
   });
 
+  // #106: started navigations (NAV_COUNT) against finished ones (landings), not the count last seen.
+  test("a count read late, already counting a third navigation, does not clear the pending one", async () => {
+    let countReads = 0;
+    let startLateRead!: () => void;
+    let releaseLateRead!: () => void;
+    const lateReadStarted = new Promise<void>((resolve) => { startLateRead = resolve; });
+    const lateReadGate = new Promise<void>((resolve) => { releaseLateRead = resolve; });
+    const { v, page } = pageNavView({
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_COUNT && ++countReads === 2) {
+          startLateRead();
+          await lateReadGate;
+        }
+        if (expr === NAV_COUNT) return page.navs;
+        return undefined;
+      },
+    });
+    v.click = async () => { page.navs++; };
+    const clock = manualClock();
+    const b = onClock(v, slow, clock);
+    await clock.fulfilledAt(b.click("#send"));
+
+    page.navs++;
+    v.onNavigationFailed?.(new Error("-999"));
+    await lateReadStarted;
+    page.navs++;
+    v.onNavigationFailed?.(new Error("-999"));
+    releaseLateRead();
+    await until(clock, () => countReads === 3);
+    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 100); }));
+
+    expect(b.navigationPending).toBe(true);
+    v.land("https://x/third");
+    expect(b.navigationPending).toBe(false);
+  });
+
   test("an action that navigates nowhere leaves nothing pending", async () => {
     const v = submitted();
     const clock = manualClock();

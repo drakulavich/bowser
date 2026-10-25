@@ -414,15 +414,15 @@ function navigationWatch(
     // evaluate, and fewer of them means fewer chances to race the commit.
     if (landed !== before) return;
     // A page busy right after the action answers late, not "no navigation" (#170).
-    const seen = await count(timing.settleMs);
-    if (seen < 1) return;
-    await follow(seen, timing.settleMs);
+    if (await count(timing.settleMs) < 1) return;
+    await follow(timing.settleMs);
   };
-  /** Wait up to `capMs` for the pending navigation to land; the page
-   *  counted `seen` navigations when it began. */
-  const follow = async (seen: number, capMs: number): Promise<void> => {
+  /** Whether more navigations started since NAV_ARM than landed since:
+   *  `started` is the page's count, plus the action's own for a reload. */
+  const unfinished = (started: number): boolean => started > landed - armedAt;
+  /** Wait up to `capMs` for the pending navigation to land. */
+  const follow = async (capMs: number): Promise<void> => {
     phase = "awaiting-navigation";
-    pendingSeen = seen;
     onNavigation();
     pendingAt = landed;
     // A failure ends the wait unless the page started another navigation
@@ -436,8 +436,7 @@ function navigationWatch(
       if (landed !== base) {
         // setTimeout treats Infinity as 1 ms.
         const now = await count(Math.min(began + capMs - clock.now(), timing.settleMs));
-        if (now <= pendingSeen) return;
-        pendingSeen = now;
+        if (!unfinished(now)) return;
         base = landed;
         pendingAt = landed;
       }
@@ -450,15 +449,14 @@ function navigationWatch(
     const base = landed;
     pendingAt = base;
     const now = await count(timing.settleMs);
-    const hasReplacement = now > pendingSeen;
-    if (now > pendingSeen) pendingSeen = now;
     if (landed !== base) return;
-    if (!hasReplacement) pendingAt = undefined;
+    if (!unfinished(now)) pendingAt = undefined;
   };
   let phase: ActPhase = "idle";
   let actionCancelled = false;
   let pendingAt: number | undefined;
-  let pendingSeen = 0;
+  // A reload is a navigation the page's count never sees (#116), so its own landing is not counted.
+  let armedAt = 0;
   return {
     get phase() { return phase; },
     cancelAction() { actionCancelled = true; },
@@ -483,6 +481,7 @@ function navigationWatch(
         if (actionCancelled) throw new Error("request timed out before the action was sent");
         const landedBefore = landed;
         const arrivedBefore = arrived;
+        armedAt = navigates ? landed + 1 : landed;
         phase = "acting";
         const result = await action();
         phase = "delivered";
@@ -491,7 +490,7 @@ function navigationWatch(
         const ended = arrived !== arrivedBefore || (landed !== landedBefore && !cancelled(failure));
         if (!navigates) await awaitNavigation(before, wasLoading);
         else {
-          if (!ended) await follow(0, Infinity);
+          if (!ended) await follow(Infinity);
           if (arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure)) throw failure;
         }
         return result;
