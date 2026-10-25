@@ -540,6 +540,36 @@ describe("wrapView navigation watch", () => {
     expect(own(v.calls)).toEqual([["goBack", []], ["goForward", []]]);
   });
 
+  // #127: past the back-forward cache WebKit reports the load's failure after goBack() resolves.
+  test("back and forward fail with the failure of the page they go to", async () => {
+    const clock = manualClock();
+    const failing = async () => { clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 5); };
+    const v = fakeView({ goBack: failing, goForward: failing });
+    const b = onClock(v, fast, clock);
+    const back = b.back();
+    await clock.settledAt(back);
+    await expect(back).rejects.toThrow("Could not connect to the server.");
+    const forward = b.forward();
+    await clock.settledAt(forward);
+    await expect(forward).rejects.toThrow("Could not connect to the server.");
+    expect(b.phase).toBe("idle");
+  });
+
+  test("back over a cancelled -999 still returns", async () => {
+    const clock = manualClock();
+    const v = fakeView({ goBack: async () => { clock.setTimeout(() => v.onNavigationFailed?.(new Error(CANCELLED)), 5); } });
+    await clock.fulfilledAt(onClock(v, fast, clock).back());
+  });
+
+  test("back that lands returns, though the navigation before it failed", async () => {
+    const clock = manualClock();
+    const v = fakeView({ goBack: async () => { clock.setTimeout(() => v.land("https://x/previous"), 5); } });
+    const b = onClock(v, fast, clock);
+    v.onNavigationFailed?.(new Error("Could not connect to the server."));
+    await clock.fulfilledAt(b.back());
+    expect(b.url).toBe("https://x/previous");
+  });
+
   test("reload falls back to location.reload() when the runtime lacks it", async () => {
     const clock = manualClock();
     const v = fakeView({ evaluate: async (expr) => {
