@@ -99,6 +99,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     expect(saved.url).toBe(`${base}/cart`);
     const r = await run(CLI, s, ["eval", "location.pathname"]);
     expect(r.code).toBe(0);
+    expect(r.out).toBe("/moved");
     expect(r.err).toBe(notice(s, "0.0.1", `page reloaded at ${base}/moved; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`));
   });
 
