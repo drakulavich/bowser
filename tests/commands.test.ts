@@ -101,7 +101,23 @@ describe("open", () => {
     const out = await cmdOpen({ ...ctx({ json: true }), connect: async () => c }, "https://x");
     expect(JSON.parse(out)).toEqual({ ok: true, url: "https://x", title: "Fake https://x" });
   });
+  // #196: a redirect leaves the page somewhere other than where open sent it.
+  test("reports the URL the page landed on, not the one asked for", async () => {
+    const text = await cmdOpen({ ...ctx(), connect: async () => redirecting() }, "https://y");
+    const json = await cmdOpen({ ...ctx({ json: true }), connect: async () => redirecting() }, "https://y");
+    expect(text).toBe(`opened https://y/landed  "Landed"`);
+    expect(JSON.parse(json)).toEqual({ ok: true, url: "https://y/landed", title: "Landed" });
+  });
 });
+
+/** A daemon whose page redirects: navigate("https://y") lands on "https://y/landed". */
+function redirecting() {
+  let url = "about:blank";
+  return fakeClient({
+    navigate: (to) => { url = `${to}/landed`; },
+    state: () => ({ url, title: url === "about:blank" ? "" : "Landed" }),
+  });
+}
 
 // F28: only `open` may start a daemon on a session whose browser exited;
 // connectOrSpawn refuses the rest. `close` never spawns at all.
@@ -329,6 +345,12 @@ describe("goto", () => {
     const out = await cmdGoto({ ...ctx(), connect: async () => c }, "https://y");
     expect(out).toContain("https://y");
     expect(c.calls).toContainEqual(["navigate", ["https://y"]]);
+  });
+  test("reports the URL the page landed on, not the one asked for (#196)", async () => {
+    const text = await cmdGoto({ ...ctx(), connect: async () => redirecting() }, "https://y");
+    const json = await cmdGoto({ ...ctx({ json: true }), connect: async () => redirecting() }, "https://y");
+    expect(text).toBe("navigated to https://y/landed");
+    expect(JSON.parse(json)).toEqual({ ok: true, url: "https://y/landed" });
   });
   test("goto errors when a real URL ends on about:blank", async () => {
     const c = fakeClient({ state: () => ({ url: "about:blank", title: "X" }) });
