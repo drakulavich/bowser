@@ -46,8 +46,15 @@ sequenceDiagram
 
 `restartSession` (`src/commands/restart.ts`) already connects to the old daemon to check that it is older.
 After the claim, it connects with `anyVersion: true` and sends `state`, as `stopDaemon` already does for
-`shutdown`. The reply's `url` replaces `state.json`'s as the page to reopen. If the request fails (the old
-daemon died, or does not answer within the health ping), the restart falls back to `state.json`, as today.
+`shutdown`. The reply's `url` replaces `state.json`'s as the page to reopen.
+
+`state` is not urgent (`URGENT_OPS` holds only `ping` and `shutdown`), so it waits behind an op in
+progress and behind the gate. At budget 0 the client sets no timer and `createGate(0)` never releases, so an
+old daemon that is busy would hold the restart for ever. The request is therefore bounded by
+`withTimeout(…, HEALTH_PING_MS)` (1 s), whatever the budget, and its client is closed before `stopDaemon`,
+which sends `shutdown` on its own connection. If the request fails, times out, or answers something without
+a string `url` (an older daemon's reply is not parsed beyond that), the restart falls back to `state.json`,
+as today, and treats the budget as unknown.
 
 `state` gains an optional field, `budgetMs`: the `BOWSER_OP_TIMEOUT_MS` value the daemon read at start (`0`
 for none). `PageState` in `src/daemon/protocol.ts` gets `budgetMs?: number`. Daemons from this release on
@@ -55,9 +62,11 @@ send it. Older ones don't, and for them the field is absent.
 
 The restart passes the budget to the spawn: `ConnectOptions` gets `daemonBudgetMs?: number | null`, which
 `spawnDaemon` hands to `daemonEnv`. A number sets `BOWSER_OP_TIMEOUT_MS` in the daemon's environment, and
-`null` deletes it, so the daemon takes the default 30 s. `cmdOpen` takes it through a new `OpenOptions`
-field and passes it to `withPageClient`. The restart sets it to the old daemon's `budgetMs`, or to `null`
-when the reply has none. So a session restarted from 0.12 gets the default, not the caller's one-off value,
+`null` deletes it, so the daemon takes the default 30 s. `0` is a number and sets `0` (no cap): the check is
+`typeof === "number"`, never truthiness. Left out, the caller's environment goes through unchanged, as for
+every spawn today. `cmdOpen` takes it through a new `OpenOptions` field and adds it to the options it already
+passes to `withPageClient`. The restart sets it to the old daemon's `budgetMs`, or to `null` when the reply
+has none. So a session restarted from 0.12 gets the default, not the caller's one-off value,
 and from the next upgrade on it gets back the budget it was opened with.
 
 **Data.** One optional number in the `state` reply, about 20 bytes, sent once per restart and on each
@@ -88,16 +97,15 @@ runs once per upgrade.
 
 `claimRestartLock` and `otherHolder` (`src/commands/restart-lock.ts`) count a live pid as the holder only if
 its `ps -o command=` line is a bowser command. That is a new `looksLikeBowser(line)` in
-`src/daemon/pidfile.ts`, next to `looksLikeOurDaemon`, and `isBowser(pid)` reads the line the way
-`isOurDaemon` does. A bowser command line is one of these:
+`src/daemon/pidfile.ts`, next to `looksLikeOurDaemon`. A line is bowser's when one of its words is
+`src/cli.ts` or ends with `/src/cli.ts` (a checkout's `bun src/cli.ts` and `bun run src/cli.ts`, and the npm
+bin, which `#!/usr/bin/env bun` runs with the absolute path of the `src/cli.ts` it links to), or has a basename
+that matches `/^bowser([-.]|$)/` (`bun …/bin/bowser` as a link ran it, and an old release binary).
 
-- `bun <path ending in /src/cli.ts> …`: a checkout, or the npm bin, which links to `src/cli.ts`;
-- `bun <path whose last segment is bowser> …`: the `~/.bun/bin/bowser` or `node_modules/.bin/bowser` link as
-  the shebang ran it;
-- a first word whose basename matches `/^bowser([-.]|$)/`: an old release binary.
-
-The executable counts as `bun` by basename, or when the line starts with `process.execPath` (#156). Any
-other live pid holding `upg` counts as stale. `claimSession` already removes a stale claim and takes it.
+`otherHolder` is synchronous, and `takeNotice` (`src/commands/context.ts`) and `restartSession`'s wait loop
+use it so. `isBowser(pid)` therefore reads the line with `Bun.spawnSync(["ps", "-o", "command=", "-p", pid])`,
+which takes a few milliseconds, and the claim's `holds` callback uses the same function. Any other live pid
+holding `upg` counts as stale. `claimSession` already removes a stale claim and takes it.
 
 `beingRestarted` ends with `; retry in a moment` (ET-36).
 
@@ -114,13 +122,20 @@ In `tests/lifecycle.test.ts`, under the `#152` describe, with the fake daemons i
 - **ET-33.** The old fake daemon answers `state` with `url: "<base>/moved"`, and `state.json` holds
   `<base>/start`. After `eval 1`, the restart's `open` went to `/moved`, and the notice says
   `page reloaded at <base>/moved`. Fails today: it reopens `/start`.
-- **ET-33, fallback.** The old fake daemon fails `state`. The restart reopens `state.json`'s URL, as today.
+- **ET-33, fallback.** The old fake daemon fails `state`. The restart reopens `state.json`'s URL. This guards
+  today's behaviour and passes before the change.
+- **A busy old daemon.** With `BOWSER_OP_TIMEOUT_MS=0`, the old fake daemon answers `ping` and `shutdown` and
+  never answers `state`. The restart sends `shutdown` within 2 s of its claim and reopens `state.json`'s URL.
+  Fails without the 1 s bound: it never reaches `shutdown`.
 - **ET-30.** The old fake daemon answers `state` with `budgetMs: 45000`, and the command runs with
   `BOWSER_OP_TIMEOUT_MS=200`. The spawn gets `daemonBudgetMs: 45000`: a recording connector, as in the
   existing tests, sees it in the options. Fails today: no such option.
 - **ET-30, from 0.12.** With no `budgetMs` in the reply, the spawn gets `daemonBudgetMs: null`.
+- **ET-30, no cap.** The old fake daemon answers `budgetMs: 0` while the caller has `BOWSER_OP_TIMEOUT_MS=200`.
+  The spawn gets `daemonBudgetMs: 0`.
 - **`daemonEnv`.** In `tests/daemon.test.ts`: `45000` sets `BOWSER_OP_TIMEOUT_MS=45000` while the caller has
-  `200`, `null` deletes it, and with no option the caller's value stays (every other spawn is unchanged).
+  `200`, `0` sets `0`, `null` deletes it, and with no option the caller's value stays (every other spawn is
+  unchanged).
 - **The daemon reports its budget.** In `tests/daemon-handler.test.ts`: `state` answers `budgetMs` equal to
   the timeout the handler was created with.
 - **ET-35.** A lock holding the pid of a live process that is not bowser (a spawned `sleep 30`, killed
@@ -130,14 +145,15 @@ In `tests/lifecycle.test.ts`, under the `#152` describe, with the fake daemons i
   `process.ppid` into the lock as a live holder. The test runner's parent is not bowser, so after this change
   those locks would count as stale. They get a helper that spawns a process that looks like bowser:
   `bun <tmp>/src/cli.ts`, where that file is `await Bun.sleep(60_000)`, killed in `afterEach`.
-- **`looksLikeBowser`.** In `tests/commands.test.ts`, next to the `looksLikeOurDaemon` cases: the three
-  accepted shapes, a spaced `bun` path, and refusals (`sleep 300`, `bun test`, `bun /x/not-bowser.ts`,
-  `/usr/bin/bowserx`).
+- **`looksLikeBowser`.** In `tests/commands.test.ts`, next to the `looksLikeOurDaemon` cases. Accepted:
+  `bun src/cli.ts eval 1`, `bun run src/cli.ts eval 1`, `/opt/bun /g/node_modules/@drakulavich/bowser-cli/src/cli.ts
+  mcp`, `bun /Users/x/.bun/bin/bowser open`, `/usr/local/bin/bowser-macos-arm64 eval 1`. Refused: `sleep 300`,
+  `bun test`, `bun /x/not-bowser.ts`, `bun /x/src/cli.tsx`, `/usr/bin/bowserx`.
 - **ET-36.** `tests/exit-codes.test.ts` or the existing `beingRestarted` assertions gain `; retry in a moment`.
 - **e2e.** `tests/e2e-upgrade.test.ts` gains one test: open on the old version, move the page with
   `history.pushState`, upgrade, `snapshot`. The notice names the pushed URL.
 
-Each new unit test fails before the change. The PR quotes one mutation per production line it names.
+Each new test fails before the change, except the fallback test, which guards behaviour that must not change. The PR quotes one mutation per production line it names.
 
 ## Out of scope
 
@@ -150,7 +166,7 @@ Each new unit test fails before the change. The PR quotes one mutation per produ
 
 | Command | Expected |
 | --- | --- |
-| `bun test tests/lifecycle.test.ts -t "ET-33"` | the new tests pass |
+| `bun test tests/lifecycle.test.ts -t "ET-33"` | the new tests pass, the busy-daemon one included |
 | `bun test tests/lifecycle.test.ts -t "ET-30"` | the new tests pass |
 | `bun test tests/commands.test.ts -t "looksLikeBowser"` | the new tests pass |
 | `bun test tests/lifecycle.test.ts -t "ET-35"` | the new test passes |
