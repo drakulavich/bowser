@@ -54,7 +54,8 @@ export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
 function startsMcpServer(argv: string[]): boolean {
   if (argv[0] !== "mcp" || helpRequested(SCHEMAS, argv)) return false;
   try {
-    return parse(SCHEMAS, argv).positional.length === 0;
+    const args = parse(SCHEMAS, argv);
+    return args.positional.length === 0 && !args.version;
   } catch {
     // An unknown flag: the server starts, as it did before this check.
     return true;

@@ -249,6 +249,17 @@ describe("--version", () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
+  test("mcp --version prints it too, and starts no server", async () => {
+    const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), "mcp", "--version"], {
+      env: { ...process.env, HOME: "/nonexistent-bowser-home" },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, code] = [await new Response(p.stdout).text(), await p.exited];
+    expect({ out, code }).toEqual({ out: `${pkg.version}\n`, code: 0 });
+  });
+
   test("is listed under the global flags", () => {
     expect(HELP).toContain("--version            print bowser's version");
   });
