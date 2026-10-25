@@ -602,10 +602,10 @@ describe("connectOrSpawn when Bun.spawn throws", () => {
   test("closes the daemon log it opened", async () => {
     const err = await connectOrSpawn("spawnthrow", { platform: "darwin" }).then(() => undefined, (e: unknown) => e);
     expect((err as Error).message).toContain("null bytes");
-    // Matched by inode: other tests' sockets close asynchronously, so a count of /dev/fd moves.
-    const log = statSync(daemonLogPath("spawnthrow")).ino;
+    // Matched by device and inode: other tests' sockets close asynchronously, so a count of /dev/fd moves.
+    const log = statSync(daemonLogPath("spawnthrow"));
     const open = readdirSync("/dev/fd").filter((fd) => {
-      try { return fstatSync(Number(fd)).ino === log; } catch { return false; }
+      try { const st = fstatSync(Number(fd)); return st.ino === log.ino && st.dev === log.dev; } catch { return false; }
     });
     expect(open).toEqual([]);
   });
