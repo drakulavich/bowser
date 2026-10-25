@@ -2,7 +2,7 @@
 // daemon that goes away mid-request.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { ensureSessionDir, profileDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, daemonCommand, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, daemonCommand, daemonLogPath, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -600,9 +600,13 @@ describe("connectOrSpawn when Bun.spawn throws", () => {
   });
 
   test("closes the daemon log it opened", async () => {
-    const before = readdirSync("/dev/fd").length;
     const err = await connectOrSpawn("spawnthrow", { platform: "darwin" }).then(() => undefined, (e: unknown) => e);
     expect((err as Error).message).toContain("null bytes");
-    expect(readdirSync("/dev/fd").length).toBe(before);
+    // Matched by device and inode: other tests' sockets close asynchronously, so a count of /dev/fd moves.
+    const log = statSync(daemonLogPath("spawnthrow"));
+    const open = readdirSync("/dev/fd").filter((fd) => {
+      try { const st = fstatSync(Number(fd)); return st.ino === log.ino && st.dev === log.dev; } catch { return false; }
+    });
+    expect(open).toEqual([]);
   });
 });
