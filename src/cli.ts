@@ -5,10 +5,12 @@ import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { failedModalState, type CommandContext } from "./commands/context.ts";
 import { restartSession } from "./commands/restart.ts";
 import { UserError } from "./errors.ts";
+import pkg from "../package.json";
 
 /** `base` seeds the command context; tests inject `connect` through it. */
 export async function run(argv: string[], base: Partial<CommandContext> = {}): Promise<string> {
   const args = parse(SCHEMAS, argv);
+  if (args.version && !args.help) return pkg.version;
   if (!args.command) return renderHelp(COMMANDS);
   const command = findCommand(args.command);
   // parse() rejects an unknown command unless --help came first; this is

@@ -58,6 +58,7 @@ export const SCHEMAS: Schemas = {
     { name: "session", short: "s", kind: "string" },
     { name: "json", kind: "boolean" },
     { name: "help", short: "h", kind: "boolean" },
+    { name: "version", kind: "boolean" },
   ],
   commands: COMMANDS.map((c) => ({ name: c.name, positional: c.positional, flags: c.flags })),
 };

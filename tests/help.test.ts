@@ -14,6 +14,7 @@ import { run } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
 import { saveState, sessionDir } from "../src/state.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
+import pkg from "../package.json";
 
 const findCommandSummary = (name: string) => COMMANDS.find((c) => c.name === name)!.summary;
 
@@ -233,4 +234,22 @@ describe("per-command help", () => {
       expect(code).toBe(0);
     }
   }, 15_000);
+});
+
+// ET-27: the CLI reports its own version, as `playwright-cli --version` does.
+describe("--version", () => {
+  test("prints the package version, exit 0, and runs no command", async () => {
+    const p = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"), "close", "--version"], {
+      env: { ...process.env, HOME: "/nonexistent-bowser-home" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, err, code] = [await new Response(p.stdout).text(), await new Response(p.stderr).text(), await p.exited];
+    expect({ out, err, code }).toEqual({ out: `${pkg.version}\n`, err: "", code: 0 });
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  test("is listed under the global flags", () => {
+    expect(HELP).toContain("--version            print bowser's version");
+  });
 });
