@@ -124,7 +124,7 @@ In `tests/lifecycle.test.ts`, under the `#152` describe, with the fake daemons i
   `page reloaded at <base>/moved`. Fails today: it reopens `/start`.
 - **ET-33, fallback.** The old fake daemon fails `state`. The restart reopens `state.json`'s URL. This guards
   today's behaviour and passes before the change.
-- **A busy old daemon.** With `BOWSER_OP_TIMEOUT_MS=0`, the old fake daemon answers `ping` and `shutdown` and
+- **ET-33, a busy old daemon.** With `BOWSER_OP_TIMEOUT_MS=0`, the old fake daemon answers `ping` and `shutdown` and
   never answers `state`. The restart sends `shutdown` within 2 s of its claim and reopens `state.json`'s URL.
   Fails without the 1 s bound: it never reaches `shutdown`.
 - **ET-30.** The old fake daemon answers `state` with `budgetMs: 45000`, and the command runs with
