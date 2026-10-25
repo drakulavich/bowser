@@ -435,7 +435,10 @@ function navigationWatch(
       if (arrived !== baseArrived) return;
       if (landed !== base) {
         // setTimeout treats Infinity as 1 ms.
+        const at = landed;
         const now = await count(Math.min(began + capMs - clock.now(), timing.settleMs));
+        // A landing during the read makes the count stale against it: read again.
+        if (landed !== at) continue;
         if (!unfinished(now)) return;
         base = landed;
         pendingAt = landed;

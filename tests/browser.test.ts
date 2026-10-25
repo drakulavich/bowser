@@ -466,6 +466,29 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/second");
   });
 
+  test("a count read during the wait that a later failure overtakes is read again (#106)", async () => {
+    const clock = manualClock();
+    let reads = 0;
+    const { v, page } = pageNavView({
+      evaluate: async (expr) => {
+        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr !== NAV_COUNT) return undefined;
+        const n = page.navs;
+        if (++reads === 2) await new Promise<void>((r) => { clock.setTimeout(r, 40); });
+        return n;
+      },
+    });
+    v.click = async () => {
+      page.navs++;
+      clock.setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 80);
+      clock.setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 100);
+      clock.setTimeout(() => v.land("https://x/third"), 200);
+    };
+    const b = onClock(v, fast, clock);
+    await clock.settledAt(b.click("#thrice"));
+    expect(b.url).toBe("https://x/third");
+  });
+
   test("a reread that never answers still leaves the wait at settleMs", async () => {
     // Codex's repro: the NAV_COUNT reread after a failure stays pending, and
     // an unbounded await never looked at the deadline again.
