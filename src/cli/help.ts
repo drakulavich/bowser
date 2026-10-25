@@ -9,7 +9,8 @@ const HEADER = "bowser — drop-in playwright-cli alternative for AI agents";
 const GLOBAL = `Global flags:
   -s, --session <name>     session name (default: "default")
       --json               machine-readable output
-  -h, --help               show this help`;
+  -h, --help               show this help
+      --version            print bowser's version`;
 
 const INDENT = 2;
 const GUTTER = 2;

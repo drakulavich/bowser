@@ -243,7 +243,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 
 With `--json`, and so over MCP, `click`, `fill`, `hover`, `select`, `check` and `uncheck` name the element the ref pointed to, with the role and name its snapshot gave: `click e724` answers `{"ok":true,"ref":"e724","element":{"role":"button","name":"Add to cart"},"url":"…"}`.
 
-Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`. A session name uses letters, digits, `.`, `_` and `-`, and does not start with `.` or `-`. It is at most 255 characters, or fewer under a very long `HOME`: `<HOME>/.bowser/sessions/<name>/pid.<pid>.tmp` must fit Bun's 1016-character path limit. A longer name is a usage error that gives the limit.
+Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`, `--version` (prints the version and runs nothing). A session name uses letters, digits, `.`, `_` and `-`, and does not start with `.` or `-`. It is at most 255 characters, or fewer under a very long `HOME`: `<HOME>/.bowser/sessions/<name>/pid.<pid>.tmp` must fit Bun's 1016-character path limit. A longer name is a usage error that gives the limit.
 
 `bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
 flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text

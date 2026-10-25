@@ -26,12 +26,13 @@ export interface Parsed {
   session: string;
   json: boolean;
   help: boolean;
+  version: boolean;
   command: string | undefined;
   positional: string[];
   flags: Record<string, string | boolean>;
 }
 
-const GLOBAL_NAMES = new Set(["session", "json", "help"]);
+const GLOBAL_NAMES = new Set(["session", "json", "help", "version"]);
 
 /** Whether argv asks for help: a `-h`/`--help` the parser reads as the flag,
  *  not as a string flag's value (`snapshot --filename -h` names a file) or
@@ -45,7 +46,7 @@ export function helpRequested(schemas: Schemas, argv: string[]): boolean {
   }
 }
 
-/** An unknown flag or command throws, unless the same argv asks for help:
+/** An unknown flag or command throws, unless the same argv asks for help or the version:
  *  then nothing runs, so the first such error is dropped. An unknown flag
  *  consumes no value, so `close --bogus -h` is help. */
 export function parse(schemas: Schemas, argv: string[]): Parsed {
@@ -54,6 +55,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
     session: "default",
     json: false,
     help: false,
+    version: false,
     command: undefined,
     positional: [],
     flags: {},
@@ -127,7 +129,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
     i++;
   }
 
-  if (error && !out.help) throw error;
+  if (error && !out.help && !out.version) throw error;
   return out;
 }
 
@@ -142,6 +144,7 @@ function assignFlag(out: Parsed, spec: FlagSpec, value: string | boolean): void 
     if (spec.name === "session") out.session = String(value);
     else if (spec.name === "json") out.json = Boolean(value);
     else if (spec.name === "help") out.help = Boolean(value);
+    else if (spec.name === "version") out.version = Boolean(value);
     return;
   }
   out.flags[spec.name] = value;
