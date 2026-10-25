@@ -227,7 +227,7 @@ async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
 }
 
 /** Process one parsed JSON-RPC message. Returns the response object, or null for
- *  notifications (no id) — which get no reply per JSON-RPC. */
+ *  notifications (no id) and the client's responses, which get no reply per JSON-RPC. */
 export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<object | null> {
   // F40: a batch (MCP 2025-06-18 has none) or a non-object is not a Request
   // object; JSON-RPC answers it with -32600 and id null, once for a whole
