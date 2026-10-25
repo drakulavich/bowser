@@ -798,6 +798,17 @@ describe("looksLikeOurDaemon", () => {
     const main = Bun.fileURLToPath(new URL("../src/daemon/main.ts", import.meta.url));
     expect(looksLikeOurDaemon(`${process.execPath} ${main} sess`, "sess")).toBe(true);
   });
+  test("accepts the source form when bun's own path has a space (#156)", () => {
+    const orig = process.execPath;
+    Object.defineProperty(process, "execPath", { value: "/Users/John Smith/.bun/bin/bun", configurable: true, writable: true });
+    try {
+      expect(looksLikeOurDaemon("/Users/John Smith/.bun/bin/bun /x/src/daemon/main.ts sess", "sess")).toBe(true);
+      expect(looksLikeOurDaemon("/Users/John Smith/.bun/bin/bun /x/src/daemon/main.ts other", "sess")).toBe(false);
+      expect(looksLikeOurDaemon("/Users/John Smith/.bun/bin/bun /tmp/daemon/main.ts sess", "sess")).toBe(false);
+    } finally {
+      Object.defineProperty(process, "execPath", { value: orig, configurable: true, writable: true });
+    }
+  });
   test("accepts the compiled form", () => {
     expect(looksLikeOurDaemon("/usr/local/bin/bowser --daemon sess", "sess")).toBe(true);
     expect(looksLikeOurDaemon(`/different/Cellar/bowser/9.9.9/bin/bowser --daemon sess`, "sess")).toBe(true);

@@ -41,7 +41,9 @@ export function looksLikeOurDaemon(command: string, session: string): boolean {
   // prefix counts too; `not-bowser-helper` does not.
   const exe = words[0]?.split("/").pop() ?? "";
   if (/^bowser([-.]|$)/.test(exe)) return marker === "--daemon";
-  return exe === "bun" && marker.endsWith("/src/daemon/main.ts");
+  // The first word is not the executable when bun's own path has a space (#156).
+  const bun = exe === "bun" || line.startsWith(`${process.execPath} `);
+  return bun && marker.endsWith("/src/daemon/main.ts");
 }
 
 export async function isOurDaemon(pid: number, session: string): Promise<boolean> {
