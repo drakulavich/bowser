@@ -14,7 +14,7 @@ import { cmdClick, cmdResize } from "../src/commands/interaction.ts";
 import { reportFailure } from "../src/cli.ts";
 import { UserError } from "../src/errors.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
-import { cmdEval } from "../src/commands/scripting.ts";
+import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { opTimeoutMs } from "../src/budget.ts";
 import { cmdScreenshot, cmdSnapshot, maxCaptureHeight } from "../src/commands/snapshot.ts";
 import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
@@ -125,6 +125,52 @@ runOrSkip("e2e: real browser", () => {
     expect((err as Error).message).toBe(`screenshot: --scale=${dpr + 1} needs a display at pixel ratio ${dpr + 1} or more; this one is ${dpr}`);
     expect(reportFailure(err).code).toBe(1);
     expect(await Bun.file(file).exists()).toBe(false);
+  }, 30_000);
+
+  // #194: text a script inserts after load, in a web font served by `font`.
+  // The bytes are not a real font: a failed load settles document.fonts all the same.
+  function lateFontPage(font: () => Promise<Response>) {
+    return Bun.serve({
+      port: 0,
+      fetch: (req) => new URL(req.url).pathname === "/f.ttf"
+        ? font()
+        : new Response(
+          "<style>@font-face{font-family:Late;src:url(/f.ttf);font-display:block}p{font:40px Late}</style>" +
+          "<div id=a></div><script>setTimeout(() => { a.innerHTML = '<p>late</p>' }, 300)</script>",
+          { headers: { "content-type": "text/html" } },
+        ),
+    });
+  }
+  const fontBytes = () => new Response("x", { headers: { "content-type": "font/ttf" } });
+
+  test("screenshot waits for a late font", async () => {
+    const server = lateFontPage(async () => { await Bun.sleep(3000); return fontBytes(); });
+    try {
+      await cmdOpen({ session, json: false }, server.url.toString());
+      const probe = await cmdRunCode({ session, json: false }, "await new Promise((r) => setTimeout(r, 500)); return document.fonts.status");
+      expect(probe).toBe("loading");
+      const file = join(tmp, "e2e-late-font.png");
+      expect(await cmdScreenshot({ session, json: false }, { filename: file })).not.toContain("fonts still loading");
+      expect(await cmdEval({ session, json: false }, "document.fonts.status")).toBe("loaded");
+    } finally {
+      server.stop(true);
+    }
+  }, 30_000);
+
+  test("a font that never arrives is reported after 5 s", async () => {
+    const server = lateFontPage(() => new Promise<Response>(() => {}));
+    try {
+      await cmdOpen({ session, json: false }, server.url.toString());
+      await cmdRunCode({ session, json: false }, "await new Promise((r) => setTimeout(r, 500)); return 0");
+      const file = join(tmp, "e2e-no-font.png");
+      const started = performance.now();
+      const out = await cmdScreenshot({ session, json: false }, { filename: file });
+      expect(performance.now() - started).toBeLessThan(8000);
+      expect(out).toEndWith("; fonts still loading");
+      expect(await Bun.file(file).exists()).toBe(true);
+    } finally {
+      server.stop(true);
+    }
   }, 30_000);
 
   // #69: at the largest viewport resize accepts, WebKit's capture fails with

@@ -11,6 +11,7 @@ import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport }
 import { createGate } from "../src/daemon/gate.ts";
 import { createSerializer } from "../src/serialize.ts";
 import { waitFor } from "./helpers/daemons.ts";
+import { AWAIT_FONTS, READ_VIEWPORT } from "../src/page-scripts.ts";
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
   const calls: Array<[string, unknown[]]> = [];
@@ -199,6 +200,51 @@ describe("createHandler", () => {
         const res = await createHandler(b)(req("screenshot", [path, 1]));
         expect(res).toMatchObject({ ok: false, error: expect.stringContaining("An unknown error occurred") });
         expect(await Bun.file(path).exists()).toBe(false);
+      });
+    });
+  });
+
+  describe("screenshot fonts", () => {
+    async function inDir(fn: (path: string) => Promise<void>) {
+      const dir = await mkdtemp(join(tmpdir(), "bowser-handler-"));
+      try { await fn(join(dir, "shot.png")); } finally { await rm(dir, { recursive: true, force: true }); }
+    }
+    /** A browser whose evaluate answers AWAIT_FONTS with `answer()` and READ_VIEWPORT with ratio 2,
+     *  recording every evaluate and capture in `calls`. */
+    function withFonts(answer: () => unknown) {
+      const b = fakeBrowser({
+        evaluate: async (expr) => { b.calls.push(["evaluate", [expr]]); return expr === AWAIT_FONTS ? answer() : [2, 2, 2]; },
+      });
+      return b;
+    }
+    const steps = (b: ReturnType<typeof fakeBrowser>) =>
+      b.calls.filter(([name]) => name === "evaluate" || name === "screenshot").map(([name, a]) => (name === "evaluate" ? a[0] : name));
+
+    test("screenshot waits for fonts before it captures", async () => {
+      await inDir(async (path) => {
+        const plain = withFonts(() => false);
+        await createHandler(plain)(req("screenshot", [path]));
+        expect(steps(plain)).toEqual([AWAIT_FONTS, "screenshot"]);
+        const scaled = withFonts(() => false);
+        await createHandler(scaled)(req("screenshot", [path, 2]));
+        expect(steps(scaled)).toEqual([AWAIT_FONTS, READ_VIEWPORT, "screenshot"]);
+      });
+    });
+
+    test("fonts still loading are reported and the file is still written", async () => {
+      await inDir(async (path) => {
+        const b = withFonts(() => true);
+        expect(await createHandler(b)(req("screenshot", [path]))).toEqual({ id: 7, ok: true, result: { path, fontsLoading: true } });
+        expect(await Bun.file(path).exists()).toBe(true);
+      });
+    });
+
+    test("a failed font wait fails the screenshot", async () => {
+      await inDir(async (path) => {
+        const b = withFonts(() => { throw new Error("page gone"); });
+        const res = await createHandler(b)(req("screenshot", [path]));
+        expect(res).toMatchObject({ ok: false, error: expect.stringContaining("page gone") });
+        expect(b.calls.some(([name]) => name === "screenshot")).toBe(false);
       });
     });
   });

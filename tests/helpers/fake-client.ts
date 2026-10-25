@@ -11,8 +11,9 @@
 // from, so that write happens here unconditionally rather than only in the
 // default. A test-supplied `screenshot` handler supplies the base64 bytes,
 // or returns `{ dpr }` for the daemon refusing a --scale, which writes
-// nothing. With no handler the bytes are a real 1×1 PNG, since the command
-// reads the written file's size.
+// nothing, or `{ path, fontsLoading: true }` for a capture taken while fonts
+// were still loading, which writes the 1×1 PNG. With no handler the bytes
+// are a real 1×1 PNG, since the command reads the written file's size.
 //
 // `opts.dialogs` is what the connection's dialogs() reports, as if the
 // daemon's replies had carried them — but only once the command has called
@@ -57,10 +58,10 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
         const [path, scale] = args as ArgsOf<"screenshot">;
         const raw = handlers.screenshot ? await handlers.screenshot(path, scale) : ONE_PX_PNG;
         if (typeof raw === "object" && "dpr" in raw) return raw as never;
-        const b64 = typeof raw === "string" ? raw : "";
+        const b64 = typeof raw === "string" ? raw : ONE_PX_PNG;
         if (path) {
           await Bun.write(path, Buffer.from(b64, "base64"));
-          return { path } as never;
+          return (typeof raw === "object" ? { ...raw, path } : { path }) as never;
         }
         return b64 as never;
       }

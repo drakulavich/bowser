@@ -74,6 +74,10 @@ element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `res
 WebKit cannot capture a viewport whose pixels fill 4 GiB. On a Retina display (pixel ratio 2)
 that is reached only near `resize`'s maximum: `resize 16384 16384` cannot be captured,
 `resize 16384 16383` can. `screenshot` then fails with exit code 1 and names the size to resize to.
+Before it captures, `screenshot` waits up to 5 s for the web fonts the page has asked for, such as a font
+first used by text a script added after the page loaded. If they are still loading after 5 s it captures
+anyway and adds `; fonts still loading` to the reply (`"fontsLoading":true` under `--json`): the image may
+show text in a fallback font or none at all, so retry, or check that the font URL answers.
 
 ## Quickstart
 
@@ -211,7 +215,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `select <ref> <value>` | Choose a `<select>` option: the first, in document order, whose value or label is `<value>` (`select e3 Red` picks `<option value="r">Red</option>`). With no such option it fails at once with `ref 'eN' has no option "<value>"` (exit 1) and the select keeps its value; `playwright-cli` waits out its timeout |
 | `check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox or radio button. A disabled one fails like `click`. `uncheck` on a checked radio fails with `ref 'eN' is a radio button; select another option in its group to uncheck it`, exit 1; on an unchecked one it succeeds and does nothing. An `aria-checked="mixed"` checkbox is unchecked for `check` (one click, as in `playwright-cli`) and checked for `uncheck`, which clicks it until it reads `false` (`playwright-cli` leaves it mixed) |
 | `dialog-accept [text]` / `dialog-dismiss` | Set the answer for the next `alert`/`confirm`/`prompt` (a prompt gets `text`, default its own value). Run it *before* the action; without one a dialog is dismissed. The action reports each dialog under `### Modal state`. |
-| `screenshot [--filename=f] [--scale=N]` | Screenshot of the viewport (PNG); no full-page capture |
+| `screenshot [--filename=f] [--scale=N]` | Screenshot of the viewport (PNG); no full-page capture. Waits up to 5 s for web fonts; `; fonts still loading` when they did not arrive |
 | `resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 (`Bun.WebView`'s limit) |
 | `go-back` / `go-forward` / `reload` | Navigation |
 | `list` | List sessions whose daemon answers. A session whose daemon is gone is not listed. |

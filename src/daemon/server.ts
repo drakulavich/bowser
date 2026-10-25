@@ -31,7 +31,7 @@ import {
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
 import { claimSession } from "./pidfile.ts";
-import { dialogAnswerScript, dialogSyncScript, READ_VIEWPORT, withDialogShim } from "../page-scripts.ts";
+import { AWAIT_FONTS, dialogAnswerScript, dialogSyncScript, READ_VIEWPORT, withDialogShim } from "../page-scripts.ts";
 
 /** What the daemon knows that the page cannot be asked for. `url` and `title`
  *  are deliberately NOT here: they are read live from the page on every
@@ -305,6 +305,7 @@ const handlers: Handlers = {
     // When the CLI passes an absolute path, the daemon writes the PNG itself
     // so the ~140 KB base64 never crosses the socket. With no path, return
     // base64 — reserved for a future --stdout / programmatic caller.
+    const fontsLoading = (await browser.evaluate(AWAIT_FONTS)) === true;
     let dpr: number | undefined;
     if (scale !== undefined) {
       dpr = ((await browser.evaluate(READ_VIEWPORT)) as [number, number, number])[2];
@@ -315,7 +316,7 @@ const handlers: Handlers = {
       let png: Uint8Array = Buffer.from(b64, "base64");
       if (dpr !== undefined && scale !== dpr) png = await scalePng(png, scale! / dpr);
       await Bun.write(path, png);
-      return { path };
+      return fontsLoading ? { path, fontsLoading } : { path };
     }
     return b64;
   },
