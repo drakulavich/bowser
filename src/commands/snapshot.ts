@@ -10,10 +10,15 @@ import { dialogsJson, liveSelector, loadRef, modalState, reply, replyPage, withC
 import { opTimeoutMs } from "../budget.ts";
 import { UserError } from "../errors.ts";
 
+function checkFilename(filename: string | undefined): void {
+  if (filename !== undefined && !filename.trim()) throw new UserError("usage: --filename needs a file name");
+}
+
 export async function cmdSnapshot(
   ctx: CommandContext,
   opts: { filename?: string; depth?: string } = {},
 ): Promise<string> {
+  checkFilename(opts.filename);
   // 0 (the default) means unlimited, as in playwright-cli.
   if (opts.depth !== undefined && !/^\d+$/.test(opts.depth)) {
     throw new UserError(`usage: --depth=N requires a non-negative integer (got '${opts.depth}')`);
@@ -50,6 +55,7 @@ export async function cmdMarkdown(
   ref?: string,
   opts: { filename?: string } = {},
 ): Promise<string> {
+  checkFilename(opts.filename);
   const saved = ref === undefined ? undefined : await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
     const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
@@ -139,6 +145,7 @@ export async function cmdScreenshot(
   ctx: CommandContext,
   opts: { filename?: string; scale?: string } = {},
 ): Promise<string> {
+  checkFilename(opts.filename);
   const scale = opts.scale === undefined ? undefined : parseScale(opts.scale);
   // The viewport only, as playwright-cli without --full-page. The default name auto-increments so repeated screenshots
   // don't clobber each other; an explicit --filename writes exactly there.

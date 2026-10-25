@@ -21,7 +21,7 @@ import {
   type ProcessOps,
 } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
-import { cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
+import { cmdMarkdown, cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import {
   cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet, cmdLocalStorageList,
   cmdLocalStorageSet, cmdSessionStorageClear, cmdSessionStorageDelete, cmdSessionStorageGet,
@@ -2411,4 +2411,21 @@ describe("fill and type errors never carry the entered text", () => {
       expect(reportFailure(err)).toEqual({ stderr: "bowser: failed: boom", code: 2 });
     });
   }
+});
+
+describe("an empty --filename (#193)", () => {
+  test("is a usage error before any request, in each command that takes one", async () => {
+    for (const filename of ["", " "]) {
+      for (const cmd of [
+        (c: ReturnType<typeof fakeClient>) => cmdSnapshot({ ...ctx(), connect: async () => c }, { filename }),
+        (c: ReturnType<typeof fakeClient>) => cmdMarkdown({ ...ctx(), connect: async () => c }, undefined, { filename }),
+        (c: ReturnType<typeof fakeClient>) => cmdScreenshot({ ...ctx(), connect: async () => c }, { filename }),
+      ]) {
+        const c = fakeClient({});
+        const err = await cmd(c).catch((e: unknown) => e);
+        expect(reportFailure(err)).toEqual({ stderr: "bowser: usage: --filename needs a file name", code: 1 });
+        expect(c.calls).toEqual([]);
+      }
+    }
+  });
 });
