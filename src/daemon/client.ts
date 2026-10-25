@@ -387,28 +387,31 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
   const debug = process.env.BOWSER_DAEMON_DEBUG === "1";
   const stdio: "ignore" | number = debug ? openSync(daemonLogPath(session), "a") : "ignore";
 
-  const proc = Bun.spawn({
-    cmd,
-    stdout: stdio,
-    stderr: stdio,
-    stdin: "ignore",
-    // Pass the LIVE process.env. Without an explicit `env`, Bun.spawn inherits
-    // the OS environment block captured at *this* process's startup and ignores
-    // runtime mutations of process.env — so a redirected HOME (set after launch,
-    // e.g. by the e2e tests' beforeAll) would NOT reach the daemon.
-    env: daemonEnv(profile),
-  });
-  // Don't let the spawned daemon keep THIS process alive. Bun keeps the parent's
-  // event loop open until a child exits — but the daemon runs forever (keepalive
-  // interval), so without unref() a daemon-spawning command (e.g. `bowser open`
-  // on a fresh session) prints its result and then hangs indefinitely instead of
-  // returning to the shell. Measured from source: without it, `bun src/cli.ts
-  // open <url>` printed `opened …` and hung until killed. `bun test` masks this
-  // (the runner force-exits); tests/e2e-spawn-exit.test.ts runs the CLI as its
-  // own process and fails without it.
-  proc.unref();
-  // The child has its own copy of the descriptor.
-  if (typeof stdio === "number") closeSync(stdio);
+  try {
+    const proc = Bun.spawn({
+      cmd,
+      stdout: stdio,
+      stderr: stdio,
+      stdin: "ignore",
+      // Pass the LIVE process.env. Without an explicit `env`, Bun.spawn inherits
+      // the OS environment block captured at *this* process's startup and ignores
+      // runtime mutations of process.env — so a redirected HOME (set after launch,
+      // e.g. by the e2e tests' beforeAll) would NOT reach the daemon.
+      env: daemonEnv(profile),
+    });
+    // Don't let the spawned daemon keep THIS process alive. Bun keeps the parent's
+    // event loop open until a child exits — but the daemon runs forever (keepalive
+    // interval), so without unref() a daemon-spawning command (e.g. `bowser open`
+    // on a fresh session) prints its result and then hangs indefinitely instead of
+    // returning to the shell. Measured from source: without it, `bun src/cli.ts
+    // open <url>` printed `opened …` and hung until killed. `bun test` masks this
+    // (the runner force-exits); tests/e2e-spawn-exit.test.ts runs the CLI as its
+    // own process and fails without it.
+    proc.unref();
+  } finally {
+    // The child has its own copy of the descriptor.
+    if (typeof stdio === "number") closeSync(stdio);
+  }
 }
 
 /** Where a daemon spawned with BOWSER_DAEMON_DEBUG=1 writes its stdout and

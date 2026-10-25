@@ -2,7 +2,7 @@
 // daemon that goes away mid-request.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -576,5 +576,33 @@ describe("the command budget", () => {
       expect(d.seen[0]).not.toHaveProperty("budgetMs");
       expect(d.seen[0]).not.toHaveProperty("budgetTotalMs");
     });
+  });
+});
+
+// #97: with BOWSER_DAEMON_DEBUG=1 the CLI opens daemon.log before Bun.spawn.
+// Bun.spawn throws on an env value with a NUL byte, and the live process.env
+// goes to the daemon as is.
+describe("connectOrSpawn when Bun.spawn throws", () => {
+  let tmp: string;
+  const orig = { HOME: process.env.HOME, BOWSER_DAEMON_DEBUG: process.env.BOWSER_DAEMON_DEBUG };
+
+  beforeAll(async () => {
+    tmp = await mkdtemp(join(tmpdir(), "bowser-spawnthrow-"));
+    process.env.HOME = tmp;
+    process.env.BOWSER_DAEMON_DEBUG = "1";
+    process.env.BOWSER_TEST_NUL = "a\0b";
+  });
+
+  afterAll(async () => {
+    for (const [k, v] of Object.entries(orig)) if (v !== undefined) process.env[k] = v; else delete process.env[k];
+    delete process.env.BOWSER_TEST_NUL;
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  test("closes the daemon log it opened", async () => {
+    const before = readdirSync("/dev/fd").length;
+    const err = await connectOrSpawn("spawnthrow", { platform: "darwin" }).then(() => undefined, (e: unknown) => e);
+    expect((err as Error).message).toContain("null bytes");
+    expect(readdirSync("/dev/fd").length).toBe(before);
   });
 });
