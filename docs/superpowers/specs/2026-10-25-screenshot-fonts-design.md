@@ -102,10 +102,12 @@ Daemon, `tests/daemon-handler.test.ts`, `describe("screenshot fonts")`, with `fa
 E2E, `tests/e2e.test.ts`, gated by `BOWSER_E2E=1`, with a `Bun.serve` page that inserts its text 300 ms
 after `load` in a font served from the test's own route:
 
-6. **screenshot waits for a late font.** The font route answers after 1.5 s. After `open` and an `eval`
-   that waits 500 ms and returns `document.fonts.status` (`loading`), `screenshot` replies without the note,
-   and an `eval document.fonts.status` straight after it answers `loaded`. Without the wait the second
-   `eval` still answers `loading`, which is the mutation this test kills.
+6. **screenshot waits for a late font.** The font route answers after 3 s, under the 5 s cap. After `open`
+   and an `eval` that waits 500 ms and returns `document.fonts.status` (`loading`), `screenshot` replies
+   without the note, and an `eval document.fonts.status` straight after it answers `loaded`. Without the wait
+   the second `eval` still answers `loading`, which is the mutation this test kills: the font lands about
+   3.3 s after `load`, so a capture without the wait has about 2.7 s after the probe before it would see
+   `loaded` (1.5 s left only about 1.2 s).
 7. **a font that never arrives is reported after 5 s.** The font route never answers. `screenshot` exits 0
    within 8 s, its reply ends with `; fonts still loading`, and the file exists.
 
