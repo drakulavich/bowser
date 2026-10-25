@@ -174,7 +174,7 @@ function toolResult(id: unknown, text: string, isError?: boolean) {
 }
 
 /** A tools/call split in two: `reply` when it is answered without running
- *  anything (unknown tool, an argument the tool refuses), otherwise the argv to
+ *  anything (an unknown tool's -32602, an argument the tool refuses), otherwise the argv to
  *  run and the session it runs in. */
 type PreparedCall =
   | { reply: object }
@@ -185,7 +185,7 @@ function prepareToolCall(id: unknown, params: unknown): PreparedCall {
   const name = p.name;
   const cmd = name ? findCommand(name) : undefined;
   const schema = cmd && cmd.mcp !== false ? cmd : undefined;
-  if (!schema) return { reply: toolResult(id, `unknown tool: ${name}`, true) };
+  if (!schema) return { reply: jsonRpcError(id, -32602, `Unknown tool: ${name}`) };
   let argv: string[];
   try {
     argv = toArgv(schema, toolArguments(schema, p.arguments));
@@ -239,6 +239,9 @@ export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<obj
   const hasId = r.id !== null && r.id !== undefined;
   // No id → notification (or unaddressable). Per JSON-RPC, send no response.
   if (!hasId) return null;
+  // A client's response: this server sends no requests, and JSON-RPC answers no response.
+  if (!("method" in r) && ("result" in r || "error" in r)) return null;
+  if (typeof r.method !== "string") return jsonRpcError(r.id, -32600, "Invalid Request");
 
   switch (r.method) {
     case "initialize": {
