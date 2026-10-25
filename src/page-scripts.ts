@@ -1026,27 +1026,31 @@ const TO_MARKDOWN = String.raw`
   };
   // A spanned cell's value fills every row and column it covers (ET-45).
   const table = (el) => {
-    const printed = [...el.rows].filter((r) => !skipped(r));
-    const grid = printed.map(() => []);
-    printed.forEach((r, y) => {
+    // Indexed by DOM row, so a span counts hidden rows and stops at its row group's end, as the table does.
+    const all = [...el.rows];
+    const shownRow = all.map((r) => !skipped(r));
+    const grid = all.map(() => []);
+    all.forEach((r, y) => {
+      if (!shownRow[y]) return;
+      const rest = r.parentNode.rows.length - r.sectionRowIndex;
       let x = 0;
       for (const c of r.cells) {
         while (grid[y][x] !== undefined) x++;
         const v = inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
         const cols = Math.max(1, c.colSpan);
-        // rowspan=0 runs to the end of the row group.
-        const rest = () => { const group = [...r.parentNode.rows].filter((g) => !skipped(g)); return group.length - group.indexOf(r); };
-        const span = c.rowSpan === 0 ? rest() : Math.max(1, c.rowSpan);
-        for (let dy = 0; dy < span && y + dy < grid.length; dy++) for (let dx = 0; dx < cols; dx++) grid[y + dy][x + dx] ??= v;
+        const span = c.rowSpan === 0 ? rest : Math.min(Math.max(1, c.rowSpan), rest);
+        for (let dy = 0; dy < span; dy++) for (let dx = 0; dx < cols; dx++) grid[y + dy][x + dx] ??= v;
         x += cols;
       }
     });
-    const rows = grid.map((r) => Array.from(r, (v) => v ?? ''));
+    const rows = grid.filter((_, y) => shownRow[y]).map((r) => Array.from(r, (v) => v ?? ''));
     if (!rows.some((r) => r.some(Boolean))) return '';
     const width = Math.max(...rows.map((r) => r.length));
     const line = (r) => '| ' + [...r, ...Array(width - r.length).fill('')].join(' | ') + ' |';
     return [line(rows[0]), '|' + ' --- |'.repeat(width), ...rows.slice(1).map(line)].join('\n');
   };
+  // Wrappers inline() marks up: they keep their mark around block content.
+  const FORMAT = new Set(['STRONG', 'B', 'EM', 'I', 'DEL', 'S', 'STRIKE', 'SUB', 'SUP', 'CODE']);
   const printedBlock = (el) => [...el.children].some((c) => !skipped(c) && (isBlock(c) || printedBlock(c)));
   // A first row of th cells names columns: a data table, whatever its cells hold (ET-46).
   const headed = (el) => { const r = [...el.rows].find((r) => !skipped(r)); return !!r && r.cells.length > 1 && [...r.cells].every((c) => c.tagName === 'TH'); };
@@ -1096,7 +1100,7 @@ const TO_MARKDOWN = String.raw`
     }
     const link = t === 'A' && n.hasAttribute('href');
     if (link && isBlock(n)) { out.push({ end: true }, { inline: inline(n) }, { end: true }); return; }
-    if (isBlock(n) || (!link && printedBlock(n))) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
+    if (isBlock(n) || (!link && !FORMAT.has(t) && printedBlock(n))) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
     out.push({ inline: inline(n) });
   };
   const escapeStarts = (p) => p.split('\n').map((l) => l.replace(/^(#{1,6}(?=\s|$)|[-+*>](?=\s))/, '\\$1').replace(/^(\d+)([.)])(?=\s)/, '$1\\$2')).join('\n');

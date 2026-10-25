@@ -52,6 +52,8 @@ const SPANS = `<!doctype html><title>spans</title><main>
 <tr><td>2</td><td>Ping An</td><td>599 m</td><td>1,965 ft</td></tr></table>
 <table><tr><td rowspan="2">a</td><td>b</td><td rowspan="2">c</td></tr><tr><td colspan="2">d</td><td>e</td></tr></table>
 <table><tr><td rowspan="0">f</td><td>g</td></tr><tr><td>h</td></tr></table>
+<table><thead><tr><th rowspan="2">K</th><th>V</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>
+<table><tr><td rowspan="2">p</td><td>q</td></tr><tr style="display: none"><td>r</td></tr><tr><td>s</td><td>t</td></tr></table>
 </main>`;
 const DATA = `<!doctype html><title>data</title><main>
 <table><tr><th>Name</th><th>Image</th></tr><tr><td>Burj</td><td><div class="center"><img alt="pic" src="/b.png"></div></td></tr></table>
@@ -61,6 +63,7 @@ const GLUED = `<!doctype html><title>glued</title><main>
 <div><a href="/g"><span style="display: block">Bloodlines</span><span>What is it?</span></a></div>
 <emu-alg><ol><li>If x, then<ol><li>Let y.</li></ol></li><li>Return y.</li></ol></emu-alg>
 <div><a href="/issues" style="display: flex"><span>Issues</span><span>(3.6k)</span></a></div>
+<p><strong><span style="display: block">Warning</span></strong></p>
 </main>`;
 const LANGS = `<!doctype html><title>langs</title><main>
 <div class="highlight highlight-source-shell"><pre>bun add x</pre></div>
@@ -68,7 +71,7 @@ const LANGS = `<!doctype html><title>langs</title><main>
 </main>`;
 const LISTS = `<!doctype html><title>lists</title><main>
 <ol start="5"><li>five</li><li>six</li></ol>
-<ol reversed><li>a</li><li>b</li></ol>
+<ol reversed><li>a</li><li hidden>gone</li><li>b</li></ol>
 <ol><li value="10">ten</li><li>eleven</li></ol>
 </main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
@@ -223,6 +226,15 @@ runOrSkip("e2e: markdown", () => {
       "| f | g |",
       "| --- | --- |",
       "| f | h |",
+      "",
+      // A rowspan stops at the end of its row group, and a hidden row counts toward it.
+      "| K | V |",
+      "| --- | --- |",
+      "| 1 | 2 |",
+      "",
+      "| p | q |",
+      "| --- | --- |",
+      "| s | t |",
     ].join("\n"));
   }, 60_000);
 
@@ -240,6 +252,7 @@ runOrSkip("e2e: markdown", () => {
       `[Bloodlines What is it?](${base}/g)`,
       "1. If x, then\n   1. Let y.\n2. Return y.",
       `[Issues (3.6k)](${base}/issues)`,
+      "**Warning**",
     ].join("\n\n"));
   }, 60_000);
 
