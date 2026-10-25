@@ -826,11 +826,13 @@ describe("looksLikeBowser", () => {
       "/opt/bun /g/node_modules/@drakulavich/bowser-cli/src/cli.ts mcp",
       "/Users/John Smith/.bun/bin/bun /Users/John Smith/repo/src/cli.ts open",
       "bun /Users/x/.bun/bin/bowser open",
+      "bun /p/node_modules/.bin/bowser mcp",
+      "/Users/John Smith/.bun/bin/bun /Users/John Smith/.bun/bin/bowser open",
       "/usr/local/bin/bowser-macos-arm64 eval 1",
     ]) expect([line, looksLikeBowser(line)]).toEqual([line, true]);
   });
   test("refuses other processes", () => {
-    for (const line of ["", "sleep 300", "bun test", "bun /x/not-bowser.ts", "bun /x/src/cli.tsx", "/usr/bin/bowserx"]) {
+    for (const line of ["", "sleep 300", "bun test", "bun /x/not-bowser.ts", "bun /x/src/cli.tsx", "/usr/bin/bowserx", "node app.js bowser", "grep bowser-cli /x/log"]) {
       expect([line, looksLikeBowser(line)]).toEqual([line, false]);
     }
   });

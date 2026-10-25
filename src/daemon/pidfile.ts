@@ -47,12 +47,14 @@ export function looksLikeOurDaemon(command: string, session: string): boolean {
 }
 
 /** True when a `ps` command line is a bowser command: a `src/cli.ts` argument
- *  (a checkout, or the npm bin as its shebang ran it) or a `bowser` executable
- *  or link. The `upg` lock trusts only such a holder: a pid the OS gave to
- *  another process after a killed restart would block the session (ET-35). */
+ *  (a checkout, or the npm bin as its shebang ran it), a `bin/bowser` link, or
+ *  a `bowser` executable. The `upg` lock trusts only such a holder: a pid the
+ *  OS gave to another process after a killed restart would block the session
+ *  (ET-35). A bare `bowser` argument of another program does not count. */
 export function looksLikeBowser(command: string): boolean {
-  return command.trim().split(/\s+/).some((w) =>
-    w === "src/cli.ts" || w.endsWith("/src/cli.ts") || /^bowser([-.]|$)/.test(w.split("/").pop() ?? ""));
+  const words = command.trim().split(/\s+/);
+  if (/^bowser([-.]|$)/.test(words[0]?.split("/").pop() ?? "")) return true;
+  return words.some((w) => w === "src/cli.ts" || w.endsWith("/src/cli.ts") || w.endsWith("bin/bowser"));
 }
 
 /** Synchronous: `otherHolder` answers as a plain value. */

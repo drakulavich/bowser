@@ -99,8 +99,10 @@ runs once per upgrade.
 its `ps -o command=` line is a bowser command. That is a new `looksLikeBowser(line)` in
 `src/daemon/pidfile.ts`, next to `looksLikeOurDaemon`. A line is bowser's when one of its words is
 `src/cli.ts` or ends with `/src/cli.ts` (a checkout's `bun src/cli.ts` and `bun run src/cli.ts`, and the npm
-bin, which `#!/usr/bin/env bun` runs with the absolute path of the `src/cli.ts` it links to), or has a basename
-that matches `/^bowser([-.]|$)/` (`bun …/bin/bowser` as a link ran it, and an old release binary).
+bin, which `#!/usr/bin/env bun` runs with the absolute path of the `src/cli.ts` it links to), or ends with
+`bin/bowser` (`bun …/bin/bowser` or `…/.bin/bowser` as a link ran it), or when its first word has a basename
+that matches `/^bowser([-.]|$)/` (an old release binary). A bare `bowser` argument of another program
+(`node app.js bowser`) does not count (Codex review of the implementation).
 
 `otherHolder` is synchronous, and `takeNotice` (`src/commands/context.ts`) and `restartSession`'s wait loop
 use it so. `isBowser(pid)` therefore reads the line with `Bun.spawnSync(["ps", "-o", "command=", "-p", pid])`,
