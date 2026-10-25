@@ -832,7 +832,7 @@ describe("looksLikeBowser", () => {
     ]) expect([line, looksLikeBowser(line)]).toEqual([line, true]);
   });
   test("refuses other processes", () => {
-    for (const line of ["", "sleep 300", "bun test", "bun /x/not-bowser.ts", "bun /x/src/cli.tsx", "/usr/bin/bowserx", "node app.js bowser", "grep bowser-cli /x/log"]) {
+    for (const line of ["", "sleep 300", "bun test", "bun /x/not-bowser.ts", "bun /x/src/cli.tsx", "/usr/bin/bowserx", "node app.js bowser", "grep bowser-cli /x/log", "node app.js /tmp/bin/bowser", "vim src/cli.ts", "bun app.js /tmp/bin/bowser"]) {
       expect([line, looksLikeBowser(line)]).toEqual([line, false]);
     }
   });

@@ -46,15 +46,18 @@ export function looksLikeOurDaemon(command: string, session: string): boolean {
   return bun && marker.endsWith("/src/daemon/main.ts");
 }
 
-/** True when a `ps` command line is a bowser command: a `src/cli.ts` argument
- *  (a checkout, or the npm bin as its shebang ran it), a `bin/bowser` link, or
- *  a `bowser` executable. The `upg` lock trusts only such a holder: a pid the
- *  OS gave to another process after a killed restart would block the session
- *  (ET-35). A bare `bowser` argument of another program does not count. */
+/** True when a `ps` command line is a bowser command: `bun` running a
+ *  `src/cli.ts` (a checkout, or the npm bin as its shebang ran it) or a
+ *  `bin/bowser` link, or a `bowser` executable. The `upg` lock trusts only
+ *  such a holder: a pid the OS gave to another process after a killed restart
+ *  would block the session (ET-35). */
 export function looksLikeBowser(command: string): boolean {
-  const words = command.trim().split(/\s+/);
-  if (/^bowser([-.]|$)/.test(words[0]?.split("/").pop() ?? "")) return true;
-  return words.some((w) => w === "src/cli.ts" || w.endsWith("/src/cli.ts") || w.endsWith("bin/bowser"));
+  const line = command.trim();
+  if (/^bowser([-.]|$)/.test(line.split(/\s+/)[0]?.split("/").pop() ?? "")) return true;
+  // bun's path may hold a space (#156), and so may the script's, which is a
+  // path (absolute, ./ or src/) right after bun or `bun run`.
+  const m = /^(?:[^\s].*?\/)?bun\s+(?:run\s+)?(.*)$/.exec(line);
+  return m !== null && /^(?:[/.].*?\/|)(?:src\/cli\.ts|\.?bin\/bowser)(?:\s|$)/.test(m[1]!);
 }
 
 /** Synchronous: `otherHolder` answers as a plain value. */

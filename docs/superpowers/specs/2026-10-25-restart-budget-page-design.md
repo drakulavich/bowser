@@ -100,7 +100,7 @@ its `ps -o command=` line is a bowser command. That is a new `looksLikeBowser(li
 `src/daemon/pidfile.ts`, next to `looksLikeOurDaemon`. A line is bowser's when one of its words is
 `src/cli.ts` or ends with `/src/cli.ts` (a checkout's `bun src/cli.ts` and `bun run src/cli.ts`, and the npm
 bin, which `#!/usr/bin/env bun` runs with the absolute path of the `src/cli.ts` it links to), or ends with
-`bin/bowser` (`bun …/bin/bowser` or `…/.bin/bowser` as a link ran it), or when its first word has a basename
+`bin/bowser` (`bun …/bin/bowser` or `…/.bin/bowser` as a link ran it), in the position of the script `bun` runs, or when its first word has a basename
 that matches `/^bowser([-.]|$)/` (an old release binary). A bare `bowser` argument of another program
 (`node app.js bowser`) does not count (Codex review of the implementation).
 
