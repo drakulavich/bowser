@@ -1034,7 +1034,10 @@ const TO_MARKDOWN = String.raw`
         while (grid[y][x] !== undefined) x++;
         const v = inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
         const cols = Math.max(1, c.colSpan);
-        for (let dy = 0; dy < Math.max(1, c.rowSpan) && y + dy < grid.length; dy++) for (let dx = 0; dx < cols; dx++) grid[y + dy][x + dx] ??= v;
+        // rowspan=0 runs to the end of the row group.
+        const group = [...r.parentNode.rows].filter((g) => !skipped(g));
+        const span = c.rowSpan === 0 ? group.length - group.indexOf(r) : Math.max(1, c.rowSpan);
+        for (let dy = 0; dy < span && y + dy < grid.length; dy++) for (let dx = 0; dx < cols; dx++) grid[y + dy][x + dx] ??= v;
         x += cols;
       }
     });
