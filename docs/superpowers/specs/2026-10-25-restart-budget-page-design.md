@@ -172,6 +172,6 @@ Each new test fails before the change, except the fallback test, which guards be
 | `bun test tests/lifecycle.test.ts -t "ET-35"` | the new test passes |
 | `grep -c "retry in a moment" src/commands/restart-lock.ts` | `1` |
 | `grep -c "twice the budget" README.md skills/bowser/references/troubleshooting.md` | at least `1` in each |
-| `grep -c "from 0.12.0 on" README.md` | `1` |
+| `grep -c "From 0.12.0 on" README.md` | `1` |
 | `bun run check` | 0 fail |
 | `BOWSER_E2E=1 bun test tests/e2e-upgrade.test.ts` (CI) | 0 fail, including the pushState test |

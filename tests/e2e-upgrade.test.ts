@@ -90,6 +90,18 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
+  test("the restart reopens the page the old daemon shows after a pushState (ET-33, #152)", async () => {
+    const old = await copyAt("old-push", "0.0.1");
+    const s = session("push");
+    await ok(old, s, ["open", `${base}/cart`]);
+    await ok(old, s, ["eval", "(history.pushState(null, '', '/moved'), location.href)"]);
+    const saved = JSON.parse(await Bun.file(join(home, ".bowser", "sessions", s, "state.json")).text()) as { url: string };
+    expect(saved.url).toBe(`${base}/cart`);
+    const r = await run(CLI, s, ["eval", "location.pathname"]);
+    expect(r.code).toBe(0);
+    expect(r.err).toBe(notice(s, "0.0.1", `page reloaded at ${base}/moved; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`));
+  });
+
   test("snapshot restarts an older daemon, reopens the page and says what was lost", async () => {
     const old = await copyAt("old-a", "0.0.1");
     const s = session("snap");

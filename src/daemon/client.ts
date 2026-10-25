@@ -149,7 +149,7 @@ export class DaemonClient implements DaemonConnection {
 /** How long a daemon has to answer the health check before it counts as
  *  unreachable. It answers in microseconds when it is alive at all: `ping` is
  *  on the daemon's urgent lane, so even a busy one replies immediately. */
-const HEALTH_PING_MS = 1000;
+export const HEALTH_PING_MS = 1000;
 
 const CLIENT_MARGIN_MS = 2000;
 
@@ -172,6 +172,9 @@ export interface ConnectOptions {
   anyVersion?: boolean;
   /** The command the user ran; a timeout names it (F21). */
   command?: string;
+  /** The `BOWSER_OP_TIMEOUT_MS` a daemon spawned now starts with: null for
+   *  the default, absent for the caller's own. Only an upgrade restart sets it (#152). */
+  daemonBudgetMs?: number | null;
   /** The bowser version installed on disk now; a test fakes it. */
   installedVersion?: () => Promise<string | undefined>;
 }
@@ -327,7 +330,7 @@ export async function connectOrSpawn(
     // The Bun guard, for the same reason: the daemon would die unseen.
     const bunError = unsupportedBun(opts.runtime ?? { version: Bun.version, webView: typeof Bun.WebView === "function" });
     if (bunError) throw new UserError(bunError);
-    await spawnDaemon(session, opts.profile);
+    await spawnDaemon(session, opts.profile, opts.daemonBudgetMs);
     // Poll until the socket is listening.
     const start = Date.now();
     while (Date.now() - start < 5000) {
@@ -360,7 +363,7 @@ export function daemonCommand(session: string): string[] {
   return [process.execPath, Bun.fileURLToPath(new URL("./main.ts", import.meta.url)), session];
 }
 
-async function spawnDaemon(session: string, profile?: string): Promise<void> {
+async function spawnDaemon(session: string, profile?: string, budgetMs?: number | null): Promise<void> {
   const { ensureSessionDir } = await import("../state.ts");
   await ensureSessionDir(session);
   // Create the profile here, in the CLI, and only for a daemon about to be
@@ -397,7 +400,7 @@ async function spawnDaemon(session: string, profile?: string): Promise<void> {
       // the OS environment block captured at *this* process's startup and ignores
       // runtime mutations of process.env — so a redirected HOME (set after launch,
       // e.g. by the e2e tests' beforeAll) would NOT reach the daemon.
-      env: daemonEnv(profile),
+      env: daemonEnv(profile, budgetMs),
     });
     // Don't let the spawned daemon keep THIS process alive. Bun keeps the parent's
     // event loop open until a child exits — but the daemon runs forever (keepalive
@@ -422,9 +425,11 @@ export function daemonLogPath(session: string): string {
 
 /** The daemon's environment: ours, with the profile set or cleared so a stale
  *  value inherited from the caller never picks the store. */
-function daemonEnv(profile: string | undefined): Record<string, string | undefined> {
+export function daemonEnv(profile: string | undefined, budgetMs?: number | null): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env };
   if (profile) env[DAEMON_PROFILE_ENV] = profile;
   else delete env[DAEMON_PROFILE_ENV];
+  if (typeof budgetMs === "number") env.BOWSER_OP_TIMEOUT_MS = String(budgetMs);
+  else if (budgetMs === null) delete env.BOWSER_OP_TIMEOUT_MS;
   return env;
 }

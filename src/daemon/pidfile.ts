@@ -46,6 +46,24 @@ export function looksLikeOurDaemon(command: string, session: string): boolean {
   return bun && marker.endsWith("/src/daemon/main.ts");
 }
 
+/** True when a `ps` command line is a bowser command: a `src/cli.ts` argument
+ *  (a checkout, or the npm bin as its shebang ran it) or a `bowser` executable
+ *  or link. The `upg` lock trusts only such a holder: a pid the OS gave to
+ *  another process after a killed restart would block the session (ET-35). */
+export function looksLikeBowser(command: string): boolean {
+  return command.trim().split(/\s+/).some((w) =>
+    w === "src/cli.ts" || w.endsWith("/src/cli.ts") || /^bowser([-.]|$)/.test(w.split("/").pop() ?? ""));
+}
+
+/** Synchronous: `otherHolder` answers as a plain value. */
+export function isBowser(pid: number): boolean {
+  try {
+    return looksLikeBowser(Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)], { stderr: "ignore" }).stdout.toString());
+  } catch {
+    return false;
+  }
+}
+
 export async function isOurDaemon(pid: number, session: string): Promise<boolean> {
   try {
     const proc = Bun.spawn(["ps", "-o", "command=", "-p", String(pid)], {

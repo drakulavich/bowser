@@ -22,7 +22,7 @@
 
 ## Timeouts
 
-`BOWSER_OP_TIMEOUT_MS` is the per-command timeout in ms (default `30000`; `0` disables). It covers the whole command, all its steps and any time spent waiting behind another command. The daemon reads it once, when the session starts; a value set on a later command applies only when it is smaller, so to raise it, `bowser close` and `bowser open` again with the new value.
+`BOWSER_OP_TIMEOUT_MS` is the per-command timeout in ms (default `30000`; `0` disables). It covers the whole command, all its steps and any time spent waiting behind another command. The daemon reads it once, when the session starts; a value set on a later command applies only when it is smaller, so to raise it, `bowser close` and `bowser open` again with the new value. An upgrade restart keeps it, and the first command after an upgrade can take up to twice the budget.
 
 - A timeout names the command and the step that overran, e.g. `'fill' timed out after 3000ms (in its 'click' step)`.
 - `the click was delivered, check the page before retrying` means the action happened, and `the click may have been delivered` means it may have: run `bowser snapshot` before you retry, or you may act twice.
@@ -34,6 +34,6 @@
 
 The package runs with the `bun` on your `PATH`. npm does not enforce the Bun version, so on an older Bun a command that would start a session fails with the error "bowser requires Bun >=1.4.3 (found <version>)". Release binaries are no longer built: if you used one, run `bowser close --all` with it, delete it, then `npm i -g @drakulavich/bowser-cli`.
 
-After an upgrade, the first command restarts the session and prints "session '<name>' restarted for bowser <w> (was <v>): …; refs cleared, run 'bowser snapshot'" first (on stderr, or first in the MCP tool text). Take a new snapshot before using refs. Without `--persistent` or `--profile` the line adds "cookies and storage were lost": log in again.
+After an upgrade, the first command restarts the session and prints "session '<name>' restarted for bowser <w> (was <v>): …; refs cleared, run 'bowser snapshot'" first (on stderr, or first in the MCP tool text). Take a new snapshot before using refs. Without `--persistent` or `--profile` the line adds "cookies and storage were lost": log in again. The restart has its own budget, so that first command can take up to twice the budget. "is being restarted by pid N …; retry in a moment" means another command is restarting it: retry.
 
 bowser runs on macOS only: it drives WebKit, which `Bun.WebView` provides only there. Elsewhere a command that would start a session fails with the error "bowser requires macOS (WebKit)". If you need Chromium, or Linux or Windows, use `playwright-cli`.

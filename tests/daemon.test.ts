@@ -12,7 +12,7 @@ import { ensureSessionDir, profileDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, daemonCommand, daemonLogPath, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
+import { connectOrSpawn, daemonCommand, daemonEnv, daemonLogPath, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -34,6 +34,24 @@ describe("socketPath", () => {
 // line the identifier cannot read (say, the profile moved to argv after the
 // session) makes a live daemon look stale: a racing claim takes its session,
 // and `close` refuses to signal it. No other test spawns and then identifies.
+// #152: only an upgrade restart sets the new daemon's budget; every other
+// spawn passes the caller's environment through.
+describe("daemonEnv", () => {
+  test("sets, clears or keeps BOWSER_OP_TIMEOUT_MS", () => {
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "200";
+    try {
+      expect(daemonEnv(undefined, 45000).BOWSER_OP_TIMEOUT_MS).toBe("45000");
+      expect(daemonEnv(undefined, 0).BOWSER_OP_TIMEOUT_MS).toBe("0");
+      expect("BOWSER_OP_TIMEOUT_MS" in daemonEnv(undefined, null)).toBe(false);
+      expect(daemonEnv(undefined).BOWSER_OP_TIMEOUT_MS).toBe("200");
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+    }
+  });
+});
+
 describe("daemonCommand", () => {
   test("is a command line looksLikeOurDaemon recognises, for its session only", () => {
     const line = daemonCommand("sess").join(" ");

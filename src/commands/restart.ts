@@ -1,6 +1,8 @@
 import pkg from "../../package.json";
 import { opTimeoutMs } from "../budget.ts";
-import { BrowserExited, OlderDaemon, recordedProfile } from "../daemon/client.ts";
+import { BrowserExited, HEALTH_PING_MS, OlderDaemon, recordedProfile } from "../daemon/client.ts";
+import type { PageState } from "../daemon/protocol.ts";
+import { withTimeout } from "../serialize.ts";
 import { loadState, saveState } from "../state.ts";
 import { connector, type CommandContext } from "./context.ts";
 import { cmdOpen, stopDaemon } from "./navigation.ts";
@@ -38,7 +40,8 @@ export async function restartSession(ctx: CommandContext, err: OlderDaemon | Bro
       }
     }
     const saved = await loadState(session);
-    const url = saved?.url ?? "";
+    const old = await oldDaemonState(ctx, session);
+    const url = old?.url ?? saved?.url ?? "";
     const profile = await recordedProfile(session);
     const page = url && url !== "about:blank" ? url : undefined;
     const lost = profile === null ? "; cookies and storage were lost (no --persistent)" : "";
@@ -51,7 +54,10 @@ export async function restartSession(ctx: CommandContext, err: OlderDaemon | Bro
       if (saved) await saveState({ ...saved, refs: [], doc: undefined });
       let reload = page ? `page reloaded at ${page}` : "no page was open";
       try {
-        await cmdOpen({ ...ctx, notices: undefined, acks: undefined, json: false, command: "open" }, page, profile === null ? {} : { profile });
+        await cmdOpen({ ...ctx, notices: undefined, acks: undefined, json: false, command: "open" }, page, {
+          ...(profile === null ? {} : { profile }),
+          daemonBudgetMs: old?.budgetMs ?? null,
+        });
       } catch (err) {
         if (!page) throw err;
         reload = `page did not reload at ${page} (${err instanceof Error ? err.message : String(err)})`;
@@ -64,5 +70,26 @@ export async function restartSession(ctx: CommandContext, err: OlderDaemon | Bro
     return true;
   } finally {
     releaseRestartLock(session);
+  }
+}
+
+/** The page the old daemon shows and its budget, or undefined when it does not
+ *  answer within the health ping: `state` waits behind a busy daemon's op, at
+ *  budget 0 for ever (ET-33, ET-30). */
+async function oldDaemonState(ctx: CommandContext, session: string): Promise<{ url: string; budgetMs?: number } | undefined> {
+  let c;
+  try {
+    c = await connector(ctx)(session, { spawn: false, anyVersion: true });
+  } catch {
+    return undefined;
+  }
+  try {
+    const s: Partial<PageState> | undefined = await withTimeout(c.request("state"), HEALTH_PING_MS, "state");
+    if (typeof s?.url !== "string") return undefined;
+    return typeof s.budgetMs === "number" ? { url: s.url, budgetMs: s.budgetMs } : { url: s.url };
+  } catch {
+    return undefined;
+  } finally {
+    c.close();
   }
 }

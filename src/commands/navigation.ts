@@ -59,6 +59,8 @@ export interface OpenOptions {
   persistent?: boolean;
   /** Profile directory, relative to the cwd; implies `persistent` and wins over it. */
   profile?: string;
+  /** Not a flag: the budget an upgrade restart gives the new daemon (#152). */
+  daemonBudgetMs?: number | null;
 }
 
 export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOptions = {}): Promise<string> {
@@ -101,7 +103,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
     await saveState(next);
     const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
     return replyPage(ctx, c, { ok: true, url: state.url, title: state.title }, text);
-  }, { profile, reopen: true });
+  }, { profile, reopen: true, ...(opts.daemonBudgetMs !== undefined && { daemonBudgetMs: opts.daemonBudgetMs }) });
 }
 
 export async function cmdGoto(ctx: CommandContext, typed: string): Promise<string> {

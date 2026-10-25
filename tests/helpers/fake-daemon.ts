@@ -62,8 +62,8 @@ export function lineSocket(onLine: (s: LineSocket, line: string) => void): Socke
 
 /** A daemon of a given version: `ping` answers `version` ("pong" is every
  *  daemon through 0.7), `state` a blank page, `evaluate` 1. */
-export function daemonOf(version: string): Answer {
+export function daemonOf(version: string, url = "about:blank"): Answer {
   return (req) => (req.op === "ping" ? version satisfies ResultOf<"ping">
-    : req.op === "state" ? { url: "about:blank", title: "" } satisfies ResultOf<"state">
+    : req.op === "state" ? { url, title: "" } satisfies ResultOf<"state">
     : req.op === "evaluate" ? 1 : undefined);
 }

@@ -43,6 +43,8 @@ export interface DaemonState {
   /** The persistent profile directory the browser opened with; absent when
    *  its store is ephemeral. Fixed for the daemon's life. */
   profile?: string;
+  /** The budget the daemon read at start, which `state` reports (#152). */
+  budgetMs?: number;
 }
 
 /** Remove only this daemon's pidfile. A replacement can overwrite the path
@@ -427,6 +429,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
           url: await b.realUrl(),
           title: await b.realTitle(),
           ...(state.profile ? { profile: state.profile } : {}),
+          ...(state.budgetMs !== undefined ? { budgetMs: state.budgetMs } : {}),
         })
       : req.op === "dialog-answer"
       ? async (b: Browser, accept: boolean, text?: string): Promise<void> => {
@@ -556,10 +559,10 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
   } catch {}
 
   const browser: Browser = await openBrowser({ profile });
-  const state: DaemonState = profile ? { profile } : {};
+  const timeoutMs = opTimeoutMs();
+  const state: DaemonState = profile ? { profile, budgetMs: timeoutMs } : { budgetMs: timeoutMs };
   const handle = createHandler(browser, state);
   const serialize = createSerializer();
-  const timeoutMs = opTimeoutMs();
   const gate = createGate(timeoutMs);
   const mark: StuckMark = {};
 
