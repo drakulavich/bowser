@@ -991,7 +991,19 @@ const TO_MARKDOWN = String.raw`
     if (n.nodeType === 3) return text(n);
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
-    const kids = () => [...n.childNodes].map(inline).join('');
+    // A block-level child is a word of its own, as the snapshot's name reads it (ET-47).
+    const kids = () => {
+      let s = '', sep = false;
+      for (const c of n.childNodes) {
+        const k = inline(c);
+        if (!k) continue;
+        const block = c.nodeType === 1 && isBlock(c);
+        if ((block || sep) && s && !/\s$/.test(s) && !/^\s/.test(k)) s += ' ';
+        s += k;
+        sep = block;
+      }
+      return s;
+    };
     if (t === 'BR') return '\n';
     if (t === 'DETAILS' && !n.open) { const s = [...n.children].find((c) => c.tagName === 'SUMMARY'); return s ? inline(s) : ''; }
     if (t === 'CODE') { const code = rawText(n); const f = fence(code, 1); return f + code + f; }
@@ -1013,17 +1025,40 @@ const TO_MARKDOWN = String.raw`
     }
     return kids();
   };
+  // A spanned cell's value fills every row and column it covers (ET-45).
   const table = (el) => {
-    const rows = [...el.rows].filter((r) => !skipped(r)).map((r) => [...r.cells].map((c) => inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|')));
+    // Indexed by DOM row, so a span counts hidden rows and stops at its row group's end, as the table does.
+    const all = [...el.rows];
+    const shownRow = all.map((r) => !skipped(r));
+    const grid = all.map(() => []);
+    all.forEach((r, y) => {
+      if (!shownRow[y]) return;
+      const rest = r.parentNode.rows.length - r.sectionRowIndex;
+      let x = 0;
+      for (const c of r.cells) {
+        while (grid[y][x] !== undefined) x++;
+        const v = inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
+        const cols = Math.max(1, c.colSpan);
+        const span = c.rowSpan === 0 ? rest : Math.min(Math.max(1, c.rowSpan), rest);
+        for (let dy = 0; dy < span; dy++) for (let dx = 0; dx < cols; dx++) grid[y + dy][x + dx] ??= v;
+        x += cols;
+      }
+    });
+    const rows = grid.filter((_, y) => shownRow[y]).map((r) => Array.from(r, (v) => v ?? ''));
     if (!rows.some((r) => r.some(Boolean))) return '';
     const width = Math.max(...rows.map((r) => r.length));
     const line = (r) => '| ' + [...r, ...Array(width - r.length).fill('')].join(' | ') + ' |';
     return [line(rows[0]), '|' + ' --- |'.repeat(width), ...rows.slice(1).map(line)].join('\n');
   };
-  const layoutTable = (el) => [...el.querySelectorAll('td, th')].some((c) => [...c.querySelectorAll('*')].some(isBlock));
+  // Wrappers inline() marks up: they keep their mark around block content.
+  const FORMAT = new Set(['STRONG', 'B', 'EM', 'I', 'DEL', 'S', 'STRIKE', 'SUB', 'SUP', 'CODE']);
+  const printedBlock = (el) => [...el.children].some((c) => !skipped(c) && (isBlock(c) || printedBlock(c)));
+  // A first row of th cells names columns: a data table, whatever its cells hold (ET-46).
+  const headed = (el) => { const r = [...el.rows].find((r) => !skipped(r)); return !!r && r.cells.length > 1 && [...r.cells].every((c) => c.tagName === 'TH'); };
+  const layoutTable = (el) => !headed(el) && [...el.querySelectorAll('td, th')].some(printedBlock);
   const language = (pre) => {
     const classes = [pre.className, pre.querySelector('code')?.className, pre.closest('[class*="language-"], [class*="lang-"], [class*="highlight-"]')?.className].join(' ');
-    return (/(?:^|\s)(?:language|lang|highlight)-([\w+#.-]+)/.exec(classes) || [])[1] || '';
+    return (/(?:^|\s)(?:[\w-]*-)?(?:language|lang)-([\w+#.-]+)/.exec(classes) || /(?:^|\s)highlight-(?:source-)?([\w+#.-]+)/.exec(classes) || [])[1] || '';
   };
   const blocks = (n, out) => {
     if (n.nodeType === 3) { out.push({ inline: text(n) }); return; }
@@ -1051,16 +1086,22 @@ const TO_MARKDOWN = String.raw`
       return;
     }
     if (t === 'UL' || t === 'OL') {
-      let i = 1;
-      const items = [...n.children].filter((li) => li.tagName === 'LI' && !skipped(li)).map((li) => {
-        const marker = t === 'OL' ? (i++) + '. ' : '- ';
+      const lis = [...n.children].filter((li) => li.tagName === 'LI' && !skipped(li));
+      const step = t === 'OL' && n.reversed ? -1 : 1;
+      let i = t === 'OL' && n.hasAttribute('start') ? n.start : step < 0 ? lis.length : 1;
+      const items = lis.map((li) => {
+        if (t === 'OL' && li.hasAttribute('value')) i = li.value;
+        const marker = t === 'OL' ? i + '. ' : '- ';
+        i += step;
         const k = convert(li.childNodes).replace(/\n\n/g, '\n').replace(/\n/g, '\n' + ' '.repeat(marker.length));
         return k ? marker + k : '';
       }).filter(Boolean);
       if (items.length) out.push(items.join('\n'));
       return;
     }
-    if (isBlock(n)) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
+    const link = t === 'A' && n.hasAttribute('href');
+    if (link && isBlock(n)) { out.push({ end: true }, { inline: inline(n) }, { end: true }); return; }
+    if (isBlock(n) || (!link && !FORMAT.has(t) && printedBlock(n))) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
     out.push({ inline: inline(n) });
   };
   const escapeStarts = (p) => p.split('\n').map((l) => l.replace(/^(#{1,6}(?=\s|$)|[-+*>](?=\s))/, '\\$1').replace(/^(\d+)([.)])(?=\s)/, '$1\\$2')).join('\n');

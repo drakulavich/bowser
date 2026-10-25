@@ -45,6 +45,35 @@ line two</div>
 <table><tr><th>Developer</th><td><div>Apple</div></td></tr><tr><th>Engine</th><td><div>WebKit</div></td></tr></table>
 </main>`;
 const REVIEW = `<!doctype html><title>review</title><main><table><tr><th>Key <details><summary>more</summary>secret</details></th><td><p>v</p></td></tr></table><div style="visibility: hidden"><img alt="hidden" src="h.png"><hr></div><table><tr><th>List</th><td><ul><li>A</li><li>B</li></ul></td></tr><tr><th>Lines</th><td><p>one<br>two</p></td></tr></table><p><img alt="pic" src="image)a.png"> <a href="x)y(z.html">link</a></p></main>`;
+// #154: the page structures the 2026-10-14 campaign found misreported (ET-45 to ET-62).
+const SPANS = `<!doctype html><title>spans</title><main>
+<table><tr><th>Rank</th><th>Building</th><th>Country</th><th colspan="2">Height</th></tr>
+<tr><td>1</td><td>Shanghai Tower</td><td rowspan="2">China</td><td>632 m</td><td>2,073 ft</td></tr>
+<tr><td>2</td><td>Ping An</td><td>599 m</td><td>1,965 ft</td></tr></table>
+<table><tr><td rowspan="2">a</td><td>b</td><td rowspan="2">c</td></tr><tr><td colspan="2">d</td><td>e</td></tr></table>
+<table><tr><td rowspan="0">f</td><td>g</td></tr><tr><td>h</td></tr></table>
+<table><thead><tr><th rowspan="2">K</th><th>V</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>
+<table><tr><td rowspan="2">p</td><td>q</td></tr><tr style="display: none"><td>r</td></tr><tr><td>s</td><td>t</td></tr></table>
+</main>`;
+const DATA = `<!doctype html><title>data</title><main>
+<table><tr><th>Name</th><th>Image</th></tr><tr><td>Burj</td><td><div class="center"><img alt="pic" src="/b.png"></div></td></tr></table>
+<table><tr><td>a <button style="display: block">toggle</button></td><td>b</td></tr></table>
+</main>`;
+const GLUED = `<!doctype html><title>glued</title><main>
+<div><a href="/g"><span style="display: block">Bloodlines</span><span>What is it?</span></a></div>
+<emu-alg><ol><li>If x, then<ol><li>Let y.</li></ol></li><li>Return y.</li></ol></emu-alg>
+<div><a href="/issues" style="display: flex"><span>Issues</span><span>(3.6k)</span></a></div>
+<p><strong><span style="display: block">Warning</span></strong></p>
+</main>`;
+const LANGS = `<!doctype html><title>langs</title><main>
+<div class="highlight highlight-source-shell"><pre>bun add x</pre></div>
+<div class="mw-highlight mw-highlight-lang-python"><pre>print(2)</pre></div>
+</main>`;
+const LISTS = `<!doctype html><title>lists</title><main>
+<ol start="5"><li>five</li><li>six</li></ol>
+<ol reversed><li>a</li><li hidden>gone</li><li>b</li></ol>
+<ol><li value="10">ten</li><li>eleven</li></ol>
+</main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
@@ -75,6 +104,8 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
         if (path === "/fidelity.html") return html(FIDELITY);
         if (path === "/review.html") return html(REVIEW);
+        const fidelity = { "/spans.html": SPANS, "/data.html": DATA, "/glued.html": GLUED, "/langs.html": LANGS, "/lists.html": LISTS }[path];
+        if (fidelity) return html(fidelity);
         if (path === "/blank.html") return html("<!doctype html><title>Just a moment...</title><main></main>");
         if (path === "/alt-slow.html") return html(ALT("/slow.md"));
         if (path === "/slow.md") { await Bun.sleep(20_000); return new Response("# Late"); }
@@ -177,6 +208,75 @@ runOrSkip("e2e: markdown", () => {
       "Lines: one two",
       `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`,
     ].join("\n\n"));
+  }, 60_000);
+
+  test("ET-45: a rowspan or colspan cell covers every row and column it spans", async () => {
+    await cmdGoto(ctx, `${base}/spans.html`);
+    expect(await cmdMarkdown(ctx)).toBe([
+      "| Rank | Building | Country | Height | Height |",
+      "| --- | --- | --- | --- | --- |",
+      "| 1 | Shanghai Tower | China | 632 m | 2,073 ft |",
+      "| 2 | Ping An | China | 599 m | 1,965 ft |",
+      "",
+      // Overlapping spans, an HTML table model error: the earlier cell keeps its slot.
+      "| a | b | c |  |",
+      "| --- | --- | --- | --- |",
+      "| a | d | c | e |",
+      "",
+      "| f | g |",
+      "| --- | --- |",
+      "| f | h |",
+      "",
+      // A rowspan stops at the end of its row group, and a hidden row counts toward it.
+      "| K | V |",
+      "| --- | --- |",
+      "| 1 | 2 |",
+      "",
+      "| p | q |",
+      "| --- | --- |",
+      "| s | t |",
+    ].join("\n"));
+  }, 60_000);
+
+  test("ET-46: a header row of th cells keeps a table with a block in a cell a table, and a block that is not printed does not count", async () => {
+    await cmdGoto(ctx, `${base}/data.html`);
+    expect(await cmdMarkdown(ctx)).toBe([
+      `| Name | Image |\n| --- | --- |\n| Burj | ![pic](${base}/b.png) |`,
+      "| a | b |\n| --- | --- |",
+    ].join("\n\n"));
+  }, 60_000);
+
+  test("ET-47, ET-48: block content inside an inline wrapper is separated, and a block link keeps its URL", async () => {
+    await cmdGoto(ctx, `${base}/glued.html`);
+    expect(await cmdMarkdown(ctx)).toBe([
+      `[Bloodlines What is it?](${base}/g)`,
+      "1. If x, then\n   1. Let y.\n2. Return y.",
+      `[Issues (3.6k)](${base}/issues)`,
+      "**Warning**",
+    ].join("\n\n"));
+  }, 60_000);
+
+  test("ET-49: GitHub's highlight-source- and MediaWiki's mw-highlight-lang- classes name the fence's language", async () => {
+    await cmdGoto(ctx, `${base}/langs.html`);
+    expect(await cmdMarkdown(ctx)).toBe("```shell\nbun add x\n```\n\n```python\nprint(2)\n```");
+  }, 60_000);
+
+  test("ET-62: an ordered list keeps its start, reversed order and li values", async () => {
+    await cmdGoto(ctx, `${base}/lists.html`);
+    expect(await cmdMarkdown(ctx)).toBe("5. five\n6. six\n\n2. a\n1. b\n\n10. ten\n11. eleven");
+  }, 60_000);
+
+  test("ET-61: with no budget, a rel=alternate link that never answers falls back to conversion after the alternate's own cap", async () => {
+    const orig = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "0";
+    try {
+      await cmdGoto(ctx, `${base}/alt-slow.html`);
+      const t0 = performance.now();
+      expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
+      expect(performance.now() - t0).toBeLessThan(10_000);
+    } finally {
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+    }
   }, 60_000);
 
   test("--json carries the page's URL and title", async () => {
