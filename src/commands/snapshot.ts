@@ -50,8 +50,10 @@ export async function cmdSnapshot(
   });
 }
 
-/** How long the page's own Markdown may take before the DOM is converted, whatever the budget (ET-61). */
-const ALTERNATE_CAP_MS = 5000;
+/** The most the page's own Markdown may take before the DOM is converted
+ *  instead, at any budget: at budget 0 a source that never answers hung the
+ *  session (ET-61, #154). */
+const ALTERNATE_MS = 5000;
 
 export async function cmdMarkdown(
   ctx: CommandContext,
@@ -63,7 +65,7 @@ export async function cmdMarkdown(
   return withPageClient(ctx, async (c) => {
     const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
     const budget = opTimeoutMs();
-    const fetchMs = budget ? Math.min(ALTERNATE_CAP_MS, Math.floor(budget / 2)) : ALTERNATE_CAP_MS;
+    const fetchMs = Math.min(ALTERNATE_MS, budget ? Math.floor(budget / 2) : ALTERNATE_MS);
     const { markdown, source, url, title } = (await c.request("evaluate", [markdownScript(selector, fetchMs)])) as { markdown: string; source: string; url: string; title: string };
     if (opts.filename) {
       const abs = resolve(opts.filename);

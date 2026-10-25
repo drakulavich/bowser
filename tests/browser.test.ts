@@ -466,6 +466,29 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/second");
   });
 
+  test("a count read during the wait that a later failure overtakes is read again (#106)", async () => {
+    const clock = manualClock();
+    let reads = 0;
+    const { v, page } = pageNavView({
+      evaluate: async (expr) => {
+        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr !== NAV_COUNT) return undefined;
+        const n = page.navs;
+        if (++reads === 2) await new Promise<void>((r) => { clock.setTimeout(r, 40); });
+        return n;
+      },
+    });
+    v.click = async () => {
+      page.navs++;
+      clock.setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 80);
+      clock.setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 100);
+      clock.setTimeout(() => v.land("https://x/third"), 200);
+    };
+    const b = onClock(v, fast, clock);
+    await clock.settledAt(b.click("#thrice"));
+    expect(b.url).toBe("https://x/third");
+  });
+
   test("a reread that never answers still leaves the wait at settleMs", async () => {
     // Codex's repro: the NAV_COUNT reread after a failure stays pending, and
     // an unbounded await never looked at the deadline again.
@@ -538,6 +561,36 @@ describe("wrapView navigation watch", () => {
     await b.back();
     await b.forward();
     expect(own(v.calls)).toEqual([["goBack", []], ["goForward", []]]);
+  });
+
+  // #127: past the back-forward cache WebKit reports the load's failure after goBack() resolves.
+  test("back and forward fail with the failure of the page they go to", async () => {
+    const clock = manualClock();
+    const failing = async () => { clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 5); };
+    const v = fakeView({ goBack: failing, goForward: failing });
+    const b = onClock(v, fast, clock);
+    const back = b.back();
+    await clock.settledAt(back);
+    await expect(back).rejects.toThrow("Could not connect to the server.");
+    const forward = b.forward();
+    await clock.settledAt(forward);
+    await expect(forward).rejects.toThrow("Could not connect to the server.");
+    expect(b.phase).toBe("idle");
+  });
+
+  test("back over a cancelled -999 still returns", async () => {
+    const clock = manualClock();
+    const v = fakeView({ goBack: async () => { clock.setTimeout(() => v.onNavigationFailed?.(new Error(CANCELLED)), 5); } });
+    await clock.fulfilledAt(onClock(v, fast, clock).back());
+  });
+
+  test("back that lands returns, though the navigation before it failed", async () => {
+    const clock = manualClock();
+    const v = fakeView({ goBack: async () => { clock.setTimeout(() => v.land("https://x/previous"), 5); } });
+    const b = onClock(v, fast, clock);
+    v.onNavigationFailed?.(new Error("Could not connect to the server."));
+    await clock.fulfilledAt(b.back());
+    expect(b.url).toBe("https://x/previous");
   });
 
   test("reload falls back to location.reload() when the runtime lacks it", async () => {
@@ -814,6 +867,44 @@ describe("a navigation a previous command left pending", () => {
     expect(countReads).toBe(3);
     expect(b.navigationPending).toBe(false);
     expect(v.calls.filter(([name, args]) => name === "evaluate" && args[0] === NAV_COUNT)).toHaveLength(3);
+  });
+
+  // #106: started navigations (NAV_COUNT) against finished ones (landings), not the count last seen.
+  test("a count read late, already counting a third navigation, does not clear the pending one", async () => {
+    let countReads = 0;
+    let startLateRead!: () => void;
+    let releaseLateRead!: () => void;
+    const lateReadStarted = new Promise<void>((resolve) => { startLateRead = resolve; });
+    const lateReadGate = new Promise<void>((resolve) => { releaseLateRead = resolve; });
+    const { v, page } = pageNavView({
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_COUNT && ++countReads === 2) {
+          startLateRead();
+          await lateReadGate;
+        }
+        if (expr === NAV_COUNT) return page.navs;
+        return undefined;
+      },
+    });
+    v.click = async () => { page.navs++; };
+    const clock = manualClock();
+    const b = onClock(v, slow, clock);
+    await clock.fulfilledAt(b.click("#send"));
+
+    page.navs++;
+    v.onNavigationFailed?.(new Error("-999"));
+    await lateReadStarted;
+    page.navs++;
+    v.onNavigationFailed?.(new Error("-999"));
+    releaseLateRead();
+    await until(clock, () => countReads === 3);
+    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 100); }));
+
+    expect(b.navigationPending).toBe(true);
+    v.land("https://x/third");
+    expect(b.navigationPending).toBe(false);
   });
 
   test("an action that navigates nowhere leaves nothing pending", async () => {

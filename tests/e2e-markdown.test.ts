@@ -335,6 +335,19 @@ runOrSkip("e2e: markdown", () => {
     }
   }, 60_000);
 
+  test("with no budget, a rel=alternate link gets 5 s before conversion (ET-61)", async () => {
+    const orig = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "0";
+    try {
+      await cmdGoto(ctx, `${base}/alt-slow.html`);
+      const t0 = performance.now();
+      expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
+      expect(performance.now() - t0).toBeLessThan(8000);
+    } finally {
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+    }
+  }, 60_000);
+
   test("a rel=alternate link that lands on an HTML page falls back to conversion", async () => {
     await cmdGoto(ctx, `${base}/alt-signin.html`);
     expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
