@@ -159,6 +159,12 @@ runOrSkip("e2e: actions on WebKit", () => {
       expect(await where()).toBe(`["guard",3,3,"hello world"]`);
     });
 
+    test("Meta+a selects all when the page sends its own cancelled keydown first (#96)", async () => {
+      await caret("relay");
+      await cmdPress(ctx, "Meta+a");
+      expect(await where()).toBe(`["relay",0,11,"hello world"]`);
+    });
+
     test("Control+a moves the caret to the start of the line, as on macOS", async () => {
       await caret("a");
       await cmdPress(ctx, "Control+a");
