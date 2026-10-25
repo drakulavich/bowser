@@ -50,6 +50,7 @@ const SPANS = `<!doctype html><title>spans</title><main>
 <table><tr><th>Rank</th><th>Building</th><th>Country</th><th colspan="2">Height</th></tr>
 <tr><td>1</td><td>Shanghai Tower</td><td rowspan="2">China</td><td>632 m</td><td>2,073 ft</td></tr>
 <tr><td>2</td><td>Ping An</td><td>599 m</td><td>1,965 ft</td></tr></table>
+<table><tr><td rowspan="2">a</td><td>b</td><td rowspan="2">c</td></tr><tr><td colspan="2">d</td><td>e</td></tr></table>
 </main>`;
 const DATA = `<!doctype html><title>data</title><main>
 <table><tr><th>Name</th><th>Image</th></tr><tr><td>Burj</td><td><div class="center"><img alt="pic" src="/b.png"></div></td></tr></table>
@@ -212,6 +213,11 @@ runOrSkip("e2e: markdown", () => {
       "| --- | --- | --- | --- | --- |",
       "| 1 | Shanghai Tower | China | 632 m | 2,073 ft |",
       "| 2 | Ping An | China | 599 m | 1,965 ft |",
+      "",
+      // Overlapping spans, an HTML table model error: the earlier cell keeps its slot.
+      "| a | b | c |  |",
+      "| --- | --- | --- | --- |",
+      "| a | d | c | e |",
     ].join("\n"));
   }, 60_000);
 
