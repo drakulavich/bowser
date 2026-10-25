@@ -60,8 +60,9 @@ interface DaemonOps {
   uncheck:          { args: [selector: string];                          result: boolean };
   /** With a path the daemon writes the PNG and returns `{ path }`; without
    *  one it returns base64 (reserved for a future --stdout). A `scale` above
-   *  the window's pixel ratio writes nothing and returns `{ dpr }` (#191). */
-  screenshot:       { args: [path?: string, scale?: number];             result: { path: string } | { dpr: number } | string };
+   *  the window's pixel ratio writes nothing and returns `{ dpr }` (#191).
+   *  `fontsLoading` says the 5 s wait for web fonts ran out (#194). */
+  screenshot:       { args: [path?: string, scale?: number];             result: { path: string; fontsLoading?: true } | { dpr: number } | string };
   resize:           { args: [width: number, height: number];             result: void };
   back:             { args: [];                                          result: void };
   forward:          { args: [];                                          result: void };

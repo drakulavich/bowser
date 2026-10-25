@@ -745,6 +745,12 @@ export const RELOAD = "location.reload()";
 /** The viewport in CSS pixels and the pixel ratio: what a failed
  *  screenshot checks against WebKit's capture limit (#69). */
 export const READ_VIEWPORT = "[innerWidth, innerHeight, devicePixelRatio]";
+/** Waits for the web fonts the page has asked for, at most 5 s, and answers
+ *  whether they were still loading (#194). The timer runs in the page: the
+ *  browser queues evaluates, so one cut short daemon-side would still hold the
+ *  capture behind it. */
+export const AWAIT_FONTS =
+  "document.fonts ? Promise.race([document.fonts.ready.then(() => false), new Promise((r) => setTimeout(() => r(true), 5000))]) : false";
 /** Recovery before the first commit (#48): the initial empty document
  *  leaves itself, which cancels a navigation stuck there. */
 export const LEAVE_INITIAL_DOCUMENT = "location.replace('about:blank')";

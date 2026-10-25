@@ -161,7 +161,12 @@ export async function cmdScreenshot(
     }
     const [width, height] = pngSize(new Uint8Array(await Bun.file(abs).slice(0, 24).arrayBuffer()));
     // The absolute path, for the same reason as snapshot --filename.
-    return reply(ctx, { ok: true, filename: abs, width, height }, `wrote ${abs} (${width}×${height})`);
+    const fontsLoading = typeof res === "object" && res.fontsLoading === true;
+    return reply(
+      ctx,
+      { ok: true, filename: abs, width, height, ...(fontsLoading && { fontsLoading }) },
+      `wrote ${abs} (${width}×${height})${fontsLoading ? "; fonts still loading" : ""}`,
+    );
   });
 }
 

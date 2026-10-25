@@ -1673,6 +1673,23 @@ describe("screenshot --scale", () => {
   });
 });
 
+describe("screenshot fonts", () => {
+  const shoot = (c: ReturnType<typeof fakeClient>, json = false) =>
+    cmdScreenshot({ ...ctx({ json }), connect: async () => c }, { filename: join(tmp, "fonts.png") });
+  const abs = () => join(tmp, "fonts.png");
+
+  test("a screenshot taken while fonts load says so", async () => {
+    const loading = () => fakeClient({ screenshot: (path) => ({ path: path!, fontsLoading: true }) });
+    expect(await shoot(loading())).toBe(`wrote ${abs()} (1×1); fonts still loading`);
+    expect(JSON.parse(await shoot(loading(), true))).toEqual({ ok: true, filename: abs(), width: 1, height: 1, fontsLoading: true });
+  });
+
+  test("a screenshot after fonts loaded has no note", async () => {
+    expect(await shoot(fakeClient())).toBe(`wrote ${abs()} (1×1)`);
+    expect(JSON.parse(await shoot(fakeClient(), true))).toEqual({ ok: true, filename: abs(), width: 1, height: 1 });
+  });
+});
+
 describe("resize", () => {
   test("sends the resize op with numeric width/height and reports them", async () => {
     const c = fakeClient({});
