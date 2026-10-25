@@ -33,7 +33,7 @@ cell never reaches into the body. Its text goes in every covered place in its fi
 
 So the row after "China" reads `| 3 | Ping An Finance Center | Shenzhen | China | 555 m | …`. Wikipedia's
 header is `Rank`, `Building` and `Country` with `rowspan=2`, then `Height` with `colspan=2`, over a second
-row `m | ft`. It prints as `| Rank | Building | Country | Height | |` over `| Rank | Building | Country | m | ft |`.
+row `m | ft`. It prints as `| Rank | Building | Country | Height |  |` over `| Rank | Building | Country | m | ft |`.
 Without those row spans, `m` and `ft` would land under Rank and Building, which is also what a browser
 shows.
 
@@ -81,7 +81,7 @@ on `main`.
 - **ET-45.** The Wikipedia shape: `Rank`, `Building` and `Country` headers with `rowspan=2`, `Height` with
   `colspan=2` over `m | ft`, then two body rows that share a `rowspan=2` Country "China". The whole expected
   table is written in the test:
-  `| Rank | Building | Country | Height | |`, `| --- | --- | --- | --- | --- |`,
+  `| Rank | Building | Country | Height |  |`, `| --- | --- | --- | --- | --- |`,
   `| Rank | Building | Country | m | ft |`, `| 1 | A | China | 632 m | 2,073 ft |`, `| 2 | B | China | 599 m | 1,965 ft |`.
 - **ET-45, row groups and clamps.** `<thead><tr><th rowspan="0">Year</th><th>Name</th></tr></thead>
   <tbody><tr><td>1903</td><td>Curie</td></tr></tbody>` prints the body row as `| 1903 | Curie |`, and a body

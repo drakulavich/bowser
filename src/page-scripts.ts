@@ -990,7 +990,8 @@ const TO_MARKDOWN = String.raw`
     if (n.nodeType === 3) return text(n);
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
-    const kids = () => [...n.childNodes].map(inline).join('');
+    // A block inside an inline element keeps its distance from its neighbours (ET-47).
+    const kids = () => [...n.childNodes].map((c) => c.nodeType === 1 && !skipped(c) && isBlock(c) ? ' ' + inline(c) + ' ' : inline(c)).join('');
     if (t === 'BR') return '\n';
     if (t === 'DETAILS' && !n.open) { const s = [...n.children].find((c) => c.tagName === 'SUMMARY'); return s ? inline(s) : ''; }
     if (t === 'CODE') { const code = rawText(n); const f = fence(code, 1); return f + code + f; }
@@ -1012,14 +1013,35 @@ const TO_MARKDOWN = String.raw`
     }
     return kids();
   };
+  /** One line of inline text, with the spaces around inner blocks folded. */
+  const oneLine = (n) => inline(n).trim().replace(/[ \t]+/g, ' ');
+  // A spanned cell fills every place it covers: its value repeats down a rowspan,
+  // the rest of a colspan is empty. rowSpan and colSpan are the DOM's clamped
+  // values, and a row span ends with its row group, as in HTML (ET-45).
   const table = (el) => {
-    const rows = [...el.rows].filter((r) => !skipped(r)).map((r) => [...r.cells].map((c) => inline(c).trim().replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|')));
+    const trs = [...el.rows].filter((r) => !skipped(r));
+    const rows = trs.map(() => []);
+    trs.forEach((r, y) => {
+      const left = trs.findLastIndex((o) => o.parentElement === r.parentElement) - y + 1;
+      let x = 0;
+      for (const c of r.cells) {
+        while (rows[y][x] !== undefined) x++;
+        const v = inline(c).trim().replace(/\s+/g, ' ').replace(/\|/g, '\\|');
+        const down = c.rowSpan === 0 ? left : Math.min(c.rowSpan, left);
+        for (let dy = 0; dy < down; dy++) for (let dx = 0; dx < c.colSpan; dx++) rows[y + dy][x + dx] = dx ? '' : v;
+        x += c.colSpan;
+      }
+    });
+    for (const r of rows) for (let i = 0; i < r.length; i++) r[i] ??= '';
     if (!rows.some((r) => r.some(Boolean))) return '';
     const width = Math.max(...rows.map((r) => r.length));
     const line = (r) => '| ' + [...r, ...Array(width - r.length).fill('')].join(' | ') + ' |';
     return [line(rows[0]), '|' + ' --- |'.repeat(width), ...rows.slice(1).map(line)].join('\n');
   };
-  const layoutTable = (el) => [...el.querySelectorAll('td, th')].some((c) => [...c.querySelectorAll('*')].some(isBlock));
+  // Data, not layout: a header row of th cells, or no cell with a block the walk would print (ET-46).
+  const headerRow = (el) => { const r = [...el.rows].find((x) => !skipped(x)); return !!r && r.cells.length >= 2 && [...r.cells].every((c) => c.tagName === 'TH'); };
+  const printed = (e, cell) => { for (let x = e; x && x !== cell; x = x.parentElement) if (skipped(x)) return false; return true; };
+  const layoutTable = (el) => !headerRow(el) && [...el.querySelectorAll('td, th')].some((c) => [...c.querySelectorAll('*')].some((e) => isBlock(e) && printed(e, c)));
   const language = (pre) => {
     const classes = [pre.className, pre.querySelector('code')?.className, pre.closest('[class*="language-"], [class*="lang-"], [class*="highlight-"]')?.className].join(' ');
     return (/(?:^|\s)(?:language|lang|highlight)-([\w+#.-]+)/.exec(classes) || [])[1] || '';
@@ -1029,19 +1051,19 @@ const TO_MARKDOWN = String.raw`
     if (n.nodeType !== 1 || skipped(n)) return;
     const t = n.tagName;
     const h = /^H([1-6])$/.exec(t);
-    if (h) { const k = inline(n).trim(); if (k) out.push('#'.repeat(+h[1]) + ' ' + k); return; }
+    if (h) { const k = oneLine(n); if (k) out.push('#'.repeat(+h[1]) + ' ' + k); return; }
     if (t === 'PRE') { const code = rawText(n).replace(/\n$/, ''); const f = fence(code, 3); out.push(f + language(n) + '\n' + code + '\n' + f); return; }
     if (t === 'HR') { if (getComputedStyle(n).visibility === 'visible') out.push('---'); return; }
     if (t === 'DETAILS' && !n.open) { const s = [...n.children].find((c) => c.tagName === 'SUMMARY'); if (s) blocks(s, out); return; }
     if (t === 'BLOCKQUOTE') { const k = convert(n.childNodes); if (k) out.push(k.split('\n').map((l) => l ? '> ' + l : '>').join('\n')); return; }
     if (t === 'TABLE' && n.rows.length) {
-      if (n.caption && !skipped(n.caption)) out.push(inline(n.caption).trim());
+      if (n.caption && !skipped(n.caption)) out.push(oneLine(n.caption));
       if (!layoutTable(n)) { out.push(table(n)); return; }
       for (const r of n.rows) {
         if (skipped(r)) continue;
         const cells = [...r.cells].filter((c) => !skipped(c));
         if (cells.length === 2 && cells[0].tagName === 'TH') {
-          const key = inline(cells[0]).trim();
+          const key = oneLine(cells[0]);
           const block = cells[1].querySelector('ul, ol, pre, blockquote, table');
           const value = block ? convert(cells[1].childNodes) : convert(cells[1].childNodes).replace(/\s*\n+\s*/g, ' ');
           if (key || value) out.push(key && value ? key + ':' + (block ? '\n\n' : ' ') + value : key || value);
@@ -1059,7 +1081,8 @@ const TO_MARKDOWN = String.raw`
       if (items.length) out.push(items.join('\n'));
       return;
     }
-    if (isBlock(n)) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
+    // An inline wrapper around blocks (tc39's emu-alg around an ol) is walked as a block; a link keeps its URL (ET-47).
+    if (isBlock(n) || (t !== 'A' && [...n.children].some((c) => !skipped(c) && isBlock(c)))) { out.push({ end: true }); for (const c of n.childNodes) blocks(c, out); out.push({ end: true }); return; }
     out.push({ inline: inline(n) });
   };
   const escapeStarts = (p) => p.split('\n').map((l) => l.replace(/^(#{1,6}(?=\s|$)|[-+*>](?=\s))/, '\\$1').replace(/^(\d+)([.)])(?=\s)/, '$1\\$2')).join('\n');

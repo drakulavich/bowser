@@ -26,6 +26,17 @@ const html = (body: string) => new Response(body, { headers: { "content-type": "
 const TALL = `<!doctype html><title>tall</title><div style="height: 3000px">Top</div><article><p>Far below</p></article>`;
 const HIDDEN = `<!doctype html><title>hidden</title><p><code>shown<span hidden>secret</span></code></p><pre>a<span style="display: none">secret</span>b</pre><table><tr hidden><td>secret</td></tr></table><p>after</p>`;
 const EDGES = "<!doctype html><title>edges</title><main><h2>Heading ref</h2><p><strong>bold </strong>text and <em> it</em>alic</p><table><tr><th>A</th><th>B</th></tr><tr><td>a<br>b</td><td>c</td></tr></table><p><code>a`b</code></p><pre>before\n```\nafter</pre></main>";
+// #154: spanned cells (ET-45), data tables (ET-46), blocks inside inline elements (ET-47).
+const PAGES: Record<string, string> = {
+  "/et45-spans.html": `<table><tr><th rowspan="2">Rank</th><th rowspan="2">Building</th><th rowspan="2">Country</th><th colspan="2">Height</th></tr><tr><th>m</th><th>ft</th></tr><tr><td>1</td><td>A</td><td rowspan="2">China</td><td>632 m</td><td>2,073 ft</td></tr><tr><td>2</td><td>B</td><td>599 m</td><td>1,965 ft</td></tr></table>`,
+  "/et45-groups.html": `<table><thead><tr><th rowspan="0">Year</th><th>Name</th></tr></thead><tbody><tr><td>1903</td><td>Curie</td></tr></tbody></table>`,
+  "/et45-clamps.html": `<table><tr><td colspan="0">a</td><td>b</td></tr><tr><td colspan="1001">c</td></tr></table>`,
+  "/et46-header.html": `<table><tr><th>Name</th><th>Note</th></tr><tr><td>X</td><td>Hello <div>World</div></td></tr></table>`,
+  "/et46-skipped.html": `<table><tr><td>a</td><td>b <button style="display: block">Toggle</button></td></tr><tr><td>c</td><td>d</td></tr></table><table><tr><td>e</td><td><div hidden><p>secret</p></div>f</td></tr><tr><td>g</td><td>h</td></tr></table>`,
+  "/et47-link.html": `<div><a href="/story"><div>Bloodlines</div><h3>What is state capture</h3></a></div>`,
+  "/et47-wrapper.html": `<emu-alg><ol><li>One</li><li>Two</li></ol></emu-alg>`,
+};
+
 const FIDELITY = `<!doctype html><title>Fidelity</title><main>
 <p><del>$99</del> <s>old</s> <strike>gone</strike> $49</p>
 <table><caption>Prices</caption><tr><th>A</th></tr><tr><td>1</td></tr></table>
@@ -74,6 +85,7 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/alt.html") return html(ALT("/page.md"));
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
         if (path === "/fidelity.html") return html(FIDELITY);
+        if (PAGES[path]) return html(`<!doctype html><title>t</title><main>${PAGES[path]}</main>`);
         if (path === "/review.html") return html(REVIEW);
         if (path === "/blank.html") return html("<!doctype html><title>Just a moment...</title><main></main>");
         if (path === "/alt-slow.html") return html(ALT("/slow.md"));
@@ -210,6 +222,47 @@ runOrSkip("e2e: markdown", () => {
     expect(await cmdMarkdown(ctx, undefined, { filename: file })).toBe(`wrote ${file}`);
     expect(await readFile(file, "utf8")).toBe(`${await cmdMarkdown(ctx)}\n`);
     expect(JSON.parse(await cmdMarkdown(json, undefined, { filename: file }))).toEqual({ ok: true, filename: file, source: "converted" });
+  }, 60_000);
+
+  test("ET-45: a spanned cell fills every place it covers, its value repeated down a rowspan", async () => {
+    await cmdGoto(ctx, `${base}/et45-spans.html`);
+    expect(await cmdMarkdown(ctx)).toBe([
+      "| Rank | Building | Country | Height |  |",
+      "| --- | --- | --- | --- | --- |",
+      "| Rank | Building | Country | m | ft |",
+      "| 1 | A | China | 632 m | 2,073 ft |",
+      "| 2 | B | China | 599 m | 1,965 ft |",
+    ].join("\n"));
+  }, 60_000);
+
+  test("ET-45: a row span ends with its row group, and colspan is the DOM's clamped value", async () => {
+    await cmdGoto(ctx, `${base}/et45-groups.html`);
+    expect(await cmdMarkdown(ctx)).toBe("| Year | Name |\n| --- | --- |\n| 1903 | Curie |");
+    await cmdGoto(ctx, `${base}/et45-clamps.html`);
+    const lines = (await cmdMarkdown(ctx)).split("\n");
+    expect(lines[0]!.startsWith("| a | b |")).toBe(true);
+    expect(lines[1]).toBe("|" + " --- |".repeat(1000));
+    expect(lines[2]!.startsWith("| c |")).toBe(true);
+  }, 60_000);
+
+  test("ET-46: a table with a header row stays a table when a cell holds a block, its text on one line", async () => {
+    await cmdGoto(ctx, `${base}/et46-header.html`);
+    expect(await cmdMarkdown(ctx)).toBe("| Name | Note |\n| --- | --- |\n| X | Hello World |");
+  }, 60_000);
+
+  test("ET-46: a block the walk skips does not make a layout table", async () => {
+    await cmdGoto(ctx, `${base}/et46-skipped.html`);
+    expect(await cmdMarkdown(ctx)).toBe("| a | b |\n| --- | --- |\n| c | d |\n\n| e | f |\n| --- | --- |\n| g | h |");
+  }, 60_000);
+
+  test("ET-47: blocks inside a link keep their distance, and the link its URL", async () => {
+    await cmdGoto(ctx, `${base}/et47-link.html`);
+    expect(await cmdMarkdown(ctx)).toBe(`[Bloodlines What is state capture](${base}/story)`);
+  }, 60_000);
+
+  test("ET-47: an inline element around a list is walked as a block", async () => {
+    await cmdGoto(ctx, `${base}/et47-wrapper.html`);
+    expect(await cmdMarkdown(ctx)).toBe("1. One\n2. Two");
   }, 60_000);
 
   test("a rel=alternate Markdown link is used as is", async () => {
