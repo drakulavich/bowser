@@ -6,7 +6,7 @@ import { createSerializer } from "../src/serialize.ts";
 import type { Op } from "../src/daemon/protocol.ts";
 import { waitFor } from "./helpers/daemons.ts";
 import { manualClock } from "./helpers/manual-clock.ts";
-import { CANCEL_PENDING_NAVIGATION, KEY_WATCH, keyCommandScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION } from "../src/page-scripts.ts";
+import { CANCEL_PENDING_NAVIGATION, keyCommandScript, keyWatchScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -344,7 +344,7 @@ describe("wrapView navigation watch", () => {
       await clock.fulfilledAt(onClock(v, fast, clock).press(key, [...mods]));
       const seen = v.calls.filter(([op, args]) => op === "press" || (op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT));
       expect(seen).toEqual([
-        ["evaluate", [KEY_WATCH]],
+        ["evaluate", [keyWatchScript(key)]],
         ["press", [key, { modifiers: [...mods] }]],
         ["evaluate", [keyCommandScript(command)]],
       ]);

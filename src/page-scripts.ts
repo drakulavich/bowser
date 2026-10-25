@@ -807,15 +807,22 @@ export const KEY_CODES = String.raw`(() => {
 
 // `press Meta+a` and friends (#55). Bun.WebView sends Meta+A/Z to WebKit as
 // key events only; on macOS those shortcuts are menu commands, which the page
-// never gets (measured, Bun 1.4.2). KEY_WATCH keeps the next keydown, seen
+// never gets (measured, Bun 1.4.2). keyWatchScript keeps the next keydown of the key, seen
 // first in the capture phase; keyCommandScript then runs the editing command
 // the menu would, unless a page handler cancelled that keydown. It is the
 // same table and the same cancel rule as Playwright's WebKit on macOS.
-export const KEY_WATCH = String.raw`(() => {
+export function keyWatchScript(key: string): string {
+  return `(() => {
   const KEY = Symbol.for('bowser.key');
   window[KEY] = null;
-  addEventListener('keydown', (e) => { window[KEY] = e; }, { capture: true, once: true });
+  const watch = (e) => {
+    if (e.key.toLowerCase() !== ${JSON.stringify(key.toLowerCase())}) return;
+    window[KEY] = e;
+    removeEventListener('keydown', watch, true);
+  };
+  addEventListener('keydown', watch, true);
 })()`;
+}
 
 export function keyCommandScript(command: "selectAll" | "undo" | "redo"): string {
   return `(() => {

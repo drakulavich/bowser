@@ -2,8 +2,8 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  CANCEL_PENDING_NAVIGATION, KEY_CODES, KEY_WATCH, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD,
-  hoverScript, keyCommandScript, readable, selectScript, setCheckedScript,
+  CANCEL_PENDING_NAVIGATION, KEY_CODES, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  hoverScript, keyCommandScript, keyWatchScript, readable, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
 
@@ -621,7 +621,7 @@ export function wrapView(
     type: (text) => guard(nav.act(() => view.type(text))),
     press: (key, modifiers = []) => guard(nav.act(async () => {
       const command = menuCommand(key, modifiers);
-      if (command) await evaluate(KEY_WATCH);
+      if (command) await evaluate(keyWatchScript(key));
       const sent = pressKey(key, modifiers);
       if (sent !== key) await evaluate(KEY_CODES);
       await view.press(sent, modifiers.length ? { modifiers } : undefined);
