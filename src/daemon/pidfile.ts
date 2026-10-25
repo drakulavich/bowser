@@ -46,6 +46,29 @@ export function looksLikeOurDaemon(command: string, session: string): boolean {
   return bun && marker.endsWith("/src/daemon/main.ts");
 }
 
+/** True when a `ps` command line is a bowser command: `bun` running a
+ *  `src/cli.ts` (a checkout, or the npm bin as its shebang ran it) or a
+ *  `bin/bowser` link, or a `bowser` executable. The `upg` lock trusts only
+ *  such a holder: a pid the OS gave to another process after a killed restart
+ *  would block the session (ET-35). */
+export function looksLikeBowser(command: string): boolean {
+  const line = command.trim();
+  if (/^bowser([-.]|$)/.test(line.split(/\s+/)[0]?.split("/").pop() ?? "")) return true;
+  // bun's path may hold a space (#156), and so may the script's, which is a
+  // path (absolute, ./ or src/) right after bun or `bun run`.
+  const m = /^(?:[^\s].*?\/)?bun\s+(?:run\s+)?(.*)$/.exec(line);
+  return m !== null && /^(?:[/.].*?\/|)(?:src\/cli\.ts|\.?bin\/bowser)(?:\s|$)/.test(m[1]!);
+}
+
+/** Synchronous: `otherHolder` answers as a plain value. */
+export function isBowser(pid: number): boolean {
+  try {
+    return looksLikeBowser(Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)], { stderr: "ignore" }).stdout.toString());
+  } catch {
+    return false;
+  }
+}
+
 export async function isOurDaemon(pid: number, session: string): Promise<boolean> {
   try {
     const proc = Bun.spawn(["ps", "-o", "command=", "-p", String(pid)], {

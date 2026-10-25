@@ -12,7 +12,7 @@ import { reportFailure, run } from "../src/cli.ts";
 import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath, type ConnectOptions } from "../src/daemon/client.ts";
-import { looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
+import { looksLikeBowser, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "../src/commands/interaction.ts";
@@ -814,6 +814,27 @@ describe("looksLikeOurDaemon", () => {
     expect(looksLikeOurDaemon(`/different/Cellar/bowser/9.9.9/bin/bowser --daemon sess`, "sess")).toBe(true);
     // Release assets keep their platform suffix unless the user renames them.
     expect(looksLikeOurDaemon("/Users/x/Downloads/bowser-macos-arm64 --daemon sess", "sess")).toBe(true);
+  });
+});
+
+// The upg lock waits only for a holder this accepts (ET-35, #152).
+describe("looksLikeBowser", () => {
+  test("accepts a checkout, the npm bin, the bowser link and a release binary", () => {
+    for (const line of [
+      "bun src/cli.ts eval 1",
+      "bun run src/cli.ts eval 1",
+      "/opt/bun /g/node_modules/@drakulavich/bowser-cli/src/cli.ts mcp",
+      "/Users/John Smith/.bun/bin/bun /Users/John Smith/repo/src/cli.ts open",
+      "bun /Users/x/.bun/bin/bowser open",
+      "bun /p/node_modules/.bin/bowser mcp",
+      "/Users/John Smith/.bun/bin/bun /Users/John Smith/.bun/bin/bowser open",
+      "/usr/local/bin/bowser-macos-arm64 eval 1",
+    ]) expect([line, looksLikeBowser(line)]).toEqual([line, true]);
+  });
+  test("refuses other processes", () => {
+    for (const line of ["", "sleep 300", "bun test", "bun /x/not-bowser.ts", "bun /x/src/cli.tsx", "/usr/bin/bowserx", "node app.js bowser", "grep bowser-cli /x/log", "node app.js /tmp/bin/bowser", "vim src/cli.ts", "bun app.js /tmp/bin/bowser"]) {
+      expect([line, looksLikeBowser(line)]).toEqual([line, false]);
+    }
   });
 });
 

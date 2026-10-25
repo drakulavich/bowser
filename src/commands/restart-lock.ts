@@ -4,7 +4,7 @@
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { opTimeoutMs } from "../budget.ts";
-import { claimSession, isAlive } from "../daemon/pidfile.ts";
+import { claimSession, isAlive, isBowser } from "../daemon/pidfile.ts";
 import { sessionDir } from "../state.ts";
 import { UserError } from "../errors.ts";
 
@@ -18,10 +18,10 @@ const msgPath = (session: string) => join(sessionDir(session), MSG);
 
 export function beingRestarted(session: string): UserError {
   const lock = lockPath(session);
-  return new UserError(`session '${session}' is being restarted by pid ${readTrimmed(lock)} (${lock})`);
+  return new UserError(`session '${session}' is being restarted by pid ${readTrimmed(lock)} (${lock}); retry in a moment`);
 }
 
-/** Claims the session's lock, waiting while a live pid holds it, up to the op
+/** Claims the session's lock, waiting while a live bowser process holds it, up to the op
  *  budget (no deadline at 0). False when the session directory is gone or the
  *  lock is corrupt. */
 export async function claimRestartLock(session: string, claim = claimSession): Promise<boolean> {
@@ -30,7 +30,7 @@ export async function claimRestartLock(session: string, claim = claimSession): P
   const deadline = budget ? Date.now() + budget : Infinity;
   for (;;) {
     try {
-      if (await claim(lock, session, undefined, async () => true)) return true;
+      if (await claim(lock, session, undefined, async (pid) => isBowser(pid))) return true;
     } catch (e) {
       // ENAMETOOLONG: a name no daemon could have claimed under this HOME (F35).
       const code = (e as { code?: string }).code;
@@ -51,10 +51,10 @@ export function releaseRestartLock(session: string): void {
   }
 }
 
-/** The live pid of another process that holds the lock, or null. */
+/** The pid of another live bowser process that holds the lock, or null. */
 export function otherHolder(session: string): number | null {
   const pid = Number(readTrimmed(lockPath(session)));
-  return pid > 0 && pid !== process.pid && isAlive(pid) ? pid : null;
+  return pid > 0 && pid !== process.pid && isAlive(pid) && isBowser(pid) ? pid : null;
 }
 
 export function writeNotice(session: string, text: string): void {

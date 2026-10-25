@@ -90,6 +90,12 @@ describe("createHandler", () => {
     expect(await createHandler(b)(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X" } });
   });
 
+  test("state reports the budget the daemon started with (#152)", async () => {
+    const b = fakeBrowser();
+    expect(await createHandler(b, { budgetMs: 45000 })(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X", budgetMs: 45000 } });
+    expect(await createHandler(b, { budgetMs: 0 })(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X", budgetMs: 0 } });
+  });
+
   test("state reports the page's live url and title, not a cached copy", async () => {
     // Two reads with a navigation between them must differ: this fails if
     // DaemonState ever starts caching url/title.

@@ -36,6 +36,9 @@ export interface PageState {
   /** The daemon's persistent profile directory; absent when its store is
    *  ephemeral. `open --persistent` compares it with the one it wants. */
   profile?: string;
+  /** The `BOWSER_OP_TIMEOUT_MS` the daemon read at start (0: none). An upgrade
+   *  restart gives it to the new daemon; an older daemon leaves it out (#152). */
+  budgetMs?: number;
 }
 
 interface DaemonOps {
