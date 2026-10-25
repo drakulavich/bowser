@@ -258,13 +258,16 @@ describe("handleMcpRequest — tools/call", () => {
     );
   });
 
-  test("unknown tool → tool error result", async () => {
-    const res: any = await handleMcpRequest(
+  // ET-05: MCP lists an unknown tool among the protocol errors.
+  test("unknown tool → -32602, and nothing runs", async () => {
+    let ran = false;
+    const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
+    const res = await handleMcpRequest(
       { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nonexistent", arguments: {} } },
-      okRun(),
+      deps,
     );
-    expect(res.result.isError).toBe(true);
-    expect(res.result.content[0].text).toContain("nonexistent");
+    expect(res).toEqual({ jsonrpc: "2.0", id: 5, error: { code: -32602, message: "Unknown tool: nonexistent" } });
+    expect(ran).toBe(false);
   });
 
   for (const stdin of [true, false, "true"]) {
@@ -286,7 +289,7 @@ describe("handleMcpRequest — tools/call", () => {
       { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "mcp", arguments: {} } },
       okRun(),
     );
-    expect(res.result.isError).toBe(true);
+    expect(res.error).toEqual({ code: -32602, message: "Unknown tool: mcp" });
   });
 });
 
@@ -297,6 +300,22 @@ describe("handleMcpRequest — errors", () => {
       okRun(),
     );
     expect(res.error.code).toBe(-32601);
+  });
+
+  // ET-06: a request needs a string method; a client's response gets no answer at all.
+  for (const [what, msg] of [["no method", { jsonrpc: "2.0", id: 3 }], ["a number for a method", { jsonrpc: "2.0", id: 3, method: 5 }]] as const) {
+    test(`${what} → -32600 with the request's id`, async () => {
+      expect(await handleMcpRequest(msg, okRun())).toEqual({ jsonrpc: "2.0", id: 3, error: { code: -32600, message: "Invalid Request" } });
+    });
+  }
+
+  test("a client's result or error response is not answered, and the next line is", async () => {
+    const res = await serve([
+      JSON.stringify({ jsonrpc: "2.0", id: 33, result: {} }),
+      JSON.stringify({ jsonrpc: "2.0", id: 34, error: { code: -1, message: "x" } }),
+      JSON.stringify({ jsonrpc: "2.0", id: 35, method: "ping" }),
+    ]);
+    expect(res).toEqual([{ jsonrpc: "2.0", id: 35, result: {} }]);
   });
 
   test("malformed JSON line → -32700 with id null", async () => {

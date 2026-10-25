@@ -265,13 +265,14 @@ const ROLE_NAME = String.raw`
   const nameHidden = (el) => hiddenSubtree(el) || styleHidden(el);
   // Inside a root that is hidden now (o.hiddenRoot), styleHidden without what
   // the root's own hiding causes: a closed <details> around it, the
-  // visibility its descendants inherit.
-  function hiddenUnder(el, root) {
+  // visibility its descendants inherit. With declared, every descendant's
+  // visibility counts as its own: computed styles cannot tell the two apart.
+  function hiddenUnder(el, root, declared) {
     if (hiddenSubtree(el)) return true;
     const ds = el.closest('details,summary');
     if (ds && ds !== el && ds !== root && root.contains(ds) && tagOf(ds) === 'DETAILS' && !ds.open) return true;
     if (tagOf(el) === 'OPTION' && el.closest('select')) return false;
-    return styleOf(el).visibility !== 'visible' && styleOf(root).visibility === 'visible';
+    return styleOf(el).visibility !== 'visible' && (declared || styleOf(root).visibility === 'visible');
   }
   const idRefs = (el, attr) => {
     const ids = (el.getAttribute(attr) || '').split(' ').filter(Boolean);
@@ -290,11 +291,11 @@ const ROLE_NAME = String.raw`
     return null;
   };
 
-  // o: { visited: Set, mode: 'self' | 'descendant' | undefined, embedded: bool, labelledBy: bool, hiddenOk: bool, hiddenRoot: Element }
+  // o: { visited: Set, mode: 'self' | 'descendant' | undefined, embedded: bool, labelledBy: bool, hiddenOk: bool, hiddenRoot: Element, hiddenDeclared: bool }
   function textAlt(el, o) {
     if (o.visited.has(el)) return '';
     const child = Object.assign({}, o, { mode: o.mode === 'self' ? 'descendant' : o.mode });
-    if (!o.hiddenOk && (o.hiddenRoot ? el !== o.hiddenRoot && hiddenUnder(el, o.hiddenRoot) : nameHidden(el))) {
+    if (!o.hiddenOk && (o.hiddenRoot ? el !== o.hiddenRoot && hiddenUnder(el, o.hiddenRoot, o.hiddenDeclared) : nameHidden(el))) {
       o.visited.add(el);
       return '';
     }
@@ -408,9 +409,9 @@ const ROLE_NAME = String.raw`
     parts.push(cssContent(el, '::after'));
     return parts.join('');
   }
-  function nameOf(el, hiddenRoot) {
+  function nameOf(el, hiddenRoot, hiddenDeclared) {
     if (NO_NAME_ROLES.includes(ariaRole(el) || '')) return '';
-    const name = norm(textAlt(el, { visited: new Set(), mode: 'self', hiddenRoot }));
+    const name = norm(textAlt(el, { visited: new Set(), mode: 'self', hiddenRoot, hiddenDeclared }));
     return name.length > 900 ? '' : name;
   }`;
 
@@ -1176,8 +1177,11 @@ export function resolveRefScript(ref: { id: string; role: string; name: string }
   const role = tagOf(el) === 'IFRAME' ? 'iframe' : ariaRole(el) || 'generic';
   // Named as if shown when hidden now: a hidden element's name is '', and
   // an action on a hidden ref must still go through (tests/e2e-stale-ref.test.ts).
-  const name = role === 'iframe' ? '' : nameOf(el, nameHidden(el) ? el : undefined);
-  if (role !== ${JSON.stringify(ref.role)} || name !== ${JSON.stringify(ref.name)}) return { changed: { role, name } };${enabled}${scroll}${covered}
+  const hidden = role !== 'iframe' && nameHidden(el);
+  const name = role === 'iframe' ? '' : nameOf(el, hidden ? el : undefined);
+  // A descendant's visibility:hidden may be its own or el's, inherited (#95): either name is el's.
+  const same = name === ${JSON.stringify(ref.name)} || (hidden && nameOf(el, el, true) === ${JSON.stringify(ref.name)});
+  if (role !== ${JSON.stringify(ref.role)} || !same) return { changed: { role, name } };${enabled}${scroll}${covered}
   ${CSS_PATH}
   return cssPath(el);
 })()`;

@@ -472,8 +472,10 @@ function navigationWatch(
     /** Run `action` and wait for a navigation it started; see above.
      *  Answers what the action answered. An action that always `navigates`
      *  waits for its landing with no grace or settle cap, and fails with
-     *  that landing's failure unless it is a -999, as navigate does (#123). */
-    async act<T>(action: () => Promise<T>, navigates = false): Promise<T> {
+     *  that landing's failure unless it is a -999, as navigate does (#123).
+     *  A `history` action waits as a click does, and fails the same way when
+     *  the page it goes to fails to load (#127). */
+    async act<T>(action: () => Promise<T>, kind: "acts" | "navigates" | "history" = "acts"): Promise<T> {
       try {
         const before = landed;
         // A navigation already in flight is not ours: only a false→true transition
@@ -484,18 +486,16 @@ function navigationWatch(
         if (actionCancelled) throw new Error("request timed out before the action was sent");
         const landedBefore = landed;
         const arrivedBefore = arrived;
-        armedAt = navigates ? landed + 1 : landed;
+        armedAt = kind === "navigates" ? landed + 1 : landed;
         phase = "acting";
         const result = await action();
         phase = "delivered";
         // A -999 here is the navigation the reload cancelled; any other
         // failure is the reload's own (measured, Bun 1.4.2).
         const ended = arrived !== arrivedBefore || (landed !== landedBefore && !cancelled(failure));
-        if (!navigates) await awaitNavigation(before, wasLoading);
-        else {
-          if (!ended) await follow(Infinity);
-          if (arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure)) throw failure;
-        }
+        if (kind !== "navigates") await awaitNavigation(before, wasLoading);
+        else if (!ended) await follow(Infinity);
+        if (kind !== "acts" && arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure)) throw failure;
         return result;
       } finally {
         phase = "idle";
@@ -647,8 +647,8 @@ export function wrapView(
       return Buffer.from(bytes).toString("base64");
     },
     resize: (width, height) => guard(view.resize(width, height)),
-    back: () => guard(nav.act(() => view.goBack())),
-    forward: () => guard(nav.act(() => view.goForward())),
+    back: () => guard(nav.act(() => view.goBack(), "history")),
+    forward: () => guard(nav.act(() => view.goForward(), "history")),
     // Native reload() resolves before the reload commits, and nothing shows
     // the reload until it lands: view.loading stays false and the page sees
     // no navigate event (#116, measured on Bun 1.4.2). So its landing is
@@ -657,7 +657,7 @@ export function wrapView(
     reload: () => guard(nav.act(async () => {
       if (typeof view.reload === "function") await view.reload();
       else await evaluate(RELOAD);
-    }, view.url !== "")),
+    }, view.url !== "" ? "navigates" : "acts")),
     close: async () => {
       // WebKit commits localStorage in a transaction 500 ms after a write
       // (measured ~530 ms, also with the CPU saturated), and Bun force-kills

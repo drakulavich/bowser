@@ -243,7 +243,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 
 With `--json`, and so over MCP, `click`, `fill`, `hover`, `select`, `check` and `uncheck` name the element the ref pointed to, with the role and name its snapshot gave: `click e724` answers `{"ok":true,"ref":"e724","element":{"role":"button","name":"Add to cart"},"url":"…"}`.
 
-Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`. A session name uses letters, digits, `.`, `_` and `-`, and does not start with `.` or `-`. It is at most 255 characters, or fewer under a very long `HOME`: `<HOME>/.bowser/sessions/<name>/pid.<pid>.tmp` must fit Bun's 1016-character path limit. A longer name is a usage error that gives the limit.
+Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`, `--version` (prints the version and runs nothing). A session name uses letters, digits, `.`, `_` and `-`, and does not start with `.` or `-`. It is at most 255 characters, or fewer under a very long `HOME`: `<HOME>/.bowser/sessions/<name>/pid.<pid>.tmp` must fit Bun's 1016-character path limit. A longer name is a usage error that gives the limit.
 
 `bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
 flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text
@@ -282,6 +282,7 @@ Notes:
 - The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies. It speaks MCP `2025-11-25`, `2025-06-18` and `2024-11-05`: `initialize` answers with the client's version when it is one of these, and with `2025-11-25` otherwise. The stateless `2026-07-28` revision is not implemented; its `server/discover` probe gets `-32601 Method not found`, on which a client falls back to `initialize`.
 - `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
 - A JSON-RPC batch (an array) or a line that is not a JSON object gets one `-32600 Invalid Request` error with `id: null`; nothing in a batch runs. MCP `2025-06-18` has no batching.
+- A request without a string `method` gets `-32600 Invalid Request` with its `id`, and a `tools/call` of a tool the server does not have gets `-32602 Unknown tool`. A response from the client (a message with `result` or `error`) gets no answer.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
 - The server exits when stdin closes and every running call has answered. A client that stops reading stdout is gone: the server exits 0 at its next response, and calls still queued never run. A browser operation already running finishes in its daemon.
 - `notifications/cancelled` drops the call: one still queued behind its session never runs, and a running one finishes but its result is discarded. Either way no response is sent for it, per the MCP spec. A browser operation that has already started is **not** undone — a cancelled `click` may still have clicked, and the session's next call waits for it to finish.

@@ -28,7 +28,8 @@ const FIXTURES = join(import.meta.dir, "fixtures");
 const RELABEL = `<!doctype html><title>relabel</title>
 <button id="buy" onclick="window.clicks = (window.clicks || 0) + 1; this.textContent = 'Delete account'">Buy A</button>
 <button id="save">Save <span style="display:none">Delete</span></button>
-<button id="send">Send <b>now</b></button>`;
+<button id="send">Send <b>now</b></button>
+<button id="post">Post <b style="visibility:hidden">later</b></button>`;
 
 const FORM = `<!doctype html><title>form</title>
 <form id="f"><input id="name" aria-label="Name"> <select id="color" aria-label="Color"><option>red</option><option>blue</option></select>
@@ -226,9 +227,12 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       await cmdSnapshot(ctx);
       const save = await refNamed("Save");
       const send = await refNamed("Send now");
-      await cmdEval(ctx, `(document.getElementById('save').style.${hide}, document.getElementById('send').style.${hide}, 1)`);
+      const post = await refNamed("Post");
+      await cmdEval(ctx, `(['save', 'send', 'post'].forEach((id) => document.getElementById(id).style.${hide}), 1)`);
       expect(await cmdHover(ctx, save)).toBe(`hovered ${save}`);
       expect(await cmdHover(ctx, send)).toBe(`hovered ${send}`);
+      // #95: its own visibility:hidden reads the same as one inherited from the button.
+      expect(await cmdHover(ctx, post)).toBe(`hovered ${post}`);
     }, 60_000);
   }
 

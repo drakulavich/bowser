@@ -5,10 +5,12 @@ import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { failedModalState, type CommandContext } from "./commands/context.ts";
 import { restartSession } from "./commands/restart.ts";
 import { UserError } from "./errors.ts";
+import pkg from "../package.json";
 
 /** `base` seeds the command context; tests inject `connect` through it. */
 export async function run(argv: string[], base: Partial<CommandContext> = {}): Promise<string> {
   const args = parse(SCHEMAS, argv);
+  if (args.version && !args.help) return pkg.version;
   if (!args.command) return renderHelp(COMMANDS);
   const command = findCommand(args.command);
   // parse() rejects an unknown command unless --help came first; this is
@@ -52,7 +54,8 @@ export function reportFailure(err: unknown): { stderr: string; code: 1 | 2 } {
 function startsMcpServer(argv: string[]): boolean {
   if (argv[0] !== "mcp" || helpRequested(SCHEMAS, argv)) return false;
   try {
-    return parse(SCHEMAS, argv).positional.length === 0;
+    const args = parse(SCHEMAS, argv);
+    return args.positional.length === 0 && !args.version;
   } catch {
     // An unknown flag: the server starts, as it did before this check.
     return true;
