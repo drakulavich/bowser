@@ -39,13 +39,16 @@ After the stop `view.url` and `view.title` stay `""` (they change only on a comp
    redirect both count.
 3. Once a new document reports anything but `loading`, wait `LOAD_CAP_MS` (5000) more for `go()`. If a later
    read shows yet another `timeOrigin` (a document that navigated on), the 5 s start again from it.
-4. If `go()` is still pending, `evaluate("window.stop()")`, and mark the navigation stopped.
+4. If `go()` is still pending, evaluate `window.stop()` followed by `NAV_ARM` in one script, and mark the
+   navigation stopped. `window.stop()` aborts every navigation the page had started before it, so after it only
+   a navigation started later can still be in flight, and `NAV_ARM` counts those.
 
 `go()` settling (resolved or rejected) ends the watcher at any step. When the navigation was stopped and
-`go()` rejects with -999, `navigate` checks `view.loading`. False: the -999 was the stop's own, and
-`navigate` returns as if the page had loaded, so the command answers with the page's URL and title. True: a
-page script started another navigation that the stop did not cover, and `navigate` takes the existing #116
-path (wait for the next landing).
+`go()` rejects with -999, `navigate` reads `NAV_COUNT` (bounded by `graceMs`). 0: the -999 was the stop's
+own, and `navigate` returns as if the page had loaded, so the command answers with the page's URL and title.
+Anything else, or no answer: a navigation the stop did not cover may be in flight, and `navigate` takes the
+existing #116 path (wait for the next landing). `view.loading` cannot tell the two apart: it stays false for
+a navigation a page started towards a slow server (`src/browser.ts`, ET-10).
 
 ```mermaid
 sequenceDiagram
@@ -110,7 +113,8 @@ them broken), which is the trade for the command answering at all.
     `navigate` promise is still pending;
   - a baseline read that gives no number: no read of step 2 and no stop, `navigate` waits for `go()`;
   - a read that never settles: no second read is queued behind it;
-  - a stop after which `view.loading` stays true: `navigate` waits for the next landing, as #116.
+  - a stop after which `NAV_COUNT` reads 1, with `view.loading` false: `navigate` does not resolve on the
+    -999 and waits for the next landing, as #116.
 - `tests/e2e-hangs.test.ts`, "ET-52": on a page whose `<img>` never answers, `open` and then `goto` both
   answer exit 0 within 8 s with the page's title; `eval document.querySelector('h1').textContent` answers;
   a `goto` to another page then works. Today: `BOWSER_E2E=1 bun test tests/e2e-hangs.test.ts -t ET-52` fails
