@@ -299,16 +299,17 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     await goto.exited;
 
     // A smaller budget bounds each attempt: before the fix the first one
-    // waited the whole 15 s behind the killed goto and failed.
-    process.env.BOWSER_OP_TIMEOUT_MS = "15000";
+    // waited the whole 25 s behind the killed goto and failed. After it the
+    // goto ends 5 s after the kill, and its recovery 2 s later.
+    process.env.BOWSER_OP_TIMEOUT_MS = "25000";
     const killedAt = performance.now();
     let href: string | undefined;
     let last: string | undefined;
-    while (href === undefined && performance.now() - killedAt < 12_000) {
+    while (href === undefined && performance.now() - killedAt < 20_000) {
       try { href = await cmdEval(ctx, "location.href"); } catch (err) { last = String(err); await Bun.sleep(200); }
     }
     expect({ href, last: href ? undefined : last }).toEqual({ href: `${base}/`, last: undefined });
-    expect(performance.now() - killedAt).toBeLessThan(12_000);
+    expect(performance.now() - killedAt).toBeLessThan(20_000);
   }, openTimeout(0, 30_000));
 
   // #48: from a fresh session nothing has committed yet (the view's url is

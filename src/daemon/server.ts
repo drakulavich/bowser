@@ -79,6 +79,8 @@ export interface Lane {
   conn?: object;
   /** Calls `fn` when this request's connection closes; returns the unsubscribe. */
   onClose?: (fn: () => void) => () => void;
+  /** How long a running op may go on once its connection closed (default CLOSED_MS). */
+  closedMs?: number;
 }
 
 /** Set while an op that timed out is still running after its recovery. That
@@ -125,6 +127,9 @@ const RECOVERY_GRACE_MS = 2000;
 /** How long before its timer a handler's own failure is due, so that failure,
  *  not the plain timeout, is what the client hears. */
 const REPLY_MARGIN_MS = 50;
+/** How long a running op whose client went away may still finish on its own:
+ *  a killed upgrade restart's page reload is one that does (ET-29). */
+const CLOSED_MS = 5000;
 
 export function dispatch(req: DaemonRequest, lane: Lane): void {
   if (IS_URGENT.has(req.op)) {
@@ -150,6 +155,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   let atGate = false;
   let leaveGate: (() => void) | undefined;
   let grace: ReturnType<typeof setTimeout> | undefined;
+  let orphan: ReturnType<typeof setTimeout> | undefined;
   let recovery: Promise<unknown> | undefined;
   const mine = { op: req.cmd ?? req.op };
   const onStuck = (op: string): void => {
@@ -164,6 +170,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     answered = true;
     waiting?.delete(onStuck);
     clearTimeout(timer);
+    clearTimeout(orphan);
     unsubscribe?.();
     if (!gone) lane.reply(res);
     // On answer, not on settle: a timed-out op still running holds only the
@@ -212,10 +219,13 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     grace = setTimeout(recover, graceMs);
   };
   const timer = ms > 0 ? setTimeout(expire, ms) : undefined;
-  // A closed connection ends its request as a timeout would, without a reply (ET-38).
+  // A closed connection ends its request as a timeout would, without a reply:
+  // a queued one at once, a running one after CLOSED_MS (ET-38).
   const unsubscribe = lane.onClose?.(() => {
     gone = true;
-    if (!answered) expire();
+    if (answered) return;
+    if (!running) expire();
+    else orphan = setTimeout(() => { if (!answered) expire(); }, lane.closedMs ?? CLOSED_MS);
   });
   const queue = (): void => {
     lane.serialize(async () => {

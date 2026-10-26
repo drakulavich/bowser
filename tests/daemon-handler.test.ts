@@ -506,8 +506,9 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
   expect(replies).toEqual(["click", "type"]);
 });
 
-// ET-38: a client killed mid-op leaves nobody to answer. Its op is ended as
-// a timeout would end it, even with no budget, and what it queued is dropped.
+// ET-38: a client killed mid-op leaves nobody to answer. Its running op gets
+// `closedMs` to finish, then is ended as a timeout would end it, even with no
+// budget; what it queued is dropped.
 describe("a closed connection", () => {
   function connection() {
     const closing = new Set<() => void>();
@@ -517,7 +518,7 @@ describe("a closed connection", () => {
     };
   }
 
-  test("ends its running op with no budget: the op is recovered after the grace, and nothing is written to it", async () => {
+  test("ends its running op with no budget after closedMs: the op is recovered after the grace, and nothing is written to it", async () => {
     const replies: DaemonResponse[] = [];
     let recoveries = 0;
     const c = connection();
@@ -528,12 +529,35 @@ describe("a closed connection", () => {
       reply: (r: DaemonResponse) => { replies.push(r); },
       recover: async () => { recoveries++; return false; },
       onClose: c.onClose,
+      closedMs: 10,
     };
     dispatch({ id: 1, op: "navigate", args: ["https://never/"] }, lane);
     await Bun.sleep(5);
     c.close();
     await waitFor(() => recoveries === 1, 5000);
     expect(replies).toEqual([]);
+  });
+
+  // ET-29: a killed upgrade restart's page reload took 4 s, past the 2 s
+  // recovery grace a timeout would give it.
+  test("lets its running op finish within closedMs, past the recovery grace: no recovery", async () => {
+    let recoveries = 0;
+    let settled = false;
+    const c = connection();
+    const lane = {
+      handle: async (req: DaemonRequest) => { await Bun.sleep(2500); settled = true; return { id: req.id, ok: true as const }; },
+      serialize: createSerializer(),
+      timeoutMs: 0,
+      reply: () => {},
+      recover: async () => { recoveries++; return false; },
+      onClose: c.onClose,
+      closedMs: 3000,
+    };
+    dispatch({ id: 1, op: "navigate", args: ["https://slow/"] }, lane);
+    await Bun.sleep(5);
+    c.close();
+    await waitFor(() => settled, 5000);
+    expect(recoveries).toBe(0);
   });
 
   test("drops its queued op, so the op never runs", async () => {
