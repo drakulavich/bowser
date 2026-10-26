@@ -30,16 +30,22 @@ After the stop `view.url` and `view.title` stay `""` (they change only on a comp
 
 `navigationWatch.navigate` (`src/browser.ts`) runs a watcher next to `go()`:
 
-1. Before `go()`, read `performance.timeOrigin` of the current document (`ask`, bounded by `graceMs`).
-2. Every 100 ms, `ask` for `[performance.timeOrigin, document.readyState]`, each read bounded by 1 s. A new
-   document is one whose `timeOrigin` differs from step 1, so the same URL (a `goto` to the page already
-   open) and a redirect both count.
-3. Once a new document reports anything but `loading`, wait `LOAD_CAP_MS` (5000) more for `go()`.
+1. Before `go()`, read `performance.timeOrigin` of the current document (`ask`, bounded by `graceMs`). If
+   that read gives no number, there is no baseline to compare with, and the watcher does not run: the
+   navigation waits for `load` as today.
+2. Read `[performance.timeOrigin, document.readyState]`, one read at a time: the next read starts 100 ms
+   after the previous one settled, never while one is still in `wrapView`'s evaluate queue. A new document is
+   one whose `timeOrigin` differs from step 1, so the same URL (a `goto` to the page already open) and a
+   redirect both count.
+3. Once a new document reports anything but `loading`, wait `LOAD_CAP_MS` (5000) more for `go()`. If a later
+   read shows yet another `timeOrigin` (a document that navigated on), the 5 s start again from it.
 4. If `go()` is still pending, `evaluate("window.stop()")`, and mark the navigation stopped.
 
-`go()` settling (resolved or rejected) ends the watcher at any step. When the navigation was stopped, the -999
-that `go()` rejects with is the stop's own and `navigate` returns as if the page had loaded: the command
-answers with the page's URL and title.
+`go()` settling (resolved or rejected) ends the watcher at any step. When the navigation was stopped and
+`go()` rejects with -999, `navigate` checks `view.loading`. False: the -999 was the stop's own, and
+`navigate` returns as if the page had loaded, so the command answers with the page's URL and title. True: a
+page script started another navigation that the stop did not cover, and `navigate` takes the existing #116
+path (wait for the next landing).
 
 ```mermaid
 sequenceDiagram
@@ -60,7 +66,9 @@ sequenceDiagram
 A page that loads within the cap is untouched: no stop, the same `load` wait as today, plus the reads of step
 2. A document that never reaches `interactive` (a server that never answers, the F9 case) is not stopped
 either: the budget and the recovery reload handle it as today. A page whose `evaluate` does not answer while it
-loads (the BBC wedge, unexplained) reads as "no new document yet", so it also behaves as today.
+loads (the BBC wedge, unexplained) reads as "no new document yet", so it also behaves as today, with one difference: a single read stays in the
+evaluate queue, so a recovery's `LEAVE_INITIAL_DOCUMENT` there is refused and `interrupt()` takes its existing
+fallback, `navigate("about:blank")` (#67).
 
 5 s matches the fixed cap `markdown` gives a Markdown alternate (ET-61, #204). It is not tied to the budget: a
 budget shorter than DOMContentLoaded plus 5 s times out as today.
@@ -68,10 +76,10 @@ budget shorter than DOMContentLoaded plus 5 s times out as today.
 ### Recovery after a stopped load
 
 `interrupt()` takes `view.url === ""` to mean "nothing has committed yet" and leaves the document with
-`location.replace('about:blank')` (#48). After a stopped first load `view.url` is still `""`, so a later
-recovery would throw the page away. The watch keeps a `committed` flag, set when a stopped navigation returns
-or `onNavigated` fires, and `interrupt()` takes the initial-document branch only when `view.url === ""` and
-`committed` is false.
+`location.replace('about:blank')` (#48), because `reload()` does nothing then. After a stopped first load
+`view.url` is still `""`, so a later recovery on that page (an op that timed out on it) leaves it for
+`about:blank`, as on a fresh session. That is unchanged code and an edge of an edge; it is documented, not
+fixed: the next `goto` or `open` loads the page again.
 
 ### Docs
 
@@ -81,9 +89,9 @@ stops the loads still running (images, frames, scripts) and answers with the pag
 
 ## Cost
 
-No stored data changes: one boolean (`committed`) and one per-navigation flag (`stopped`) in memory. The
-reads of step 2 are one `evaluate` per 100 ms while a navigation is in flight: about 10 for a page that
-loads in 1 s. On a stopped page, images and frames that had not finished stay missing (a `screenshot` shows
+No stored data changes: one per-navigation flag (`stopped`) in memory. The reads of step 2 are at most one
+`evaluate` per 100 ms while a navigation is in flight, and never two queued: about 10 for a page that loads
+in 1 s. On a stopped page, images and frames that had not finished stay missing (a `screenshot` shows
 them broken), which is the trade for the command answering at all.
 
 ## Not in scope
@@ -98,12 +106,15 @@ them broken), which is the trade for the command answering at all.
   - `navigate` whose `go()` never settles, whose page reports a new `timeOrigin` and `interactive`, evaluates
     `window.stop()` 5 s later and resolves when `go()` then rejects with -999;
   - a `go()` that resolves within the cap: `window.stop()` is never evaluated;
-  - a document that stays `loading`: no stop, `navigate` keeps waiting;
-  - after a stopped load with `view.url === ""`, `interrupt()` reloads instead of evaluating
-    `LEAVE_INITIAL_DOCUMENT`.
+  - a document that stays `loading`: at a time past `LOAD_CAP_MS`, `window.stop()` was not evaluated and the
+    `navigate` promise is still pending;
+  - a baseline read that gives no number: no read of step 2 and no stop, `navigate` waits for `go()`;
+  - a read that never settles: no second read is queued behind it;
+  - a stop after which `view.loading` stays true: `navigate` waits for the next landing, as #116.
 - `tests/e2e-hangs.test.ts`, "ET-52": on a page whose `<img>` never answers, `open` and then `goto` both
   answer exit 0 within 8 s with the page's title; `eval document.querySelector('h1').textContent` answers;
   a `goto` to another page then works. Today: `BOWSER_E2E=1 bun test tests/e2e-hangs.test.ts -t ET-52` fails
   (the test does not exist yet; the behaviour it checks times out at the budget, measured above).
 - Each new test goes red under one mutation of the line it names, quoted in the PR.
-- `bun run check` and `BOWSER_E2E=1 bun test` pass; README and `commands.md` describe the cap.
+- `bun run check` and `BOWSER_E2E=1 bun test` pass; README and `commands.md` describe the cap, and
+  `troubleshooting.md` the recovery on a stopped first load.
