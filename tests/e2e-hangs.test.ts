@@ -46,6 +46,8 @@ const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 /** ET-10 (#78): Send posts to a server that never answers. */
 const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
+/** ET-52: parsed at once, but its image never answers, so `load` never fires. */
+const IMAGE_PAGE = `<!doctype html><title>Image</title><h1>Text is here</h1><img src="/never" alt="">`;
 const SLOW_MS = 3000;
 /** openWith's retry window, from the end of its first open. That open and
  *  the last retry each take up to a budget, so a test that opens with it
@@ -128,7 +130,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
           return new Promise<Response>(() => {});
         }
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
-        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE, "/redirect": REDIRECT_PAGE }[path] ?? HOME_PAGE;
+        const page = { "/image": IMAGE_PAGE, "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE, "/redirect": REDIRECT_PAGE }[path] ?? HOME_PAGE;
         return new Response(page, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
@@ -280,6 +282,24 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(5000);
   }, openTimeout(1000, 30_000));
+
+  test("ET-52: open and goto of a page whose image never loads answer within the 5 s cap, and the session goes on", async () => {
+    process.env.BOWSER_OP_TIMEOUT_MS = "20000";
+    const ctx: CommandContext = { session: "hangimage", json: false };
+    sessions.push(ctx.session);
+
+    const open = await timed(() => cmdOpen(ctx, `${base}/image`));
+    expect(open).toEqual({ ms: expect.any(Number) as unknown as number });
+    expect(open.ms).toBeLessThan(8000);
+    const goto = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/image`));
+    expect(goto.error).toBeUndefined();
+    expect(goto.ms).toBeLessThan(8000);
+
+    expect(await cmdEval(ctx, "document.title + ' / ' + document.querySelector('h1').textContent")).toBe("Image / Text is here");
+    expect(await cmdEval(ctx, "location.href")).toBe(`${base}/image`);
+    // The stop ended the navigation: another one is accepted.
+    expect(await cmdGoto(ctx, `${base}/`)).toContain(`${base}/`);
+  }, 60_000);
 
   // #48: from a fresh session nothing has committed yet (the view's url is
   // ""), so reload() has no page to reload and does nothing, and WebKit

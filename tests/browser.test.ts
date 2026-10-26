@@ -6,7 +6,7 @@ import { createSerializer } from "../src/serialize.ts";
 import type { Op } from "../src/daemon/protocol.ts";
 import { waitFor } from "./helpers/daemons.ts";
 import { manualClock } from "./helpers/manual-clock.ts";
-import { CANCEL_PENDING_NAVIGATION, keyCommandScript, keyWatchScript, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION } from "../src/page-scripts.ts";
+import { CANCEL_PENDING_NAVIGATION, keyCommandScript, keyWatchScript, LEAVE_INITIAL_DOCUMENT, LOAD_STATE, NAV_ARM, NAV_COUNT, NAV_DESTINATION, STOP_LOADING, TIME_ORIGIN } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -1189,7 +1189,7 @@ describe("wrapView interrupt", () => {
 });
 
 describe("wrapView watchNavigation", () => {
-  test("a landing reports a navigation, with no page call", async () => {
+  test("a landing reports a navigation, with no page call of its own", async () => {
     const v = fakeView();
     const b = wrapView(v);
     let navigated = 0;
@@ -1197,7 +1197,8 @@ describe("wrapView watchNavigation", () => {
     await b.navigate("https://x/1");
     v.land("https://x/1");
     expect(navigated).toBe(1);
-    expect(v.calls).toEqual([["navigate", ["https://x/1"]]]);
+    // navigate's own baseline read for the load cap (ET-52), nothing after the landing.
+    expect(v.calls).toEqual([["evaluate", [TIME_ORIGIN]], ["navigate", ["https://x/1"]]]);
   });
 
   test("an action whose navigation starts reports it before the navigation lands", async () => {
@@ -1278,4 +1279,122 @@ describe("every ACTS op runs inside the navigation watch", () => {
       expect(b.phase).toBe("idle");
     });
   }
+});
+
+// ET-52: a subresource that never finishes holds `load`, and navigate() with
+// it. Once the new document is parsed, navigate waits LOAD_CAP_MS more, then
+// stops the loads; the stop's own -999 is a landing on the page.
+describe("navigate caps its wait for load (ET-52)", () => {
+  /** A page that commits a new document (timeOrigin 2) 50 ms after navigate()
+   *  and never fires load. stop() rejects the pending navigate with -999, as
+   *  WebKit does; `afterStop` runs then, to start a page navigation of its own. */
+  function hangingLoad(clock: ReturnType<typeof manualClock>, opts: {
+    origin?: unknown;
+    state?: string;
+    loadAt?: number;
+    afterStop?: (page: { navs: number }) => void;
+    read?: (expr: string) => Promise<unknown> | undefined;
+  } = {}) {
+    const page = { origin: 1 as number, state: "complete", navs: 0 };
+    let fail: (err: Error) => void = () => {};
+    const v = fakeView({
+      navigate: (url) => {
+        v.calls.push(["navigate", [url]]);
+        clock.setTimeout(() => { page.origin = 2; page.state = opts.state ?? "interactive"; }, 50);
+        return new Promise<void>((resolve, reject) => {
+          fail = reject;
+          if (opts.loadAt !== undefined) clock.setTimeout(() => { v.land(url); resolve(); }, opts.loadAt);
+        });
+      },
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        const custom = opts.read?.(expr);
+        if (custom) return custom;
+        if (expr === TIME_ORIGIN) return "origin" in opts ? opts.origin : page.origin;
+        if (expr === LOAD_STATE) return [page.origin, page.state];
+        if (expr === NAV_COUNT) return page.navs;
+        if (expr === STOP_LOADING) {
+          page.navs = 0;
+          opts.afterStop?.(page);
+          const err = new Error(CANCELLED);
+          v.onNavigationFailed?.(err);
+          fail(err);
+        }
+        return undefined;
+      },
+    });
+    return { v, page };
+  }
+  const evaluated = (v: Fake, expr: string) => v.calls.filter(([n, a]) => n === "evaluate" && a[0] === expr).length;
+
+  test("stops the loads 5 s after the new document is parsed, and resolves on the stop's -999", async () => {
+    const clock = manualClock();
+    const { v } = hangingLoad(clock);
+    const b = onClock(v, fast, clock);
+    const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+    expect(evaluated(v, STOP_LOADING)).toBe(1);
+    // Parsed at the first read after 50 ms (100), stopped one poll past 5100.
+    expect(at).toBeGreaterThanOrEqual(5100);
+    expect(at).toBeLessThan(5300);
+  });
+
+  test("a page that loads within the cap is not stopped", async () => {
+    const clock = manualClock();
+    const { v } = hangingLoad(clock, { loadAt: 3000 });
+    const b = onClock(v, fast, clock);
+    expect(await clock.fulfilledAt(b.navigate("https://x/slow"))).toBe(3000);
+    expect(evaluated(v, STOP_LOADING)).toBe(0);
+  });
+
+  test("a document that stays loading is not stopped, and navigate keeps waiting", async () => {
+    const clock = manualClock();
+    const { v } = hangingLoad(clock, { state: "loading" });
+    const b = onClock(v, fast, clock);
+    await expect(clock.settledAt(b.navigate("https://x/never-parsed"), 8000)).rejects.toThrow("still pending at clock");
+    expect(clock.now()).toBeGreaterThan(5100);
+    expect(evaluated(v, STOP_LOADING)).toBe(0);
+  });
+
+  test("with no baseline timeOrigin there is no watcher: no reads, no stop", async () => {
+    const clock = manualClock();
+    const { v } = hangingLoad(clock, { origin: undefined });
+    const b = onClock(v, fast, clock);
+    await expect(clock.settledAt(b.navigate("https://x/hang"), 8000)).rejects.toThrow("still pending at clock");
+    expect([evaluated(v, LOAD_STATE), evaluated(v, STOP_LOADING)]).toEqual([0, 0]);
+  });
+
+  test("a read that does not answer queues no second read behind it", async () => {
+    const clock = manualClock();
+    let release!: (x: unknown) => void;
+    let first = true;
+    const { v } = hangingLoad(clock, {
+      read: (expr) => {
+        if (expr !== LOAD_STATE || !first) return undefined;
+        first = false;
+        return new Promise((r) => { release = r; });
+      },
+    });
+    const b = onClock(v, fast, clock);
+    await expect(clock.settledAt(b.navigate("https://x/hang"), 3000)).rejects.toThrow("still pending at clock");
+    // Freed later: one read follows it, not the dozens a 100 ms timer would have queued.
+    release([1, "complete"]);
+    await new Promise((r) => setImmediate(r));
+    expect(evaluated(v, LOAD_STATE)).toBeLessThanOrEqual(2);
+  });
+
+  test("after a stop, a navigation the page started keeps navigate waiting for its landing (#116)", async () => {
+    const clock = manualClock();
+    let v!: Fake;
+    ({ v } = hangingLoad(clock, {
+      afterStop: (page) => {
+        page.navs = 1;
+        clock.setTimeout(() => v.land("https://x/next"), 1000);
+      },
+    }));
+    const b = onClock(v, fast, clock);
+    const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+    expect(evaluated(v, STOP_LOADING)).toBe(1);
+    // Not at the stop (about 5100), at the page's own landing a second later.
+    expect(at).toBeGreaterThanOrEqual(6100);
+  });
 });

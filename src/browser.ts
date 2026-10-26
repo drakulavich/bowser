@@ -2,7 +2,7 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  CANCEL_PENDING_NAVIGATION, KEY_CODES, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD,
+  CANCEL_PENDING_NAVIGATION, KEY_CODES, LEAVE_INITIAL_DOCUMENT, LOAD_STATE, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD, STOP_LOADING, TIME_ORIGIN,
   hoverScript, keyCommandScript, keyWatchScript, readable, selectScript, setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
@@ -273,6 +273,9 @@ export interface NavTiming {
   settleMs: number;
 }
 const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
+/** How long navigate() waits for `load` once the new document is parsed (ET-52). */
+const LOAD_CAP_MS = 5000;
+const LOAD_POLL_MS = 100;
 
 /** What wrapView reads the time from and waits on. */
 export interface Clock {
@@ -455,6 +458,28 @@ function navigationWatch(
     if (landed !== base) return;
     if (!unfinished(now)) pendingAt = undefined;
   };
+  /** Stop a navigation's loads LOAD_CAP_MS after its new document is parsed:
+   *  a subresource that never finishes would hold `load` for good (ET-52).
+   *  One read at a time, so a page that does not answer queues no more. */
+  const capLoad = async (origin: number, load: { over: boolean; stopped: boolean }): Promise<void> => {
+    let doc: number | undefined;
+    let since = 0;
+    while (!load.over) {
+      const read = await evaluate(LOAD_STATE).catch(() => undefined);
+      if (load.over) return;
+      if (Array.isArray(read) && read[0] !== origin && read[1] !== "loading") {
+        if (read[0] !== doc) {
+          doc = read[0] as number;
+          since = clock.now();
+        } else if (clock.now() - since >= LOAD_CAP_MS) {
+          load.stopped = true;
+          await evaluate(STOP_LOADING).catch(() => {});
+          return;
+        }
+      }
+      await sleep(LOAD_POLL_MS);
+    }
+  };
   let phase: ActPhase = "idle";
   let actionCancelled = false;
   let pendingAt: number | undefined;
@@ -508,10 +533,16 @@ function navigationWatch(
     async navigate(url: string, go: () => Promise<void>): Promise<void> {
       const before = landed;
       const arrivedBefore = arrived;
+      const origin = await ask(TIME_ORIGIN, timing.graceMs);
+      const load = { over: false, stopped: false };
+      if (typeof origin === "number") void capLoad(origin, load);
       try {
         return await go();
       } catch (err) {
         if (!cancelled(err)) throw err;
+        if (load.stopped && (await ask(NAV_COUNT, timing.graceMs)) === 0) return;
+      } finally {
+        load.over = true;
       }
       while (landed - before < 2) await sleep(10);
       if (arrived !== arrivedBefore) return;
