@@ -77,6 +77,8 @@ export interface Lane {
    *  request waits until its connection holds the gate (#77). */
   gate?: Gate;
   conn?: object;
+  /** Calls `fn` when this request's connection closes; returns the unsubscribe. */
+  onClose?: (fn: () => void) => () => void;
 }
 
 /** Set while an op that timed out is still running after its recovery. That
@@ -142,6 +144,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     return;
   }
   let answered = false;
+  let gone = false;
   let running = false;
   let settled = false;
   let atGate = false;
@@ -161,14 +164,15 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     answered = true;
     waiting?.delete(onStuck);
     clearTimeout(timer);
-    lane.reply(res);
+    unsubscribe?.();
+    if (!gone) lane.reply(res);
     // On answer, not on settle: a timed-out op still running holds only the
     // serializer, so the next client gets its "waiting for" hint (F9).
     leaveGate?.();
   };
   const ms = req.budgetMs !== undefined && (lane.timeoutMs <= 0 || req.budgetMs < lane.timeoutMs) ? req.budgetMs : lane.timeoutMs;
   const deadline = ms > 0 ? Date.now() + ms - REPLY_MARGIN_MS : undefined;
-  const timer = ms > 0 ? setTimeout(() => {
+  const expire = (): void => {
     const timedOut = timeoutMessage(req, budget, running ? lane.phase?.() : undefined);
     if (atGate) {
       answer({ id: req.id, ok: false, error: `${timedOut} (waiting for another client's command on this session)` });
@@ -184,7 +188,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     answer({ id: req.id, ok: false, error: timedOut, ...(dialogs ? { dialogs } : {}) });
     // Runs while this op still holds the serializer, so no later queued op
     // can overlap it; see Browser.interrupt for what it may overlap.
-    const graceMs = Math.min(RECOVERY_GRACE_MS, ms);
+    const graceMs = ms > 0 ? Math.min(RECOVERY_GRACE_MS, ms) : RECOVERY_GRACE_MS;
     let watched = false;
     const recover = (): void => {
       // The action returned and the watch ends on its own unless it sees a
@@ -206,7 +210,13 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
       });
     };
     grace = setTimeout(recover, graceMs);
-  }, ms) : undefined;
+  };
+  const timer = ms > 0 ? setTimeout(expire, ms) : undefined;
+  // A closed connection ends its request as a timeout would, without a reply (ET-38).
+  const unsubscribe = lane.onClose?.(() => {
+    gone = true;
+    if (!answered) expire();
+  });
   const queue = (): void => {
     lane.serialize(async () => {
       if (answered) return;
@@ -568,7 +578,7 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
 
   // Each connection's line reader lives on its socket's `data`, with the
   // object the gate knows it by.
-  Bun.listen<{ read: (chunk: Uint8Array) => void; conn: object }>({
+  Bun.listen<{ read: (chunk: Uint8Array) => void; conn: object; closing: Set<() => void> }>({
     unix: sock,
     socket: {
       data(socket, data) {
@@ -576,8 +586,10 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
       },
       open(socket) {
         const conn = {};
+        const closing = new Set<() => void>();
+        const onClose = (fn: () => void) => { closing.add(fn); return () => { closing.delete(fn); }; };
         // Requests are newline-delimited, one reader per connection.
-        socket.data = { conn, read: lineReader((line) => {
+        socket.data = { conn, closing, read: lineReader((line) => {
           if (!line) return;
           let req: DaemonRequest;
           try {
@@ -589,13 +601,14 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
             );
             return;
           }
-          dispatch(req, { handle, serialize, gate, conn, mark, timeoutMs, timedOut: handle.timedOut, cancelAction: handle.cancelAction, recover: () => browser.interrupt(), phase: () => browser.phase, reply: (res) => {
+          dispatch(req, { handle, serialize, gate, conn, onClose, mark, timeoutMs, timedOut: handle.timedOut, cancelAction: handle.cancelAction, recover: () => browser.interrupt(), phase: () => browser.phase, reply: (res) => {
             socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
           } });
         }) };
       },
       close(socket) {
         gate.leave(socket.data.conn);
+        for (const fn of [...socket.data.closing]) fn();
       },
       drain(socket) {
         flushSocket(socket as unknown as WritableSocket);

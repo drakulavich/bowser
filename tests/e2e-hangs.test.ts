@@ -25,6 +25,7 @@ import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { loadState } from "../src/state.ts";
+import { waitFor } from "./helpers/daemons.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
@@ -65,6 +66,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   let server: ReturnType<typeof Bun.serve> | undefined;
   let base: string;
   let never2Requested: Promise<void> = Promise.resolve();
+  let neverHits = 0;
   let resolveNever2Requested = () => {};
   const sessions: string[] = [];
 
@@ -125,6 +127,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
         // A server that never answers: the navigation never settles.
         if (path === "/never" || path === "/never2") {
           if (path === "/never2") resolveNever2Requested();
+          else neverHits++;
           return new Promise<Response>(() => {});
         }
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
@@ -280,6 +283,33 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     expect(close.error).toBeUndefined();
     expect(close.ms).toBeLessThan(5000);
   }, openTimeout(1000, 30_000));
+
+  // ET-38: a killed client's op used to keep its whole budget in the daemon,
+  // and with no budget (0) it held the session for good.
+  test("ET-38: with no budget, a goto whose client is killed is recovered, and the next command works", async () => {
+    const ctx = await openWith("hangkilled", 0);
+    const hits = neverHits;
+    const goto = Bun.spawn(["bun", join(import.meta.dir, "../src/cli.ts"), "goto", `${base}/never`, "-s", ctx.session], {
+      env: { ...process.env, HOME: tmp },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    expect(await waitFor(() => neverHits > hits, 10_000)).toBe(true);
+    goto.kill("SIGKILL");
+    await goto.exited;
+
+    // A smaller budget bounds each attempt: before the fix the first one
+    // waited the whole 15 s behind the killed goto and failed.
+    process.env.BOWSER_OP_TIMEOUT_MS = "15000";
+    const killedAt = performance.now();
+    let href: string | undefined;
+    let last: string | undefined;
+    while (href === undefined && performance.now() - killedAt < 12_000) {
+      try { href = await cmdEval(ctx, "location.href"); } catch (err) { last = String(err); await Bun.sleep(200); }
+    }
+    expect({ href, last: href ? undefined : last }).toEqual({ href: `${base}/`, last: undefined });
+    expect(performance.now() - killedAt).toBeLessThan(12_000);
+  }, openTimeout(0, 30_000));
 
   // #48: from a fresh session nothing has committed yet (the view's url is
   // ""), so reload() has no page to reload and does nothing, and WebKit
