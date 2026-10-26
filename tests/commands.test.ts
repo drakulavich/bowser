@@ -612,9 +612,9 @@ describe("close", () => {
     expect(existsSync(sessionDir(session))).toBe(false);
   });
 
-  test("succeeds on a session that never existed", async () => {
+  test("says a session that never existed is not open (ET-28)", async () => {
     const out = await closeOne({ ...ctx(), connect: unreachable }, "never-existed", procOps());
-    expect(out).toContain("closed session 'never-existed'");
+    expect(out).toBe("session 'never-existed' is not open");
   });
 
   test("ends an unreachable daemon that is ours", async () => {
@@ -721,10 +721,10 @@ describe("close", () => {
         const dir = join(sessionsRoot(), name);
         await mkdir(dir);
         expect(await cmdList({ ...ctx({ json: true }), connect: unreachable })).toBe("[]");
-        expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`closed session '${name}'`);
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`session '${name}' is not open`);
         expect(existsSync(dir)).toBe(false);
         await mkdir(dir);
-        expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe(`closed 1 session: ${name}`);
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe("no sessions to close");
         expect(existsSync(dir)).toBe(false);
       } finally {
         process.env.HOME = prevHome;
