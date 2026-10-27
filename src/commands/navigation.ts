@@ -324,8 +324,9 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
  *  path cannot escape it. Its daemon cannot be reached (`socketPath` refuses the
  *  name too) or identified from `ps` (the name may hold spaces), so it is never
  *  signalled: a live recorded pid leaves the directory for a person. */
-async function closeLegacy(name: string): Promise<void> {
+async function closeLegacy(name: string): Promise<boolean> {
   const dir = join(sessionsRoot(), name);
+  const open = ["state.json", "pid", "sock"].some((f) => existsSync(join(dir, f)));
   const pid = await readPidFile(join(dir, "pid"));
   if (pid !== null && realProcess.alive(pid)) {
     throw new Error(`close: pid ${pid} recorded for legacy session ${JSON.stringify(name)} is running`);
@@ -337,6 +338,7 @@ async function closeLegacy(name: string): Promise<void> {
     throw new Error(`close: legacy session ${JSON.stringify(name)} has no pidfile but still has a socket`);
   }
   await rm(dir, { recursive: true, force: true });
+  return open;
 }
 
 /** Close every session, trying each whatever the others do. A session it
@@ -353,7 +355,7 @@ async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> 
   }
   const results = await Promise.all(names.map(async (name) => {
     try {
-      const open = isValidSessionName(name) ? (await closeSession(ctx, name, proc)).open : (await closeLegacy(name), true);
+      const open = isValidSessionName(name) ? (await closeSession(ctx, name, proc)).open : await closeLegacy(name);
       return { name, open, error: undefined };
     } catch (err) {
       return { name, open: true, error: err instanceof Error ? err.message : String(err) };
