@@ -23,12 +23,7 @@ const quoted = JSON.stringify(nasty);
 
 describe("page scripts quote their inputs", () => {
   test("selector builders embed JSON.stringify(selector)", () => {
-    for (const s of [
-      hoverScript(nasty),
-      selectScript(nasty, "v"),
-      setCheckedScript(nasty, true),
-      fillScript(nasty, "v"),
-    ]) {
+    for (const s of [hoverScript(nasty), selectScript(nasty, "v"), setCheckedScript(nasty, true), fillScript(nasty, "v")]) {
       expect(s).toContain(`document.querySelector(${quoted})`);
     }
     expect(selectScript("#s", nasty)).toContain(`const want = ${quoted};`);
@@ -39,12 +34,8 @@ describe("page scripts quote their inputs", () => {
     expect(storageGetScript("localStorage", nasty)).toContain(`localStorage.getItem(${quoted})`);
     expect(storageSetScript("sessionStorage", nasty, nasty)).toContain(`sessionStorage.setItem(${quoted}, ${quoted})`);
     expect(storageDeleteScript("localStorage", nasty)).toContain(`localStorage.removeItem(${quoted})`);
-    expect(storageRestoreScript("localStorage", [{ name: nasty, value: "1" }])).toContain(
-      `localStorage.setItem(${quoted}, "1");`,
-    );
-    expect(storageScript("localStorage", "x")).toBe(
-      "(() => { try { x } catch (e) { throw new Error('localStorage: ' + (e && e.message || e)); } })()",
-    );
+    expect(storageRestoreScript("localStorage", [{ name: nasty, value: "1" }])).toContain(`localStorage.setItem(${quoted}, "1");`);
+    expect(storageScript("localStorage", "x")).toBe("(() => { try { x } catch (e) { throw new Error('localStorage: ' + (e && e.message || e)); } })()");
   });
 
   test("the list builder is the storage dump every list command shares", () => {
@@ -87,8 +78,7 @@ describe("page scripts quote their inputs", () => {
 // getAttribute('value'); tests/e2e-password.test.ts covers the known paths.
 describe("the snapshot walker reads values only through valueOf", () => {
   /** Each `.value` read that is not an assignment, as the line it is on. */
-  const valueReads = (script: string): string[] =>
-    script.split("\n").flatMap((line) => [...line.matchAll(/\.value\b(?!\s*=(?!=))/g)].map(() => line.trim()));
+  const valueReads = (script: string): string[] => script.split("\n").flatMap((line) => [...line.matchAll(/\.value\b(?!\s*=(?!=))/g)].map(() => line.trim()));
 
   const saved = { id: "e1", role: "textbox", name: "Password" };
   for (const [what, script] of [
@@ -105,13 +95,8 @@ describe("the snapshot walker reads values only through valueOf", () => {
   }
 
   test("the check sees a planted read and ignores assignments", () => {
-    const planted = SNAPSHOT_SCRIPT.replace(
-      "// ---- the walk ----",
-      "// ---- the walk ----\n  const leak = (el) => el.value;",
-    );
-    expect(valueReads(planted).sort()).toEqual(
-      [...valueReads(SNAPSHOT_SCRIPT), "const leak = (el) => el.value;"].sort(),
-    );
+    const planted = SNAPSHOT_SCRIPT.replace("// ---- the walk ----", "// ---- the walk ----\n  const leak = (el) => el.value;");
+    expect(valueReads(planted).sort()).toEqual([...valueReads(SNAPSHOT_SCRIPT), "const leak = (el) => el.value;"].sort());
     expect(valueReads("saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')")).toEqual([
       "saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')",
     ]);
@@ -122,8 +107,7 @@ describe("the snapshot walker reads values only through valueOf", () => {
 // touches the DOM, so a plain object stands in for the page's window.
 describe("a ref resolves only in the document whose snapshot saved it", () => {
   const ref = { id: "e2", role: "button", name: "OK" };
-  const inWindow = (win: object, doc: string | undefined) =>
-    new Function("window", `return ${resolveRefScript(ref, { doc })}`)(win);
+  const inWindow = (win: object, doc: string | undefined) => new Function("window", `return ${resolveRefScript(ref, { doc })}`)(win);
   const store = (doc?: string) => ({
     [Symbol.for("bowser.aria-refs")]: { refs: new WeakMap(), byRef: new Map(), last: 2, doc },
   });

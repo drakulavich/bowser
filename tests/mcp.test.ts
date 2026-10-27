@@ -9,15 +9,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  serveLines,
-  buildTools,
-  createMcpServer,
-  toArgv,
-  handleMcpRequest,
-  handleMcpLine,
-  type McpDeps,
-} from "../src/mcp.ts";
+import { serveLines, buildTools, createMcpServer, toArgv, handleMcpRequest, handleMcpLine, type McpDeps } from "../src/mcp.ts";
 import { parse } from "../src/cli/parser.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
@@ -106,16 +98,7 @@ describe("toArgv", () => {
       persistent: true,
       session: "s1",
     });
-    expect(argv).toEqual([
-      "--session",
-      "s1",
-      "--json",
-      "open",
-      "--persistent",
-      "--profile=./p",
-      "--",
-      "https://x.com/",
-    ]);
+    expect(argv).toEqual(["--session", "s1", "--json", "open", "--persistent", "--profile=./p", "--", "https://x.com/"]);
   });
 
   test("omits a false boolean flag and an absent session", () => {
@@ -148,10 +131,7 @@ describe("toArgv", () => {
 
 describe("handleMcpRequest — handshake", () => {
   test("initialize echoes protocol version and reports serverInfo", async () => {
-    const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
-      okRun(),
-    );
+    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }, okRun());
     expect(res.id).toBe(1);
     expect(res.result.protocolVersion).toBe("2025-06-18");
     expect(res.result.capabilities.tools).toBeDefined();
@@ -204,10 +184,7 @@ describe("handleMcpRequest — tools/call", () => {
       },
       version: "9.9.9",
     };
-    const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "snapshot", arguments: {} } },
-      deps,
-    );
+    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "snapshot", arguments: {} } }, deps);
     expect(res.error).toBeUndefined();
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("no open page");
@@ -215,10 +192,7 @@ describe("handleMcpRequest — tools/call", () => {
 
   test("a restart's notice is the first line of the tool text, on success and on error (#145)", async () => {
     const call = (run: McpDeps["run"]) =>
-      handleMcpRequest(
-        { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "snapshot", arguments: {} } },
-        { run, version: "9.9.9" },
-      ) as Promise<any>;
+      handleMcpRequest({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "snapshot", arguments: {} } }, { run, version: "9.9.9" }) as Promise<any>;
     const ok = await call(async (_, base) => {
       base?.notices?.push("session 'default' restarted");
       return "page";
@@ -309,10 +283,7 @@ describe("handleMcpRequest — tools/call", () => {
       },
       version: "9.9.9",
     };
-    const res = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nonexistent", arguments: {} } },
-      deps,
-    );
+    const res = await handleMcpRequest({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nonexistent", arguments: {} } }, deps);
     expect(res).toEqual({ jsonrpc: "2.0", id: 5, error: { code: -32602, message: "Unknown tool: nonexistent" } });
     expect(ran).toBe(false);
   });
@@ -327,10 +298,7 @@ describe("handleMcpRequest — tools/call", () => {
         },
         version: "9.9.9",
       };
-      const res: any = await handleMcpRequest(
-        { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", stdin } } },
-        deps,
-      );
+      const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", stdin } } }, deps);
       expect(res.result.isError).toBe(true);
       expect(res.result.content[0].text).toMatch(/^usage: .*--stdin/);
       expect(ran).toBe(false);
@@ -338,10 +306,7 @@ describe("handleMcpRequest — tools/call", () => {
   }
 
   test("an excluded command is not callable as a tool", async () => {
-    const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "mcp", arguments: {} } },
-      okRun(),
-    );
+    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "mcp", arguments: {} } }, okRun());
     expect(res.error).toEqual({ code: -32602, message: "Unknown tool: mcp" });
   });
 });
@@ -431,8 +396,7 @@ describe("MCP positionals are data, never flags", () => {
           refs: [{ id: "e1", role: "textbox", name: "Email", tag: "input" }],
         });
         const c = fakeClient({
-          evaluate: (e) =>
-            e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }, { hit: true }) ? "input" : undefined,
+          evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }, { hit: true }) ? "input" : undefined),
         });
         const deps: McpDeps = {
           run: (argv) =>
@@ -495,10 +459,7 @@ describe("bowser mcp never reads its own stdin for a command", () => {
       let buf = "";
       const deadline = Date.now() + 5000;
       while (buf.split("\n").filter(Boolean).length < 2 && Date.now() < deadline) {
-        const next = await Promise.race([
-          reader.read(),
-          Bun.sleep(deadline - Date.now()).then(() => ({ done: true, value: undefined })),
-        ]);
+        const next = await Promise.race([reader.read(), Bun.sleep(deadline - Date.now()).then(() => ({ done: true, value: undefined }))]);
         if (next.done) break;
         buf += decoder.decode(next.value, { stream: true });
       }
@@ -529,11 +490,7 @@ describe("bowser mcp resolves file outputs against a writable directory", () => 
 
   /** Start the server in `cwd` with its own TMPDIR, send one tools/call, and
    *  return the tool result's text. */
-  async function callIn(
-    cwd: string,
-    tmpDir: string,
-    args: Record<string, string>,
-  ): Promise<{ isError?: boolean; text: string }> {
+  async function callIn(cwd: string, tmpDir: string, args: Record<string, string>): Promise<{ isError?: boolean; text: string }> {
     const home = await mkdtemp(join(tmpdir(), "bowser-mcp-cwd-home-"));
     const proc = Bun.spawn([process.execPath, HELPER], {
       cwd,
@@ -629,16 +586,10 @@ describe("MCP fill and type never echo the entered text", () => {
           refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }],
         });
         const c = fakeClient({
-          evaluate: (e) =>
-            e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true })
-              ? "input"
-              : undefined,
+          evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined),
         });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
-        const res: any = await handleMcpRequest(
-          { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } },
-          deps,
-        );
+        const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } }, deps);
         expect(res.result.isError).toBeFalsy();
         expect(c.calls).toContainEqual(["type", [SECRET]]);
         expect(JSON.stringify(res)).not.toContain(SECRET);
@@ -669,17 +620,13 @@ describe("MCP fill and type errors never carry the entered text", () => {
         refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }],
       });
       const c = fakeClient({
-        evaluate: (e) =>
-          e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined,
+        evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined),
         type: () => {
           throw new Error(message);
         },
       });
       const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
-      const res: any = await handleMcpRequest(
-        { jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: tool, arguments: args } },
-        deps,
-      );
+      const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: tool, arguments: args } }, deps);
       expect(res.result.isError).toBe(true);
       return res.result.content[0].text as string;
     } finally {
@@ -689,9 +636,7 @@ describe("MCP fill and type errors never carry the entered text", () => {
   };
   for (const [tool, args] of cases) {
     test(`the ${tool} tool's isError text withholds a browser error containing the text`, async () => {
-      expect(await call(tool, args, `failed: ${SECRET}`)).toBe(
-        `${tool}: the browser's error message was withheld because it contained the entered text`,
-      );
+      expect(await call(tool, args, `failed: ${SECRET}`)).toBe(`${tool}: the browser's error message was withheld because it contained the entered text`);
     });
     test(`the ${tool} tool's isError text passes an error without the text through`, async () => {
       expect(await call(tool, args, "failed: boom")).toBe("failed: boom");
@@ -769,9 +714,7 @@ describe("MCP server: a batch or a non-object message is an invalid request", ()
       },
       version: "9.9.9",
     };
-    const batch = JSON.stringify([
-      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list", arguments: {} } },
-    ]);
+    const batch = JSON.stringify([{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list", arguments: {} } }]);
     const res = await serve([batch, JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" })], deps);
     expect(res).toEqual([INVALID, { jsonrpc: "2.0", id: 2, result: {} }]);
     expect(ran).toBe(false);
@@ -798,58 +741,17 @@ describe("MCP server: tool arguments are checked against the tool's schema", () 
     const [res] = await serve([line], deps);
     return { result: res.result, argv };
   }
-  const call = (name: string, args: unknown) =>
-    callLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }));
+  const call = (name: string, args: unknown) => callLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }));
 
   const refused: Array<[string, string, unknown, RegExp]> = [
-    [
-      "a number session",
-      "eval",
-      { session: 42, expression: "1" },
-      /^usage: argument 'session' of 'eval' must be a non-empty string, got number$/,
-    ],
-    [
-      "an empty session",
-      "eval",
-      { session: "", expression: "1" },
-      /^usage: argument 'session' of 'eval' must be a non-empty string, got ""$/,
-    ],
-    [
-      "an object positional",
-      "eval",
-      { expression: { a: 1 } },
-      /^usage: argument 'expression' of 'eval' must be a string or a number, got object$/,
-    ],
-    [
-      "an array positional",
-      "goto",
-      { url: ["https://e.com"] },
-      /^usage: argument 'url' of 'goto' must be a string or a number, got array$/,
-    ],
-    [
-      "a boolean positional",
-      "eval",
-      { expression: true },
-      /^usage: argument 'expression' of 'eval' must be a string or a number, got boolean$/,
-    ],
-    [
-      "an object string flag",
-      "snapshot",
-      { filename: {} },
-      /^usage: argument 'filename' of 'snapshot' must be a string or a number, got object$/,
-    ],
-    [
-      "a string boolean flag",
-      "open",
-      { session: "s", persistent: "false" },
-      /^usage: argument 'persistent' of 'open' must be true or false, got string$/,
-    ],
-    [
-      "a number boolean flag",
-      "open",
-      { session: "s", persistent: 1 },
-      /^usage: argument 'persistent' of 'open' must be true or false, got number$/,
-    ],
+    ["a number session", "eval", { session: 42, expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got number$/],
+    ["an empty session", "eval", { session: "", expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got ""$/],
+    ["an object positional", "eval", { expression: { a: 1 } }, /^usage: argument 'expression' of 'eval' must be a string or a number, got object$/],
+    ["an array positional", "goto", { url: ["https://e.com"] }, /^usage: argument 'url' of 'goto' must be a string or a number, got array$/],
+    ["a boolean positional", "eval", { expression: true }, /^usage: argument 'expression' of 'eval' must be a string or a number, got boolean$/],
+    ["an object string flag", "snapshot", { filename: {} }, /^usage: argument 'filename' of 'snapshot' must be a string or a number, got object$/],
+    ["a string boolean flag", "open", { session: "s", persistent: "false" }, /^usage: argument 'persistent' of 'open' must be true or false, got string$/],
+    ["a number boolean flag", "open", { session: "s", persistent: 1 }, /^usage: argument 'persistent' of 'open' must be true or false, got number$/],
     ["an unknown key", "eval", { expression: "1", bogus: 1 }, /^usage: unknown argument 'bogus' for 'eval'$/],
     ["an array of arguments", "eval", ["1"], /^usage: the arguments of 'eval' must be an object, got array$/],
     ["a string of arguments", "eval", "1", /^usage: the arguments of 'eval' must be an object, got string$/],
@@ -864,8 +766,7 @@ describe("MCP server: tool arguments are checked against the tool's schema", () 
   }
 
   test("a number too large to be finite (1e400 parses to Infinity) is refused", async () => {
-    const line =
-      '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"resize","arguments":{"width":1e400,"height":600}}}';
+    const line = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"resize","arguments":{"width":1e400,"height":600}}}';
     const { result, argv } = await callLine(line);
     expect(result.content[0].text).toBe("usage: argument 'width' of 'resize' must be a string or a number, got number");
     expect(argv).toBeNull();
@@ -951,11 +852,7 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
     ["click", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" }, url: "" }],
     ["fill", { ref: "e2", text: SECRET }, { ok: true, ref: "e2", element: { role: "textbox", name: "Password" } }],
     ["hover", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" } }],
-    [
-      "select",
-      { ref: "e3", value: "red" },
-      { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" },
-    ],
+    ["select", { ref: "e3", value: "red" }, { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" }],
     ["check", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
     ["uncheck", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
   ] as const) {
@@ -995,8 +892,7 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     method: "initialize",
     params: { protocolVersion: "2025-06-18" },
   });
-  const call = (id: number, name: string) =>
-    JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: {} } });
+  const call = (id: number, name: string) => JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: {} } });
   async function* feed(lines: string[]) {
     for (const l of lines) yield l;
   }
@@ -1074,9 +970,7 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     const byId = new Map(h.responses().map((r) => [r.id, r]));
     for (const id of [7, 8]) {
       expect(byId.get(id)?.result.isError).toBe(true);
-      expect(byId.get(id)?.result.content[0].text).toStartWith(
-        "bowser mcp could not hand over to the installed bowser 2.0.0: it exited",
-      );
+      expect(byId.get(id)?.result.content[0].text).toStartWith("bowser mcp could not hand over to the installed bowser 2.0.0: it exited");
     }
   });
 
@@ -1173,13 +1067,7 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     const prevHome = process.env.HOME;
     process.env.HOME = home;
     try {
-      const lines = [
-        INIT,
-        call(5, "snapshot"),
-        JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" }),
-        call(7, "list"),
-        call(8, "list"),
-      ];
+      const lines = [INIT, call(5, "snapshot"), JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" }), call(7, "list"), call(8, "list")];
       async function* slow() {
         yield lines[0]!;
         yield lines[1]!;

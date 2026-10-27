@@ -4,16 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UserError } from "../src/errors.ts";
-import {
-  ensureSessionDir,
-  maxSessionNameLength,
-  profileDir,
-  resolveRef,
-  sessionDir,
-  sessionsRoot,
-  type Ref,
-  type SessionState,
-} from "../src/state.ts";
+import { ensureSessionDir, maxSessionNameLength, profileDir, resolveRef, sessionDir, sessionsRoot, type Ref, type SessionState } from "../src/state.ts";
 import { longHomePath } from "./helpers/long-home.ts";
 
 const state: SessionState = {
@@ -40,9 +31,7 @@ describe("resolveRef", () => {
     expect(() => resolveRef(state, "@e2")).toThrow(/expected a ref like 'e1'/);
   });
   test("names a playwright-cli frame ref as unsupported", () => {
-    expect(() => resolveRef(state, "f1e3")).toThrow(
-      new Error("'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents"),
-    );
+    expect(() => resolveRef(state, "f1e3")).toThrow(new Error("'f1e3' is a playwright-cli frame ref; bowser does not snapshot iframe contents"));
     expect(() => resolveRef(state, "f1")).toThrow(/expected a ref like 'e1', got 'f1'/);
   });
   test("throws for unknown ref", () => {
@@ -175,9 +164,7 @@ describe("the longest session name for this HOME (F35)", () => {
       const max = maxSessionNameLength();
       const err = await ensureSessionDir("n".repeat(max + 1)).catch((e) => e);
       expect(err).toBeInstanceOf(UserError);
-      expect(err.message).toBe(
-        `usage: session name is too long for this HOME: at most ${max} characters under ${sessionsRoot()}, got ${max + 1}`,
-      );
+      expect(err.message).toBe(`usage: session name is too long for this HOME: at most ${max} characters under ${sessionsRoot()}, got ${max + 1}`);
       expect(existsSync(sessionsRoot())).toBe(false);
       await ensureSessionDir("n".repeat(max));
       expect(existsSync(join(sessionsRoot(), "n".repeat(max)))).toBe(true);

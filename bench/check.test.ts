@@ -11,9 +11,7 @@ describe("judge", () => {
   });
 
   test("reads the last ANSWER line, not an earlier one", () => {
-    expect(
-      judge(task, ok("ANSWER: Soumission, £50.10\nWait, rechecking.\nANSWER: Tipping the Velvet, £53.74")).pass,
-    ).toBe(false);
+    expect(judge(task, ok("ANSWER: Soumission, £50.10\nWait, rechecking.\nANSWER: Tipping the Velvet, £53.74")).pass).toBe(false);
   });
 
   test("fails an answer that matches only some patterns", () => {
@@ -53,27 +51,19 @@ describe("isolation", () => {
   });
 
   test("fails on an MCP server", () => {
-    expect(isolation({ ...init, mcp_servers: [{ name: "playwright" }] }, "bowser", userSkills)).toBe(
-      "MCP server playwright",
-    );
+    expect(isolation({ ...init, mcp_servers: [{ name: "playwright" }] }, "bowser", userSkills)).toBe("MCP server playwright");
   });
 
   test("fails on one of the user's skills", () => {
-    expect(isolation({ ...init, skills: [...init.skills, "humanizer"] }, "bowser", userSkills)).toBe(
-      "user skill humanizer",
-    );
+    expect(isolation({ ...init, skills: [...init.skills, "humanizer"] }, "bowser", userSkills)).toBe("user skill humanizer");
   });
 
   test("accepts the tool's skill when the user has one by the same name", () => {
-    expect(
-      isolation({ ...init, skills: ["playwright-cli", "simplify"] }, "playwright-cli", ["playwright-cli"]),
-    ).toBeNull();
+    expect(isolation({ ...init, skills: ["playwright-cli", "simplify"] }, "playwright-cli", ["playwright-cli"])).toBeNull();
   });
 
   test("fails on the other tool's skill", () => {
-    expect(isolation({ ...init, skills: [...init.skills, "playwright-cli"] }, "bowser", userSkills)).toBe(
-      "skill playwright-cli",
-    );
+    expect(isolation({ ...init, skills: [...init.skills, "playwright-cli"] }, "bowser", userSkills)).toBe("skill playwright-cli");
   });
 
   test("fails on a plugin that is not built in", () => {

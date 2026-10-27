@@ -12,16 +12,7 @@ import { ensureSessionDir, profileDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import {
-  connectOrSpawn,
-  daemonCommand,
-  daemonEnv,
-  daemonLogPath,
-  DaemonClient,
-  DaemonNotAnswering,
-  pidPath,
-  socketPath,
-} from "../src/daemon/client.ts";
+import { connectOrSpawn, daemonCommand, daemonEnv, daemonLogPath, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -273,9 +264,7 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
       () => undefined,
       (e: unknown) => e,
     );
-    expect((err as Error).message).toBe(
-      `session '${session}' is not open (its browser exited); run 'bowser open --persistent'`,
-    );
+    expect((err as Error).message).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --persistent'`);
   });
 
   describe("the profile open recorded decides the advice (#93)", () => {
@@ -288,18 +277,14 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     test("the default profile: open --persistent", async () => {
       const session = "rec-default";
       await crashed(session, { profile: profileDir(session) });
-      expect(await refusal(session)).toBe(
-        `session '${session}' is not open (its browser exited); run 'bowser open --persistent'`,
-      );
+      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --persistent'`);
     });
 
     test("a custom profile: open --profile=<dir>", async () => {
       const session = "rec-custom";
       const dir = join(tmp, "custom-profile");
       await crashed(session, { profile: dir });
-      expect(await refusal(session)).toBe(
-        `session '${session}' is not open (its browser exited); run 'bowser open --profile=${dir}'`,
-      );
+      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --profile=${dir}'`);
     });
 
     test("quotes a custom profile path when the shell would split it", async () => {
@@ -307,9 +292,7 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
       const dir = join(tmp, "custom profile's");
       await crashed(session, { profile: dir });
       const quoted = `'${dir.replaceAll("'", "'\\''")}'`;
-      expect(await refusal(session)).toBe(
-        `session '${session}' is not open (its browser exited); run 'bowser open --profile=${quoted}'`,
-      );
+      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --profile=${quoted}'`);
     });
 
     test("no profile: plain open, even with a profile directory left on disk", async () => {
@@ -324,9 +307,7 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     const session = "crashed-open";
     await crashed(session);
     // Past the refusal, the spawn path's own platform check answers.
-    await expect(connectOrSpawn(session, { platform: "linux", reopen: true })).rejects.toThrow(
-      "bowser requires macOS (WebKit)",
-    );
+    await expect(connectOrSpawn(session, { platform: "linux", reopen: true })).rejects.toThrow("bowser requires macOS (WebKit)");
   });
 
   test("a session that never ran a daemon still starts one", async () => {
@@ -429,9 +410,7 @@ describe("daemon goes away mid-request", () => {
     try {
       const client = await connectOrSpawn(session, { spawn: false });
       try {
-        expect(await outcomeWithin(client.request("state"), 1000)).toBe(
-          `rejected: daemon for session '${session}' closed the connection`,
-        );
+        expect(await outcomeWithin(client.request("state"), 1000)).toBe(`rejected: daemon for session '${session}' closed the connection`);
       } finally {
         client.close();
       }

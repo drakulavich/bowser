@@ -112,8 +112,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     await cmdClick(ctx, await refNamed("Add"));
   };
 
-  const checked = async (label: string): Promise<string> =>
-    cmdEval(ctx, `String(document.querySelector('[aria-label="${label}"]').checked)`);
+  const checked = async (label: string): Promise<string> => cmdEval(ctx, `String(document.querySelector('[aria-label="${label}"]').checked)`);
 
   test("ET-03: clicking a removed todo's checkbox fails in under 1 s and changes nothing", async () => {
     await cmdOpen(ctx, `${base}/todo-app.html`);
@@ -217,10 +216,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     const hover = await refNamed("Hover me");
     // Still connected, no longer visible. check and hover act through page
     // scripts that do not wait for visibility, so today both go through.
-    await cmdEval(
-      ctx,
-      "(document.getElementById('agree').style.visibility = 'hidden', document.getElementById('hoverme').style.display = 'none')",
-    );
+    await cmdEval(ctx, "(document.getElementById('agree').style.visibility = 'hidden', document.getElementById('hoverme').style.display = 'none')");
     await cmdCheck(ctx, agree);
     expect(await checked("Agree")).toBe("true");
     await cmdHover(ctx, hover);
@@ -261,9 +257,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       stderr: "pipe",
     });
     const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
-    expect(stderr).toContain(
-      `ref '${buy}' now points to button "Delete account", not button "Buy A"; take a new snapshot`,
-    );
+    expect(stderr).toContain(`ref '${buy}' now points to button "Delete account", not button "Buy A"; take a new snapshot`);
     expect(code).toBe(1);
     expect(await cmdEval(ctx, clicks)).toBe("1");
   }, 60_000);

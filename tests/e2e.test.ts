@@ -98,9 +98,7 @@ runOrSkip("e2e: real browser", () => {
     const png = new DataView(await Bun.file(file).arrayBuffer());
     // IHDR: width and height, big-endian, at bytes 16 and 20.
     const [w, h] = [png.getUint32(16), png.getUint32(20)];
-    const [vw, vh, dpr] = JSON.parse(
-      await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])"),
-    ) as number[];
+    const [vw, vh, dpr] = JSON.parse(await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])")) as number[];
     expect([w, h]).toEqual([Math.round(vw! * dpr!), Math.round(vh! * dpr!)]);
     expect(h).toBeLessThan(5000 * dpr!);
   }, 30_000);
@@ -123,12 +121,8 @@ runOrSkip("e2e: real browser", () => {
     await cmdOpen({ session, json: false }, dataUrl);
     const dpr = Number(await cmdEval({ session, json: false }, "devicePixelRatio"));
     const file = join(tmp, "e2e-scale-high.png");
-    const err = await cmdScreenshot({ session, json: false }, { filename: file, scale: String(dpr + 1) }).catch(
-      (e: unknown) => e,
-    );
-    expect((err as Error).message).toBe(
-      `screenshot: --scale=${dpr + 1} needs a display at pixel ratio ${dpr + 1} or more; this one is ${dpr}`,
-    );
+    const err = await cmdScreenshot({ session, json: false }, { filename: file, scale: String(dpr + 1) }).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(`screenshot: --scale=${dpr + 1} needs a display at pixel ratio ${dpr + 1} or more; this one is ${dpr}`);
     expect(reportFailure(err).code).toBe(1);
     expect(await Bun.file(file).exists()).toBe(false);
   }, 30_000);
@@ -157,10 +151,7 @@ runOrSkip("e2e: real browser", () => {
     });
     try {
       await cmdOpen({ session, json: false }, server.url.toString());
-      const probe = await cmdRunCode(
-        { session, json: false },
-        "await new Promise((r) => setTimeout(r, 500)); return document.fonts.status",
-      );
+      const probe = await cmdRunCode({ session, json: false }, "await new Promise((r) => setTimeout(r, 500)); return document.fonts.status");
       expect(probe).toBe("loading");
       const file = join(tmp, "e2e-late-font.png");
       expect(await cmdScreenshot({ session, json: false }, { filename: file })).not.toContain("fonts still loading");
@@ -193,16 +184,12 @@ runOrSkip("e2e: real browser", () => {
     await cmdOpen({ session, json: false }, dataUrl);
     await cmdResize({ session, json: false }, "16384", "16384");
     try {
-      const [vw, , dpr] = JSON.parse(
-        await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])"),
-      ) as number[];
+      const [vw, , dpr] = JSON.parse(await cmdEval({ session, json: false }, "JSON.stringify([innerWidth, innerHeight, devicePixelRatio])")) as number[];
       // Only a display at pixel ratio 2 reaches the limit through resize: at
       // ratio 1, 16384x16384 is 1 GiB of pixels, and capturing that is slow
       // and not what this test is about. Not measured at ratio 1 (#69).
       if (dpr! < 2) return;
-      const err = await cmdScreenshot({ session, json: false }, { filename: join(tmp, "e2e-huge.png") }).catch(
-        (e: unknown) => e,
-      );
+      const err = await cmdScreenshot({ session, json: false }, { filename: join(tmp, "e2e-huge.png") }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(UserError);
       expect((err as Error).message).toContain(`run 'bowser resize ${vw} ${maxCaptureHeight(vw!, dpr!)}' or smaller`);
       expect(reportFailure(err).code).toBe(1);
@@ -263,10 +250,7 @@ runOrSkip("e2e: real browser", () => {
       port: 0,
       fetch: (req) => {
         const u = new URL(req.url);
-        const body =
-          u.pathname === "/long"
-            ? "<title>long</title><p>landed</p>"
-            : `<title>start</title><a href="/long?${u.searchParams.get("i")}-${q}">go</a>`;
+        const body = u.pathname === "/long" ? "<title>long</title><p>landed</p>" : `<title>start</title><a href="/long?${u.searchParams.get("i")}-${q}">go</a>`;
         return new Response(body, { headers: { "content-type": "text/html" } });
       },
     });

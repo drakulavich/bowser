@@ -182,10 +182,7 @@ describe("createHandler", () => {
   });
 
   describe("screenshot --scale", () => {
-    const ONE_PX = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-      "base64",
-    );
+    const ONE_PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
     const ihdr = (b: Uint8Array) => {
       const v = new DataView(b.buffer, b.byteOffset);
       return [v.getUint32(16), v.getUint32(20)];
@@ -273,9 +270,7 @@ describe("createHandler", () => {
       return b;
     }
     const steps = (b: ReturnType<typeof fakeBrowser>) =>
-      b.calls
-        .filter(([name]) => name === "evaluate" || name === "screenshot")
-        .map(([name, a]) => (name === "evaluate" ? a[0] : name));
+      b.calls.filter(([name]) => name === "evaluate" || name === "screenshot").map(([name, a]) => (name === "evaluate" ? a[0] : name));
 
     test("screenshot waits for fonts before it captures", async () => {
       await inDir(async (path) => {
@@ -495,8 +490,7 @@ test("a timeout while awaiting navigation says the click was delivered", async (
     {
       id: 1,
       ok: false,
-      error:
-        "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying",
+      error: "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying",
     },
     {
       id: 2,
@@ -620,9 +614,7 @@ test("a timed-out request that prints nothing leaves the queued reports alone", 
   );
   await waitFor(() => replies.length >= 1, 3000);
   expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 20ms" }]);
-  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
-    { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
-  ]);
+  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
 });
 
 test("a non-urgent op waits its turn behind the one before it", async () => {
@@ -1087,8 +1079,7 @@ describe("the queue-time budget", () => {
 // #77: requests of different connections on one session run one connection
 // at a time, through the gate, before the serializer.
 describe("the session gate", () => {
-  const WAITING = (op: string, ms: number) =>
-    `'${op}' timed out after ${ms}ms (waiting for another client's command on this session)`;
+  const WAITING = (op: string, ms: number) => `'${op}' timed out after ${ms}ms (waiting for another client's command on this session)`;
 
   function lanes(handle: (req: DaemonRequest) => Promise<DaemonResponse>, timeoutMs: number, idleMs = timeoutMs) {
     const gate = createGate(idleMs);
@@ -1183,8 +1174,7 @@ describe("the session gate", () => {
       {
         id: 2,
         ok: false,
-        error:
-          "'evaluate' timed out after 30ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)",
+        error: "'evaluate' timed out after 30ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)",
       },
     ]);
     expect(started).toEqual([1]);
@@ -1511,8 +1501,7 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
   };
   const load = () => go(engine());
   /** The page's own call, as a click handler makes it. */
-  const page = <T>(name: "alert" | "confirm" | "prompt", ...a: unknown[]) =>
-    (win[name] as (...a: unknown[]) => T)(...a);
+  const page = <T>(name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (win[name] as (...a: unknown[]) => T)(...a);
   /** The current document, and bringing an earlier one back, as history does. */
   const window = () => win;
   const restore = (w: typeof win) => go(w);
@@ -1535,8 +1524,7 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
     return f;
   };
   /** A call a frame's own code makes on its window. */
-  const inFrame = <T>(f: typeof win, name: "alert" | "confirm" | "prompt", ...a: unknown[]) =>
-    (f[name] as (...a: unknown[]) => T)(...a);
+  const inFrame = <T>(f: typeof win, name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (f[name] as (...a: unknown[]) => T)(...a);
   return Object.assign(b, { load, page, window, restore, addFrame, inFrame });
 }
 
@@ -1633,12 +1621,8 @@ describe("dialogs on webkit: the page shim answers them", () => {
     };
     const h = createHandler(b);
     await h(rep("dialog-answer", [true, "typed"]));
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" },
-    ]);
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" }]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true }]);
     expect(got).toEqual(["typed", null]);
   });
 
@@ -1670,9 +1654,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
     const h = createHandler(b);
     await h(rep("dialog-answer", [true]));
     await h(rep("navigate", ["https://x/next"]));
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
   });
 
@@ -1690,9 +1672,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
       b.restore(first);
     }; // the back-forward cache
     await h(rep("back"));
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
   });
 
@@ -1710,9 +1690,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
       b.restore(first);
     };
     await h(rep("back"));
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
   });
 
@@ -1733,9 +1711,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
     b.click = async () => {
       got.push(b.page("confirm", "sure?"));
     };
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
   });
 
@@ -1747,9 +1723,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
     const h = createHandler(b);
     await h(rep("evaluate", ["1"]));
     b.load(); // a page script navigated, between commands
-    expect((await h(rep("press", ["Enter"]))).dialogs).toEqual([
-      { type: "alert", message: "hi", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("press", ["Enter"]))).dialogs).toEqual([{ type: "alert", message: "hi", state: "dismissed", unanswered: true }]);
   });
 
   test("page calls per op: an eval is one; a native action or a navigation is one read before it and one after", async () => {
@@ -1803,9 +1777,7 @@ describe("dialogs on webkit: the page shim answers them", () => {
     await h(rep("evaluate", ["1"]));
     b.page("confirm", "later");
     expect(await h(req("evaluate", ["2"]))).toEqual({ id: 7, ok: true, result: 2 });
-    expect((await h(rep("evaluate", ["3"]))).dialogs).toEqual([
-      { type: "confirm", message: "later", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("evaluate", ["3"]))).dialogs).toEqual([{ type: "confirm", message: "later", state: "dismissed", unanswered: true }]);
   });
 });
 
@@ -1907,15 +1879,11 @@ describe("dialogs in same-origin frames", () => {
     b.click = async () => {
       got.push(b.inFrame(frame, "confirm", "frame"));
     };
-    expect((await h(rep("click", ["#via"]))).dialogs).toEqual([
-      { type: "confirm", message: "frame", state: "accepted" },
-    ]);
+    expect((await h(rep("click", ["#via"]))).dialogs).toEqual([{ type: "confirm", message: "frame", state: "accepted" }]);
     b.click = async () => {
       got.push(b.page("confirm", "top"));
     };
-    expect((await h(rep("click", ["#top"]))).dialogs).toEqual([
-      { type: "confirm", message: "top", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("click", ["#top"]))).dialogs).toEqual([{ type: "confirm", message: "top", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([true, false]);
   });
 
@@ -1927,9 +1895,7 @@ describe("dialogs in same-origin frames", () => {
     child[0] = engine2(child);
     await h(rep("evaluate", ["1"]));
     b.inFrame(child[0] as Record<string | symbol, unknown>, "alert", "deep");
-    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([
-      { type: "alert", message: "deep", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "alert", message: "deep", state: "dismissed", unanswered: true }]);
 
     function engine2(parent: Record<string | symbol, unknown>) {
       parent.length = 1;
@@ -1948,9 +1914,7 @@ describe("dialogs in same-origin frames", () => {
     const h = createHandler(b);
     await h(rep("evaluate", ["1"]));
     b.inFrame(same, "confirm", "after");
-    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([
-      { type: "confirm", message: "after", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "confirm", message: "after", state: "dismissed", unanswered: true }]);
   });
 
   test("a frame's own confirm is left alone", async () => {
@@ -1980,9 +1944,7 @@ describe("the command budget (budgetMs)", () => {
     dispatch({ id: 1, op: "type", args: ["hi"], cmd: "fill", budgetMs: 50 }, lane(replies, t0));
     await waitFor(() => replies.length >= 1, 3000);
     // The message names the command's budget, not what was left of it.
-    expect(replies.map(([, r]) => r)).toEqual([
-      { id: 1, ok: false, error: "'fill' timed out after 1000ms (in its 'type' step)" },
-    ]);
+    expect(replies.map(([, r]) => r)).toEqual([{ id: 1, ok: false, error: "'fill' timed out after 1000ms (in its 'type' step)" }]);
     // At budgetMs (50), not at the daemon's 1000 ms; the threshold sits between them.
     expect(replies[0]![0]).toBeLessThan(500);
   });
@@ -1998,14 +1960,8 @@ describe("the command budget (budgetMs)", () => {
   // ET-10 before its fix: a daemon on 30 s and a command on 3 s said "after 30000ms".
   test("the timeout message names the command's own budget (budgetTotalMs)", async () => {
     const replies: Array<[number, DaemonResponse]> = [];
-    dispatch(
-      { id: 1, op: "click", args: ["#b"], cmd: "fill", budgetMs: 50, budgetTotalMs: 3000 },
-      lane(replies, Date.now(), 30_000),
-    );
-    dispatch(
-      { id: 2, op: "click", args: ["#b"], cmd: "fill", budgetMs: 0, budgetTotalMs: 3000 },
-      lane(replies, Date.now(), 30_000),
-    );
+    dispatch({ id: 1, op: "click", args: ["#b"], cmd: "fill", budgetMs: 50, budgetTotalMs: 3000 }, lane(replies, Date.now(), 30_000));
+    dispatch({ id: 2, op: "click", args: ["#b"], cmd: "fill", budgetMs: 0, budgetTotalMs: 3000 }, lane(replies, Date.now(), 30_000));
     await waitFor(() => replies.length >= 2, 3000);
     expect(replies.map(([, r]) => r)).toEqual([
       { id: 2, ok: false, error: "'fill' timed out after 3000ms (in its 'click' step)" },
@@ -2196,9 +2152,7 @@ describe("the waitFor op", () => {
   test("with no deadline it is still reading past 1 s", async () => {
     const clock = manualClock();
     const b = reads([false]);
-    await expect(clock.settledAt(createHandler(b, {}, clock)(WAIT()), 1500)).rejects.toThrow(
-      "still pending at clock 1500",
-    );
+    await expect(clock.settledAt(createHandler(b, {}, clock)(WAIT()), 1500)).rejects.toThrow("still pending at clock 1500");
     expect(evaluates(b)).toBe(16);
   });
 
@@ -2241,9 +2195,6 @@ describe("the waitFor op", () => {
     const clock = manualClock();
     const b = reads([true]);
     await clock.fulfilledAt(createHandler(b, {}, clock)(WAIT(1, "text", `it's "there"`), 10_000));
-    expect(b.calls.find(([n]) => n === "evaluate")).toEqual([
-      "evaluate",
-      [`(document.body?.innerText ?? '').includes("it's \\"there\\"")`],
-    ]);
+    expect(b.calls.find(([n]) => n === "evaluate")).toEqual(["evaluate", [`(document.body?.innerText ?? '').includes("it's \\"there\\"")`]]);
   });
 });

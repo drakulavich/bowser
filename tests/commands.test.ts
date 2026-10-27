@@ -13,27 +13,8 @@ import { cmdDialog } from "../src/commands/dialog.ts";
 import { readStdin, reply, syncState, type CommandContext } from "../src/commands/context.ts";
 import { pidPath, type ConnectOptions } from "../src/daemon/client.ts";
 import { looksLikeBowser, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
-import {
-  cmdCheck,
-  cmdClick,
-  cmdFill,
-  cmdHover,
-  cmdPress,
-  cmdResize,
-  cmdSelect,
-  cmdType,
-  cmdUncheck,
-} from "../src/commands/interaction.ts";
-import {
-  closeOne,
-  cmdClose,
-  cmdGoto,
-  cmdHistory,
-  cmdList,
-  cmdOpen,
-  cmdWaitFor,
-  type ProcessOps,
-} from "../src/commands/navigation.ts";
+import { cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck } from "../src/commands/interaction.ts";
+import { closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, cmdWaitFor, type ProcessOps } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { cmdMarkdown, cmdScreenshot, cmdSnapshot } from "../src/commands/snapshot.ts";
 import {
@@ -48,14 +29,7 @@ import {
   cmdSessionStorageList,
   cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
-import {
-  ensureSessionDir,
-  maxSessionNameLength,
-  saveState,
-  loadState,
-  sessionDir,
-  sessionsRoot,
-} from "../src/state.ts";
+import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
 import { killDaemons } from "./helpers/daemons.ts";
 import { longHome } from "./helpers/long-home.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
@@ -178,10 +152,7 @@ describe("which commands may replace a browser that exited", () => {
 describe("open --persistent / --profile", () => {
   /** Run `open` through its registry entry, as the CLI does, with a fake
    *  connector that records the options the daemon would be spawned with. */
-  async function openWith(
-    flags: Record<string, string | boolean>,
-    running: { profile?: string } | "spawned" = "spawned",
-  ) {
+  async function openWith(flags: Record<string, string | boolean>, running: { profile?: string } | "spawned" = "spawned") {
     const seen: Array<{ spawn?: boolean; profile?: string } | undefined> = [];
     let c = fakeClient({});
     const connect: CommandContext["connect"] = async (_s, opts) => {
@@ -311,9 +282,7 @@ describe("open --persistent / --profile", () => {
   test("a running daemon with a different store is a usage error, before any navigation", async () => {
     const err = await openWith({ persistent: true }, { profile: "/elsewhere" }).catch((e: Error) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe(
-      `usage: session '${session}' is already open with a different profile; run 'bowser close' first`,
-    );
+    expect((err as Error).message).toBe(`usage: session '${session}' is already open with a different profile; run 'bowser close' first`);
   });
 
   test("a running ephemeral daemon conflicts with --persistent too", async () => {
@@ -345,14 +314,13 @@ describe("open --persistent / --profile", () => {
       }),
     });
     try {
-      const proc = Bun.spawn(
-        [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", "--persistent", "-s", session],
-        { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
-      );
+      const proc = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", "--persistent", "-s", session], {
+        env: { ...process.env, HOME: tmp },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-      expect(stderr).toContain(
-        `session '${session}' is already open with a different profile; run 'bowser close' first`,
-      );
+      expect(stderr).toContain(`session '${session}' is already open with a different profile; run 'bowser close' first`);
       expect(code).toBe(1);
     } finally {
       listener.stop(true);
@@ -366,10 +334,11 @@ describe("open --persistent / --profile", () => {
     await Bun.write(blocker, "not a directory");
     const target = join(blocker, "profile");
     const t0 = Date.now();
-    const proc = Bun.spawn(
-      [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", `--profile=${target}`, "-s", session],
-      { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
-    );
+    const proc = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "open", `--profile=${target}`, "-s", session], {
+      env: { ...process.env, HOME: tmp },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
     expect(stderr).toContain(target);
     expect(stderr).toMatch(/ENOTDIR|not a directory/i);
@@ -403,9 +372,7 @@ describe("goto", () => {
   });
   test("goto errors when a real URL ends on about:blank", async () => {
     const c = fakeClient({ state: () => ({ url: "about:blank", title: "X" }) });
-    await expect(cmdGoto({ ...ctx(), connect: async () => c }, "https://example.com/?q=1")).rejects.toThrow(
-      /did not load/i,
-    );
+    await expect(cmdGoto({ ...ctx(), connect: async () => c }, "https://example.com/?q=1")).rejects.toThrow(/did not load/i);
   });
 });
 
@@ -438,9 +405,7 @@ describe("too many arguments", () => {
         },
         (e: unknown) => e,
       );
-      expect((err as Error).message).toBe(
-        `usage: too many arguments for '${c.name}': expected ${n}, received ${n + 1}`,
-      );
+      expect((err as Error).message).toBe(`usage: too many arguments for '${c.name}': expected ${n}, received ${n + 1}`);
       expect(seen.connects).toBe(0);
       expect(reportFailure(err).code).toBe(1);
     });
@@ -470,9 +435,7 @@ describe("too many arguments", () => {
   test("select e3 and localstorage-set k name their usage", async () => {
     const { base } = counting();
     await expect(run(["-s", session, "select", "e3"], base)).rejects.toThrow("usage: bowser select <ref> <value>");
-    await expect(run(["-s", session, "localstorage-set", "k"], base)).rejects.toThrow(
-      "usage: bowser localstorage-set <key> <value>",
-    );
+    await expect(run(["-s", session, "localstorage-set", "k"], base)).rejects.toThrow("usage: bowser localstorage-set <key> <value>");
   });
 
   // An empty word is a value, as in playwright-cli (measured, 0.1.13):
@@ -490,9 +453,7 @@ describe("too many arguments", () => {
 
   test("words after -- still count: fill e1 -- a b is too many", async () => {
     const { seen, base } = counting();
-    await expect(run(["-s", session, "fill", "e1", "--", "a", "b"], base)).rejects.toThrow(
-      "usage: too many arguments for 'fill': expected 2, received 3",
-    );
+    await expect(run(["-s", session, "fill", "e1", "--", "a", "b"], base)).rejects.toThrow("usage: too many arguments for 'fill': expected 2, received 3");
     expect(seen.connects).toBe(0);
   });
 
@@ -553,9 +514,7 @@ describe("URL normalization in open and goto", () => {
 describe("open (assertNavigated guard)", () => {
   test("open errors when a real URL ends on about:blank", async () => {
     const c = fakeClient({ state: () => ({ url: "about:blank", title: "" }) });
-    await expect(cmdOpen({ ...ctx(), connect: async () => c }, "https://example.com/?q=1")).rejects.toThrow(
-      /did not load/i,
-    );
+    await expect(cmdOpen({ ...ctx(), connect: async () => c }, "https://example.com/?q=1")).rejects.toThrow(/did not load/i);
   });
 
   test("open does NOT throw when the URL resolves correctly", async () => {
@@ -572,9 +531,7 @@ describe("snapshot", () => {
     tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
     refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
   };
-  const yaml =
-    "### Page\n- Page URL: https://x\n- Page Title: X\n### Snapshot\n" +
-    '```yaml\n- link "Home" [ref=e1]:\n  - /url: /\n```';
+  const yaml = "### Page\n- Page URL: https://x\n- Page Title: X\n### Snapshot\n" + '```yaml\n- link "Home" [ref=e1]:\n  - /url: /\n```';
 
   test("prints the page wrapper around the aria-tree YAML", async () => {
     const c = fakeClient({ evaluate: () => snap });
@@ -837,9 +794,7 @@ describe("close", () => {
       await mkdir(legacy, { recursive: true });
       await Bun.write(join(legacy, "pid"), String(process.pid));
       const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
-      await expect(call).rejects.toThrow(
-        `- team one: close: pid ${process.pid} recorded for legacy session "team one" is running`,
-      );
+      await expect(call).rejects.toThrow(`- team one: close: pid ${process.pid} recorded for legacy session "team one" is running`);
       expect(existsSync(legacy)).toBe(true);
     });
 
@@ -848,9 +803,7 @@ describe("close", () => {
       await mkdir(legacy, { recursive: true });
       await Bun.write(join(legacy, "sock"), "");
       const call = cmdClose({ ...ctx(), connect: unreachable }, { all: true });
-      await expect(call).rejects.toThrow(
-        '- old session: close: legacy session "old session" has no pidfile but still has a socket',
-      );
+      await expect(call).rejects.toThrow('- old session: close: legacy session "old session" has no pidfile but still has a socket');
       expect(existsSync(legacy)).toBe(true);
     });
 
@@ -863,8 +816,7 @@ describe("close", () => {
       await Bun.write(pidPath("stale31"), "4242");
       const proc = procOps({ alive: (pid) => pid === 4242 });
       for (const json of [false, true]) {
-        if (!existsSync(sessionDir("zz31")))
-          await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
+        if (!existsSync(sessionDir("zz31"))) await saveState({ name: "zz31", url: "x", title: "", refs: [], updatedAt: Date.now() });
         const err = await cmdClose({ ...ctx({ json }), connect: async () => fakeClient({}) }, { all: true }, proc).then(
           () => undefined,
           (e: unknown) => e,
@@ -1292,10 +1244,7 @@ describe("press", () => {
   }
 
   for (const [input, message] of [
-    [
-      "shift+Tab",
-      `usage: bowser press: unknown modifier 'shift' in 'shift+Tab'; use Shift, Control, Alt, Meta or ControlOrMeta`,
-    ],
+    ["shift+Tab", `usage: bowser press: unknown modifier 'shift' in 'shift+Tab'; use Shift, Control, Alt, Meta or ControlOrMeta`],
     ["Cmd+a", `usage: bowser press: unknown modifier 'Cmd' in 'Cmd+a'; use Shift, Control, Alt, Meta or ControlOrMeta`],
     ["Shift+Shift+a", `usage: bowser press: modifier 'Shift' repeated in 'Shift+Shift+a'`],
     [
@@ -1533,8 +1482,7 @@ describe("actions refuse a ref of the wrong kind", () => {
   });
 
   test("fill refuses a listitem, a <select> and a checkbox, sending nothing", async () => {
-    const msg = (id: string, role: string) =>
-      `ref '${id}' is not an <input>, <textarea> or contenteditable element (${role})`;
+    const msg = (id: string, role: string) => `ref '${id}' is not an <input>, <textarea> or contenteditable element (${role})`;
     await rejects(cmdFill(actx(), "e1", "x"), msg("e1", "listitem"));
     await rejects(cmdFill(actx(), "e7", "x"), msg("e7", "combobox"));
     await rejects(cmdFill(actx(), "e2", "x"), msg("e2", "checkbox"));
@@ -1680,9 +1628,7 @@ describe("ref commands resolve the ref in the live page first", () => {
         },
         (e: Error) => e,
       );
-      expect(err.message).toBe(
-        `ref '${ref}' now points to button "Delete account", not ${saved.role} "${saved.name}"; take a new snapshot`,
-      );
+      expect(err.message).toBe(`ref '${ref}' now points to button "Delete account", not ${saved.role} "${saved.name}"; take a new snapshot`);
       expect(reportFailure(err).code).toBe(1);
       expect(c.calls).toEqual([["resolve", [resolve]]]);
     });
@@ -1727,14 +1673,11 @@ describe("screenshot", () => {
   const failingCapture = () => {
     throw new Error("An unknown error occurred");
   };
-  const viewport = (w: number, h: number, dpr: number) => (expr: string) =>
-    expr === READ_VIEWPORT ? [w, h, dpr] : undefined;
+  const viewport = (w: number, h: number, dpr: number) => (expr: string) => (expr === READ_VIEWPORT ? [w, h, dpr] : undefined);
 
   test("a viewport too large to capture is a UserError naming the size that fits (#69)", async () => {
     const c = fakeClient({ screenshot: failingCapture, evaluate: viewport(16384, 16384, 2) });
-    const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, "big.png") }).catch(
-      (e: unknown) => e,
-    );
+    const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, "big.png") }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UserError);
     expect((err as Error).message).toBe(
       "screenshot: WebKit cannot capture a 16384x16384 viewport at pixel ratio 2 (its pixels would fill 4 GiB); " +
@@ -1745,9 +1688,7 @@ describe("screenshot", () => {
 
   test("a failed capture of a viewport that fits keeps its own error (#69)", async () => {
     const c = fakeClient({ screenshot: failingCapture, evaluate: viewport(800, 600, 2) });
-    const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, "small.png") }).catch(
-      (e: unknown) => e,
-    );
+    const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, "small.png") }).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(UserError);
     expect((err as Error).message).toBe("An unknown error occurred");
   });
@@ -1834,18 +1775,10 @@ describe("screenshot", () => {
 });
 
 describe("screenshot --scale", () => {
-  const ONE_PX = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-    "base64",
-  );
-  const pngB64 = async (w: number, h: number) =>
-    Buffer.from(await new Bun.Image(ONE_PX).resize(w, h, { fit: "fill" }).png().bytes()).toString("base64");
-  const shoot = (
-    c: ReturnType<typeof fakeClient>,
-    scale: string | undefined,
-    json = false,
-    file = join(tmp, "scaled.png"),
-  ) => cmdScreenshot({ ...ctx({ json }), connect: async () => c }, { filename: file, scale });
+  const ONE_PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const pngB64 = async (w: number, h: number) => Buffer.from(await new Bun.Image(ONE_PX).resize(w, h, { fit: "fill" }).png().bytes()).toString("base64");
+  const shoot = (c: ReturnType<typeof fakeClient>, scale: string | undefined, json = false, file = join(tmp, "scaled.png")) =>
+    cmdScreenshot({ ...ctx({ json }), connect: async () => c }, { filename: file, scale });
 
   test("a scale that is not a number above 0 is a usage error", async () => {
     for (const raw of ["0", "-1", "abc", "0x2", " ", "", "9".repeat(400)]) {
@@ -1859,9 +1792,7 @@ describe("screenshot --scale", () => {
   });
 
   test("--scale= reaches the command as an empty value", async () => {
-    const err = await run(["screenshot", "--scale=", "-s", session], { connect: async () => fakeClient({}) }).catch(
-      (e: unknown) => e,
-    );
+    const err = await run(["screenshot", "--scale=", "-s", session], { connect: async () => fakeClient({}) }).catch((e: unknown) => e);
     expect((err as Error).message).toBe("screenshot: --scale must be a number above 0, got ''");
     expect(reportFailure(err).code).toBe(1);
   });
@@ -1877,9 +1808,7 @@ describe("screenshot --scale", () => {
     const file = join(tmp, "refused.png");
     const err = await shoot(c, "2", false, file).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UserError);
-    expect((err as Error).message).toBe(
-      "screenshot: --scale=2 needs a display at pixel ratio 2 or more; this one is 1",
-    );
+    expect((err as Error).message).toBe("screenshot: --scale=2 needs a display at pixel ratio 2 or more; this one is 1");
     expect(reportFailure(err).code).toBe(1);
     expect(existsSync(file)).toBe(false);
   });
@@ -1962,9 +1891,7 @@ describe("resize", () => {
     ["100", "100000"],
   ])("rejects invalid dimensions (%p, %p) before any daemon request", async (w, h) => {
     const c = fakeClient({});
-    await expect(cmdResize({ ...ctx(), connect: async () => c }, w, h)).rejects.toThrow(
-      "usage: bowser resize <width> <height> (each 1 to 16384)",
-    );
+    await expect(cmdResize({ ...ctx(), connect: async () => c }, w, h)).rejects.toThrow("usage: bowser resize <width> <height> (each 1 to 16384)");
     expect(c.calls).toEqual([]);
   });
 
@@ -2205,9 +2132,7 @@ describe("run-code", () => {
       () => null,
       (e: Error) => e,
     );
-    expect(err?.message).toBe(
-      "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return",
-    );
+    expect(err?.message).toBe("run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return");
     expect(reportFailure(err).code).toBe(1);
   });
 
@@ -2246,9 +2171,7 @@ describe("run-code", () => {
 
 describe("context helpers", () => {
   test("reply picks JSON or text by ctx.json, with identical JSON.stringify output", () => {
-    expect(reply({ session: "s", json: true }, { ok: true, ref: "e1" }, "clicked e1")).toBe(
-      JSON.stringify({ ok: true, ref: "e1" }),
-    );
+    expect(reply({ session: "s", json: true }, { ok: true, ref: "e1" }, "clicked e1")).toBe(JSON.stringify({ ok: true, ref: "e1" }));
     expect(reply({ session: "s", json: false }, { ok: true, ref: "e1" }, "clicked e1")).toBe("clicked e1");
   });
 
@@ -2415,9 +2338,7 @@ describe("fill --stdin", () => {
   });
 
   test("the registry's fill refuses --stdin with a <text> positional", async () => {
-    await expect(
-      findCommand("fill")!.run(sctx(SECRET), { positional: ["e2", "x"], flags: { stdin: true } }),
-    ).rejects.toThrow(/^usage:/);
+    await expect(findCommand("fill")!.run(sctx(SECRET), { positional: ["e2", "x"], flags: { stdin: true } })).rejects.toThrow(/^usage:/);
     expect(connected).toBe(false);
   });
 
@@ -2468,11 +2389,7 @@ describe("fill --stdin", () => {
         stdout: "pipe",
         stderr: "pipe",
       });
-      const [code, stdout, stderr] = await Promise.all([
-        p.exited,
-        new Response(p.stdout).text(),
-        new Response(p.stderr).text(),
-      ]);
+      const [code, stdout, stderr] = await Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
       expect(stderr).toStartWith("bowser: usage:");
       expect(stdout + stderr).not.toContain(SECRET);
       expect(code).toBe(1);
@@ -2490,8 +2407,7 @@ describe("dialogs", () => {
     state: "dismissed" as const,
     unanswered: true as const,
   };
-  const DISMISSED_OUT =
-    '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
+  const DISMISSED_OUT = '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
 
   async function clickable() {
     await saveState({
@@ -2584,8 +2500,7 @@ describe("dialogs", () => {
         { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
       ],
     });
-    const c = () =>
-      fakeClient({ evaluate: resolving({ e2: "input", e3: "select", e4: "input.cb" }) }, { dialogs: [dismissed] });
+    const c = () => fakeClient({ evaluate: resolving({ e2: "input", e3: "select", e4: "input.cb" }) }, { dialogs: [dismissed] });
     const outs = [
       await cmdGoto({ ...ctx(), connect: async () => c() }, "https://x/"),
       await cmdFill({ ...ctx(), connect: async () => c() }, "e2", "x"),
@@ -2636,15 +2551,10 @@ describe("dialogs", () => {
     };
     const c = fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] });
     const out = await cmdSnapshot({ ...ctx(), connect: async () => c }, {});
-    expect(out.startsWith(`### Page\n- Page URL: https://x/\n- Page Title: X\n${DISMISSED_OUT}\n### Snapshot\n`)).toBe(
-      true,
-    );
+    expect(out.startsWith(`### Page\n- Page URL: https://x/\n- Page Title: X\n${DISMISSED_OUT}\n### Snapshot\n`)).toBe(true);
     expect(out).toContain('button "go" [ref=e1]');
     const json = JSON.parse(
-      await cmdSnapshot(
-        { ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] }) },
-        {},
-      ),
+      await cmdSnapshot({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }, { dialogs: [dismissed] }) }, {}),
     );
     expect(json.dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed" }]);
     expect(typeof json.snapshot).toBe("string");
@@ -2652,21 +2562,14 @@ describe("dialogs", () => {
 
   test("snapshot with no dialogs has no modal state and no dialogs key", async () => {
     const snap = { url: "https://x/", title: "X", tree: [], refs: [] };
-    expect(
-      await cmdSnapshot({ ...ctx(), connect: async () => fakeClient({ evaluate: () => snap }) }, {}),
-    ).not.toContain("Modal state");
-    const json = JSON.parse(
-      await cmdSnapshot({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }) }, {}),
-    );
+    expect(await cmdSnapshot({ ...ctx(), connect: async () => fakeClient({ evaluate: () => snap }) }, {})).not.toContain("Modal state");
+    const json = JSON.parse(await cmdSnapshot({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: () => snap }) }, {}));
     expect("dialogs" in json).toBe(false);
   });
 
   test("commands that print no dialogs do not take the daemon's queued reports", async () => {
     const shot = fakeClient({}, { dialogs: [dismissed] });
-    await cmdScreenshot(
-      { ...ctx(), connect: async () => shot },
-      { filename: join(tmpdir(), `bowser-shot-${Date.now()}.png`) },
-    );
+    await cmdScreenshot({ ...ctx(), connect: async () => shot }, { filename: join(tmpdir(), `bowser-shot-${Date.now()}.png`) });
     expect(shot.reporting).toBe(false);
     const storage = fakeClient({ evaluate: () => ({}) }, { dialogs: [dismissed] });
     await cmdLocalStorageList({ ...ctx(), connect: async () => storage });
@@ -2681,8 +2584,7 @@ describe("a failed page command still reports its dialogs", () => {
     state: "dismissed" as const,
     unanswered: true as const,
   };
-  const MODAL =
-    '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
+  const MODAL = '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
 
   test("eval that throws after a confirm: the error unchanged, then the report, exit code 2", async () => {
     const c = fakeClient(
@@ -2734,10 +2636,8 @@ describe("fill and type errors never carry the entered text", () => {
     state: "dismissed" as const,
     unanswered: true as const,
   };
-  const MODAL =
-    '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
-  const withheld = (cmd: string) =>
-    `${cmd}: the browser's error message was withheld because it contained the entered text`;
+  const MODAL = '### Modal state\n- ["confirm" dialog with message "sure?"]: dismissed (run dialog-accept before the action to accept it)';
+  const withheld = (cmd: string) => `${cmd}: the browser's error message was withheld because it contained the entered text`;
   /** A client whose `type` request fails with `message`. */
   const failing = (message: string, opts: Parameters<typeof fakeClient>[1] = {}) =>
     fakeClient(
@@ -2796,8 +2696,7 @@ describe("an empty --filename (#193)", () => {
     for (const filename of ["", " "]) {
       for (const cmd of [
         (c: ReturnType<typeof fakeClient>) => cmdSnapshot({ ...ctx(), connect: async () => c }, { filename }),
-        (c: ReturnType<typeof fakeClient>) =>
-          cmdMarkdown({ ...ctx(), connect: async () => c }, undefined, { filename }),
+        (c: ReturnType<typeof fakeClient>) => cmdMarkdown({ ...ctx(), connect: async () => c }, undefined, { filename }),
         (c: ReturnType<typeof fakeClient>) => cmdScreenshot({ ...ctx(), connect: async () => c }, { filename }),
       ]) {
         const c = fakeClient({});
@@ -2837,9 +2736,7 @@ describe("wait-for (#114)", () => {
       (e: unknown) => e,
     );
     expect(err).not.toBeInstanceOf(UserError);
-    const m = (err as Error).message.match(
-      /^wait-for: no text "it's \\"done\\"" after (\d+)ms; the page is at https:\/\/x\/home$/,
-    );
+    const m = (err as Error).message.match(/^wait-for: no text "it's \\"done\\"" after (\d+)ms; the page is at https:\/\/x\/home$/);
     expect(Number(m?.[1])).toBeGreaterThanOrEqual(200);
     expect(Number(m?.[1])).toBeLessThan(10_000);
   });

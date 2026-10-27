@@ -44,12 +44,7 @@ async function failure(argv: string[], handlers: FakeHandlers = {}, base: Partia
 describe("an error from the page is a runtime error (exit 2), whatever its text", () => {
   // Measured before the fix: both exited 1, because a regex over the message
   // took the page's text for a user error.
-  for (const text of [
-    "usage: from the page",
-    "ref 'e1' not found anywhere",
-    "no open page here",
-    "bowser requires a break",
-  ]) {
+  for (const text of ["usage: from the page", "ref 'e1' not found anywhere", "no open page here", "bowser requires a break"]) {
     test(`eval failing with ${JSON.stringify(text)}`, async () => {
       const r = await failure(["eval", "boom()"], {
         evaluate: () => {
@@ -263,8 +258,7 @@ describe("user errors raised outside a command's run", () => {
 
   test("fill --stdin from a terminal", async () => {
     expect(await code(readStdin({ isTTY: true }, async () => "x"))).toEqual({
-      stderr:
-        "bowser: usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin",
+      stderr: "bowser: usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin",
       code: 1,
     });
   });

@@ -24,14 +24,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "src/errors.ts",
-        "src/page-scripts.ts",
-        "src/serialize.ts",
-        "src/socket-write.ts",
-        "src/daemon/protocol.ts",
-        "src/daemon/pidfile.ts"
-      ],
+      "includes": ["src/errors.ts", "src/page-scripts.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts", "src/daemon/pidfile.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -80,14 +73,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "./daemon/**",
-                      "!./daemon/protocol.ts",
-                      "./commands/**",
-                      "./cli/**",
-                      "./mcp.ts",
-                      "./cli.ts"
-                    ],
+                    "group": ["./daemon/**", "!./daemon/protocol.ts", "./commands/**", "./cli/**", "./mcp.ts", "./cli.ts"],
                     "message": "src/browser.ts may import only leaf modules (daemon/protocol.ts among them), state and snapshot: the daemon owns the browser, not the other way. Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]
@@ -127,15 +113,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "../browser.ts",
-                      "./server.ts",
-                      "./main.ts",
-                      "../commands/**",
-                      "../cli/**",
-                      "../mcp.ts",
-                      "../cli.ts"
-                    ],
+                    "group": ["../browser.ts", "./server.ts", "./main.ts", "../commands/**", "../cli/**", "../mcp.ts", "../cli.ts"],
                     "message": "src/daemon/client.ts is the command side of the socket: it may import only leaf modules, state, snapshot and daemon/protocol, never the browser or the daemon process (server.ts, main.ts). Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]
@@ -155,15 +133,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "../browser.ts",
-                      "../daemon/server.ts",
-                      "../daemon/main.ts",
-                      "../cli/**",
-                      "!../cli/parser.ts",
-                      "../mcp.ts",
-                      "../cli.ts"
-                    ],
+                    "group": ["../browser.ts", "../daemon/server.ts", "../daemon/main.ts", "../cli/**", "!../cli/parser.ts", "../mcp.ts", "../cli.ts"],
                     "message": "src/commands talk to the daemon only through daemon/client.ts and daemon/protocol.ts (never browser.ts, daemon/server.ts or daemon/main.ts), and from src/cli use only cli/parser.ts: cli/registry.ts collects the commands. Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]

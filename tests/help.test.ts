@@ -167,9 +167,7 @@ describe("per-command help", () => {
     const cwd = process.cwd();
     process.chdir(tmp);
     try {
-      expect(await run(["-s", "snap", "snapshot", "--filename", "-h"], { connect: async () => c })).toBe(
-        `wrote ${join(realpathSync(tmp), "-h")}`,
-      );
+      expect(await run(["-s", "snap", "snapshot", "--filename", "-h"], { connect: async () => c })).toBe(`wrote ${join(realpathSync(tmp), "-h")}`);
       expect(await Bun.file(join(tmp, "-h")).text()).toContain('link "Home" [ref=e1]');
     } finally {
       process.chdir(cwd);
@@ -215,13 +213,7 @@ describe("per-command help", () => {
 
   // An unknown flag next to --help still gets the help: `mcp --bogus --help`
   // once started the server, because the parse error hid the --help.
-  test.each([
-    [["close", "--help"]],
-    [["mcp", "--help"]],
-    [["close", "--bogus", "--help"]],
-    [["mcp", "--bogus", "--help"]],
-    [["mcp", "-x", "-h"]],
-  ])(
+  test.each([[["close", "--help"]], [["mcp", "--help"]], [["close", "--bogus", "--help"]], [["mcp", "--bogus", "--help"]], [["mcp", "-x", "-h"]]])(
     "the CLI entry prints help and exits 0 for %j, starting no server",
     async (argv) => {
       const name = argv[0]!;

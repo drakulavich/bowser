@@ -945,10 +945,7 @@ export function storageScript(area: StorageArea, body: string): string {
 }
 
 export function storageListScript(area: StorageArea): string {
-  return storageScript(
-    area,
-    `const o = {}; for (let i = 0; i < ${area}.length; i++) { const k = ${area}.key(i); o[k] = ${area}.getItem(k); } return o;`,
-  );
+  return storageScript(area, `const o = {}; for (let i = 0; i < ${area}.length; i++) { const k = ${area}.key(i); o[k] = ${area}.getItem(k); } return o;`);
 }
 
 export function storageGetScript(area: StorageArea, key: string): string {
@@ -968,10 +965,7 @@ export function storageClearScript(area: StorageArea): string {
 }
 
 export function storageRestoreScript(area: StorageArea, entries: Array<{ name: string; value: string }>): string {
-  return storageScript(
-    area,
-    entries.map((e) => `${area}.setItem(${JSON.stringify(e.name)}, ${JSON.stringify(e.value)});`).join(" "),
-  );
+  return storageScript(area, entries.map((e) => `${area}.setItem(${JSON.stringify(e.name)}, ${JSON.stringify(e.value)});`).join(" "));
 }
 
 const TO_MARKDOWN = String.raw`

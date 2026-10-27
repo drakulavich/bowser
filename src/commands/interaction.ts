@@ -5,18 +5,7 @@
 import { fillScript, type FillOutcome } from "../page-scripts.ts";
 import type { KeyModifier } from "../daemon/protocol.ts";
 import type { Ref } from "../state.ts";
-import {
-  liveSelector,
-  loadRef,
-  readStdin,
-  reply,
-  replyPage,
-  syncState,
-  withClient,
-  withPageClient,
-  type CommandContext,
-  type Command,
-} from "./context.ts";
+import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 // Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so
@@ -46,12 +35,7 @@ export async function cmdClick(ctx: CommandContext, ref: string): Promise<string
     await c.request("click", [await liveSelector(c, target, { enabled: true, doc, hit: true })]);
     const state = await c.request("state");
     await syncState(prev, state);
-    return replyPage(
-      ctx,
-      c,
-      { ok: true, ref, element: element(target), url: state.url },
-      `clicked ${ref} (${target.role} "${target.name}")`,
-    );
+    return replyPage(ctx, c, { ok: true, ref, element: element(target), url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
   });
 }
 
@@ -99,12 +83,7 @@ function readFillAnswer(found: unknown): { outcome: FillOutcome; type: string } 
 
 /** With `stdin`, the text comes from standard input so a secret never
  *  reaches argv. In every mode the text is never echoed back. */
-export async function cmdFill(
-  ctx: CommandContext,
-  ref: string,
-  text: string | undefined,
-  opts: { stdin?: boolean } = {},
-): Promise<string> {
+export async function cmdFill(ctx: CommandContext, ref: string, text: string | undefined, opts: { stdin?: boolean } = {}): Promise<string> {
   if (opts.stdin && text !== undefined) throw new UserError(`${FILL_USAGE} (not both)`);
   if (!opts.stdin && text === undefined) throw new UserError(FILL_USAGE);
   const value = opts.stdin ? withoutFinalNewline(await (ctx.readStdin ?? readStdin)()) : text!;
@@ -115,17 +94,11 @@ export async function cmdFill(
     await c.request("click", [selector]);
     const found = await withholdingText("fill", value, () => c.request("evaluate", [fillScript(selector, value)]));
     const { outcome, type } = readFillAnswer(found);
-    if (outcome === "disabled" || outcome === "readonly")
-      throw new UserError(`ref '${ref}' is not an editable element (${outcome})`);
+    if (outcome === "disabled" || outcome === "readonly") throw new UserError(`ref '${ref}' is not an editable element (${outcome})`);
     if (outcome === "nan") throw new UserError(`ref '${ref}' needs a number (input[type=number])`);
     if (outcome === "rejected") throw new UserError(`ref '${ref}' did not accept the value for input[type=${type}]`);
     if (outcome !== "set") await withholdingText("fill", value, () => c.request("type", [value]));
-    return replyPage(
-      ctx,
-      c,
-      { ok: true, ref, element: element(target) },
-      `filled ${ref} (${target.role} "${target.name}")`,
-    );
+    return replyPage(ctx, c, { ok: true, ref, element: element(target) }, `filled ${ref} (${target.role} "${target.name}")`);
   });
 }
 
@@ -177,9 +150,7 @@ function parseKey(input: string): { key: string; modifiers: KeyModifier[] } {
   for (const word of parts) {
     const m = MODIFIERS[word];
     if (!m) {
-      throw new UserError(
-        `usage: bowser press: unknown modifier '${word}' in '${input}'; use Shift, Control, Alt, Meta or ControlOrMeta`,
-      );
+      throw new UserError(`usage: bowser press: unknown modifier '${word}' in '${input}'; use Shift, Control, Alt, Meta or ControlOrMeta`);
     }
     if (modifiers.includes(m)) throw new UserError(`usage: bowser press: modifier '${word}' repeated in '${input}'`);
     modifiers.push(m);
@@ -233,8 +204,7 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   requireKind("check", ref, target);
   return withPageClient(ctx, async (c) => {
     const done = await c.request("uncheck", [await liveSelector(c, target, { enabled: true, doc })]);
-    if (done === false)
-      throw new UserError(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
+    if (done === false) throw new UserError(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
     return replyPage(ctx, c, { ok: true, ref, element: element(target) }, `unchecked ${ref}`);
   });
 }

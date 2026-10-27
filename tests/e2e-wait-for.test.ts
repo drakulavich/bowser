@@ -72,9 +72,7 @@ runOrSkip("e2e: wait-for (#114)", () => {
         () => undefined,
         (e: unknown) => e,
       );
-      const m = (err as Error | undefined)?.message.match(
-        /^wait-for: no text "Never" after (\d+)ms; the page is at (.*)$/,
-      );
+      const m = (err as Error | undefined)?.message.match(/^wait-for: no text "Never" after (\d+)ms; the page is at (.*)$/);
       expect(m?.[2]).toBe(at);
       expect(Number(m?.[1])).toBeGreaterThanOrEqual(1400);
       expect(Number(m?.[1])).toBeLessThan(2500);

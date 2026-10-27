@@ -115,9 +115,7 @@ export function toArgv(schema: CommandSchema, args: Record<string, unknown>): st
   const session = args.session;
   if (session !== undefined && session !== null) {
     if (typeof session !== "string" || session === "") {
-      throw new UserError(
-        `usage: argument 'session' of '${schema.name}' must be a non-empty string, got ${kindOf(session)}`,
-      );
+      throw new UserError(`usage: argument 'session' of '${schema.name}' must be a non-empty string, got ${kindOf(session)}`);
     }
     argv.push("--session", session);
   }
@@ -246,8 +244,7 @@ export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<obj
   switch (r.method) {
     case "initialize": {
       const requested = (r.params as { protocolVersion?: unknown } | undefined)?.protocolVersion;
-      const protocolVersion =
-        SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ?? SUPPORTED_PROTOCOL_VERSIONS[0];
+      const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ?? SUPPORTED_PROTOCOL_VERSIONS[0];
       return jsonRpcResult(r.id, {
         protocolVersion,
         capabilities: { tools: {} },
@@ -581,8 +578,7 @@ function startHandover(
       })();
       const timeout = Bun.sleep(HANDOVER_MS).then(() => "timeout" as const);
       const got = await Promise.race([answered, timeout]);
-      if (got !== true)
-        throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
+      if (got !== true) throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
     }
     forwarded = (async () => {
       for (let r = await out.next(); !r.done; r = await out.next()) {

@@ -74,16 +74,10 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
           );
         }
         if (path === "/one") {
-          return page(
-            "one",
-            `<button onclick="navigator.sendBeacon('/hit/A'); document.title = 'clicked-A'">Buy A</button>`,
-          );
+          return page("one", `<button onclick="navigator.sendBeacon('/hit/A'); document.title = 'clicked-A'">Buy A</button>`);
         }
         if (path === "/two") {
-          return page(
-            "two",
-            `<button onclick="navigator.sendBeacon('/hit/DELETE'); document.title = 'clicked-DELETE'">DELETE</button>`,
-          );
+          return page("two", `<button onclick="navigator.sendBeacon('/hit/DELETE'); document.title = 'clicked-DELETE'">DELETE</button>`);
         }
         return page(path.slice(1) || "root", `<p>${path}</p>`);
       },
@@ -122,13 +116,11 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
       signal(proc, "SIGCONT");
       signal(proc, "SIGKILL");
     }, deadlineMs);
-    const result = Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]).then(
-      ([out, err, code]) => {
-        clearTimeout(deadline);
-        live.delete(proc);
-        return { code, out: out.trim(), err: err.trim(), ms: Date.now() - t0 };
-      },
-    );
+    const result = Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]).then(([out, err, code]) => {
+      clearTimeout(deadline);
+      live.delete(proc);
+      return { code, out: out.trim(), err: err.trim(), ms: Date.now() - t0 };
+    });
     return { proc, result };
   }
 
@@ -164,19 +156,13 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
     for (let i = 0; i < 10; i++) {
       await ok(s, ["goto", `${base}/form`]);
       const snap = await ok(s, ["snapshot"]);
-      const fills = await Promise.all(
-        Object.entries(texts).map(([name, text]) => run(s, ["fill", refOf(snap, "textbox", name), text])),
-      );
+      const fills = await Promise.all(Object.entries(texts).map(([name, text]) => run(s, ["fill", refOf(snap, "textbox", name), text])));
       for (const f of fills) {
         expect(f.err).toBe("");
         expect(f.code).toBe(0);
         expect(f.out).toStartWith("filled ");
       }
-      expect(JSON.parse(await ok(s, ["eval", "JSON.stringify([n.value, p.value, e.value])"]))).toEqual([
-        texts.Name,
-        texts.Password,
-        texts.Email,
-      ]);
+      expect(JSON.parse(await ok(s, ["eval", "JSON.stringify([n.value, p.value, e.value])"]))).toEqual([texts.Name, texts.Password, texts.Email]);
       expect(await ok(s, ["snapshot"])).not.toContain(texts.Password);
     }
   }, 180_000);

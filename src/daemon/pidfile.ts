@@ -63,9 +63,7 @@ export function looksLikeBowser(command: string): boolean {
 /** Synchronous: `otherHolder` answers as a plain value. */
 export function isBowser(pid: number): boolean {
   try {
-    return looksLikeBowser(
-      Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)], { stderr: "ignore" }).stdout.toString(),
-    );
+    return looksLikeBowser(Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)], { stderr: "ignore" }).stdout.toString());
   } catch {
     return false;
   }
@@ -165,11 +163,7 @@ function tryClaim(pidFile: string): boolean {
  *  stale one has other content. A newcomer that finds the lock taken leaves
  *  the removal to its holder; its next claim attempt sees the outcome.
  *  Returns whether it removed the pidfile. */
-async function removeStale(
-  pidFile: string,
-  stale: string,
-  pause: (step: ClaimStep) => Promise<void>,
-): Promise<boolean> {
+async function removeStale(pidFile: string, stale: string, pause: (step: ClaimStep) => Promise<void>): Promise<boolean> {
   const lock = `${pidFile}.lock`;
   try {
     mkdirSync(lock);

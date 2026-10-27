@@ -109,9 +109,7 @@ runOrSkip("e2e: click and fill reach an element below the fold", () => {
     await cmdSnapshot(ctx);
     const button = await refNamed("Under");
     // In the viewport, under the 120 px header: the viewport test alone would not scroll.
-    const top = Number(
-      await cmdEval(ctx, "(window.scrollTo(0, 280), document.getElementById('under').getBoundingClientRect().top)"),
-    );
+    const top = Number(await cmdEval(ctx, "(window.scrollTo(0, 280), document.getElementById('under').getBoundingClientRect().top)"));
     expect(top).toBeGreaterThanOrEqual(0);
     expect(top).toBeLessThan(100);
     const t0 = performance.now();
@@ -131,11 +129,7 @@ runOrSkip("e2e: click and fill reach an element below the fold", () => {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [code, stdout, stderr] = await Promise.all([
-      p.exited,
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-    ]);
+    const [code, stdout, stderr] = await Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
     expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
     expect(stdout).toContain('["alert" dialog with message "scrolled"]: dismissed');
     expect(await cmdEval(ctx, "document.body.dataset.clicked")).toBe("yes");

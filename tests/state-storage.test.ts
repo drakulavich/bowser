@@ -176,9 +176,7 @@ describe("state-load", () => {
     const out = await cmdStateLoad({ ...ctx(), connect: async () => c }, file);
     expect(out).toBe(`loaded ${file} (1 origin(s))`);
     expect(ops(c)).toEqual(["state", "evaluate"]);
-    expect(stderr.mock.calls).toEqual([
-      ["2 cookies skipped (bowser has no cookie access on WebKit; use open --persistent)"],
-    ]);
+    expect(stderr.mock.calls).toEqual([["2 cookies skipped (bowser has no cookie access on WebKit; use open --persistent)"]]);
   });
 
   test("skips origins that do not match the current page and reports them", async () => {
@@ -221,9 +219,7 @@ describe("state-load", () => {
 
   test("errors clearly when the file is missing", async () => {
     const c = fakeClient({});
-    await expect(cmdStateLoad({ ...ctx(), connect: async () => c }, join(tmp, "does-not-exist.json"))).rejects.toThrow(
-      /file not found/,
-    );
+    await expect(cmdStateLoad({ ...ctx(), connect: async () => c }, join(tmp, "does-not-exist.json"))).rejects.toThrow(/file not found/);
   });
 });
 
@@ -236,11 +232,7 @@ describe("state-load checks the file's shape", () => {
     ["the top level is a string", "x", "storageState: expected object, got string"],
     ["cookies is a string", { cookies: "nope" }, "storageState.cookies: expected array, got string"],
     ["an origin is a number", { origins: [5] }, "storageState.origins[0]: expected object, got number"],
-    [
-      "an origin has no origin string",
-      { origins: [{ localStorage: [] }] },
-      "storageState.origins[0].origin: expected string, got undefined",
-    ],
+    ["an origin has no origin string", { origins: [{ localStorage: [] }] }, "storageState.origins[0].origin: expected string, got undefined"],
     [
       "localStorage is an object",
       { origins: [{ origin: "https://example.com", localStorage: {} }] },

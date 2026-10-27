@@ -356,13 +356,7 @@ function menuCommand(key: string, modifiers: KeyModifier[]): "selectAll" | "undo
  *  onNavigated waits for the response (measured, Bun 1.4.2: a link to a
  *  page served after 3 s showed nothing for 3 s; the navigate event fired
  *  6 ms after click() resolved). */
-function navigationWatch(
-  view: ViewLike,
-  timing: NavTiming,
-  onNavigation: () => void,
-  evaluate: (expr: string) => Promise<unknown>,
-  clock: Clock,
-) {
+function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => void, evaluate: (expr: string) => Promise<unknown>, clock: Clock) {
   // One watch per view: this takes over the view's navigation callbacks, so
   // wrapView must be called once per view (openBrowser does).
   // A failed navigation ends the wait but does not fail the action (reload's
@@ -538,8 +532,7 @@ function navigationWatch(
         const ended = arrived !== arrivedBefore || (landed !== landedBefore && !cancelled(failure));
         if (kind !== "navigates") await awaitNavigation(before, wasLoading);
         else if (!ended) await follow(Infinity);
-        if (kind !== "acts" && arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure))
-          throw failure;
+        if (kind !== "acts" && arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure)) throw failure;
         return result;
       } finally {
         phase = "idle";
@@ -560,9 +553,7 @@ function navigationWatch(
       while (landed - before < 2) await sleep(10);
       if (arrived !== arrivedBefore) return;
       if (failure && !cancelled(failure)) throw failure;
-      throw new Error(
-        `navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`,
-      );
+      throw new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
     },
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
@@ -697,8 +688,7 @@ export function wrapView(
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
-    click: (selector, timeoutMs) =>
-      guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
+    click: (selector, timeoutMs) => guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
     type: (text) => guard(nav.act(() => view.type(text))),
     press: (key, modifiers = []) =>
       guard(
@@ -721,8 +711,7 @@ export function wrapView(
         }),
       ),
     select: (selector, value) => guard(nav.act(async () => (await evaluate(selectScript(selector, value))) === true)),
-    setChecked: (selector, checked) =>
-      guard(nav.act(async () => (await evaluate(setCheckedScript(selector, checked))) !== false)),
+    setChecked: (selector, checked) => guard(nav.act(async () => (await evaluate(setCheckedScript(selector, checked))) !== false)),
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
       // takes no full-page option. Element-bounded screenshots are not supported.

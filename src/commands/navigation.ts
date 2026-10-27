@@ -6,28 +6,9 @@ import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
 import { claimSession, isAlive, isOurDaemon } from "../daemon/pidfile.ts";
-import {
-  ensureSessionDir,
-  isValidSessionName,
-  loadState,
-  profileDir,
-  saveState,
-  sessionDir,
-  sessionsRoot,
-  statePath,
-  type SessionState,
-} from "../state.ts";
+import { ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, statePath, type SessionState } from "../state.ts";
 import { claimRestartLock, LOCK, releaseRestartLock } from "./restart-lock.ts";
-import {
-  connector,
-  emptyState,
-  reply,
-  replyPage,
-  syncState,
-  withPageClient,
-  type CommandContext,
-  type Command,
-} from "./context.ts";
+import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
@@ -89,8 +70,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
     throw new UserError("usage: --profile needs a directory, e.g. --profile=./profile");
   }
   await ensureSessionDir(ctx.session);
-  const profile =
-    opts.profile !== undefined ? resolve(opts.profile) : opts.persistent ? profileDir(ctx.session) : undefined;
+  const profile = opts.profile !== undefined ? resolve(opts.profile) : opts.persistent ? profileDir(ctx.session) : undefined;
   // The directory is created only when a new daemon is spawned for it
   // (spawnDaemon), so a refused open (below) leaves nothing behind.
   return withPageClient(
@@ -101,9 +81,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
       // running may have another one, and navigating it would silently lose
       // the persistence asked for, so refuse before touching the page.
       if (profile && before.profile !== profile) {
-        throw new UserError(
-          `usage: session '${ctx.session}' is already open with a different profile; run 'bowser close' first`,
-        );
+        throw new UserError(`usage: session '${ctx.session}' is already open with a different profile; run 'bowser close' first`);
       }
       if (url) {
         const saved = await loadState(ctx.session);
@@ -176,11 +154,7 @@ export async function cmdHistory(ctx: CommandContext, which: "back" | "forward" 
   });
 }
 
-export async function cmdClose(
-  ctx: CommandContext,
-  opts: { name?: string; all?: boolean } = {},
-  proc: ProcessOps = realProcess,
-): Promise<string> {
+export async function cmdClose(ctx: CommandContext, opts: { name?: string; all?: boolean } = {}, proc: ProcessOps = realProcess): Promise<string> {
   if (opts.all) return closeAll(ctx, proc);
   return closeOne(ctx, opts.name ?? ctx.session, proc);
 }
@@ -294,12 +268,7 @@ export async function stopDaemon(
 
 /** Exported for tests, which supply their own `proc` to exercise the paths that
  *  decide whether to signal a pid. `cmdClose` is the command entry point. */
-export async function closeOne(
-  ctx: CommandContext,
-  session: string,
-  proc: ProcessOps = realProcess,
-  claim = claimSession,
-): Promise<string> {
+export async function closeOne(ctx: CommandContext, session: string, proc: ProcessOps = realProcess, claim = claimSession): Promise<string> {
   return (await closeSession(ctx, session, proc, claim)).text;
 }
 
@@ -320,12 +289,7 @@ async function closeSession(
   }
 }
 
-async function closeLocked(
-  ctx: CommandContext,
-  session: string,
-  proc: ProcessOps,
-  locked: boolean,
-): Promise<{ text: string; open: boolean }> {
+async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOps, locked: boolean): Promise<{ text: string; open: boolean }> {
   const files = [statePath(session), pidPath(session), socketPath(session)].some((p) => existsSync(p));
   const { pid, ended, answered } = await stopDaemon(ctx, session, proc);
   const open = files || answered;
@@ -408,10 +372,7 @@ async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> 
   );
   const closed = results.filter((r) => r.error === undefined && r.open).map((r) => r.name);
   const failed = results.filter((r) => r.error !== undefined).map((r) => `- ${r.name}: ${r.error}`);
-  const done =
-    closed.length > 0
-      ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}`
-      : "";
+  const done = closed.length > 0 ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}` : "";
   if (failed.length > 0) {
     const word = failed.length === 1 ? "session" : "sessions";
     throw new Error(`close --all: ${done ? `${done}; ` : ""}failed ${failed.length} ${word}:\n${failed.join("\n")}`);

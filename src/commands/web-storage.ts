@@ -3,13 +3,7 @@
 // session. Values are always strings — that's the Storage API surface, no
 // JSON encoding is implied.
 
-import {
-  storageClearScript,
-  storageDeleteScript,
-  storageGetScript,
-  storageListScript,
-  storageSetScript,
-} from "../page-scripts.ts";
+import { storageClearScript, storageDeleteScript, storageGetScript, storageListScript, storageSetScript } from "../page-scripts.ts";
 import { reply, withClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
@@ -24,12 +18,7 @@ async function storageList(ctx: CommandContext, area: "localStorage" | "sessionS
   });
 }
 
-async function storageGet(
-  ctx: CommandContext,
-  area: "localStorage" | "sessionStorage",
-  command: string,
-  key: string,
-): Promise<string> {
+async function storageGet(ctx: CommandContext, area: "localStorage" | "sessionStorage", command: string, key: string): Promise<string> {
   if (!key) throw new UserError(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     const val = (await c.request("evaluate", [storageGetScript(area, key)])) as string | null;
@@ -37,13 +26,7 @@ async function storageGet(
   });
 }
 
-async function storageSet(
-  ctx: CommandContext,
-  area: "localStorage" | "sessionStorage",
-  command: string,
-  key: string,
-  value: string,
-): Promise<string> {
+async function storageSet(ctx: CommandContext, area: "localStorage" | "sessionStorage", command: string, key: string, value: string): Promise<string> {
   if (!key) throw new UserError(`usage: bowser ${command} <key> <value>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [storageSetScript(area, key, value)]);
@@ -51,12 +34,7 @@ async function storageSet(
   });
 }
 
-async function storageDelete(
-  ctx: CommandContext,
-  area: "localStorage" | "sessionStorage",
-  command: string,
-  key: string,
-): Promise<string> {
+async function storageDelete(ctx: CommandContext, area: "localStorage" | "sessionStorage", command: string, key: string): Promise<string> {
   if (!key) throw new UserError(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
     await c.request("evaluate", [storageDeleteScript(area, key)]);
@@ -72,21 +50,15 @@ async function storageClear(ctx: CommandContext, area: "localStorage" | "session
 }
 
 export const cmdLocalStorageList = (ctx: CommandContext) => storageList(ctx, "localStorage");
-export const cmdLocalStorageGet = (ctx: CommandContext, key: string) =>
-  storageGet(ctx, "localStorage", "localstorage-get", key);
-export const cmdLocalStorageSet = (ctx: CommandContext, key: string, value: string) =>
-  storageSet(ctx, "localStorage", "localstorage-set", key, value);
-export const cmdLocalStorageDelete = (ctx: CommandContext, key: string) =>
-  storageDelete(ctx, "localStorage", "localstorage-delete", key);
+export const cmdLocalStorageGet = (ctx: CommandContext, key: string) => storageGet(ctx, "localStorage", "localstorage-get", key);
+export const cmdLocalStorageSet = (ctx: CommandContext, key: string, value: string) => storageSet(ctx, "localStorage", "localstorage-set", key, value);
+export const cmdLocalStorageDelete = (ctx: CommandContext, key: string) => storageDelete(ctx, "localStorage", "localstorage-delete", key);
 export const cmdLocalStorageClear = (ctx: CommandContext) => storageClear(ctx, "localStorage");
 
 export const cmdSessionStorageList = (ctx: CommandContext) => storageList(ctx, "sessionStorage");
-export const cmdSessionStorageGet = (ctx: CommandContext, key: string) =>
-  storageGet(ctx, "sessionStorage", "sessionstorage-get", key);
-export const cmdSessionStorageSet = (ctx: CommandContext, key: string, value: string) =>
-  storageSet(ctx, "sessionStorage", "sessionstorage-set", key, value);
-export const cmdSessionStorageDelete = (ctx: CommandContext, key: string) =>
-  storageDelete(ctx, "sessionStorage", "sessionstorage-delete", key);
+export const cmdSessionStorageGet = (ctx: CommandContext, key: string) => storageGet(ctx, "sessionStorage", "sessionstorage-get", key);
+export const cmdSessionStorageSet = (ctx: CommandContext, key: string, value: string) => storageSet(ctx, "sessionStorage", "sessionstorage-set", key, value);
+export const cmdSessionStorageDelete = (ctx: CommandContext, key: string) => storageDelete(ctx, "sessionStorage", "sessionstorage-delete", key);
 export const cmdSessionStorageClear = (ctx: CommandContext) => storageClear(ctx, "sessionStorage");
 
 export const COMMANDS: Command[] = [

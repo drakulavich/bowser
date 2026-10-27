@@ -233,9 +233,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
       // settles. An unreachable one is not a hang: JSC collects it and WebKit
       // rejects the evaluate "no longer reachable" (~6 s, measured).
       // `command` is what run() sets: the timeout names the command (F21).
-      const stuck = await timed(() =>
-        cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"),
-      );
+      const stuck = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
       expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
       expect(stuck.ms).toBeLessThan(budget + 1000);
 
@@ -331,14 +329,11 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     async () => {
       const ctx = await openWith("hangkilled", 0);
       const hits = neverHits;
-      const goto = Bun.spawn(
-        ["bun", join(import.meta.dir, "../src/cli.ts"), "goto", `${base}/never`, "-s", ctx.session],
-        {
-          env: { ...process.env, HOME: tmp },
-          stdout: "ignore",
-          stderr: "ignore",
-        },
-      );
+      const goto = Bun.spawn(["bun", join(import.meta.dir, "../src/cli.ts"), "goto", `${base}/never`, "-s", ctx.session], {
+        env: { ...process.env, HOME: tmp },
+        stdout: "ignore",
+        stderr: "ignore",
+      });
       expect(await waitFor(() => neverHits > hits, 10_000)).toBe(true);
       goto.kill("SIGKILL");
       await goto.exited;
@@ -403,9 +398,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const budget = 1000;
     const ctx = await openFresh("hangfresh", budget);
 
-    const stuck = await timed(() =>
-      cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"),
-    );
+    const stuck = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
     expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
 
     // Recovery runs a grace (the budget) after the timeout, and the stuck
@@ -446,16 +439,13 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
       process.env.BOWSER_OP_TIMEOUT_MS = "3000";
       const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
       expect(fill.ms).toBeLessThan(3500);
-      if (fill.error)
-        expect(fill.error).toBe(`page is still loading ${base}/never; retry later, or run 'bowser close'`);
+      if (fill.error) expect(fill.error).toBe(`page is still loading ${base}/never; retry later, or run 'bowser close'`);
       else expect(await cmdEval(ctx, "document.querySelector('[name=b]').value")).toBe("AFTER");
 
       // The daemon's budget is 30 s; the timeout names the command's own.
       // The page holds the resolver: JSC collects an unreachable promise and
       // WebKit then rejects the evaluate "no longer reachable" (#100).
-      const hung = await timed(() =>
-        cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"),
-      );
+      const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
       expect(hung.error).toBe("'eval' timed out after 3000ms (in its 'evaluate' step)");
 
       const close = await timed(() => cmdClose(ctx));

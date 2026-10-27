@@ -2,14 +2,7 @@
 // connection with its close, the empty session state, and ref lookup.
 
 import type { FlagSpec } from "../cli/parser.ts";
-import {
-  BrowserExited,
-  browserExited,
-  connectOrSpawn,
-  NoDaemon,
-  OlderDaemon,
-  type ConnectOptions,
-} from "../daemon/client.ts";
+import { BrowserExited, browserExited, connectOrSpawn, NoDaemon, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, statePath, type Ref, type SessionState } from "../state.ts";
@@ -62,14 +55,9 @@ export interface Command {
 
 /** All of standard input as UTF-8. A terminal is refused rather than read:
  *  reading it would block until the user typed an end-of-file. */
-export async function readStdin(
-  stdin: { isTTY?: boolean } = process.stdin,
-  read: () => Promise<string> = () => Bun.stdin.text(),
-): Promise<string> {
+export async function readStdin(stdin: { isTTY?: boolean } = process.stdin, read: () => Promise<string> = () => Bun.stdin.text()): Promise<string> {
   if (stdin.isTTY) {
-    throw new UserError(
-      "usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin",
-    );
+    throw new UserError("usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin");
   }
   return read();
 }
@@ -78,11 +66,7 @@ export function connector(ctx: CommandContext): (session: string, opts?: Connect
   return ctx.connect ?? connectOrSpawn;
 }
 
-export async function withClient<T>(
-  ctx: CommandContext,
-  fn: (c: DaemonConnection) => Promise<T>,
-  opts: ConnectOptions = {},
-): Promise<T> {
+export async function withClient<T>(ctx: CommandContext, fn: (c: DaemonConnection) => Promise<T>, opts: ConnectOptions = {}): Promise<T> {
   const connect = (o: ConnectOptions) => connector(ctx)(ctx.session, ctx.command ? { ...o, command: ctx.command } : o);
   let client: DaemonConnection;
   let read = true;
@@ -189,20 +173,14 @@ export function reply(ctx: CommandContext, json: Record<string, unknown>, text: 
 /** One answered dialog, as `["confirm" dialog with message "sure?"]: accepted`. */
 function dialogLine(d: DialogReport): string {
   // No hint for an alert: accepting and dismissing it are the same.
-  const what =
-    d.unanswered && d.type !== "alert" ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
+  const what = d.unanswered && d.type !== "alert" ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
   return `[${JSON.stringify(d.type)} dialog with message ${JSON.stringify(d.message)}]: ${what}`;
 }
 
 /** `reply` for a command that acts on the page: the dialogs the daemon
  *  answered while it ran follow the answer as playwright-cli's
  *  `### Modal state` (`dialogs` under --json, without `unanswered`). */
-export function replyPage(
-  ctx: CommandContext,
-  c: DaemonConnection,
-  json: Record<string, unknown>,
-  text: string,
-): string {
+export function replyPage(ctx: CommandContext, c: DaemonConnection, json: Record<string, unknown>, text: string): string {
   const modal = modalState(c);
   if (!modal) return reply(ctx, json, text);
   return reply(ctx, { ...json, dialogs: dialogsJson(c) }, `${text}\n${modal}`);
@@ -232,11 +210,7 @@ export function dialogsJson(c: DaemonConnection): Omit<DialogReport, "unanswered
 /** `withClient` for a command that prints the dialogs the daemon answered
  *  (through `replyPage` or `modalState`): only such a command takes them,
  *  so a report is never lost to one that would not print it. */
-export function withPageClient<T>(
-  ctx: CommandContext,
-  fn: (c: DaemonConnection) => Promise<T>,
-  opts: ConnectOptions = {},
-): Promise<T> {
+export function withPageClient<T>(ctx: CommandContext, fn: (c: DaemonConnection) => Promise<T>, opts: ConnectOptions = {}): Promise<T> {
   return withClient(
     ctx,
     async (c) => {

@@ -43,8 +43,7 @@ const sec = (ms: number) => (Number.isNaN(ms) ? "—" : `${Math.round(ms / 1000)
 const usd = (n: number) => (Number.isNaN(n) ? "—" : `$${n.toFixed(3)}`);
 
 const tools = TOOLS.filter((t) => rows.some((r) => r.tool === t));
-const versionOf = (tool: string) =>
-  [...new Set(rows.filter((r) => r.tool === tool).map((r) => r.toolVersion))].join(", ");
+const versionOf = (tool: string) => [...new Set(rows.filter((r) => r.tool === tool).map((r) => r.toolVersion))].join(", ");
 const one = (f: (r: Row) => string) => [...new Set(rows.map(f))].join(", ");
 
 type Cell = { pass: number; runs: number; tokens: number; bytes: number; ms: number; cost: number };

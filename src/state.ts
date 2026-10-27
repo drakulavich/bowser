@@ -84,9 +84,7 @@ export function maxSessionNameLength(): number {
 export function checkNewSessionName(name: string): void {
   const max = maxSessionNameLength();
   if (name.length > max) {
-    throw new UserError(
-      `usage: session name is too long for this HOME: at most ${max} characters under ${sessionsRoot()}, got ${name.length}`,
-    );
+    throw new UserError(`usage: session name is too long for this HOME: at most ${max} characters under ${sessionsRoot()}, got ${name.length}`);
   }
 }
 
@@ -98,9 +96,7 @@ export function checkNewSessionName(name: string): void {
  *  or `--daemon victim` would pass for the daemon of `victim`. */
 export function sessionDir(name: string): string {
   if (!isValidSessionName(name)) {
-    throw new UserError(
-      `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got ${JSON.stringify(name)}`,
-    );
+    throw new UserError(`usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got ${JSON.stringify(name)}`);
   }
   return join(sessionsRoot(), name);
 }
@@ -143,9 +139,7 @@ export function resolveRef(state: SessionState, ref: string): Ref {
   }
   const found = state.refs.find((r) => r.id === ref);
   if (!found) {
-    throw new UserError(
-      `ref '${ref}' not found in last snapshot of session '${state.name}'. ` + `Run 'bowser snapshot' to refresh.`,
-    );
+    throw new UserError(`ref '${ref}' not found in last snapshot of session '${state.name}'. ` + `Run 'bowser snapshot' to refresh.`);
   }
   return found;
 }

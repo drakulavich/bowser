@@ -75,8 +75,7 @@ const LISTS = `<!doctype html><title>lists</title><main>
 <ol reversed><li>a</li><li hidden>gone</li><li>b</li></ol>
 <ol><li value="10">ten</li><li>eleven</li></ol>
 </main>`;
-const ALT = (href: string) =>
-  `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
+const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
   const ctx: CommandContext = { session: "markdown", json: false };
@@ -126,11 +125,8 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/alt-shell.html") return html(ALT("/shell.md"));
         if (path === "/shell.md") return html("<!doctype html><div id=root>Loading</div>");
         if (path === "/alert.html")
-          return html(
-            "<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>",
-          );
-        if (path === "/page.md")
-          return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
+          return html("<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>");
+        if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
         return new Response("not found", { status: 404 });
       },
     });
@@ -181,13 +177,7 @@ runOrSkip("e2e: markdown", () => {
   test("emphasis keeps the spaces at its edges, a <br> in a cell keeps the row, and code fences outgrow the backticks inside", async () => {
     await cmdGoto(ctx, `${base}/edges.html`);
     expect(await cmdMarkdown(ctx)).toBe(
-      [
-        "## Heading ref",
-        "**bold** text and *it*alic",
-        "| A | B |\n| --- | --- |\n| a b | c |",
-        "``a`b``",
-        "````\nbefore\n```\nafter\n````",
-      ].join("\n\n"),
+      ["## Heading ref", "**bold** text and *it*alic", "| A | B |\n| --- | --- |\n| a b | c |", "``a`b``", "````\nbefore\n```\nafter\n````"].join("\n\n"),
     );
   }, 60_000);
 
@@ -225,13 +215,7 @@ runOrSkip("e2e: markdown", () => {
   test("a closed details in a key cell, hidden images and rules, a list as a row's value, and parentheses in URLs", async () => {
     await cmdGoto(ctx, `${base}/review.html`);
     expect(await cmdMarkdown(ctx)).toBe(
-      [
-        "Key more: v",
-        "List:",
-        "- A\n- B",
-        "Lines: one two",
-        `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`,
-      ].join("\n\n"),
+      ["Key more: v", "List:", "- A\n- B", "Lines: one two", `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`].join("\n\n"),
     );
   }, 60_000);
 
@@ -267,20 +251,13 @@ runOrSkip("e2e: markdown", () => {
 
   test("ET-46: a header row of th cells keeps a table with a block in a cell a table, and a block that is not printed does not count", async () => {
     await cmdGoto(ctx, `${base}/data.html`);
-    expect(await cmdMarkdown(ctx)).toBe(
-      [`| Name | Image |\n| --- | --- |\n| Burj | ![pic](${base}/b.png) |`, "| a | b |\n| --- | --- |"].join("\n\n"),
-    );
+    expect(await cmdMarkdown(ctx)).toBe([`| Name | Image |\n| --- | --- |\n| Burj | ![pic](${base}/b.png) |`, "| a | b |\n| --- | --- |"].join("\n\n"));
   }, 60_000);
 
   test("ET-47, ET-48: block content inside an inline wrapper is separated, and a block link keeps its URL", async () => {
     await cmdGoto(ctx, `${base}/glued.html`);
     expect(await cmdMarkdown(ctx)).toBe(
-      [
-        `[Bloodlines What is it?](${base}/g)`,
-        "1. If x, then\n   1. Let y.\n2. Return y.",
-        `[Issues (3.6k)](${base}/issues)`,
-        "**Warning**",
-      ].join("\n\n"),
+      [`[Bloodlines What is it?](${base}/g)`, "1. If x, then\n   1. Let y.\n2. Return y.", `[Issues (3.6k)](${base}/issues)`, "**Warning**"].join("\n\n"),
     );
   }, 60_000);
 
@@ -408,9 +385,7 @@ runOrSkip("e2e: markdown", () => {
     });
     await cmdGoto(ctx, `${base}/alert.html`);
     await Bun.sleep(600);
-    expect(await cmdMarkdown(ctx)).toBe(
-      'Alert page\n### Modal state\n- ["alert" dialog with message "hello"]: dismissed',
-    );
+    expect(await cmdMarkdown(ctx)).toBe('Alert page\n### Modal state\n- ["alert" dialog with message "hello"]: dismissed');
   }, 60_000);
 
   test("a ref converts only its element", async () => {
@@ -431,9 +406,7 @@ runOrSkip("e2e: markdown", () => {
     await cmdSnapshot(ctx);
     const ref = await refOfRole("article");
     await cmdGoto(ctx, `${base}/fixture.html`);
-    await expect(cmdMarkdown(ctx, ref)).rejects.toThrow(
-      `ref '${ref}' is from a page that is no longer loaded; take a new snapshot`,
-    );
+    await expect(cmdMarkdown(ctx, ref)).rejects.toThrow(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
   }, 60_000);
 });
 

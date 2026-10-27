@@ -109,8 +109,7 @@ export class DaemonClient implements DaemonConnection {
   request<O extends Op>(...params: RequestParams<O>): Promise<ResultOf<O>> {
     const [op, args = []] = params;
     if (!this.sock) throw new Error("client not connected");
-    if (this.closed)
-      return Promise.reject(this.notAnswering ? new DaemonNotAnswering(this.session) : new Error(this.closedMessage));
+    if (this.closed) return Promise.reject(this.notAnswering ? new DaemonNotAnswering(this.session) : new Error(this.closedMessage));
     const id = this.nextId++;
     const budget = opTimeoutMs();
     if (op !== "ping") this.start ??= Date.now();
@@ -126,9 +125,7 @@ export class DaemonClient implements DaemonConnection {
       }) + "\n";
     return new Promise((resolve, reject) => {
       // Cleared on every settle: a pending timer keeps the CLI alive after it printed.
-      const timer = timed
-        ? setTimeout(() => this.giveUp(), this.start! + budget + CLIENT_MARGIN_MS - Date.now())
-        : undefined;
+      const timer = timed ? setTimeout(() => this.giveUp(), this.start! + budget + CLIENT_MARGIN_MS - Date.now()) : undefined;
       this.pending.set(id, {
         resolve: (result) => {
           clearTimeout(timer);
@@ -227,9 +224,7 @@ async function otherVersion(session: string, answer: unknown, opts: ConnectOptio
   // long-running process (`bowser mcp`) meets its own new daemon here.
   const installed = await (opts.installedVersion ?? installedVersion)();
   if (installed === answer && installed !== pkg.version) {
-    return new UserError(
-      `this bowser (${pkg.version}) differs from the installed bowser (${installed}); restart the MCP server or re-run the command`,
-    );
+    return new UserError(`this bowser (${pkg.version}) differs from the installed bowser (${installed}); restart the MCP server or re-run the command`);
   }
   const semver = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer);
   const v = semver ? answer : "an older version";
@@ -251,12 +246,7 @@ async function installedVersion(): Promise<string | undefined> {
 
 /** The client, once its daemon has answered `ping` with `answer`; refused
  *  when the daemon is of another version, unless `opts.anyVersion`. */
-async function checked(
-  client: DaemonClient,
-  session: string,
-  answer: unknown,
-  opts: ConnectOptions,
-): Promise<DaemonClient> {
+async function checked(client: DaemonClient, session: string, answer: unknown, opts: ConnectOptions): Promise<DaemonClient> {
   if (opts.anyVersion || answer === pkg.version) return client;
   client.close();
   throw await otherVersion(session, answer, opts);
@@ -338,8 +328,7 @@ export async function connectOrSpawn(session: string, opts: ConnectOptions = {})
     // A daemon ran here (it left state.json) and none answers now: its
     // browser exited. Only `open` may start another; `close` never spawns.
     // A fresh session has no state.json and still spawns lazily.
-    if (!opts.reopen && (await Bun.file(statePath(session)).exists()))
-      throw new BrowserExited(await browserExited(session));
+    if (!opts.reopen && (await Bun.file(statePath(session)).exists())) throw new BrowserExited(await browserExited(session));
     // Before the spawn guards: a daemon under a name too long for this HOME
     // would die claiming its pidfile, seen only as "did not start in time" (F35).
     checkNewSessionName(session);
@@ -348,9 +337,7 @@ export async function connectOrSpawn(session: string, opts: ConnectOptions = {})
     // the "did not start in time" timeout below. Refuse with the real reason.
     if ((opts.platform ?? process.platform) !== "darwin") throw new UserError(REQUIRES_MACOS);
     // The Bun guard, for the same reason: the daemon would die unseen.
-    const bunError = unsupportedBun(
-      opts.runtime ?? { version: Bun.version, webView: typeof Bun.WebView === "function" },
-    );
+    const bunError = unsupportedBun(opts.runtime ?? { version: Bun.version, webView: typeof Bun.WebView === "function" });
     if (bunError) throw new UserError(bunError);
     await spawnDaemon(session, opts.profile, opts.daemonBudgetMs);
     // Poll until the socket is listening.
@@ -368,10 +355,7 @@ export async function connectOrSpawn(session: string, opts: ConnectOptions = {})
       }
       return checked(c, session, reply, opts);
     }
-    const log =
-      process.env.BOWSER_DAEMON_DEBUG === "1"
-        ? `; its output is in ${daemonLogPath(session)}`
-        : "; rerun with BOWSER_DAEMON_DEBUG=1 to see why";
+    const log = process.env.BOWSER_DAEMON_DEBUG === "1" ? `; its output is in ${daemonLogPath(session)}` : "; rerun with BOWSER_DAEMON_DEBUG=1 to see why";
     throw new Error(`daemon for session '${session}' did not start in time${log}`);
   }
   // Checked outside the try: its refusal must not fall into the spawn path.

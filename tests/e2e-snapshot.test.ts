@@ -239,9 +239,7 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   test("probe page: names, text merging, quoting and state attributes match playwright-cli", async () => {
     await cmdGoto(ctx, `${base}/probe.html`);
     const want = await golden("probe");
-    expect(tree(await cmdSnapshot(ctx))).toBe(
-      withDeviations(want, webkitLinkCursor(want, ["Home", 'Say "hi"', "inline link", "link"])),
-    );
+    expect(tree(await cmdSnapshot(ctx))).toBe(withDeviations(want, webkitLinkCursor(want, ["Home", 'Say "hi"', "inline link", "link"])));
   }, 60_000);
 
   test("inline text-only generics flatten like playwright-cli's; a pointer-events:none iframe gets no ref", async () => {
@@ -268,9 +266,7 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     await cmdGoto(ctx, `${base}/editable.html`);
     await cmdSnapshot(ctx);
     await cmdFill(ctx, await refNamed("Notes"), "hello editable");
-    expect(await cmdEval(ctx, "JSON.stringify(document.getElementById('notes').textContent)")).toContain(
-      '"hello editable"',
-    );
+    expect(await cmdEval(ctx, "JSON.stringify(document.getElementById('notes').textContent)")).toContain('"hello editable"');
   }, 60_000);
 
   // One page, several rules; the golden line that breaks names the rule:

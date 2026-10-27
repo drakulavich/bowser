@@ -58,31 +58,15 @@ runOrSkip("e2e: fill --stdin keeps a secret out of argv and output", () => {
   /** Run `bowser fill <ref> --stdin` as its own process and pipe `input` in
    *  after it has started, the way `op read … |` would. */
   const fillFromStdin = async (ref: string, input: string, json: boolean) => {
-    const cmd = [
-      process.execPath,
-      join(import.meta.dir, "../src/cli.ts"),
-      "-s",
-      ctx.session,
-      ...(json ? ["--json"] : []),
-      "fill",
-      ref,
-      "--stdin",
-    ];
+    const cmd = [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", ctx.session, ...(json ? ["--json"] : []), "fill", ref, "--stdin"];
     const proc = Bun.spawn({ cmd, env: process.env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     proc.stdin.write(input);
     proc.stdin.end();
-    const [code, stdout, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
+    const [code, stdout, stderr] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
     return { argv: cmd, code, stdout, stderr };
   };
 
-  const fieldValue = () =>
-    cmdEval({ ...ctx, json: true }, "document.querySelector('#pw').value").then(
-      (out) => (JSON.parse(out) as { result: string }).result,
-    );
+  const fieldValue = () => cmdEval({ ...ctx, json: true }, "document.querySelector('#pw').value").then((out) => (JSON.parse(out) as { result: string }).result);
 
   for (const json of [false, true]) {
     test(`a piped secret lands in the password field and nowhere in bowser's argv or ${json ? "--json" : "plain"} output`, async () => {
@@ -96,9 +80,7 @@ runOrSkip("e2e: fill --stdin keeps a secret out of argv and output", () => {
       expect(run.stderr).not.toContain(secret);
       expect(run.argv.join("\0")).not.toContain(secret);
       expect(run.stdout.trim()).toBe(
-        json
-          ? JSON.stringify({ ok: true, ref, element: { role: "textbox", name: "Password" } })
-          : `filled ${ref} (textbox "Password")`,
+        json ? JSON.stringify({ ok: true, ref, element: { role: "textbox", name: "Password" } }) : `filled ${ref} (textbox "Password")`,
       );
     }, 60_000);
   }

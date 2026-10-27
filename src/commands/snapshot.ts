@@ -6,18 +6,7 @@ import { markdownScript, READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.
 import { pngSize, type DaemonConnection } from "../daemon/protocol.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { loadState, saveState } from "../state.ts";
-import {
-  dialogsJson,
-  liveSelector,
-  loadRef,
-  modalState,
-  reply,
-  replyPage,
-  withClient,
-  withPageClient,
-  type CommandContext,
-  type Command,
-} from "./context.ts";
+import { dialogsJson, liveSelector, loadRef, modalState, reply, replyPage, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { opTimeoutMs } from "../budget.ts";
 import { UserError } from "../errors.ts";
 
@@ -25,10 +14,7 @@ function checkFilename(filename: string | undefined): void {
   if (filename !== undefined && !filename.trim()) throw new UserError("usage: --filename needs a file name");
 }
 
-export async function cmdSnapshot(
-  ctx: CommandContext,
-  opts: { filename?: string; depth?: string } = {},
-): Promise<string> {
+export async function cmdSnapshot(ctx: CommandContext, opts: { filename?: string; depth?: string } = {}): Promise<string> {
   checkFilename(opts.filename);
   // 0 (the default) means unlimited, as in playwright-cli.
   if (opts.depth !== undefined && !/^\d+$/.test(opts.depth)) {
@@ -60,9 +46,7 @@ export async function cmdSnapshot(
       await Bun.write(abs, renderPage(snap, depth, modalState(c)) + "\n");
       return reply(ctx, { ok: true, filename: abs, ...withDialogs }, `wrote ${abs}`);
     }
-    return ctx.json
-      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...withDialogs }, null, 2)
-      : renderPage(snap, depth, modalState(c));
+    return ctx.json ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...withDialogs }, null, 2) : renderPage(snap, depth, modalState(c));
   });
 }
 
@@ -71,11 +55,7 @@ export async function cmdSnapshot(
  *  session (ET-61, #154). */
 const ALTERNATE_MS = 5000;
 
-export async function cmdMarkdown(
-  ctx: CommandContext,
-  ref?: string,
-  opts: { filename?: string } = {},
-): Promise<string> {
+export async function cmdMarkdown(ctx: CommandContext, ref?: string, opts: { filename?: string } = {}): Promise<string> {
   checkFilename(opts.filename);
   const saved = ref === undefined ? undefined : await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
@@ -165,16 +145,12 @@ function parseScale(raw: string): number {
   return n;
 }
 
-export async function cmdScreenshot(
-  ctx: CommandContext,
-  opts: { filename?: string; scale?: string } = {},
-): Promise<string> {
+export async function cmdScreenshot(ctx: CommandContext, opts: { filename?: string; scale?: string } = {}): Promise<string> {
   checkFilename(opts.filename);
   const scale = opts.scale === undefined ? undefined : parseScale(opts.scale);
   // The viewport only, as playwright-cli without --full-page. The default name auto-increments so repeated screenshots
   // don't clobber each other; an explicit --filename writes exactly there.
-  const filename =
-    opts.filename ?? (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
+  const filename = opts.filename ?? (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
   // Resolve against the CLI's cwd and let the daemon write the file. The daemon
   // runs with a different cwd, and its PNG payload (~140 KB base64) must not be
   // shipped back over the socket — so we hand it an absolute target path.
@@ -187,9 +163,7 @@ export async function cmdScreenshot(
       throw (await tooLargeToCapture(c)) ?? err;
     }
     if (typeof res === "object" && "dpr" in res) {
-      throw new UserError(
-        `screenshot: --scale=${scale} needs a display at pixel ratio ${scale} or more; this one is ${res.dpr}`,
-      );
+      throw new UserError(`screenshot: --scale=${scale} needs a display at pixel ratio ${scale} or more; this one is ${res.dpr}`);
     }
     const [width, height] = pngSize(new Uint8Array(await Bun.file(abs).slice(0, 24).arrayBuffer()));
     // The absolute path, for the same reason as snapshot --filename.
@@ -219,8 +193,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "markdown",
-    summary:
-      "Print the page, or one ref's element, as Markdown to read it: far smaller than a snapshot, and without refs",
+    summary: "Print the page, or one ref's element, as Markdown to read it: far smaller than a snapshot, and without refs",
     positional: [{ name: "ref", required: false }],
     flags: [{ name: "filename", kind: "string" }],
     run: (ctx, a) => cmdMarkdown(ctx, a.positional[0], { filename: str(a.flags, "filename") }),

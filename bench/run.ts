@@ -28,14 +28,11 @@ const reps = Number(args.reps);
 if (!tasks.length || !tools.length || !(reps > 0)) throw new Error("nothing to run: check --task, --tool and --reps");
 
 type Run = { task: Task; tool: Tool; rep: number };
-const plan = (tool: Tool): Run[] =>
-  tasks.flatMap((task) => Array.from({ length: reps }, (_, i) => ({ task, tool, rep: i + 1 })));
+const plan = (tool: Tool): Run[] => tasks.flatMap((task) => Array.from({ length: reps }, (_, i) => ({ task, tool, rep: i + 1 })));
 
 if (args["dry-run"]) {
   for (const tool of tools) for (const r of plan(tool)) console.log(`${r.tool}\t${r.task.id}\t${r.rep}`);
-  console.log(
-    `${tools.length * tasks.length * reps} planned runs: ${tasks.length} tasks × ${tools.length} tools × ${reps} reps`,
-  );
+  console.log(`${tools.length * tasks.length * reps} planned runs: ${tasks.length} tasks × ${tools.length} tools × ${reps} reps`);
   process.exit(0);
 }
 
@@ -59,8 +56,7 @@ async function toolVersion(tool: Tool): Promise<string> {
   return `${version}+${await sh(["git", "rev-parse", "--short", "HEAD"], ROOT)}`;
 }
 
-const close = (tool: Tool, session: string): string[] =>
-  tool === "bowser" ? ["bowser", "close", session] : ["playwright-cli", `-s=${session}`, "close"];
+const close = (tool: Tool, session: string): string[] => (tool === "bowser" ? ["bowser", "close", session] : ["playwright-cli", `-s=${session}`, "close"]);
 const list: Record<Tool, string[]> = { bowser: ["bowser", "list"], "playwright-cli": ["playwright-cli", "list"] };
 
 const userSkills = [join(homedir(), ".claude/skills"), join(homedir(), ".agents/skills")].flatMap((d) => {
@@ -136,11 +132,7 @@ async function runOne({ task, tool, rep }: Run, skill: string, version: string):
   });
   const init = stream.find((m) => m.type === "system" && m.subtype === "init");
   const result = stream.find((m) => m.type === "result");
-  const leak = !init
-    ? "no init message"
-    : skillFailed(stream)
-      ? "skill failed to load"
-      : isolation(init, tool, userSkills);
+  const leak = !init ? "no init message" : skillFailed(stream) ? "skill failed to load" : isolation(init, tool, userSkills);
   const verdict = timedOut
     ? { pass: false, failReason: "timeout" }
     : leak
@@ -170,9 +162,7 @@ async function runOne({ task, tool, rep }: Run, skill: string, version: string):
     ...streamCounts(stream),
   };
   appendFileSync(resultsFile, `${JSON.stringify(row)}\n`);
-  console.log(
-    `${tool}\t${task.id}\t${rep}\t${row.pass ? "pass" : `FAIL ${row.failReason}`}\t${Math.round(row.durationMs / 1000)} s`,
-  );
+  console.log(`${tool}\t${task.id}\t${rep}\t${row.pass ? "pass" : `FAIL ${row.failReason}`}\t${Math.round(row.durationMs / 1000)} s`);
 }
 
 // One run at a time per tool, the tools side by side: at most two browsers open.
@@ -180,14 +170,12 @@ await Promise.all(
   tools.map(async (tool) => {
     const [skill, version] = [await skillDir(tool), await toolVersion(tool)];
     const open = await sh(list[tool]);
-    if (open && open !== "(no browsers)")
-      throw new Error(`${tool} has sessions open; close them before the benchmark:\n${open}`);
+    if (open && open !== "(no browsers)") throw new Error(`${tool} has sessions open; close them before the benchmark:\n${open}`);
     for (const r of plan(tool)) await runOne(r, skill, version);
   }),
 );
 for (const tool of tools) {
   const open = await sh(list[tool]);
-  if (open && open !== "(no browsers)")
-    console.log(`${tool} still has sessions open, not closed by the runner:\n${open}`);
+  if (open && open !== "(no browsers)") console.log(`${tool} still has sessions open, not closed by the runner:\n${open}`);
 }
 console.log(`results: ${resultsFile}`);

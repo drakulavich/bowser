@@ -39,10 +39,7 @@ function page(tree: Array<AriaNode | string>, over: Partial<SnapshotResult> = {}
   return { url: "http://localhost:49731/x.html", title: "X", tree, refs: [], doc: "doc-x", ...over };
 }
 
-async function snapshot(
-  snap: SnapshotResult,
-  opts: { depth?: string; filename?: string; json?: boolean } = {},
-): Promise<string> {
+async function snapshot(snap: SnapshotResult, opts: { depth?: string; filename?: string; json?: boolean } = {}): Promise<string> {
   const c = fakeClient({ evaluate: () => snap });
   const ctx: CommandContext = {
     session: "snap-" + Math.random().toString(36).slice(2, 8),
@@ -75,21 +72,9 @@ const todoTree: AriaNode = n(
     "list",
     "Todo list",
     { ref: "e6" },
-    n(
-      "listitem",
-      "",
-      { ref: "e14" },
-      n("checkbox", "Toggle buy milk", { checked: true, ref: "e15" }),
-      n("generic", "", { ref: "e16" }, "buy milk"),
-    ),
+    n("listitem", "", { ref: "e14" }, n("checkbox", "Toggle buy milk", { checked: true, ref: "e15" }), n("generic", "", { ref: "e16" }, "buy milk")),
   ),
-  n(
-    "generic",
-    "",
-    { ref: "e8" },
-    n("generic", "", { ref: "e9" }, "0 items left"),
-    n("button", "Clear completed", { ref: "e10", cursor: true }),
-  ),
+  n("generic", "", { ref: "e8" }, n("generic", "", { ref: "e9" }, "0 items left"), n("button", "Clear completed", { ref: "e10", cursor: true })),
 );
 
 // pw-todo-app-toggled.txt minus its `- Console:` line and trailing newline.
@@ -237,44 +222,23 @@ describe("snapshot key", () => {
   });
 
   test("checked: true and pressed: true print bare [checked] / [pressed]", async () => {
-    const tree = treeOf(
-      await snapshot(
-        page([
-          n("radio", "Radio A", { checked: true, ref: "e20" }),
-          n("button", "Pressed", { pressed: true, ref: "e17" }),
-        ]),
-      ),
-    );
+    const tree = treeOf(await snapshot(page([n("radio", "Radio A", { checked: true, ref: "e20" }), n("button", "Pressed", { pressed: true, ref: "e17" })])));
     expect(tree).toBe('- radio "Radio A" [checked] [ref=e20]\n- button "Pressed" [pressed] [ref=e17]');
   });
 
   test("omits an empty name and JSON-encodes a non-empty one", async () => {
-    const tree = treeOf(
-      await snapshot(
-        page([n("paragraph"), n("link", 'Say "hi"', { ref: "e4", props: { url: "#x" } }), n("button", "back\\slash")]),
-      ),
-    );
-    expect(tree).toBe(
-      ["- paragraph", '- link "Say \\"hi\\"" [ref=e4]:', '  - /url: "#x"', '- button "back\\\\slash"'].join("\n"),
-    );
+    const tree = treeOf(await snapshot(page([n("paragraph"), n("link", 'Say "hi"', { ref: "e4", props: { url: "#x" } }), n("button", "back\\slash")])));
+    expect(tree).toBe(["- paragraph", '- link "Say \\"hi\\"" [ref=e4]:', '  - /url: "#x"', '- button "back\\\\slash"'].join("\n"));
   });
 
   test("single-quotes a key that needs YAML quoting, doubling inner single quotes", async () => {
     const tree = treeOf(
       await snapshot(
-        page([
-          n("heading", "Sub: title", { level: 2, ref: "e6" }),
-          n("button", "Key: value", { ref: "e15" }, "x"),
-          n("heading", "It's: here", { level: 3 }),
-        ]),
+        page([n("heading", "Sub: title", { level: 2, ref: "e6" }), n("button", "Key: value", { ref: "e15" }, "x"), n("heading", "It's: here", { level: 3 })]),
       ),
     );
     expect(tree).toBe(
-      [
-        "- 'heading \"Sub: title\" [level=2] [ref=e6]'",
-        "- 'button \"Key: value\" [ref=e15]': x",
-        "- 'heading \"It''s: here\" [level=3]'",
-      ].join("\n"),
+      ["- 'heading \"Sub: title\" [level=2] [ref=e6]'", "- 'button \"Key: value\" [ref=e15]': x", "- 'heading \"It''s: here\" [level=3]'"].join("\n"),
     );
   });
 });
@@ -321,14 +285,7 @@ describe("snapshot line shapes", () => {
         page([
           n("paragraph"),
           n("paragraph", "", { ref: "e10" }, "1280x720"),
-          n(
-            "paragraph",
-            "",
-            { ref: "e8" },
-            "Hello bold world",
-            n("link", "inline link", { ref: "e9", cursor: true, props: { url: "/in" } }),
-            "tail.",
-          ),
+          n("paragraph", "", { ref: "e8" }, "Hello bold world", n("link", "inline link", { ref: "e9", cursor: true, props: { url: "/in" } }), "tail."),
           n("textbox", "Search", { props: { url: "/u", placeholder: "Type" } }),
           "top-level text",
         ]),
@@ -352,9 +309,7 @@ describe("snapshot line shapes", () => {
   });
 
   test("a node with props and one text child is block form, not inline", async () => {
-    const tree = treeOf(
-      await snapshot(page([n("textbox", "Name", { ref: "e5", props: { placeholder: "Your name" } }, "Ann")])),
-    );
+    const tree = treeOf(await snapshot(page([n("textbox", "Name", { ref: "e5", props: { placeholder: "Your name" } }, "Ann")])));
     expect(tree).toBe('- textbox "Name" [ref=e5]:\n  - /placeholder: Your name\n  - text: Ann');
   });
 });

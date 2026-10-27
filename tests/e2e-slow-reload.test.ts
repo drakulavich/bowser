@@ -77,9 +77,7 @@ runOrSkip("e2e: navigation over a slow load (#116)", () => {
     await cmdHistory(ctx, "reload");
     expect(Date.now() - t0).toBeGreaterThanOrEqual(SLOW_MS - 100);
     expect(await cmdEval(ctx, "performance.getEntriesByType('navigation')[0].type")).toBe("reload");
-    await expect(cmdClick(ctx, ref)).rejects.toThrow(
-      `ref '${ref}' is from a page that is no longer loaded; take a new snapshot`,
-    );
+    await expect(cmdClick(ctx, ref)).rejects.toThrow(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
   }, 60_000);
 
   test("goto while a page script's navigation is still loading lands", async () => {

@@ -46,10 +46,11 @@ runOrSkip("e2e: a daemon-spawning command exits (F7)", () => {
   test(
     "`open` on a new session prints its answer and exits",
     async () => {
-      const proc = Bun.spawn(
-        [process.execPath, CLI, `-s=${session}`, "open", "data:text/html,<title>spawn</title><h1>x</h1>"],
-        { env: { ...process.env }, stdout: "pipe", stderr: "pipe" },
-      );
+      const proc = Bun.spawn([process.execPath, CLI, `-s=${session}`, "open", "data:text/html,<title>spawn</title><h1>x</h1>"], {
+        env: { ...process.env },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const started = Date.now();
       const timer = setTimeout(() => proc.kill("SIGKILL"), BOUND_MS);
       const code = await proc.exited;

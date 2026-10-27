@@ -115,13 +115,9 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     server = Bun.serve({
       port: 0,
       fetch: (req) =>
-        new Response(
-          { "/backdrop": BACKDROP, "/swap": SWAP, "/smooth": SMOOTH, "/late": LATE }[new URL(req.url).pathname] ??
-            HITTABLE,
-          {
-            headers: { "content-type": "text/html; charset=utf-8" },
-          },
-        ),
+        new Response({ "/backdrop": BACKDROP, "/swap": SWAP, "/smooth": SMOOTH, "/late": LATE }[new URL(req.url).pathname] ?? HITTABLE, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
     });
     base = server.url.toString().replace(/\/$/, "");
   });
@@ -168,9 +164,7 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     t0 = performance.now();
     const fill = await failure(cmdFill(ctx, input, "milk"));
     expect(performance.now() - t0).toBeLessThan(1000);
-    expect(fill.message).toBe(
-      `ref '${input}' (textbox "Search") is covered by generic <div> at its click point; take a new snapshot or close what covers it`,
-    );
+    expect(fill.message).toBe(`ref '${input}' (textbox "Search") is covered by generic <div> at its click point; take a new snapshot or close what covers it`);
 
     expect(await cmdEval(ctx, "String(document.body.dataset.clicked)")).toBe("undefined");
     expect(await cmdEval(ctx, "document.querySelector('input').value")).toBe("");
@@ -185,9 +179,7 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     const add = await refNamed("Add");
     await cmdClick(ctx, add);
     const second = await failure(cmdClick(ctx, add));
-    expect(second.message).toBe(
-      `ref '${add}' (button "Add") is covered by button "+" at its click point; take a new snapshot or close what covers it`,
-    );
+    expect(second.message).toBe(`ref '${add}' (button "Add") is covered by button "+" at its click point; take a new snapshot or close what covers it`);
     expect(reportFailure(second).code).toBe(1);
     await Bun.sleep(1000);
     expect(await cmdEval(ctx, "JSON.stringify([window.adds, window.plus])")).toBe("[1,0]");
@@ -197,12 +189,7 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     await cmdOpen(ctx, `${base}/smooth`);
     await cmdSnapshot(ctx);
     const button = await refNamed("Under");
-    const top = Number(
-      await cmdEval(
-        ctx,
-        "(scrollTo({ top: 280, behavior: 'instant' }), document.getElementById('under').getBoundingClientRect().top)",
-      ),
-    );
+    const top = Number(await cmdEval(ctx, "(scrollTo({ top: 280, behavior: 'instant' }), document.getElementById('under').getBoundingClientRect().top)"));
     expect(top).toBeGreaterThanOrEqual(0);
     expect(top).toBeLessThan(100);
     await cmdClick(ctx, button);
@@ -224,9 +211,7 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     expect(performance.now() - t0).toBeLessThan(4000);
     // Bun's click was still waiting for the target to be actionable, which
     // the daemon cannot tell from a click it already fired (#115).
-    expect(err.message).toBe(
-      "'click' timed out after 3000ms; the click may have been delivered, check the page before retrying",
-    );
+    expect(err.message).toBe("'click' timed out after 3000ms; the click may have been delivered, check the page before retrying");
     expect(reportFailure(err).code).toBe(2);
     expect(await cmdEval(ctx, "String(document.body.dataset.clicked) + ' ' + window.covered")).toBe("undefined true");
   }, 30_000);

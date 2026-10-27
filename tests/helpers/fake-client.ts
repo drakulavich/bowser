@@ -66,8 +66,7 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
         }
         return b64 as never;
       }
-      const fn = (handlers[op] ?? (op === "resolve" ? handlers.evaluate : undefined) ?? defaults[op]) as
-        ((...a: unknown[]) => unknown) | undefined;
+      const fn = (handlers[op] ?? (op === "resolve" ? handlers.evaluate : undefined) ?? defaults[op]) as ((...a: unknown[]) => unknown) | undefined;
       return (fn ? await fn(...args) : undefined) as never;
     },
     dialogs: () => (c.reporting ? [...(opts.dialogs ?? [])] : []),

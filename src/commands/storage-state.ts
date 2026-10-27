@@ -92,9 +92,7 @@ export async function cmdStateSave(ctx: CommandContext, file: string): Promise<s
     // No origin, no localStorage to read: WebKit refuses the read on
     // about:blank ("The operation is insecure"), and playwright-cli writes an
     // empty file there (F33).
-    const entries = origin
-      ? ((await c.request("evaluate", [storageListScript("localStorage")])) as Record<string, string> | null)
-      : null;
+    const entries = origin ? ((await c.request("evaluate", [storageListScript("localStorage")])) as Record<string, string> | null) : null;
     const local = entries ?? {};
     const origins: StorageStateOrigin[] = [];
     if (origin && Object.keys(local).length > 0) {
@@ -149,9 +147,7 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
     }
     const text =
       `loaded ${target} (${originsRestored} origin(s)` +
-      (originsSkipped
-        ? `, ${originsSkipped} skipped — navigate to each origin then load again to restore its localStorage`
-        : "") +
+      (originsSkipped ? `, ${originsSkipped} skipped — navigate to each origin then load again to restore its localStorage` : "") +
       ")";
     return reply(ctx, { ok: true, file: target, cookiesSkipped, originsRestored, originsSkipped }, text);
   });

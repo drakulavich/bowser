@@ -23,11 +23,7 @@ export type Answer = (req: Request) => unknown;
 function reply(s: LineSocket, id: number, result: unknown): void {
   if (result === SILENT) return;
   const failed = typeof result === "object" && result !== null && (result as { ok?: unknown }).ok === false;
-  const res: DaemonResponse = failed
-    ? { id, ...(result as { ok: false; error: string }) }
-    : result === undefined
-      ? { id, ok: true }
-      : { id, ok: true, result };
+  const res: DaemonResponse = failed ? { id, ...(result as { ok: false; error: string }) } : result === undefined ? { id, ok: true } : { id, ok: true, result };
   s.write(JSON.stringify(res) + "\n");
 }
 

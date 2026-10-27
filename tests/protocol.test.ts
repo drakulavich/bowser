@@ -11,9 +11,7 @@ async function typeChecks(): Promise<void> {
   const version: string = await c.request("ping");
   const st: { url: string; title: string } = await c.request("state", []);
   // Results are typed without casts.
-  const shot: { path: string; fontsLoading?: true } | { dpr: number } | string = await c.request("screenshot", [
-    "/tmp/x.png",
-  ]);
+  const shot: { path: string; fontsLoading?: true } | { dpr: number } | string = await c.request("screenshot", ["/tmp/x.png"]);
   const r: unknown = await c.request("evaluate", ["1"]);
   void [version, st, shot, r];
 

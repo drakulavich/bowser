@@ -34,9 +34,7 @@ describe("nextAvailablePath", () => {
     expect(await nextAvailablePath("shot.png", async (p) => taken.has(p))).toBe("shot-3.png");
   });
   test("inserts the suffix before the extension", async () => {
-    expect(await nextAvailablePath("a/b/screenshot-x.png", async (p) => p === "a/b/screenshot-x.png")).toBe(
-      "a/b/screenshot-x-1.png",
-    );
+    expect(await nextAvailablePath("a/b/screenshot-x.png", async (p) => p === "a/b/screenshot-x.png")).toBe("a/b/screenshot-x-1.png");
   });
   test("handles a name with no extension", async () => {
     expect(await nextAvailablePath("shot", async (p) => p === "shot")).toBe("shot-1");

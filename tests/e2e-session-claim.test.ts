@@ -106,10 +106,7 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
     await cmdOpen(ctx, url, { persistent: true });
     await cmdEval(ctx, "(localStorage.setItem('pre', '1'), 1)");
     // WebKit commits localStorage ~500 ms after a write; a kill before that loses it (#87).
-    expect(
-      await waitFor(() => storedOnDisk(profileDir(s), "pre")),
-      `localStorage key 'pre' never reached ${profileDir(s)} on disk`,
-    ).toBe(true);
+    expect(await waitFor(() => storedOnDisk(profileDir(s), "pre")), `localStorage key 'pre' never reached ${profileDir(s)} on disk`).toBe(true);
     const pid = Number((await Bun.file(pidPath(s)).text()).trim());
     process.kill(pid, "SIGKILL");
     expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
@@ -120,9 +117,7 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
         () => undefined,
         (e: unknown) => e,
       );
-      expect((err as Error)?.message).toBe(
-        `session '${s}' is not open (its browser exited); run 'bowser open --persistent'`,
-      );
+      expect((err as Error)?.message).toBe(`session '${s}' is not open (its browser exited); run 'bowser open --persistent'`);
       expect(reportFailure(err).code).toBe(1);
     }
     expect(await daemonPids(s)).toEqual([]);
@@ -186,8 +181,7 @@ runOrSkip("e2e: daemon session claim (F29)", () => {
     spawned.push(p);
     return p;
   };
-  const exitedWithin = (p: ReturnType<typeof Bun.spawn>, ms: number) =>
-    Promise.race([p.exited, Bun.sleep(ms).then(() => "running" as const)]);
+  const exitedWithin = (p: ReturnType<typeof Bun.spawn>, ms: number) => Promise.race([p.exited, Bun.sleep(ms).then(() => "running" as const)]);
 
   test("a daemon starting on a session a live daemon of ours holds exits, leaving its socket and pidfile", async () => {
     const session = await fresh("held");

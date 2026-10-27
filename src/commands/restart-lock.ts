@@ -18,9 +18,7 @@ const msgPath = (session: string) => join(sessionDir(session), MSG);
 
 export function beingRestarted(session: string): UserError {
   const lock = lockPath(session);
-  return new UserError(
-    `session '${session}' is being restarted by pid ${readTrimmed(lock)} (${lock}); retry in a moment`,
-  );
+  return new UserError(`session '${session}' is being restarted by pid ${readTrimmed(lock)} (${lock}); retry in a moment`);
 }
 
 /** Claims the session's lock, waiting while a live bowser process holds it, up to the op

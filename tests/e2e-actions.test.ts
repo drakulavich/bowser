@@ -112,22 +112,10 @@ runOrSkip("e2e: actions on WebKit", () => {
   describe("#168: a bare named key fires its keydown", () => {
     test("with the key's own keyCode, which React's TodoMVC tests for Enter", async () => {
       await cmdClick(ctx, await ref("A"));
-      await js(
-        "(window.codes = [], document.addEventListener('keydown', (e) => codes.push(e.key + ':' + e.keyCode + ':' + e.which)), 0)",
-      );
-      for (const key of ["Enter", "Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab"])
-        await cmdPress(ctx, key);
+      await js("(window.codes = [], document.addEventListener('keydown', (e) => codes.push(e.key + ':' + e.keyCode + ':' + e.which)), 0)");
+      for (const key of ["Enter", "Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab"]) await cmdPress(ctx, key);
       expect(await js("window.codes")).toBe(
-        JSON.stringify([
-          "Enter:13:13",
-          "Backspace:8:8",
-          "Delete:46:46",
-          "ArrowLeft:37:37",
-          "ArrowRight:39:39",
-          "ArrowUp:38:38",
-          "ArrowDown:40:40",
-          "Tab:9:9",
-        ]),
+        JSON.stringify(["Enter:13:13", "Backspace:8:8", "Delete:46:46", "ArrowLeft:37:37", "ArrowRight:39:39", "ArrowUp:38:38", "ArrowDown:40:40", "Tab:9:9"]),
       );
       expect(await log()).toBe(
         JSON.stringify([
@@ -162,9 +150,7 @@ runOrSkip("e2e: actions on WebKit", () => {
         `(() => { const el = document.getElementById(${JSON.stringify(id)}); el.value = "hello world"; el.focus(); el.setSelectionRange(3, 3); return 1; })()`,
       );
     const where = () =>
-      js(
-        "[document.activeElement.id, document.activeElement.selectionStart, document.activeElement.selectionEnd, document.activeElement.value]",
-      );
+      js("[document.activeElement.id, document.activeElement.selectionStart, document.activeElement.selectionEnd, document.activeElement.value]");
 
     test("Shift+Tab moves focus back to the previous field", async () => {
       await cmdClick(ctx, await ref("B"));
@@ -307,20 +293,14 @@ runOrSkip("e2e: actions on WebKit", () => {
   describe("F20: uncheck on a radio", () => {
     test("a checked radio: exit 1, it stays checked", async () => {
       const e = await ref("Large");
-      await refused(
-        cmdUncheck(ctx, e),
-        `ref '${e}' is a radio button; select another option in its group to uncheck it`,
-      );
+      await refused(cmdUncheck(ctx, e), `ref '${e}' is a radio button; select another option in its group to uncheck it`);
       expect(await js("[large.checked, small.checked]")).toBe("[true,false]");
       expect(await log()).toBe("[]");
     });
 
     test("a checked role=radio: exit 1, no handler ran", async () => {
       const e = await ref("AriaRadio");
-      await refused(
-        cmdUncheck(ctx, e),
-        `ref '${e}' is a radio button; select another option in its group to uncheck it`,
-      );
+      await refused(cmdUncheck(ctx, e), `ref '${e}' is a radio button; select another option in its group to uncheck it`);
       expect(await log()).toBe("[]");
     });
 

@@ -6,14 +6,7 @@ import { withTimeout } from "../serialize.ts";
 import { loadState, saveState } from "../state.ts";
 import { connector, type CommandContext } from "./context.ts";
 import { cmdOpen, stopDaemon } from "./navigation.ts";
-import {
-  beingRestarted,
-  claimRestartLock,
-  otherHolder,
-  releaseRestartLock,
-  removeNotice,
-  writeNotice,
-} from "./restart-lock.ts";
+import { beingRestarted, claimRestartLock, otherHolder, releaseRestartLock, removeNotice, writeNotice } from "./restart-lock.ts";
 import { UserError } from "../errors.ts";
 
 /** Whether this command restarted the session. False when it waited for
@@ -81,10 +74,7 @@ export async function restartSession(ctx: CommandContext, err: OlderDaemon | Bro
 /** The page the old daemon shows and its budget, or undefined when it does not
  *  answer within the health ping: `state` waits behind a busy daemon's op, at
  *  budget 0 for ever (ET-33, ET-30). */
-async function oldDaemonState(
-  ctx: CommandContext,
-  session: string,
-): Promise<{ url: string; budgetMs?: number } | undefined> {
+async function oldDaemonState(ctx: CommandContext, session: string): Promise<{ url: string; budgetMs?: number } | undefined> {
   let c;
   try {
     c = await connector(ctx)(session, { spawn: false, anyVersion: true });

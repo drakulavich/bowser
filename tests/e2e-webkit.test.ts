@@ -13,17 +13,7 @@ import { join } from "node:path";
 
 import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
-import {
-  cmdCheck,
-  cmdClick,
-  cmdFill,
-  cmdHover,
-  cmdPress,
-  cmdResize,
-  cmdSelect,
-  cmdType,
-  cmdUncheck,
-} from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -304,9 +294,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
       () => null,
       (e: Error) => e,
     );
-    expect(err?.message).toBe(
-      "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return",
-    );
+    expect(err?.message).toBe("run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return");
     expect(reportFailure(err).code).toBe(1);
   }, 60_000);
 

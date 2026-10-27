@@ -99,9 +99,7 @@ describe("every statement of the Bun floor names engines.bun", () => {
   for (const file of FLOOR_FILES) {
     test(file, () => {
       const text = readFileSync(join(ROOT, file), "utf8");
-      const stated = [...text.matchAll(/Bun\s*(?:≥|>=)\s*([\d.]+)|bun-version:\s*"?>=\s*([\d.]+)/g)].map((m) =>
-        (m[1] ?? m[2]!).replace(/\.$/, ""),
-      );
+      const stated = [...text.matchAll(/Bun\s*(?:≥|>=)\s*([\d.]+)|bun-version:\s*"?>=\s*([\d.]+)/g)].map((m) => (m[1] ?? m[2]!).replace(/\.$/, ""));
       expect(stated.length).toBeGreaterThan(0);
       expect(stated.filter((v) => v !== floor)).toEqual([]);
     });

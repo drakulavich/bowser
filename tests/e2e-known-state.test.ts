@@ -103,11 +103,7 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
     });
     live.add(proc);
     const deadline = setTimeout(() => proc.kill("SIGKILL"), deadlineMs);
-    const [out, err, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     clearTimeout(deadline);
     live.delete(proc);
     return { code, out: out.trim(), err: err.trim(), ms: Date.now() - t0 };
@@ -276,14 +272,9 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
     const add = refOf(await ok(s, ["snapshot"], 3000), "button", "Add");
 
     const click = await run(s, ["click", add], budget);
-    expect([click.code, click.err]).toEqual([
-      2,
-      `bowser: 'click' timed out after ${budget}ms; the click was delivered, check the page before retrying`,
-    ]);
+    expect([click.code, click.err]).toEqual([2, `bowser: 'click' timed out after ${budget}ms; the click was delivered, check the page before retrying`]);
     await Bun.sleep(2500); // past the recovery grace
-    expect(await settledEval(s, "performance.getEntriesByType('navigation')[0].type + ' ' + window.added")).toBe(
-      "navigate 1",
-    );
+    expect(await settledEval(s, "performance.getEntriesByType('navigation')[0].type + ' ' + window.added")).toBe("navigate 1");
 
     await closesFast(s);
   }, 60_000);

@@ -43,8 +43,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     return s;
   };
 
-  const html = (body: string) =>
-    new Response(`<!doctype html>${body}`, { headers: { "content-type": "text/html; charset=utf-8" } });
+  const html = (body: string) => new Response(`<!doctype html>${body}`, { headers: { "content-type": "text/html; charset=utf-8" } });
 
   /** A copy of this package that reports `version`: an older or newer bowser. */
   async function copyAt(name: string, version: string): Promise<string> {
@@ -62,11 +61,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [out, err, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     return { code, out: out.trim(), err: err.trim() };
   }
 
@@ -76,8 +71,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     return r.out;
   }
 
-  const notice = (s: string, was: string, rest: string) =>
-    `bowser: session '${s}' restarted for bowser ${pkg.version} (was ${was}): ${rest}`;
+  const notice = (s: string, was: string, rest: string) => `bowser: session '${s}' restarted for bowser ${pkg.version} (was ${was}): ${rest}`;
 
   beforeAll(async () => {
     tmp = await mkdtemp(join(tmpdir(), "bowser-upgrade-"));
@@ -118,11 +112,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     expect(r.code).toBe(0);
     expect(r.out).toBe("/moved");
     expect(r.err).toBe(
-      notice(
-        s,
-        "0.0.1",
-        `page reloaded at ${base}/moved; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
-      ),
+      notice(s, "0.0.1", `page reloaded at ${base}/moved; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`),
     );
   });
 
@@ -134,11 +124,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain('button "Add"');
     expect(r.err).toBe(
-      notice(
-        s,
-        "0.0.1",
-        `page reloaded at ${base}/cart; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
-      ),
+      notice(s, "0.0.1", `page reloaded at ${base}/cart; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`),
     );
     expect(await daemonPids(s)).toHaveLength(1);
   }, 60_000);
@@ -246,11 +232,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       const next = await run(CLI, s, ["eval", "1"]);
       expect(next.code).toBe(0);
       expect(next.err).toBe(
-        notice(
-          s,
-          "0.0.1",
-          `page reload at ${base}/slow was interrupted; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
-        ),
+        notice(s, "0.0.1", `page reload at ${base}/slow was interrupted; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`),
       );
       const after = await run(CLI, s, ["eval", "1"]);
       expect(after).toEqual({ code: 0, out: "1", err: "" });
@@ -267,11 +249,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     const [ev, cl] = await Promise.all([run(CLI, s, ["eval", "1"]), run(CLI, s, ["close"])]);
     expect(cl.code).toBe(0);
     if (ev.code !== 0) {
-      expect(ev.err).toMatch(
-        new RegExp(
-          `was closed while this command waited to restart it|daemon for session '${s}' closed the connection`,
-        ),
-      );
+      expect(ev.err).toMatch(new RegExp(`was closed while this command waited to restart it|daemon for session '${s}' closed the connection`));
     }
     expect(await daemonPids(s)).toHaveLength(0);
     expect((await run(CLI, s, ["list"])).out).not.toContain(s);

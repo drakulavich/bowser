@@ -39,14 +39,7 @@ import {
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
 import { claimSession } from "./pidfile.ts";
-import {
-  AWAIT_FONTS,
-  dialogAnswerScript,
-  dialogSyncScript,
-  READ_VIEWPORT,
-  waitForScript,
-  withDialogShim,
-} from "../page-scripts.ts";
+import { AWAIT_FONTS, dialogAnswerScript, dialogSyncScript, READ_VIEWPORT, waitForScript, withDialogShim } from "../page-scripts.ts";
 
 /** What the daemon knows that the page cannot be asked for. `url` and `title`
  *  are deliberately NOT here: they are read live from the page on every
@@ -162,10 +155,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     return;
   }
   const total = req.budgetTotalMs;
-  const budget =
-    total !== undefined && (lane.timeoutMs <= 0 || total < lane.timeoutMs)
-      ? total
-      : lane.timeoutMs || Math.max(req.budgetMs ?? 0, 0);
+  const budget = total !== undefined && (lane.timeoutMs <= 0 || total < lane.timeoutMs) ? total : lane.timeoutMs || Math.max(req.budgetMs ?? 0, 0);
   if (req.budgetMs !== undefined && req.budgetMs <= 0) {
     lane.reply({ id: req.id, ok: false, error: timeoutMessage(req, budget) });
     return;
@@ -199,10 +189,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     // serializer, so the next client gets its "waiting for" hint (F9).
     leaveGate?.();
   };
-  const ms =
-    req.budgetMs !== undefined && (lane.timeoutMs <= 0 || req.budgetMs < lane.timeoutMs)
-      ? req.budgetMs
-      : lane.timeoutMs;
+  const ms = req.budgetMs !== undefined && (lane.timeoutMs <= 0 || req.budgetMs < lane.timeoutMs) ? req.budgetMs : lane.timeoutMs;
   const deadline = ms > 0 ? Date.now() + ms - REPLY_MARGIN_MS : undefined;
   const expire = (): void => {
     const timedOut = timeoutMessage(req, budget, running ? lane.phase?.() : undefined);
@@ -336,10 +323,7 @@ function timeoutMessage(req: DaemonRequest, ms: number, phase?: ActPhase): strin
 // the daemon owns, so createHandler() answers them with closures instead.
 // `waitFor` needs the request's deadline and the handler's clock.
 type Handlers = {
-  [O in Exclude<Op, "state" | "dialog-answer" | "waitFor">]: (
-    browser: Browser,
-    ...args: ArgsOf<O>
-  ) => Promise<ResultOf<O>>;
+  [O in Exclude<Op, "state" | "dialog-answer" | "waitFor">]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
 };
 
 const handlers: Handlers = {
@@ -460,10 +444,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     }
     // A ref resolved before the pending navigation lands would be acted on
     // in the next document (#105).
-    const res =
-      ACTS.has(req.op) || req.op === "resolve" || req.op === "waitFor"
-        ? await afterPendingNavigation(req, deadline)
-        : await runShimmed(req);
+    const res = ACTS.has(req.op) || req.op === "resolve" || req.op === "waitFor" ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
     const dialogs = claim(req);
     return dialogs ? { ...res, dialogs } : res;
   };
@@ -491,8 +472,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     const url = await browser.navigationDestination(Math.max(0, deadline - clock.now()));
     while (browser.navigationPending) {
       const left = deadline - clock.now();
-      if (left <= 0)
-        return { id: req.id, ok: false, error: `page is still loading ${url}; retry later, or run 'bowser close'` };
+      if (left <= 0) return { id: req.id, ok: false, error: `page is still loading ${url}; retry later, or run 'bowser close'` };
       await new Promise<void>((r) => {
         clock.setTimeout(r, Math.min(10, left));
       });
@@ -572,9 +552,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     // Bun's click otherwise waits 30 s for a covered target, past the
     // recovery reload, which leaves the session stuck (#112).
     const res = await run(
-      req.op === "click" && deadline !== Infinity
-        ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - clock.now())] }
-        : req,
+      req.op === "click" && deadline !== Infinity ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - clock.now())] } : req,
     );
     await sync();
     return res;
@@ -624,12 +602,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
   function take(log: unknown): void {
     if (!Array.isArray(log)) return;
     for (const d of log) {
-      if (
-        !DIALOG_TYPES.has(d?.type) ||
-        typeof d.message !== "string" ||
-        (d.state !== "accepted" && d.state !== "dismissed")
-      )
-        continue;
+      if (!DIALOG_TYPES.has(d?.type) || typeof d.message !== "string" || (d.state !== "accepted" && d.state !== "dismissed")) continue;
       // In the shim's key order, which --json prints.
       const report: DialogReport = {
         type: d.type,
@@ -713,10 +686,7 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
             try {
               req = JSON.parse(line) as DaemonRequest;
             } catch (err) {
-              socketWriteAll(
-                socket as unknown as WritableSocket,
-                JSON.stringify({ id: -1, ok: false, error: "invalid JSON: " + String(err) }) + "\n",
-              );
+              socketWriteAll(socket as unknown as WritableSocket, JSON.stringify({ id: -1, ok: false, error: "invalid JSON: " + String(err) }) + "\n");
               return;
             }
             dispatch(req, {

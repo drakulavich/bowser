@@ -59,11 +59,7 @@ const ESCAPES: Record<string, string> = {
 
 function quoteValue(s: string): string {
   if (!needsQuotes(s)) return s;
-  return (
-    '"' +
-    s.replace(/[\\"\x00-\x1f\x7f-\x9f]/g, (c) => ESCAPES[c] ?? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")) +
-    '"'
-  );
+  return '"' + s.replace(/[\\"\x00-\x1f\x7f-\x9f]/g, (c) => ESCAPES[c] ?? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")) + '"';
 }
 
 function quoteKey(s: string): string {

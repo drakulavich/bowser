@@ -437,14 +437,12 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
 });
 
 const fast = { graceMs: 40, settleMs: 300 };
-const onClock = (v: ViewLike, timing: NavTiming, clock: Clock) =>
-  wrapView(v, timing, undefined, undefined, undefined, clock);
+const onClock = (v: ViewLike, timing: NavTiming, clock: Clock) => wrapView(v, timing, undefined, undefined, undefined, clock);
 // For "at once" checks: any wait for a landing costs at least graceMs.
 const slow = { graceMs: 1_000, settleMs: 2_000 };
 
 /** The calls an action made, without the watch's own page reads. */
-const own = (calls: Calls): Calls =>
-  calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
+const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
 
 /** A view whose page reports, as WebKit's Navigation API does, that a
  *  cross-document navigation began: `page.navs` is what NAV_COUNT reads.
@@ -521,9 +519,7 @@ describe("wrapView navigation watch", () => {
       const v = fakeView();
       const clock = manualClock();
       await clock.fulfilledAt(onClock(v, fast, clock).press(key, [...mods]));
-      const seen = v.calls.filter(
-        ([op, args]) => op === "press" || (op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT),
-      );
+      const seen = v.calls.filter(([op, args]) => op === "press" || (op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT));
       expect(seen).toEqual([
         ["evaluate", [keyWatchScript(key)]],
         ["press", [key, { modifiers: [...mods] }]],
@@ -539,9 +535,7 @@ describe("wrapView navigation watch", () => {
     await clock.fulfilledAt(b.press("a", ["Control"]));
     await clock.fulfilledAt(b.press("a", ["Shift", "Meta"]));
     await clock.fulfilledAt(b.press("c", ["Meta"]));
-    expect(v.calls.filter(([op, args]) => op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT)).toEqual(
-      [],
-    );
+    expect(v.calls.filter(([op, args]) => op === "evaluate" && args[0] !== NAV_ARM && args[0] !== NAV_COUNT)).toEqual([]);
   });
 
   test("press Tab still goes through the watch", async () => {
@@ -1105,9 +1099,7 @@ describe("navigate over a navigation still loading", () => {
       () => undefined,
       (e: Error) => e,
     );
-    expect(err?.message).toBe(
-      "navigate: the navigation to https://x/next was cancelled by another navigation; run 'bowser snapshot' to see where the page is",
-    );
+    expect(err?.message).toBe("navigate: the navigation to https://x/next was cancelled by another navigation; run 'bowser snapshot' to see where the page is");
   });
 
   test("any other failure is reported at once", async () => {
@@ -1351,10 +1343,7 @@ describe("a navigation a previous command left pending", () => {
         clock.setTimeout(() => v.land(v.url), 5);
       };
       await send({ id: 1, op: "click", args: ["#send"] });
-      const res = await send(
-        { id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] },
-        30,
-      );
+      const res = await send({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, 30);
       expect(res.error).toBeUndefined();
     });
   }
