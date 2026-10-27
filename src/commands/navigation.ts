@@ -12,7 +12,6 @@ import {
 import { claimRestartLock, LOCK, releaseRestartLock } from "./restart-lock.ts";
 import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
-import { opTimeoutMs } from "../budget.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
  *  state op reads the page's location.href (realUrl), which stays about:blank
@@ -131,12 +130,11 @@ export async function cmdWaitFor(ctx: CommandContext, opts: { url?: string; text
   if (!value) throw new UserError(WAIT_FOR_USAGE);
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   const started = Date.now();
-  const budget = opTimeoutMs();
   return withPageClient(ctx, async (c) => {
     const { met, url, title } = await c.request("waitFor", [kind, value]);
     if (!met) {
       const what = kind === "url" ? `URL containing '${value}'` : `text ${JSON.stringify(value)}`;
-      throw new Error(`wait-for: no ${what} after ${budget > 0 ? budget : Date.now() - started}ms; the page is at ${url}`);
+      throw new Error(`wait-for: no ${what} after ${Date.now() - started}ms; the page is at ${url}`);
     }
     await syncState(prev, { url, title });
     return replyPage(ctx, c, { ok: true, url }, url);

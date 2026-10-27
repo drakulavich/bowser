@@ -397,6 +397,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
   // Requests that overran their budget: their late replies reach nobody, so
   // they must not take reports.
   const abandoned = new WeakSet<DaemonRequest>();
+  let cancelled = false;
   const claim = (req: DaemonRequest): DialogReport[] | undefined => {
     // Only a command that prints dialogs takes the reports (never an urgent
     // reply, such as the ping every connect sends); the rest leave them queued.
@@ -407,7 +408,10 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
   };
   const handle = async (req: DaemonRequest, deadline?: number): Promise<DaemonResponse> => {
     // An urgent op runs beside a timed-out one; clearing it would let that op still act.
-    if (!IS_URGENT.has(req.op)) browser.resetActionCancellation?.();
+    if (!IS_URGENT.has(req.op)) {
+      browser.resetActionCancellation?.();
+      cancelled = false;
+    }
     // A ref resolved before the pending navigation lands would be acted on
     // in the next document (#105).
     const res = ACTS.has(req.op) || req.op === "resolve" || req.op === "waitFor" ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
@@ -419,7 +423,10 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
   // native action took them just before the action wedged. The timeout
   // reply carries them, since the late reply will reach nobody.
   return Object.assign(handle, {
-    cancelAction: () => browser.cancelAction?.(),
+    cancelAction: () => {
+      cancelled = true;
+      browser.cancelAction?.();
+    },
     timedOut: (req: DaemonRequest) => {
       const dialogs = claim(req);
       abandoned.add(req);
@@ -529,7 +536,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
       } catch {
         // The document is being replaced: not yet.
       }
+      if (cancelled) return { id: req.id, ok: false, error: "wait-for: cancelled" };
       if (met || clock.now() >= deadline) {
+        await sync();
         return { id: req.id, ok: true, result: { met, url: await browser.realUrl(), title: await browser.realTitle() } };
       }
       await new Promise<void>((r) => { clock.setTimeout(r, Math.min(WAIT_POLL_MS, deadline - clock.now())); });

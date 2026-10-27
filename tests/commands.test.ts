@@ -2506,18 +2506,13 @@ describe("wait-for (#114)", () => {
     expect(c.calls).toEqual([]);
   });
 
-  test("a check that never held says what was awaited and where the page is", async () => {
-    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
-    process.env.BOWSER_OP_TIMEOUT_MS = "1500";
-    try {
-      const c = fakeClient({ waitFor: () => ({ met: false, url: "https://x/home", title: "Home" }) });
-      const err = await cmdWaitFor({ ...ctx(), connect: async () => c }, { text: `it's "done"` }).then(() => undefined, (e: unknown) => e);
-      expect(err).not.toBeInstanceOf(UserError);
-      expect((err as Error).message).toBe(`wait-for: no text "it's \\"done\\"" after 1500ms; the page is at https://x/home`);
-    } finally {
-      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
-      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
-    }
+  test("a check that never held says what was awaited, how long it waited and where the page is", async () => {
+    const c = fakeClient({ waitFor: async () => { await Bun.sleep(200); return { met: false, url: "https://x/home", title: "Home" }; } });
+    const err = await cmdWaitFor({ ...ctx(), connect: async () => c }, { text: `it's "done"` }).then(() => undefined, (e: unknown) => e);
+    expect(err).not.toBeInstanceOf(UserError);
+    const m = (err as Error).message.match(/^wait-for: no text "it's \\"done\\"" after (\d+)ms; the page is at https:\/\/x\/home$/);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(200);
+    expect(Number(m?.[1])).toBeLessThan(10_000);
   });
 
   test("a check that held prints the URL and saves the page to the session state", async () => {

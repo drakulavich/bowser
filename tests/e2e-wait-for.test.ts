@@ -64,7 +64,10 @@ runOrSkip("e2e: wait-for (#114)", () => {
     try {
       const t0 = performance.now();
       const err = await cmdWaitFor(ctx, { text: "Never" }).then(() => undefined, (e: unknown) => e);
-      expect((err as Error | undefined)?.message).toBe(`wait-for: no text "Never" after 1500ms; the page is at ${at}`);
+      const m = (err as Error | undefined)?.message.match(/^wait-for: no text "Never" after (\d+)ms; the page is at (.*)$/);
+      expect(m?.[2]).toBe(at);
+      expect(Number(m?.[1])).toBeGreaterThanOrEqual(1400);
+      expect(Number(m?.[1])).toBeLessThan(2500);
       expect(performance.now() - t0).toBeLessThan(2500);
     } finally {
       delete process.env.BOWSER_OP_TIMEOUT_MS;

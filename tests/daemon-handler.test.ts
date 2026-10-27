@@ -1719,7 +1719,31 @@ describe("the waitFor op", () => {
     const p = createHandler(b, {}, clock)(WAIT(), 10_000);
     expect(await clock.fulfilledAt(p)).toBe(200);
     expect(await p).toEqual({ id: 1, ok: true, result: { met: true, url: "https://x/moved", title: "X" } });
-    expect(evaluates(b)).toBe(3);
+    // Three checks and the dialog log.
+    expect(evaluates(b)).toBe(4);
+  });
+
+  test("with no deadline, a cancelled wait stops at its next read and sends no more", async () => {
+    const clock = manualClock();
+    const b = reads([false]);
+    const h = createHandler(b, {}, clock);
+    const p = h(WAIT());
+    clock.setTimeout(() => h.cancelAction(), 250);
+    expect(await clock.fulfilledAt(p)).toBe(300);
+    expect(await p).toEqual({ id: 1, ok: false, error: "wait-for: cancelled" });
+    expect(evaluates(b)).toBe(4);
+  });
+
+  test("a dialog the page answered during the wait is reported with the result", async () => {
+    const clock = manualClock();
+    const log = JSON.stringify([{ type: "confirm", message: "sure?", state: "accepted" }]);
+    const b = reads([true], { evaluate: async (expr: string) => (expr.includes("log.splice") ? log : true) });
+    const p = createHandler(b, {}, clock)({ ...WAIT(), report: true }, 10_000);
+    await clock.fulfilledAt(p);
+    expect(await p).toEqual({
+      id: 1, ok: true, result: { met: true, url: "https://x/moved", title: "X" },
+      dialogs: [{ type: "confirm", message: "sure?", state: "accepted" }],
+    });
   });
 
   test("a check that never holds answers not met by the deadline", async () => {
@@ -1757,7 +1781,7 @@ describe("the waitFor op", () => {
     const events: string[] = [];
     let pending = true;
     clock.setTimeout(() => { pending = false; events.push("landed"); }, 300);
-    const b = reads([true], { evaluate: async () => { events.push("read"); return true; } });
+    const b = reads([true], { evaluate: async (expr: string) => { if (!expr.includes("log.splice")) events.push("read"); return true; } });
     // A getter, not a value: fakeBrowser's spread would copy a value once.
     Object.defineProperty(b, "navigationPending", { get: () => pending });
     await clock.fulfilledAt(createHandler(b, {}, clock)(WAIT(), 10_000));
