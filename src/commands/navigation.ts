@@ -1,12 +1,13 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
+import { existsSync } from "node:fs";
 import { readFile, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
 import { claimSession, isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
-  ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, type SessionState,
+  ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, statePath, type SessionState,
 } from "../state.ts";
 import { claimRestartLock, LOCK, releaseRestartLock } from "./restart-lock.ts";
 import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
@@ -192,8 +193,9 @@ export async function stopDaemon(
   ctx: CommandContext,
   session: string,
   proc: ProcessOps = realProcess,
-): Promise<{ pid: number | null; ended: boolean }> {
+): Promise<{ pid: number | null; ended: boolean; answered: boolean }> {
   const pid = await readPid(session);
+  let answered = false;
 
   // Ask the daemon to stop, whatever its version: an upgrade can leave an
   // older one running (F2). Failing to connect is not yet an error: the daemon
@@ -203,6 +205,7 @@ export async function stopDaemon(
     const client = await connector(ctx)(session, { spawn: false, anyVersion: true });
     try {
       await client.request("shutdown");
+      answered = true;
     } finally {
       client.close();
     }
@@ -244,7 +247,7 @@ export async function stopDaemon(
     }
   }
 
-  return { pid, ended };
+  return { pid, ended, answered };
 }
 
 /** Exported for tests, which supply their own `proc` to exercise the paths that
@@ -255,6 +258,17 @@ export async function closeOne(
   proc: ProcessOps = realProcess,
   claim = claimSession,
 ): Promise<string> {
+  return (await closeSession(ctx, session, proc, claim)).text;
+}
+
+/** `open` is false for a session with no state, pid, socket or daemon: a
+ *  name never opened, or a directory a refused start left (ET-28). */
+async function closeSession(
+  ctx: CommandContext,
+  session: string,
+  proc: ProcessOps = realProcess,
+  claim = claimSession,
+): Promise<{ text: string; open: boolean }> {
   // An upgrade restart holds the lock from its stop to its open (ET-32).
   const locked = await claimRestartLock(session, claim);
   try {
@@ -264,8 +278,10 @@ export async function closeOne(
   }
 }
 
-async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOps, locked: boolean): Promise<string> {
-  const { pid, ended } = await stopDaemon(ctx, session, proc);
+async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOps, locked: boolean): Promise<{ text: string; open: boolean }> {
+  const files = [statePath(session), pidPath(session), socketPath(session)].some((p) => existsSync(p));
+  const { pid, ended, answered } = await stopDaemon(ctx, session, proc);
+  const open = files || answered;
 
   // A concurrent `open` can start a replacement daemon while the steps above
   // are waiting. Removing the directory then deletes the newcomer's socket and
@@ -296,10 +312,11 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
     await rm(dir, { recursive: true, force: true });
   }
 
+  if (!open) return { open, text: reply(ctx, { ok: true, session, ended, open }, `session '${session}' is not open`) };
   const text = ended
     ? `closed session '${session}' (ended unreachable daemon ${pid})`
     : `closed session '${session}'`;
-  return reply(ctx, { ok: true, session, ended }, text);
+  return { open, text: reply(ctx, { ok: true, session, ended, open }, text) };
 }
 
 /** A directory under the sessions root whose name predates the naming rule,
@@ -307,8 +324,9 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
  *  path cannot escape it. Its daemon cannot be reached (`socketPath` refuses the
  *  name too) or identified from `ps` (the name may hold spaces), so it is never
  *  signalled: a live recorded pid leaves the directory for a person. */
-async function closeLegacy(name: string): Promise<void> {
+async function closeLegacy(name: string): Promise<boolean> {
   const dir = join(sessionsRoot(), name);
+  const open = ["state.json", "pid", "sock"].some((f) => existsSync(join(dir, f)));
   const pid = await readPidFile(join(dir, "pid"));
   if (pid !== null && realProcess.alive(pid)) {
     throw new Error(`close: pid ${pid} recorded for legacy session ${JSON.stringify(name)} is running`);
@@ -320,6 +338,7 @@ async function closeLegacy(name: string): Promise<void> {
     throw new Error(`close: legacy session ${JSON.stringify(name)} has no pidfile but still has a socket`);
   }
   await rm(dir, { recursive: true, force: true });
+  return open;
 }
 
 /** Close every session, trying each whatever the others do. A session it
@@ -336,13 +355,13 @@ async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> 
   }
   const results = await Promise.all(names.map(async (name) => {
     try {
-      await (isValidSessionName(name) ? closeOne(ctx, name, proc) : closeLegacy(name));
-      return { name, error: undefined };
+      const open = isValidSessionName(name) ? (await closeSession(ctx, name, proc)).open : await closeLegacy(name);
+      return { name, open, error: undefined };
     } catch (err) {
-      return { name, error: err instanceof Error ? err.message : String(err) };
+      return { name, open: true, error: err instanceof Error ? err.message : String(err) };
     }
   }));
-  const closed = results.filter((r) => r.error === undefined).map((r) => r.name);
+  const closed = results.filter((r) => r.error === undefined && r.open).map((r) => r.name);
   const failed = results.filter((r) => r.error !== undefined).map((r) => `- ${r.name}: ${r.error}`);
   const done = closed.length > 0
     ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}`
