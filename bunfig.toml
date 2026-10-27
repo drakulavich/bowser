@@ -3,4 +3,4 @@
 preload = ["./tests/helpers/preload-home.ts"]
 
 [fmt]
-printWidth = 120
+printWidth = 160
