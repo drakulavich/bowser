@@ -144,7 +144,7 @@ bowser click e8
 - ["prompt" dialog with message "Your name?"]: accepted
 ```
 
-The command that caused the dialog reports it under `### Modal state`. With `--json` it reports it as `"dialogs": [...]`. If the command fails, the report follows its error on stderr and the exit code is unchanged. `dismissed (run dialog-accept before the action to accept it)` means no answer was set. An answer covers one dialog and is dropped when the page navigates.
+The command that caused the dialog reports it under `### Modal state`. With `--json` it reports it as `"dialogs": [...]`. A report lists the first 20 dialogs and then `- and N more dialogs` (`"dialogsOmitted": N` with `--json`), so a page timer that opens a dialog every 100 ms does not flood the next command. If the command fails, the report follows its error on stderr and the exit code is unchanged. `dismissed (run dialog-accept before the action to accept it)` means no answer was set. An answer covers one dialog and is dropped when the page navigates.
 
 **Differences from `playwright-cli`:**
 

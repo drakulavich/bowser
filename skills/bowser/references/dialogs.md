@@ -9,7 +9,7 @@ The answer covers one dialog and is dropped when the page navigates. The action 
 
 `dismissed (run dialog-accept before the action to accept it)` means no answer was set. To accept it, run `dialog-accept` and repeat the action. Running `dialog-accept` *after* the action does not answer the dialog that action opened, unlike `playwright-cli`. It prepares the next one.
 
-A dialog in a same-origin iframe is reported like the page's own and takes your prepared answer. A dialog a timer opens between commands is reported by the next command that prints dialogs, even one that leaves the page (`reload`, `goto`, `go-back`, `press Enter` on a form). If the page defines its own `window.confirm` (an in-page modal, a test stub), bowser leaves it alone: it runs, and nothing is reported. A function the page made with `.bind()` from the browser's own (`confirm.bind(window)`) looks native to bowser: it is replaced, and the dialog is reported.
+A dialog in a same-origin iframe is reported like the page's own and takes your prepared answer. A dialog a timer opens between commands is reported by the next command that prints dialogs, even one that leaves the page (`reload`, `goto`, `go-back`, `press Enter` on a form). A report lists the first 20 dialogs and then `- and N more dialogs`; with `--json`, `dialogs` holds the first 20 and `dialogsOmitted` the count of the rest. If the page defines its own `window.confirm` (an in-page modal, a test stub), bowser leaves it alone: it runs, and nothing is reported. A function the page made with `.bind()` from the browser's own (`confirm.bind(window)`) looks native to bowser: it is replaced, and the dialog is reported.
 
 These are dismissed and not reported, and your prepared answer stays set for the next dialog:
 

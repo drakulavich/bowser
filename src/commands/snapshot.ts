@@ -32,8 +32,7 @@ export async function cmdSnapshot(
     });
     // Dialogs the daemon answered since the last command that printed them
     // (a page timer's, say). Nothing is blocked, so the tree renders too.
-    const dialogs = dialogsJson(c);
-    const withDialogs = dialogs.length ? { dialogs } : {};
+    const withDialogs = dialogsJson(c);
     if (opts.filename) {
       // The file always holds the text form, with its Modal state lines, plus
       // the CLI's newline; --json changes only the reply, which has
