@@ -36,16 +36,19 @@ runOrSkip("e2e: persistent profile survives close", () => {
     // A real http origin: data: URLs have no localStorage and no cookies.
     server = Bun.serve({
       port: 0,
-      fetch: () => new Response("<html><head><title>Persist</title></head><body>p</body></html>", {
-        headers: { "content-type": "text/html; charset=utf-8" },
-      }),
+      fetch: () =>
+        new Response("<html><head><title>Persist</title></head><body>p</body></html>", {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
     });
     page = server.url.toString();
   });
 
   afterAll(async () => {
     for (const session of sessions) {
-      try { await cmdClose({ session, json: true }); } catch {}
+      try {
+        await cmdClose({ session, json: true });
+      } catch {}
     }
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;

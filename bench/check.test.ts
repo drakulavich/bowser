@@ -11,7 +11,9 @@ describe("judge", () => {
   });
 
   test("reads the last ANSWER line, not an earlier one", () => {
-    expect(judge(task, ok("ANSWER: Soumission, £50.10\nWait, rechecking.\nANSWER: Tipping the Velvet, £53.74")).pass).toBe(false);
+    expect(
+      judge(task, ok("ANSWER: Soumission, £50.10\nWait, rechecking.\nANSWER: Tipping the Velvet, £53.74")).pass,
+    ).toBe(false);
   });
 
   test("fails an answer that matches only some patterns", () => {
@@ -23,11 +25,17 @@ describe("judge", () => {
   });
 
   test("fails when there is no ANSWER line", () => {
-    expect(judge(task, ok("The cheapest is Soumission at £50.10."))).toEqual({ pass: false, failReason: "no ANSWER line" });
+    expect(judge(task, ok("The cheapest is Soumission at £50.10."))).toEqual({
+      pass: false,
+      failReason: "no ANSWER line",
+    });
   });
 
   test("fails a run that hit max turns", () => {
-    expect(judge(task, { type: "result", subtype: "error_max_turns" })).toEqual({ pass: false, failReason: "error_max_turns" });
+    expect(judge(task, { type: "result", subtype: "error_max_turns" })).toEqual({
+      pass: false,
+      failReason: "error_max_turns",
+    });
   });
 });
 
@@ -51,15 +59,21 @@ describe("isolation", () => {
   });
 
   test("fails on one of the user's skills", () => {
-    expect(isolation({ ...init, skills: [...init.skills, "humanizer"] }, "bowser", userSkills)).toBe("user skill humanizer");
+    expect(isolation({ ...init, skills: [...init.skills, "humanizer"] }, "bowser", userSkills)).toBe(
+      "user skill humanizer",
+    );
   });
 
   test("accepts the tool's skill when the user has one by the same name", () => {
-    expect(isolation({ ...init, skills: ["playwright-cli", "simplify"] }, "playwright-cli", ["playwright-cli"])).toBeNull();
+    expect(
+      isolation({ ...init, skills: ["playwright-cli", "simplify"] }, "playwright-cli", ["playwright-cli"]),
+    ).toBeNull();
   });
 
   test("fails on the other tool's skill", () => {
-    expect(isolation({ ...init, skills: [...init.skills, "playwright-cli"] }, "bowser", userSkills)).toBe("skill playwright-cli");
+    expect(isolation({ ...init, skills: [...init.skills, "playwright-cli"] }, "bowser", userSkills)).toBe(
+      "skill playwright-cli",
+    );
   });
 
   test("fails on a plugin that is not built in", () => {
@@ -78,19 +92,38 @@ describe("isolation", () => {
 
 test("streamCounts counts Bash calls and the bytes their results returned", () => {
   const stream = [
-    { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", id: "a" }, { type: "text", text: "x" }] } },
+    {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", name: "Bash", id: "a" },
+          { type: "text", text: "x" },
+        ],
+      },
+    },
     { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "a", content: "héllo" }] } },
     { type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", id: "b" }] } },
-    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "b", content: [{ type: "text", text: "skill body" }] }] } },
+    {
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "b", content: [{ type: "text", text: "skill body" }] }],
+      },
+    },
     { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", id: "c" }] } },
-    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "c", content: [{ type: "text", text: "abc" }] }] } },
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "c", content: [{ type: "text", text: "abc" }] }] },
+    },
   ];
   expect(streamCounts(stream)).toEqual({ bashCalls: 2, toolOutputBytes: 9 });
 });
 
 test("skillFailed spots a Skill call that came back as an error", () => {
   const call = { type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", id: "s" }] } };
-  const result = (is_error: boolean) => ({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "s", is_error, content: "x" }] } });
+  const result = (is_error: boolean) => ({
+    type: "user",
+    message: { content: [{ type: "tool_result", tool_use_id: "s", is_error, content: "x" }] },
+  });
   expect(skillFailed([call, result(true)])).toBe(true);
   expect(skillFailed([call, result(false)])).toBe(false);
 });

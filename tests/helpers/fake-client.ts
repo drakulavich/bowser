@@ -23,8 +23,7 @@
 import pkg from "../../package.json";
 import type { ArgsOf, DaemonConnection, DialogReport, Op, ResultOf } from "../../src/daemon/protocol.ts";
 
-const ONE_PX_PNG =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const ONE_PX_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 export type FakeHandlers = {
   [O in Op]?: (...args: ArgsOf<O>) => ResultOf<O> | Promise<ResultOf<O>>;
@@ -46,7 +45,9 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
   const c: FakeClient = {
     calls,
     reporting: false,
-    reportDialogs() { c.reporting = true; },
+    reportDialogs() {
+      c.reporting = true;
+    },
     async request(...params) {
       const [op, args = []] = params as [Op, unknown[]?];
       calls.push([op, args]);
@@ -65,7 +66,8 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
         }
         return b64 as never;
       }
-      const fn = (handlers[op] ?? (op === "resolve" ? handlers.evaluate : undefined) ?? defaults[op]) as ((...a: unknown[]) => unknown) | undefined;
+      const fn = (handlers[op] ?? (op === "resolve" ? handlers.evaluate : undefined) ?? defaults[op]) as
+        ((...a: unknown[]) => unknown) | undefined;
       return (fn ? await fn(...args) : undefined) as never;
     },
     dialogs: () => (c.reporting ? [...(opts.dialogs ?? [])] : []),

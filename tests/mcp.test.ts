@@ -38,7 +38,9 @@ const okRun = (out = '{"ok":true}'): McpDeps => ({
  *  once every accepted call has finished. */
 async function serve(lines: string[], deps: McpDeps = okRun()): Promise<any[]> {
   const writes: string[] = [];
-  const server = createMcpServer(deps, (line) => { writes.push(line); });
+  const server = createMcpServer(deps, (line) => {
+    writes.push(line);
+  });
   for (const line of lines) server.accept(line);
   await server.idle();
   await new Promise((r) => setTimeout(r, 0));
@@ -105,12 +107,14 @@ describe("toArgv", () => {
       session: "s1",
     });
     expect(argv).toEqual([
-      "--session", "s1",
+      "--session",
+      "s1",
       "--json",
       "open",
       "--persistent",
       "--profile=./p",
-      "--", "https://x.com/",
+      "--",
+      "https://x.com/",
     ]);
   });
 
@@ -156,29 +160,20 @@ describe("handleMcpRequest — handshake", () => {
   });
 
   test("initialize without a known version falls back to the server default", async () => {
-    const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
-      okRun(),
-    );
+    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, okRun());
     expect(typeof res.result.protocolVersion).toBe("string");
     expect(res.result.protocolVersion.length).toBeGreaterThan(0);
   });
 
   test("notifications get NO response", async () => {
-    const res = await handleMcpRequest(
-      { jsonrpc: "2.0", method: "notifications/initialized" },
-      okRun(),
-    );
+    const res = await handleMcpRequest({ jsonrpc: "2.0", method: "notifications/initialized" }, okRun());
     expect(res).toBeNull();
   });
 });
 
 describe("handleMcpRequest — tools/list", () => {
   test("returns the generated tool set", async () => {
-    const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 2, method: "tools/list" },
-      okRun(),
-    );
+    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }, okRun());
     expect(res.result.tools.length).toBe(SCHEMAS.commands.length - MCP_EXCLUDED_COUNT);
   });
 });
@@ -186,7 +181,13 @@ describe("handleMcpRequest — tools/list", () => {
 describe("handleMcpRequest — tools/call", () => {
   test("success: reconstructs argv, returns text content", async () => {
     let captured: string[] = [];
-    const deps: McpDeps = { run: async (a) => { captured = a; return '{"ok":true,"url":"u"}'; }, version: "9.9.9" };
+    const deps: McpDeps = {
+      run: async (a) => {
+        captured = a;
+        return '{"ok":true,"url":"u"}';
+      },
+      version: "9.9.9",
+    };
     const res: any = await handleMcpRequest(
       { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "goto", arguments: { url: "https://e.com" } } },
       deps,
@@ -197,7 +198,12 @@ describe("handleMcpRequest — tools/call", () => {
   });
 
   test("command error maps to a tool error result (not a JSON-RPC error)", async () => {
-    const deps: McpDeps = { run: async () => { throw new Error("no open page. Run 'bowser open <url>' first."); }, version: "9.9.9" };
+    const deps: McpDeps = {
+      run: async () => {
+        throw new Error("no open page. Run 'bowser open <url>' first.");
+      },
+      version: "9.9.9",
+    };
     const res: any = await handleMcpRequest(
       { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "snapshot", arguments: {} } },
       deps,
@@ -208,13 +214,20 @@ describe("handleMcpRequest — tools/call", () => {
   });
 
   test("a restart's notice is the first line of the tool text, on success and on error (#145)", async () => {
-    const call = (run: McpDeps["run"]) => handleMcpRequest(
-      { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "snapshot", arguments: {} } },
-      { run, version: "9.9.9" },
-    ) as Promise<any>;
-    const ok = await call(async (_, base) => { base?.notices?.push("session 'default' restarted"); return "page"; });
+    const call = (run: McpDeps["run"]) =>
+      handleMcpRequest(
+        { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "snapshot", arguments: {} } },
+        { run, version: "9.9.9" },
+      ) as Promise<any>;
+    const ok = await call(async (_, base) => {
+      base?.notices?.push("session 'default' restarted");
+      return "page";
+    });
     expect(ok.result.content[0].text).toBe("session 'default' restarted\npage");
-    const failed = await call(async (_, base) => { base?.notices?.push("session 'default' restarted"); throw new Error("ref 'e1' is gone"); });
+    const failed = await call(async (_, base) => {
+      base?.notices?.push("session 'default' restarted");
+      throw new Error("ref 'e1' is gone");
+    });
     expect(failed.result.isError).toBe(true);
     expect(failed.result.content[0].text).toBe("session 'default' restarted\nref 'e1' is gone");
   });
@@ -227,11 +240,21 @@ describe("handleMcpRequest — tools/call", () => {
     process.env.HOME = dir;
     try {
       const file = join(dir, "snap.md");
-      const snap = { url: "https://x", title: "X", tree: [{ role: "button", name: "Go", ref: "e1", children: [] }], refs: [] };
+      const snap = {
+        url: "https://x",
+        title: "X",
+        tree: [{ role: "button", name: "Go", ref: "e1", children: [] }],
+        refs: [],
+      };
       const connect = async () => fakeClient({ evaluate: () => snap });
       const deps: McpDeps = { run: (argv) => run(argv, { connect }), version: "9.9.9" };
       const res: any = await handleMcpRequest(
-        { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "snapshot", arguments: { session: "m38", filename: file } } },
+        {
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: { name: "snapshot", arguments: { session: "m38", filename: file } },
+        },
         deps,
       );
       expect(res.result.isError).toBeFalsy();
@@ -245,11 +268,29 @@ describe("handleMcpRequest — tools/call", () => {
   });
 
   test("a failed tool call's error text carries the dialogs the command answered", async () => {
-    const dismissed = { type: "confirm" as const, message: "sure?", state: "dismissed" as const, unanswered: true as const };
-    const connect = async () => fakeClient({ evaluate: () => { throw new Error("Error: boom"); } }, { dialogs: [dismissed] });
+    const dismissed = {
+      type: "confirm" as const,
+      message: "sure?",
+      state: "dismissed" as const,
+      unanswered: true as const,
+    };
+    const connect = async () =>
+      fakeClient(
+        {
+          evaluate: () => {
+            throw new Error("Error: boom");
+          },
+        },
+        { dialogs: [dismissed] },
+      );
     const deps: McpDeps = { run: (argv) => run(argv, { connect }), version: "9.9.9" };
     const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "eval", arguments: { expression: "confirm('sure?'); throw 1" } } },
+      {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: { name: "eval", arguments: { expression: "confirm('sure?'); throw 1" } },
+      },
       deps,
     );
     expect(res.result.isError).toBe(true);
@@ -261,7 +302,13 @@ describe("handleMcpRequest — tools/call", () => {
   // ET-05: MCP lists an unknown tool among the protocol errors.
   test("unknown tool → -32602, and nothing runs", async () => {
     let ran = false;
-    const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
+    const deps: McpDeps = {
+      run: async () => {
+        ran = true;
+        return "{}";
+      },
+      version: "9.9.9",
+    };
     const res = await handleMcpRequest(
       { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nonexistent", arguments: {} } },
       deps,
@@ -273,7 +320,13 @@ describe("handleMcpRequest — tools/call", () => {
   for (const stdin of [true, false, "true"]) {
     test(`fill with stdin: ${JSON.stringify(stdin)} is a usage error and never runs the command`, async () => {
       let ran = false;
-      const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
+      const deps: McpDeps = {
+        run: async () => {
+          ran = true;
+          return "{}";
+        },
+        version: "9.9.9",
+      };
       const res: any = await handleMcpRequest(
         { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", stdin } } },
         deps,
@@ -295,17 +348,21 @@ describe("handleMcpRequest — tools/call", () => {
 
 describe("handleMcpRequest — errors", () => {
   test("unknown method → -32601", async () => {
-    const res: any = await handleMcpRequest(
-      { jsonrpc: "2.0", id: 7, method: "foo/bar" },
-      okRun(),
-    );
+    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 7, method: "foo/bar" }, okRun());
     expect(res.error.code).toBe(-32601);
   });
 
   // ET-06: a request needs a string method; a client's response gets no answer at all.
-  for (const [what, msg] of [["no method", { jsonrpc: "2.0", id: 3 }], ["a number for a method", { jsonrpc: "2.0", id: 3, method: 5 }]] as const) {
+  for (const [what, msg] of [
+    ["no method", { jsonrpc: "2.0", id: 3 }],
+    ["a number for a method", { jsonrpc: "2.0", id: 3, method: 5 }],
+  ] as const) {
     test(`${what} → -32600 with the request's id`, async () => {
-      expect(await handleMcpRequest(msg, okRun())).toEqual({ jsonrpc: "2.0", id: 3, error: { code: -32600, message: "Invalid Request" } });
+      expect(await handleMcpRequest(msg, okRun())).toEqual({
+        jsonrpc: "2.0",
+        id: 3,
+        error: { code: -32600, message: "Invalid Request" },
+      });
     });
   }
 
@@ -366,19 +423,42 @@ describe("MCP positionals are data, never flags", () => {
       const prevHome = process.env.HOME;
       process.env.HOME = home;
       try {
-        await saveState({ name: "dash", url: "https://x", title: "X", updatedAt: Date.now(),
-          refs: [{ id: "e1", role: "textbox", name: "Email", tag: "input" }] });
-        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }, { hit: true }) ? "input" : undefined) });
+        await saveState({
+          name: "dash",
+          url: "https://x",
+          title: "X",
+          updatedAt: Date.now(),
+          refs: [{ id: "e1", role: "textbox", name: "Email", tag: "input" }],
+        });
+        const c = fakeClient({
+          evaluate: (e) =>
+            e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }, { hit: true }) ? "input" : undefined,
+        });
         const deps: McpDeps = {
-          run: (argv) => run(argv, { connect: async () => c, readStdin: async () => { throw new Error("read stdin"); } }),
+          run: (argv) =>
+            run(argv, {
+              connect: async () => c,
+              readStdin: async () => {
+                throw new Error("read stdin");
+              },
+            }),
           version: "9.9.9",
         };
         const res: any = await handleMcpRequest(
-          { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", text, session: "dash" } } },
+          {
+            jsonrpc: "2.0",
+            id: 9,
+            method: "tools/call",
+            params: { name: "fill", arguments: { ref: "e1", text, session: "dash" } },
+          },
           deps,
         );
         expect(res.result.isError).toBeFalsy();
-        expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true, ref: "e1", element: { role: "textbox", name: "Email" } });
+        expect(JSON.parse(res.result.content[0].text)).toEqual({
+          ok: true,
+          ref: "e1",
+          element: { role: "textbox", name: "Email" },
+        });
         expect(c.calls.filter(([op]) => op === "type")).toEqual([["type", [text]]]);
       } finally {
         process.env.HOME = prevHome;
@@ -389,22 +469,24 @@ describe("MCP positionals are data, never flags", () => {
 });
 
 describe("bowser mcp never reads its own stdin for a command", () => {
-  test("fill with text \"--stdin\" is text, not the flag, and the server keeps answering", async () => {
+  test('fill with text "--stdin" is text, not the flag, and the server keeps answering', async () => {
     // The server's stdin is the JSON-RPC stream: parsing the text as the flag
     // would read it, swallowing later requests and hanging this one. toArgv's
     // `--` keeps it a positional, so the call fails on the empty HOME instead.
     const home = await mkdtemp(join(tmpdir(), "bowser-mcp-stdin-"));
-    const proc = Bun.spawn(
-      [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "mcp"],
-      {
-        env: { ...process.env, HOME: home },
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
+    const proc = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "mcp"], {
+      env: { ...process.env, HOME: home },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     try {
-      const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", text: "--stdin" } } };
+      const call = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "fill", arguments: { ref: "e1", text: "--stdin" } },
+      };
       proc.stdin.write(JSON.stringify(call) + "\n");
       proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\n");
       proc.stdin.flush();
@@ -421,7 +503,10 @@ describe("bowser mcp never reads its own stdin for a command", () => {
         buf += decoder.decode(next.value, { stream: true });
       }
       // Responses may come in any order (F36): the ping does not wait.
-      const lines = buf.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const lines = buf
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
       const first = lines.find((m) => m.id === 1);
       const second = lines.find((m) => m.id === 2);
       expect(first?.id).toBe(1);
@@ -444,15 +529,26 @@ describe("bowser mcp resolves file outputs against a writable directory", () => 
 
   /** Start the server in `cwd` with its own TMPDIR, send one tools/call, and
    *  return the tool result's text. */
-  async function callIn(cwd: string, tmpDir: string, args: Record<string, string>): Promise<{ isError?: boolean; text: string }> {
+  async function callIn(
+    cwd: string,
+    tmpDir: string,
+    args: Record<string, string>,
+  ): Promise<{ isError?: boolean; text: string }> {
     const home = await mkdtemp(join(tmpdir(), "bowser-mcp-cwd-home-"));
     const proc = Bun.spawn([process.execPath, HELPER], {
       cwd,
       env: { ...process.env, HOME: home, TMPDIR: tmpDir },
-      stdin: "pipe", stdout: "pipe", stderr: "pipe",
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
     });
     try {
-      const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "screenshot", arguments: { session: "m37", ...args } } };
+      const call = {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "screenshot", arguments: { session: "m37", ...args } },
+      };
       proc.stdin.write(JSON.stringify(call) + "\n");
       proc.stdin.end();
       const out = await new Response(proc.stdout).text();
@@ -488,7 +584,12 @@ describe("bowser mcp resolves file outputs against a writable directory", () => 
     const tmpDir = realpathSync(await mkdtemp(join(tmpdir(), "bowser-mcp-root-")));
     try {
       const res = await callIn("/", tmpDir, {});
-      expect(JSON.parse(res.text)).toEqual({ ok: true, filename: join(tmpDir, "bowser-mcp", "screenshot-m37.png"), width: 1, height: 1 });
+      expect(JSON.parse(res.text)).toEqual({
+        ok: true,
+        filename: join(tmpDir, "bowser-mcp", "screenshot-m37.png"),
+        width: 1,
+        height: 1,
+      });
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -520,9 +621,19 @@ describe("MCP fill and type never echo the entered text", () => {
       const prevHome = process.env.HOME;
       process.env.HOME = home;
       try {
-        await saveState({ name: "echo", url: "https://x", title: "X", updatedAt: Date.now(),
-          refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }] });
-        const c = fakeClient({ evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined) });
+        await saveState({
+          name: "echo",
+          url: "https://x",
+          title: "X",
+          updatedAt: Date.now(),
+          refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }],
+        });
+        const c = fakeClient({
+          evaluate: (e) =>
+            e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true })
+              ? "input"
+              : undefined,
+        });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
         const res: any = await handleMcpRequest(
           { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } },
@@ -550,11 +661,19 @@ describe("MCP fill and type errors never carry the entered text", () => {
     const prevHome = process.env.HOME;
     process.env.HOME = home;
     try {
-      await saveState({ name: "echoerr", url: "https://x", title: "X", updatedAt: Date.now(),
-        refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }] });
+      await saveState({
+        name: "echoerr",
+        url: "https://x",
+        title: "X",
+        updatedAt: Date.now(),
+        refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }],
+      });
       const c = fakeClient({
-        evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined),
-        type: () => { throw new Error(message); },
+        evaluate: (e) =>
+          e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined,
+        type: () => {
+          throw new Error(message);
+        },
       });
       const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
       const res: any = await handleMcpRequest(
@@ -585,7 +704,12 @@ describe("MCP fill and type errors never carry the entered text", () => {
 // 2026-07-28 is not one either: it drops the initialize handshake.
 describe("MCP server: initialize negotiates the protocol version", () => {
   const init = (protocolVersion?: unknown) =>
-    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: protocolVersion === undefined ? {} : { protocolVersion } });
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: protocolVersion === undefined ? {} : { protocolVersion },
+    });
   for (const v of ["2025-11-25", "2025-06-18", "2024-11-05"]) {
     test(`a supported version (${v}) is echoed`, async () => {
       const [res] = await serve([init(v)]);
@@ -603,7 +727,11 @@ describe("MCP server: initialize negotiates the protocol version", () => {
   // with server/discover and falls back to initialize on -32601.
   test("server/discover is an unknown method (-32601), so a 2026 client falls back", async () => {
     const [res] = await serve([JSON.stringify({ jsonrpc: "2.0", id: 9, method: "server/discover", params: {} })]);
-    expect(res).toEqual({ jsonrpc: "2.0", id: 9, error: { code: -32601, message: "Method not found: server/discover" } });
+    expect(res).toEqual({
+      jsonrpc: "2.0",
+      id: 9,
+      error: { code: -32601, message: "Method not found: server/discover" },
+    });
   });
 });
 
@@ -613,7 +741,13 @@ describe("MCP server: initialize negotiates the protocol version", () => {
 describe("MCP server: a batch or a non-object message is an invalid request", () => {
   const INVALID = { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
   const cases: Array<[string, string]> = [
-    ["a batch array", JSON.stringify([{ jsonrpc: "2.0", id: 6, method: "ping" }, { jsonrpc: "2.0", id: 7, method: "ping" }])],
+    [
+      "a batch array",
+      JSON.stringify([
+        { jsonrpc: "2.0", id: 6, method: "ping" },
+        { jsonrpc: "2.0", id: 7, method: "ping" },
+      ]),
+    ],
     ["an empty array", "[]"],
     ["a number", "123"],
     ["a string", '"str"'],
@@ -628,8 +762,16 @@ describe("MCP server: a batch or a non-object message is an invalid request", ()
 
   test("a batched tools/call never runs, and the next line is still answered", async () => {
     let ran = false;
-    const deps: McpDeps = { run: async () => { ran = true; return "{}"; }, version: "9.9.9" };
-    const batch = JSON.stringify([{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list", arguments: {} } }]);
+    const deps: McpDeps = {
+      run: async () => {
+        ran = true;
+        return "{}";
+      },
+      version: "9.9.9",
+    };
+    const batch = JSON.stringify([
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list", arguments: {} } },
+    ]);
     const res = await serve([batch, JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" })], deps);
     expect(res).toEqual([INVALID, { jsonrpc: "2.0", id: 2, result: {} }]);
     expect(ran).toBe(false);
@@ -646,7 +788,13 @@ describe("MCP server: tool arguments are checked against the tool's schema", () 
   /** Send one tools/call line; return the result and the argv run got, if any. */
   async function callLine(line: string): Promise<{ result: any; argv: string[] | null }> {
     let argv: string[] | null = null;
-    const deps: McpDeps = { run: async (a) => { argv = a; return '{"ok":true}'; }, version: "9.9.9" };
+    const deps: McpDeps = {
+      run: async (a) => {
+        argv = a;
+        return '{"ok":true}';
+      },
+      version: "9.9.9",
+    };
     const [res] = await serve([line], deps);
     return { result: res.result, argv };
   }
@@ -654,14 +802,54 @@ describe("MCP server: tool arguments are checked against the tool's schema", () 
     callLine(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }));
 
   const refused: Array<[string, string, unknown, RegExp]> = [
-    ["a number session", "eval", { session: 42, expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got number$/],
-    ["an empty session", "eval", { session: "", expression: "1" }, /^usage: argument 'session' of 'eval' must be a non-empty string, got ""$/],
-    ["an object positional", "eval", { expression: { a: 1 } }, /^usage: argument 'expression' of 'eval' must be a string or a number, got object$/],
-    ["an array positional", "goto", { url: ["https://e.com"] }, /^usage: argument 'url' of 'goto' must be a string or a number, got array$/],
-    ["a boolean positional", "eval", { expression: true }, /^usage: argument 'expression' of 'eval' must be a string or a number, got boolean$/],
-    ["an object string flag", "snapshot", { filename: {} }, /^usage: argument 'filename' of 'snapshot' must be a string or a number, got object$/],
-    ["a string boolean flag", "open", { session: "s", persistent: "false" }, /^usage: argument 'persistent' of 'open' must be true or false, got string$/],
-    ["a number boolean flag", "open", { session: "s", persistent: 1 }, /^usage: argument 'persistent' of 'open' must be true or false, got number$/],
+    [
+      "a number session",
+      "eval",
+      { session: 42, expression: "1" },
+      /^usage: argument 'session' of 'eval' must be a non-empty string, got number$/,
+    ],
+    [
+      "an empty session",
+      "eval",
+      { session: "", expression: "1" },
+      /^usage: argument 'session' of 'eval' must be a non-empty string, got ""$/,
+    ],
+    [
+      "an object positional",
+      "eval",
+      { expression: { a: 1 } },
+      /^usage: argument 'expression' of 'eval' must be a string or a number, got object$/,
+    ],
+    [
+      "an array positional",
+      "goto",
+      { url: ["https://e.com"] },
+      /^usage: argument 'url' of 'goto' must be a string or a number, got array$/,
+    ],
+    [
+      "a boolean positional",
+      "eval",
+      { expression: true },
+      /^usage: argument 'expression' of 'eval' must be a string or a number, got boolean$/,
+    ],
+    [
+      "an object string flag",
+      "snapshot",
+      { filename: {} },
+      /^usage: argument 'filename' of 'snapshot' must be a string or a number, got object$/,
+    ],
+    [
+      "a string boolean flag",
+      "open",
+      { session: "s", persistent: "false" },
+      /^usage: argument 'persistent' of 'open' must be true or false, got string$/,
+    ],
+    [
+      "a number boolean flag",
+      "open",
+      { session: "s", persistent: 1 },
+      /^usage: argument 'persistent' of 'open' must be true or false, got number$/,
+    ],
     ["an unknown key", "eval", { expression: "1", bogus: 1 }, /^usage: unknown argument 'bogus' for 'eval'$/],
     ["an array of arguments", "eval", ["1"], /^usage: the arguments of 'eval' must be an object, got array$/],
     ["a string of arguments", "eval", "1", /^usage: the arguments of 'eval' must be an object, got string$/],
@@ -676,7 +864,8 @@ describe("MCP server: tool arguments are checked against the tool's schema", () 
   }
 
   test("a number too large to be finite (1e400 parses to Infinity) is refused", async () => {
-    const line = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"resize","arguments":{"width":1e400,"height":600}}}';
+    const line =
+      '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"resize","arguments":{"width":1e400,"height":600}}}';
     const { result, argv } = await callLine(line);
     expect(result.content[0].text).toBe("usage: argument 'width' of 'resize' must be a string or a number, got number");
     expect(argv).toBeNull();
@@ -712,12 +901,21 @@ describe("bowser mcp exits when its client is gone", () => {
     const log = join(dir, "eval.log");
     const proc = Bun.spawn([process.execPath, HELPER], {
       env: { ...process.env, HOME: dir, MCP_FAKE_EVAL_LOG: log, MCP_FAKE_EVAL_MS: "500" },
-      stdin: "pipe", stdout: "pipe", stderr: "pipe",
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
     });
     const ran = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
     try {
       const call = (id: number, expression: string) =>
-        proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "eval", arguments: { session: "gone", expression } } }) + "\n");
+        proc.stdin.write(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method: "tools/call",
+            params: { name: "eval", arguments: { session: "gone", expression } },
+          }) + "\n",
+        );
       call(1, "first");
       call(2, "queued");
       proc.stdin.flush();
@@ -753,7 +951,11 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
     ["click", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" }, url: "" }],
     ["fill", { ref: "e2", text: SECRET }, { ok: true, ref: "e2", element: { role: "textbox", name: "Password" } }],
     ["hover", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" } }],
-    ["select", { ref: "e3", value: "red" }, { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" }],
+    [
+      "select",
+      { ref: "e3", value: "red" },
+      { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" },
+    ],
     ["check", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
     ["uncheck", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
   ] as const) {
@@ -766,7 +968,12 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
         const c = fakeClient({ evaluate: () => "sel" });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
         const res: any = await handleMcpRequest(
-          { jsonrpc: "2.0", id: 13, method: "tools/call", params: { name: tool, arguments: { ...args, session: "el" } } },
+          {
+            jsonrpc: "2.0",
+            id: 13,
+            method: "tools/call",
+            params: { name: tool, arguments: { ...args, session: "el" } },
+          },
           deps,
         );
         expect(res.result.isError).toBeFalsy();
@@ -782,73 +989,180 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
 
 describe("serveLines: handover to the installed bowser after an upgrade (#145)", () => {
   const CLI = join(import.meta.dir, "..", "src", "cli.ts");
-  const INIT = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
-  const call = (id: number, name: string) => JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: {} } });
-  async function* feed(lines: string[]) { for (const l of lines) yield l; }
+  const INIT = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-06-18" },
+  });
+  const call = (id: number, name: string) =>
+    JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: {} } });
+  async function* feed(lines: string[]) {
+    for (const l of lines) yield l;
+  }
   function harness() {
     const out: string[] = [];
     let runs = 0;
-    const server = createMcpServer({ run: async () => { runs++; await Bun.sleep(50); return "old server"; }, version: "1.0.0" }, (line) => { out.push(line); });
-    return { out, server, runs: () => runs, responses: () => out.join("").trim().split("\n").map((l) => JSON.parse(l)) };
+    const server = createMcpServer(
+      {
+        run: async () => {
+          runs++;
+          await Bun.sleep(50);
+          return "old server";
+        },
+        version: "1.0.0",
+      },
+      (line) => {
+        out.push(line);
+      },
+    );
+    return {
+      out,
+      server,
+      runs: () => runs,
+      responses: () =>
+        out
+          .join("")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l)),
+    };
   }
 
   test("handover: a child that exits at once leaves each call an isError 'could not hand over'", async () => {
     const h = harness();
-    const code = await serveLines(feed([INIT, call(7, "snapshot"), call(8, "snapshot")]), h.server, (l) => { h.out.push(l); }, {
-      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", "process.exit(3)"],
-    });
+    const code = await serveLines(
+      feed([INIT, call(7, "snapshot"), call(8, "snapshot")]),
+      h.server,
+      (l) => {
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "2.0.0",
+        child: [process.execPath, "-e", "process.exit(3)"],
+      },
+    );
     expect(code).toBe(0);
     const byId = new Map(h.responses().map((r) => [r.id, r]));
     for (const id of [7, 8]) {
       expect(byId.get(id).result.isError).toBe(true);
-      expect(byId.get(id).result.content[0].text).toStartWith("bowser mcp could not hand over to the installed bowser 2.0.0: it exited; restart the MCP server");
+      expect(byId.get(id).result.content[0].text).toStartWith(
+        "bowser mcp could not hand over to the installed bowser 2.0.0: it exited; restart the MCP server",
+      );
     }
     expect(h.runs()).toBe(0);
   });
 
   test("handover: a child that answers initialize and then exits leaves each call an isError", async () => {
     const h = harness();
-    const once = 'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(0);';
-    const code = await serveLines(feed([INIT, call(7, "snapshot"), call(8, "snapshot")]), h.server, (l) => { h.out.push(l); }, {
-      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", once],
-    });
+    const once =
+      'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(0);';
+    const code = await serveLines(
+      feed([INIT, call(7, "snapshot"), call(8, "snapshot")]),
+      h.server,
+      (l) => {
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "2.0.0",
+        child: [process.execPath, "-e", once],
+      },
+    );
     expect(code).toBe(0);
     const byId = new Map(h.responses().map((r) => [r.id, r]));
     for (const id of [7, 8]) {
       expect(byId.get(id)?.result.isError).toBe(true);
-      expect(byId.get(id)?.result.content[0].text).toStartWith("bowser mcp could not hand over to the installed bowser 2.0.0: it exited");
+      expect(byId.get(id)?.result.content[0].text).toStartWith(
+        "bowser mcp could not hand over to the installed bowser 2.0.0: it exited",
+      );
     }
   });
 
   test("handover: stdin that ends after the child died still exits with the child's code", async () => {
     const h = harness();
-    const once = 'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(4);';
-    async function* late() { yield INIT; yield call(7, "snapshot"); await Bun.sleep(500); }
-    const code = await serveLines(late(), h.server, (l) => { h.out.push(l); }, {
-      version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", once],
-    });
+    const once =
+      'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(4);';
+    async function* late() {
+      yield INIT;
+      yield call(7, "snapshot");
+      await Bun.sleep(500);
+    }
+    const code = await serveLines(
+      late(),
+      h.server,
+      (l) => {
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "2.0.0",
+        child: [process.execPath, "-e", once],
+      },
+    );
     expect(code).toBe(4);
   });
 
   test("handover: a cancellation sent during the handover reaches a call still running in this server (#149)", async () => {
     const out: string[] = [];
     let started = 0;
-    const server = createMcpServer({ run: async () => { started++; await Bun.sleep(300); return "old server"; }, version: "1.0.0" }, (line) => { out.push(line); });
+    const server = createMcpServer(
+      {
+        run: async () => {
+          started++;
+          await Bun.sleep(300);
+          return "old server";
+        },
+        version: "1.0.0",
+      },
+      (line) => {
+        out.push(line);
+      },
+    );
     const cancel = JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 5 } });
-    async function* lines() { yield INIT; yield call(5, "snapshot"); await Bun.sleep(50); yield call(7, "list"); yield cancel; }
-    await serveLines(lines(), server, (l) => { out.push(l); }, {
-      version: "1.0.0", installed: async () => (started > 0 ? "2.0.0" : "1.0.0"), child: [process.execPath, "-e", "process.exit(0)"],
-    });
-    const ids = out.join("").trim().split("\n").map((l) => JSON.parse(l).id);
+    async function* lines() {
+      yield INIT;
+      yield call(5, "snapshot");
+      await Bun.sleep(50);
+      yield call(7, "list");
+      yield cancel;
+    }
+    await serveLines(
+      lines(),
+      server,
+      (l) => {
+        out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => (started > 0 ? "2.0.0" : "1.0.0"),
+        child: [process.execPath, "-e", "process.exit(0)"],
+      },
+    );
+    const ids = out
+      .join("")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l).id);
     expect(ids).not.toContain(5);
   });
 
   test("handover: with no package.json on disk, calls run in this server and nothing is spawned", async () => {
     const h = harness();
     const marker = join(tmpdir(), `bowser-handover-${process.pid}`);
-    await serveLines(feed([INIT, call(7, "snapshot"), call(8, "snapshot")]), h.server, (l) => { h.out.push(l); }, {
-      version: "1.0.0", installed: async () => undefined, child: [process.execPath, "-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "")`],
-    });
+    await serveLines(
+      feed([INIT, call(7, "snapshot"), call(8, "snapshot")]),
+      h.server,
+      (l) => {
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => undefined,
+        child: [process.execPath, "-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "")`],
+      },
+    );
     expect(h.runs()).toBe(2);
     expect(existsSync(marker)).toBe(false);
   });
@@ -859,15 +1173,42 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     const prevHome = process.env.HOME;
     process.env.HOME = home;
     try {
-      const lines = [INIT, call(5, "snapshot"), JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" }), call(7, "list"), call(8, "list")];
-      async function* slow() { yield lines[0]!; yield lines[1]!; await Bun.sleep(10); yield lines[2]!; yield lines[3]!; yield lines[4]!; }
-      const code = await serveLines(slow(), h.server, (l) => { h.out.push(l); }, {
-        version: "1.0.0", installed: async () => (h.runs() > 0 ? "2.0.0" : "1.0.0"), child: [process.execPath, CLI, "mcp"],
-      });
+      const lines = [
+        INIT,
+        call(5, "snapshot"),
+        JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" }),
+        call(7, "list"),
+        call(8, "list"),
+      ];
+      async function* slow() {
+        yield lines[0]!;
+        yield lines[1]!;
+        await Bun.sleep(10);
+        yield lines[2]!;
+        yield lines[3]!;
+        yield lines[4]!;
+      }
+      const code = await serveLines(
+        slow(),
+        h.server,
+        (l) => {
+          h.out.push(l);
+        },
+        {
+          version: "1.0.0",
+          installed: async () => (h.runs() > 0 ? "2.0.0" : "1.0.0"),
+          child: [process.execPath, CLI, "mcp"],
+        },
+      );
       expect(code).toBe(0);
       const res = h.responses();
       // The old server's answers (the running call, tools/list) come before any forwarded line.
-      expect(res.slice(0, 3).map((r) => r.id).sort()).toEqual([1, 5, 6]);
+      expect(
+        res
+          .slice(0, 3)
+          .map((r) => r.id)
+          .sort(),
+      ).toEqual([1, 5, 6]);
       expect(res.slice(3).map((r) => r.id)).toEqual([7, 8]);
       expect(res.find((r) => r.id === 5).result.content[0].text).toBe("old server");
       expect(res.find((r) => r.id === 7).result.content[0].text).toBe("[]");
@@ -880,11 +1221,18 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
 });
 
 describe("a restart's notice is delivered only by a written response (#152)", () => {
-  const call = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "eval", arguments: { expression: "1" } } });
+  const call = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "eval", arguments: { expression: "1" } },
+  });
   const deps = (acked: { n: number }): McpDeps => ({
     run: async (_argv, base) => {
       base?.notices?.push("session 'default' restarted");
-      base?.acks?.push(() => { acked.n++; });
+      base?.acks?.push(() => {
+        acked.n++;
+      });
       return "1";
     },
     version: "9.9.9",

@@ -15,8 +15,16 @@ describe("resolveUrl", () => {
   });
 
   test("falls back to view.url when the read throws", async () => {
-    expect(await resolveUrl("http://x/a", async () => { throw new Error("eval failed"); })).toBe("http://x/a");
-    expect(await resolveUrl("", async () => { throw new Error("eval failed"); })).toBe("");
+    expect(
+      await resolveUrl("http://x/a", async () => {
+        throw new Error("eval failed");
+      }),
+    ).toBe("http://x/a");
+    expect(
+      await resolveUrl("", async () => {
+        throw new Error("eval failed");
+      }),
+    ).toBe("");
   });
 
   test("falls back to view.url when the read yields a non-string", async () => {

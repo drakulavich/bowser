@@ -33,13 +33,20 @@ runOrSkip("e2e: an unreachable daemon does not survive close", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose({ session, json: true }); } catch {}
+    try {
+      await cmdClose({ session, json: true });
+    } catch {}
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });
 
   const alive = (pid: number): boolean => {
-    try { process.kill(pid, 0); return true; } catch { return false; }
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   test("close ends a daemon whose socket is gone", async () => {

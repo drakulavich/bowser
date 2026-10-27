@@ -30,7 +30,9 @@ runOrSkip("e2e: state-save on about:blank", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     await killDaemons(ctx.session);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });

@@ -12,7 +12,16 @@ import { ensureSessionDir, profileDir, saveState } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, daemonCommand, daemonEnv, daemonLogPath, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
+import {
+  connectOrSpawn,
+  daemonCommand,
+  daemonEnv,
+  daemonLogPath,
+  DaemonClient,
+  DaemonNotAnswering,
+  pidPath,
+  socketPath,
+} from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -25,7 +34,8 @@ describe("socketPath", () => {
     try {
       expect(socketPath("sess")).toBe("/tmp/bowser-sockpath-test/.bowser/sessions/sess/sock");
     } finally {
-      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+      if (orig !== undefined) process.env.HOME = orig;
+      else delete process.env.HOME;
     }
   });
 });
@@ -84,7 +94,8 @@ describe("pidPath", () => {
     try {
       expect(pidPath("sess")).toBe("/tmp/bowser-pidpath-test/.bowser/sessions/sess/pid");
     } finally {
-      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+      if (orig !== undefined) process.env.HOME = orig;
+      else delete process.env.HOME;
     }
   });
 });
@@ -130,7 +141,8 @@ describe("spawned daemon HOME propagation", () => {
       await child.exited;
       expect(seen).toBe(redirected);
     } finally {
-      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+      if (orig !== undefined) process.env.HOME = orig;
+      else delete process.env.HOME;
     }
   });
 });
@@ -157,7 +169,10 @@ describe("connectOrSpawn on a platform without WebKit", () => {
     test(`${platform}: refuses to spawn a daemon, a user error (exit 1)`, async () => {
       const session = `platform-${platform}`;
       const started = Date.now();
-      const err = await connectOrSpawn(session, { platform }).then(() => undefined, (e: unknown) => e);
+      const err = await connectOrSpawn(session, { platform }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect((err as Error).message).toBe("bowser requires macOS (WebKit)");
       expect(reportFailure(err).code).toBe(1);
       // Refused before any spawn: no pidfile, and no wait for a startup timeout.
@@ -198,7 +213,10 @@ describe("connectOrSpawn on a Bun below the engines.bun floor", () => {
   for (const [label, session, runtime] of cases) {
     test(`${label}: refuses to spawn a daemon, a user error (exit 1)`, async () => {
       const started = Date.now();
-      const err = await connectOrSpawn(session, { platform: "darwin", runtime }).then(() => undefined, (e: unknown) => e);
+      const err = await connectOrSpawn(session, { platform: "darwin", runtime }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect((err as Error).message).toBe(`bowser requires Bun ${floor} (found ${runtime.version})`);
       expect(reportFailure(err).code).toBe(1);
       expect(await Bun.file(pidPath(session)).exists()).toBe(false);
@@ -237,7 +255,10 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     await crashed(session);
     const started = Date.now();
     // platform: a spawn attempt would fail with its own message, not this one.
-    const err = await connectOrSpawn(session, { platform: "linux" }).then(() => undefined, (e: unknown) => e);
+    const err = await connectOrSpawn(session, { platform: "linux" }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect((err as Error).message).toBe("session 'crashed' is not open (its browser exited); run 'bowser open'");
     expect(reportFailure(err).code).toBe(1);
     expect((await Bun.file(pidPath(session)).text()).trim()).toBe("99999");
@@ -248,25 +269,37 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     const session = "crashed-persistent";
     await crashed(session);
     await mkdir(profileDir(session), { recursive: true });
-    const err = await connectOrSpawn(session, { platform: "linux" }).then(() => undefined, (e: unknown) => e);
-    expect((err as Error).message).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --persistent'`);
+    const err = await connectOrSpawn(session, { platform: "linux" }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect((err as Error).message).toBe(
+      `session '${session}' is not open (its browser exited); run 'bowser open --persistent'`,
+    );
   });
 
   describe("the profile open recorded decides the advice (#93)", () => {
     const refusal = (session: string) =>
-      connectOrSpawn(session, { platform: "linux" }).then(() => "no refusal", (e: unknown) => (e as Error).message);
+      connectOrSpawn(session, { platform: "linux" }).then(
+        () => "no refusal",
+        (e: unknown) => (e as Error).message,
+      );
 
     test("the default profile: open --persistent", async () => {
       const session = "rec-default";
       await crashed(session, { profile: profileDir(session) });
-      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --persistent'`);
+      expect(await refusal(session)).toBe(
+        `session '${session}' is not open (its browser exited); run 'bowser open --persistent'`,
+      );
     });
 
     test("a custom profile: open --profile=<dir>", async () => {
       const session = "rec-custom";
       const dir = join(tmp, "custom-profile");
       await crashed(session, { profile: dir });
-      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --profile=${dir}'`);
+      expect(await refusal(session)).toBe(
+        `session '${session}' is not open (its browser exited); run 'bowser open --profile=${dir}'`,
+      );
     });
 
     test("quotes a custom profile path when the shell would split it", async () => {
@@ -291,7 +324,9 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     const session = "crashed-open";
     await crashed(session);
     // Past the refusal, the spawn path's own platform check answers.
-    await expect(connectOrSpawn(session, { platform: "linux", reopen: true })).rejects.toThrow("bowser requires macOS (WebKit)");
+    await expect(connectOrSpawn(session, { platform: "linux", reopen: true })).rejects.toThrow(
+      "bowser requires macOS (WebKit)",
+    );
   });
 
   test("a session that never ran a daemon still starts one", async () => {
@@ -458,7 +493,9 @@ describe("session claim (F29)", () => {
   /** A newcomer, paused at `pauseAt` until released. */
   const newcomer = (pidFile: string, session: string, pauseAt = "-") => {
     const p = Bun.spawn([process.execPath, HELPER, pidFile, pauseAt, "/x/src/daemon/main.ts", session], {
-      stdin: "ignore", stdout: "pipe", stderr: "inherit",
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "inherit",
     });
     spawned.push(p);
     const said = (async () => {
@@ -476,7 +513,9 @@ describe("session claim (F29)", () => {
   /** A process `ps` shows as our daemon for `session`: a live holder. */
   const liveHolder = async (session: string) => {
     const p = Bun.spawn([process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session], {
-      stdin: "ignore", stdout: "ignore", stderr: "ignore",
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
     });
     spawned.push(p);
     await waitFor(async () => (await daemonPids(session)).includes(p.pid));
@@ -548,7 +587,14 @@ describe("the command budget", () => {
         setTimeout(() => s.write(JSON.stringify({ id: req.id, ok: true }) + "\n"), seen.length === 1 ? firstMs : 0);
       }),
     });
-    return { path, seen, stop: async () => { server.stop(true); await rm(dir, { recursive: true, force: true }); } };
+    return {
+      path,
+      seen,
+      stop: async () => {
+        server.stop(true);
+        await rm(dir, { recursive: true, force: true });
+      },
+    };
   }
 
   async function withBudget(value: string, run: () => Promise<void>): Promise<void> {
@@ -557,7 +603,8 @@ describe("the command budget", () => {
     try {
       await run();
     } finally {
-      if (orig !== undefined) process.env.BOWSER_OP_TIMEOUT_MS = orig; else delete process.env.BOWSER_OP_TIMEOUT_MS;
+      if (orig !== undefined) process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      else delete process.env.BOWSER_OP_TIMEOUT_MS;
     }
   }
 
@@ -612,18 +659,28 @@ describe("connectOrSpawn when Bun.spawn throws", () => {
   });
 
   afterAll(async () => {
-    for (const [k, v] of Object.entries(orig)) if (v !== undefined) process.env[k] = v; else delete process.env[k];
+    for (const [k, v] of Object.entries(orig))
+      if (v !== undefined) process.env[k] = v;
+      else delete process.env[k];
     delete process.env.BOWSER_TEST_NUL;
     await rm(tmp, { recursive: true, force: true });
   });
 
   test("closes the daemon log it opened", async () => {
-    const err = await connectOrSpawn("spawnthrow", { platform: "darwin" }).then(() => undefined, (e: unknown) => e);
+    const err = await connectOrSpawn("spawnthrow", { platform: "darwin" }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect((err as Error).message).toContain("null bytes");
     // Matched by device and inode: other tests' sockets close asynchronously, so a count of /dev/fd moves.
     const log = statSync(daemonLogPath("spawnthrow"));
     const open = readdirSync("/dev/fd").filter((fd) => {
-      try { const st = fstatSync(Number(fd)); return st.ino === log.ino && st.dev === log.dev; } catch { return false; }
+      try {
+        const st = fstatSync(Number(fd));
+        return st.ino === log.ino && st.dev === log.dev;
+      } catch {
+        return false;
+      }
     });
     expect(open).toEqual([]);
   });

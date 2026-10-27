@@ -49,7 +49,10 @@ const claimed = (text: string): string[] => {
 const REGISTERED = new Set(COMMANDS.map((c) => c.name));
 
 describe("the command-reference table matches the registry", () => {
-  for (const [file, text] of [["README", README], ["SKILL.md", SKILL]] as const) {
+  for (const [file, text] of [
+    ["README", README],
+    ["SKILL.md", SKILL],
+  ] as const) {
     test(`${file}: every registered command has a row`, () => {
       const rows = tableCommands(text);
       expect([...REGISTERED].filter((n) => !rows.has(n))).toEqual([]);

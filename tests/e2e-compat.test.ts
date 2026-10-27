@@ -144,7 +144,9 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
     const opened = await pw("open", "--browser=webkit", base);
     if (opened.code !== 0) {
       if (/is not installed/.test(opened.out)) {
-        console.warn("e2e-compat: playwright-cli has no WebKit; run `playwright-cli install-browser webkit`. Skipping.");
+        console.warn(
+          "e2e-compat: playwright-cli has no WebKit; run `playwright-cli install-browser webkit`. Skipping.",
+        );
       } else {
         throw new Error(`playwright-cli open failed:\n${opened.out}`);
       }
@@ -157,23 +159,38 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
   }, 60_000);
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
-    if (pwReady) { try { await pw("close"); } catch {} }
+    try {
+      await cmdClose(ctx);
+    } catch {}
+    if (pwReady) {
+      try {
+        await pw("close");
+      } catch {}
+    }
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   }, 60_000);
 
   test("bowser's refs are a subset of playwright-cli's tree on the fresh page", async () => {
-    if (!pwReady) throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
+    if (!pwReady)
+      throw new Error(
+        "playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`",
+      );
     const pwOut = (await pw("snapshot")).out;
     const bowserOut = await cmdSnapshot(text);
     const missing = missingFrom(parseBowser(bowserOut), parsePlaywright(pwOut));
-    expect(missing, `bowser refs absent from playwright-cli:\n${JSON.stringify(missing)}\n\nbowser:\n${bowserOut}\n\nplaywright-cli:\n${pwOut}`).toEqual([]);
+    expect(
+      missing,
+      `bowser refs absent from playwright-cli:\n${JSON.stringify(missing)}\n\nbowser:\n${bowserOut}\n\nplaywright-cli:\n${pwOut}`,
+    ).toEqual([]);
   }, 90_000);
 
   test("after the same fill+click flow both tools see the new todos", async () => {
-    if (!pwReady) throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
+    if (!pwReady)
+      throw new Error(
+        "playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`",
+      );
     for (const todo of ["buy milk", "write tests"]) {
       // playwright-cli: re-snapshot before each action, refs can shift.
       let snap = (await pw("snapshot")).out;
@@ -196,6 +213,9 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
     expect(b).toContainEqual({ role: "checkbox", name: "Toggle buy milk" });
     expect(b).toContainEqual({ role: "checkbox", name: "Toggle write tests" });
     const missing = missingFrom(b, parsePlaywright(pwOut));
-    expect(missing, `bowser refs absent from playwright-cli:\n${JSON.stringify(missing)}\n\nbowser:\n${bowserOut}\n\nplaywright-cli:\n${pwOut}`).toEqual([]);
+    expect(
+      missing,
+      `bowser refs absent from playwright-cli:\n${JSON.stringify(missing)}\n\nbowser:\n${bowserOut}\n\nplaywright-cli:\n${pwOut}`,
+    ).toEqual([]);
   }, 180_000);
 });

@@ -91,7 +91,10 @@ describe("a removed command", () => {
   // (exit 1), before any daemon work.
   for (const name of ["install", "cookie-list", "cookie-get", "cookie-set", "cookie-delete", "cookie-clear"]) {
     test(`${name} is an unknown command, exit 1`, async () => {
-      const err = await run([name]).then(() => undefined, (e: unknown) => e);
+      const err = await run([name]).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect(err).toBeInstanceOf(Error);
       expect((err as Error).message).toBe(`unknown command: ${name}`);
       expect(reportFailure(err).code).toBe(1);

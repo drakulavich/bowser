@@ -117,7 +117,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
   beforeAll(async () => {
     origHome = process.env.HOME;
     origTimeout = process.env.BOWSER_OP_TIMEOUT_MS;
-    never2Requested = new Promise<void>((resolve) => { resolveNever2Requested = resolve; });
+    never2Requested = new Promise<void>((resolve) => {
+      resolveNever2Requested = resolve;
+    });
     tmp = await mkdtemp(join(tmpdir(), "bowser-hangs-"));
     process.env.HOME = tmp;
     server = Bun.serve({
@@ -131,7 +133,15 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
           return new Promise<Response>(() => {});
         }
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
-        const page = { "/slow": SLOW_PAGE, "/slow2": SLOW_TWO_PAGE, "/shadowed": SHADOWED_PAGE, "/double": DOUBLE_PAGE, "/form": FORM_PAGE, "/redirect": REDIRECT_PAGE }[path] ?? HOME_PAGE;
+        const page =
+          {
+            "/slow": SLOW_PAGE,
+            "/slow2": SLOW_TWO_PAGE,
+            "/shadowed": SHADOWED_PAGE,
+            "/double": DOUBLE_PAGE,
+            "/form": FORM_PAGE,
+            "/redirect": REDIRECT_PAGE,
+          }[path] ?? HOME_PAGE;
         return new Response(page, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
@@ -142,7 +152,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
 
   afterAll(async () => {
     for (const session of sessions) {
-      try { await cmdClose({ session, json: false }); } catch {}
+      try {
+        await cmdClose({ session, json: false });
+      } catch {}
     }
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
@@ -151,166 +163,206 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     await rm(tmp, { recursive: true, force: true });
   });
 
-  test("F10: click on a link to a page served after 3 s waits for it, and snapshot shows it", async () => {
-    const ctx = await openWith("slownav", 8000);
-    await cmdSnapshot(ctx);
-    const refs = (await loadState(ctx.session))!.refs;
-    const link = refs.find((r) => r.name === "Slow")!.id;
-    const stay = refs.find((r) => r.name === "Stay")!.id;
+  test(
+    "F10: click on a link to a page served after 3 s waits for it, and snapshot shows it",
+    async () => {
+      const ctx = await openWith("slownav", 8000);
+      await cmdSnapshot(ctx);
+      const refs = (await loadState(ctx.session))!.refs;
+      const link = refs.find((r) => r.name === "Slow")!.id;
+      const stay = refs.find((r) => r.name === "Stay")!.id;
 
-    // An action that navigates nowhere still costs only the grace window.
-    const still = await timed(() => cmdClick(ctx, stay));
-    expect(still.error).toBeUndefined();
-    expect(still.ms).toBeLessThan(1000);
+      // An action that navigates nowhere still costs only the grace window.
+      const still = await timed(() => cmdClick(ctx, stay));
+      expect(still.error).toBeUndefined();
+      expect(still.ms).toBeLessThan(1000);
 
-    const click = await timed(() => cmdClick(ctx, link));
-    expect(click.error).toBeUndefined();
-    expect(click.ms).toBeGreaterThanOrEqual(SLOW_MS - 500);
+      const click = await timed(() => cmdClick(ctx, link));
+      expect(click.error).toBeUndefined();
+      expect(click.ms).toBeGreaterThanOrEqual(SLOW_MS - 500);
 
-    const snap = await cmdSnapshot(ctx);
-    expect(snap).toContain(`- Page URL: ${base}/slow`);
-    expect(snap).toContain("- Page Title: Slow");
-    expect(snap).toContain('heading "Arrived"');
-  }, openTimeout(8000, 30_000));
+      const snap = await cmdSnapshot(ctx);
+      expect(snap).toContain(`- Page URL: ${base}/slow`);
+      expect(snap).toContain("- Page Title: Slow");
+      expect(snap).toContain('heading "Arrived"');
+    },
+    openTimeout(8000, 30_000),
+  );
 
-  test("F10: a page whose own `navigation` shadows the Navigation API still has its slow click awaited", async () => {
-    const ctx = await openWith("shadowed", 8000);
-    await cmdGoto(ctx, `${base}/shadowed`);
-    await cmdSnapshot(ctx);
-    const link = (await loadState(ctx.session))!.refs.find((r) => r.name === "Slow")!.id;
-    const click = await timed(() => cmdClick(ctx, link));
-    expect(click.error).toBeUndefined();
-    const snap = await cmdSnapshot(ctx);
-    expect(snap).toContain(`- Page URL: ${base}/slow`);
-    expect(snap).toContain("- Page Title: Slow");
-  }, openTimeout(8000, 30_000));
+  test(
+    "F10: a page whose own `navigation` shadows the Navigation API still has its slow click awaited",
+    async () => {
+      const ctx = await openWith("shadowed", 8000);
+      await cmdGoto(ctx, `${base}/shadowed`);
+      await cmdSnapshot(ctx);
+      const link = (await loadState(ctx.session))!.refs.find((r) => r.name === "Slow")!.id;
+      const click = await timed(() => cmdClick(ctx, link));
+      expect(click.error).toBeUndefined();
+      const snap = await cmdSnapshot(ctx);
+      expect(snap).toContain(`- Page URL: ${base}/slow`);
+      expect(snap).toContain("- Page Title: Slow");
+    },
+    openTimeout(8000, 30_000),
+  );
 
-  test("F10: a navigation that replaces the one the click started is awaited too", async () => {
-    const ctx = await openWith("double", 12000);
-    await cmdGoto(ctx, `${base}/double`);
-    await cmdSnapshot(ctx);
-    const button = (await loadState(ctx.session))!.refs.find((r) => r.name === "Twice")!.id;
-    const click = await timed(() => cmdClick(ctx, button));
-    expect(click.error).toBeUndefined();
-    // The second page is requested at ~200 ms and served 3 s later.
-    expect(click.ms).toBeGreaterThanOrEqual(SLOW_MS);
-    const snap = await cmdSnapshot(ctx);
-    expect(snap).toContain(`- Page URL: ${base}/slow2`);
-    expect(snap).toContain("- Page Title: Slow two");
-  }, openTimeout(12000, 30_000));
+  test(
+    "F10: a navigation that replaces the one the click started is awaited too",
+    async () => {
+      const ctx = await openWith("double", 12000);
+      await cmdGoto(ctx, `${base}/double`);
+      await cmdSnapshot(ctx);
+      const button = (await loadState(ctx.session))!.refs.find((r) => r.name === "Twice")!.id;
+      const click = await timed(() => cmdClick(ctx, button));
+      expect(click.error).toBeUndefined();
+      // The second page is requested at ~200 ms and served 3 s later.
+      expect(click.ms).toBeGreaterThanOrEqual(SLOW_MS);
+      const snap = await cmdSnapshot(ctx);
+      expect(snap).toContain(`- Page URL: ${base}/slow2`);
+      expect(snap).toContain("- Page Title: Slow two");
+    },
+    openTimeout(12000, 30_000),
+  );
 
-  test("F9: after an eval that never settles, the next eval works or fails within its budget, recovery frees the session, and close works", async () => {
-    const budget = 1000;
-    const ctx = await openWith("hangeval", budget);
+  test(
+    "F9: after an eval that never settles, the next eval works or fails within its budget, recovery frees the session, and close works",
+    async () => {
+      const budget = 1000;
+      const ctx = await openWith("hangeval", budget);
 
-    // The page holds the resolver, so the promise stays reachable and never
-    // settles. An unreachable one is not a hang: JSC collects it and WebKit
-    // rejects the evaluate "no longer reachable" (~6 s, measured).
-    // `command` is what run() sets: the timeout names the command (F21).
-    const stuck = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
-    expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
-    expect(stuck.ms).toBeLessThan(budget + 1000);
-
-    // Sent at once: the reload comes after a grace (the 1 s budget here) and
-    // WebKit frees the stuck evaluate ~2.4-3 s after it,
-    // so this one may time out in the queue, but never past its own budget.
-    const next = await timed(() => cmdEval(ctx, "1"));
-    if (next.error) {
-      expect(next.error).toBe(
-        `'evaluate' timed out after ${budget}ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`,
+      // The page holds the resolver, so the promise stays reachable and never
+      // settles. An unreachable one is not a hang: JSC collects it and WebKit
+      // rejects the evaluate "no longer reachable" (~6 s, measured).
+      // `command` is what run() sets: the timeout names the command (F21).
+      const stuck = await timed(() =>
+        cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"),
       );
-    }
-    expect(next.ms).toBeLessThan(budget + 1000);
+      expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
+      expect(stuck.ms).toBeLessThan(budget + 1000);
 
-    // Spec F9: from here each command either works, after the recovery
-    // reload freed the evaluate, or fails fast in the queue within its own
-    // budget. Locally the reload frees it ~2.4-3 s after it runs; on the CI
-    // runner it had not within 8 s (PR #46), so both outcomes are accepted
-    // and neither may take longer than a budget. Recovery itself is pinned
-    // by the goto test below and the dispatch unit tests.
-    //
-    // A third outcome, also within F9: the lane frees while an attempt is
-    // queued, so it runs on what is left of its budget from receipt, and can
-    // overrun it there. It then fails as a running op, without the "waiting
-    // for" tail (CI run 36299769857; pinned by the dispatch unit test "a
-    // request that reaches the head of the queue with too little budget
-    // left …"). It is still bounded by its budget.
-    const QUEUED = `'eval' timed out after ${budget}ms (in its 'evaluate' step) (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
-    const RAN_OUT = `'eval' timed out after ${budget}ms (in its 'evaluate' step)`;
-    // Where the reload did not free it (CI), the session is marked stuck
-    // until it settles, and each attempt is answered at once (#78).
-    const STUCK = "session is stuck: 'eval' is still running after a reload; run 'bowser close'";
-    let href: string | undefined;
-    const deadline = performance.now() + 20_000;
-    while (href === undefined && performance.now() < deadline) {
-      const attempt = await timed(async () => { href = await cmdEval({ ...ctx, command: "eval" }, "location.href"); });
-      expect(attempt.ms).toBeLessThan(budget + 1000);
-      if (attempt.error) {
-        expect([QUEUED, RAN_OUT, STUCK]).toContain(attempt.error);
-        await Bun.sleep(200);
+      // Sent at once: the reload comes after a grace (the 1 s budget here) and
+      // WebKit frees the stuck evaluate ~2.4-3 s after it,
+      // so this one may time out in the queue, but never past its own budget.
+      const next = await timed(() => cmdEval(ctx, "1"));
+      if (next.error) {
+        expect(next.error).toBe(
+          `'evaluate' timed out after ${budget}ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`,
+        );
       }
-    }
-    if (href !== undefined) expect(href).toBe(`${base}/`);
+      expect(next.ms).toBeLessThan(budget + 1000);
 
-    const close = await timed(() => cmdClose(ctx));
-    expect(close.error).toBeUndefined();
-    expect(close.ms).toBeLessThan(5000);
-  }, openTimeout(1000, 45_000));
+      // Spec F9: from here each command either works, after the recovery
+      // reload freed the evaluate, or fails fast in the queue within its own
+      // budget. Locally the reload frees it ~2.4-3 s after it runs; on the CI
+      // runner it had not within 8 s (PR #46), so both outcomes are accepted
+      // and neither may take longer than a budget. Recovery itself is pinned
+      // by the goto test below and the dispatch unit tests.
+      //
+      // A third outcome, also within F9: the lane frees while an attempt is
+      // queued, so it runs on what is left of its budget from receipt, and can
+      // overrun it there. It then fails as a running op, without the "waiting
+      // for" tail (CI run 36299769857; pinned by the dispatch unit test "a
+      // request that reaches the head of the queue with too little budget
+      // left …"). It is still bounded by its budget.
+      const QUEUED = `'eval' timed out after ${budget}ms (in its 'evaluate' step) (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)`;
+      const RAN_OUT = `'eval' timed out after ${budget}ms (in its 'evaluate' step)`;
+      // Where the reload did not free it (CI), the session is marked stuck
+      // until it settles, and each attempt is answered at once (#78).
+      const STUCK = "session is stuck: 'eval' is still running after a reload; run 'bowser close'";
+      let href: string | undefined;
+      const deadline = performance.now() + 20_000;
+      while (href === undefined && performance.now() < deadline) {
+        const attempt = await timed(async () => {
+          href = await cmdEval({ ...ctx, command: "eval" }, "location.href");
+        });
+        expect(attempt.ms).toBeLessThan(budget + 1000);
+        if (attempt.error) {
+          expect([QUEUED, RAN_OUT, STUCK]).toContain(attempt.error);
+          await Bun.sleep(200);
+        }
+      }
+      if (href !== undefined) expect(href).toBe(`${base}/`);
 
-  test("F9: after a goto whose server never answers, the next command is bounded by its budget", async () => {
-    const budget = 1000;
-    const ctx = await openWith("hanggoto", budget);
+      const close = await timed(() => cmdClose(ctx));
+      expect(close.error).toBeUndefined();
+      expect(close.ms).toBeLessThan(5000);
+    },
+    openTimeout(1000, 45_000),
+  );
 
-    const stuck = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/never`));
-    expect(stuck.error).toBe(`'goto' timed out after ${budget}ms (in its 'navigate' step)`);
+  test(
+    "F9: after a goto whose server never answers, the next command is bounded by its budget",
+    async () => {
+      const budget = 1000;
+      const ctx = await openWith("hanggoto", budget);
 
-    // Sent at once: the daemon reloads only after a grace (the 1 s budget
-    // here), so this may time out in the queue, but never past its budget.
-    const next = await timed(() => cmdEval(ctx, "location.href"));
-    expect(next.ms).toBeLessThan(budget + 1000);
-    if (next.error) expect(next.error).toContain("(waiting for 'navigate', which timed out and is still running");
+      const stuck = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/never`));
+      expect(stuck.error).toBe(`'goto' timed out after ${budget}ms (in its 'navigate' step)`);
 
-    // The reload cancels the stuck navigation at once: the session works
-    // again, on the page it was on.
-    let href: string | undefined;
-    const deadline = performance.now() + 5000;
-    while (href === undefined && performance.now() < deadline) {
-      try { href = await cmdEval(ctx, "location.href"); } catch { await Bun.sleep(200); }
-    }
-    expect(href).toBe(`${base}/`);
+      // Sent at once: the daemon reloads only after a grace (the 1 s budget
+      // here), so this may time out in the queue, but never past its budget.
+      const next = await timed(() => cmdEval(ctx, "location.href"));
+      expect(next.ms).toBeLessThan(budget + 1000);
+      if (next.error) expect(next.error).toContain("(waiting for 'navigate', which timed out and is still running");
 
-    const close = await timed(() => cmdClose(ctx));
-    expect(close.error).toBeUndefined();
-    expect(close.ms).toBeLessThan(5000);
-  }, openTimeout(1000, 30_000));
+      // The reload cancels the stuck navigation at once: the session works
+      // again, on the page it was on.
+      let href: string | undefined;
+      const deadline = performance.now() + 5000;
+      while (href === undefined && performance.now() < deadline) {
+        try {
+          href = await cmdEval(ctx, "location.href");
+        } catch {
+          await Bun.sleep(200);
+        }
+      }
+      expect(href).toBe(`${base}/`);
+
+      const close = await timed(() => cmdClose(ctx));
+      expect(close.error).toBeUndefined();
+      expect(close.ms).toBeLessThan(5000);
+    },
+    openTimeout(1000, 30_000),
+  );
 
   // ET-38: a killed client's op used to keep its whole budget in the daemon,
   // and with no budget (0) it held the session for good.
-  test("ET-38: with no budget, a goto whose client is killed is recovered, and the next command works", async () => {
-    const ctx = await openWith("hangkilled", 0);
-    const hits = neverHits;
-    const goto = Bun.spawn(["bun", join(import.meta.dir, "../src/cli.ts"), "goto", `${base}/never`, "-s", ctx.session], {
-      env: { ...process.env, HOME: tmp },
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    expect(await waitFor(() => neverHits > hits, 10_000)).toBe(true);
-    goto.kill("SIGKILL");
-    await goto.exited;
+  test(
+    "ET-38: with no budget, a goto whose client is killed is recovered, and the next command works",
+    async () => {
+      const ctx = await openWith("hangkilled", 0);
+      const hits = neverHits;
+      const goto = Bun.spawn(
+        ["bun", join(import.meta.dir, "../src/cli.ts"), "goto", `${base}/never`, "-s", ctx.session],
+        {
+          env: { ...process.env, HOME: tmp },
+          stdout: "ignore",
+          stderr: "ignore",
+        },
+      );
+      expect(await waitFor(() => neverHits > hits, 10_000)).toBe(true);
+      goto.kill("SIGKILL");
+      await goto.exited;
 
-    // A smaller budget bounds each attempt: before the fix the first one
-    // waited the whole 25 s behind the killed goto and failed. After it the
-    // goto ends 5 s after the kill, and its recovery 2 s later.
-    process.env.BOWSER_OP_TIMEOUT_MS = "25000";
-    const killedAt = performance.now();
-    let href: string | undefined;
-    let last: string | undefined;
-    while (href === undefined && performance.now() - killedAt < 20_000) {
-      try { href = await cmdEval(ctx, "location.href"); } catch (err) { last = String(err); await Bun.sleep(200); }
-    }
-    expect({ href, last: href ? undefined : last }).toEqual({ href: `${base}/`, last: undefined });
-    expect(performance.now() - killedAt).toBeLessThan(20_000);
-  }, openTimeout(0, 30_000));
+      // A smaller budget bounds each attempt: before the fix the first one
+      // waited the whole 25 s behind the killed goto and failed. After it the
+      // goto ends 5 s after the kill, and its recovery 2 s later.
+      process.env.BOWSER_OP_TIMEOUT_MS = "25000";
+      const killedAt = performance.now();
+      let href: string | undefined;
+      let last: string | undefined;
+      while (href === undefined && performance.now() - killedAt < 20_000) {
+        try {
+          href = await cmdEval(ctx, "location.href");
+        } catch (err) {
+          last = String(err);
+          await Bun.sleep(200);
+        }
+      }
+      expect({ href, last: href ? undefined : last }).toEqual({ href: `${base}/`, last: undefined });
+      expect(performance.now() - killedAt).toBeLessThan(20_000);
+    },
+    openTimeout(0, 30_000),
+  );
 
   // #48: from a fresh session nothing has committed yet (the view's url is
   // ""), so reload() has no page to reload and does nothing, and WebKit
@@ -328,7 +380,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     let landed: string | undefined;
     const deadline = performance.now() + 10_000;
     while (landed === undefined && performance.now() < deadline) {
-      const attempt = await timed(async () => { landed = await cmdGoto(ctx, `${base}/`); });
+      const attempt = await timed(async () => {
+        landed = await cmdGoto(ctx, `${base}/`);
+      });
       expect(attempt.ms).toBeLessThan(budget + 1000);
       if (attempt.error) await Bun.sleep(200);
     }
@@ -349,7 +403,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     const budget = 1000;
     const ctx = await openFresh("hangfresh", budget);
 
-    const stuck = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
+    const stuck = await timed(() =>
+      cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"),
+    );
     expect(stuck.error).toBe(`'eval' timed out after ${budget}ms (in its 'evaluate' step)`);
 
     // Recovery runs a grace (the budget) after the timeout, and the stuck
@@ -359,7 +415,9 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     let href: string | undefined;
     const deadline = t0 + 15_000;
     while (href === undefined && performance.now() < deadline) {
-      const attempt = await timed(async () => { href = await cmdEval({ ...ctx, command: "eval" }, "location.href"); });
+      const attempt = await timed(async () => {
+        href = await cmdEval({ ...ctx, command: "eval" }, "location.href");
+      });
       expect(attempt.ms).toBeLessThan(budget + 1000);
       if (attempt.error) await Bun.sleep(200);
     }
@@ -372,58 +430,71 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
 
   // ET-10 (#78): a selector click started while the page's POST is still
   // unanswered never resolved on WebKit, so this fill hung until its budget.
-  test("ET-10: after a submit to a server that never answers, the next fill types or says the page is still loading, within its budget", async () => {
-    const ctx = await openWith("et10", 30_000);
-    await cmdGoto(ctx, `${base}/form`);
-    await cmdSnapshot(ctx);
-    const refs = (await loadState(ctx.session))!.refs;
-    const ref = (name: string) => refs.find((r) => r.name === name)!.id;
-    await cmdFill(ctx, ref("First"), "hello");
-    // Returns at the navigation watch's 10 s cap with the POST still pending.
-    const submit = await timed(() => cmdClick(ctx, ref("Send")));
-    expect(submit.error).toBeUndefined();
+  test(
+    "ET-10: after a submit to a server that never answers, the next fill types or says the page is still loading, within its budget",
+    async () => {
+      const ctx = await openWith("et10", 30_000);
+      await cmdGoto(ctx, `${base}/form`);
+      await cmdSnapshot(ctx);
+      const refs = (await loadState(ctx.session))!.refs;
+      const ref = (name: string) => refs.find((r) => r.name === name)!.id;
+      await cmdFill(ctx, ref("First"), "hello");
+      // Returns at the navigation watch's 10 s cap with the POST still pending.
+      const submit = await timed(() => cmdClick(ctx, ref("Send")));
+      expect(submit.error).toBeUndefined();
 
-    process.env.BOWSER_OP_TIMEOUT_MS = "3000";
-    const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
-    expect(fill.ms).toBeLessThan(3500);
-    if (fill.error) expect(fill.error).toBe(`page is still loading ${base}/never; retry later, or run 'bowser close'`);
-    else expect(await cmdEval(ctx, "document.querySelector('[name=b]').value")).toBe("AFTER");
+      process.env.BOWSER_OP_TIMEOUT_MS = "3000";
+      const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
+      expect(fill.ms).toBeLessThan(3500);
+      if (fill.error)
+        expect(fill.error).toBe(`page is still loading ${base}/never; retry later, or run 'bowser close'`);
+      else expect(await cmdEval(ctx, "document.querySelector('[name=b]').value")).toBe("AFTER");
 
-    // The daemon's budget is 30 s; the timeout names the command's own.
-    // The page holds the resolver: JSC collects an unreachable promise and
-    // WebKit then rejects the evaluate "no longer reachable" (#100).
-    const hung = await timed(() => cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"));
-    expect(hung.error).toBe("'eval' timed out after 3000ms (in its 'evaluate' step)");
+      // The daemon's budget is 30 s; the timeout names the command's own.
+      // The page holds the resolver: JSC collects an unreachable promise and
+      // WebKit then rejects the evaluate "no longer reachable" (#100).
+      const hung = await timed(() =>
+        cmdEval({ ...ctx, command: "eval" }, "new Promise((resolve) => { window.hold = resolve; })"),
+      );
+      expect(hung.error).toBe("'eval' timed out after 3000ms (in its 'evaluate' step)");
 
-    const close = await timed(() => cmdClose(ctx));
-    expect(close.error).toBeUndefined();
-    expect(close.ms).toBeLessThan(2000);
-  }, openTimeout(30_000, 40_000));
+      const close = await timed(() => cmdClose(ctx));
+      expect(close.error).toBeUndefined();
+      expect(close.ms).toBeLessThan(2000);
+    },
+    openTimeout(30_000, 40_000),
+  );
 
-  test("#98: a navigation that replaces the pending one after the watch ends still holds the next fill", async () => {
-    const ctx = await openWith("replaced", 30_000);
-    await cmdGoto(ctx, `${base}/redirect`);
-    await cmdSnapshot(ctx);
-    const refs = (await loadState(ctx.session))!.refs;
-    const ref = (name: string) => refs.find((r) => r.name === name)!.id;
-    const submit = await timed(() => cmdClick(ctx, ref("Send")));
-    expect(submit.error).toBeUndefined();
-    // Wait for the server to see the replacement request. The page's 11 s
-    // timer starts at submit, before cmdClick returns; bound this wait so a
-    // broken repro cannot hold the suite indefinitely.
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const requested = await Promise.race([
-      never2Requested.then(() => true),
-      new Promise<false>((resolve) => { timeout = setTimeout(() => resolve(false), 15_000); }),
-    ]);
-    clearTimeout(timeout);
-    expect(requested).toBe(true);
+  test(
+    "#98: a navigation that replaces the pending one after the watch ends still holds the next fill",
+    async () => {
+      const ctx = await openWith("replaced", 30_000);
+      await cmdGoto(ctx, `${base}/redirect`);
+      await cmdSnapshot(ctx);
+      const refs = (await loadState(ctx.session))!.refs;
+      const ref = (name: string) => refs.find((r) => r.name === name)!.id;
+      const submit = await timed(() => cmdClick(ctx, ref("Send")));
+      expect(submit.error).toBeUndefined();
+      // Wait for the server to see the replacement request. The page's 11 s
+      // timer starts at submit, before cmdClick returns; bound this wait so a
+      // broken repro cannot hold the suite indefinitely.
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const requested = await Promise.race([
+        never2Requested.then(() => true),
+        new Promise<false>((resolve) => {
+          timeout = setTimeout(() => resolve(false), 15_000);
+        }),
+      ]);
+      clearTimeout(timeout);
+      expect(requested).toBe(true);
 
-    process.env.BOWSER_OP_TIMEOUT_MS = "3000";
-    const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
-    expect(fill.error).toBe(`page is still loading ${base}/never2; retry later, or run 'bowser close'`);
+      process.env.BOWSER_OP_TIMEOUT_MS = "3000";
+      const fill = await timed(() => cmdFill({ ...ctx, command: "fill" }, ref("Second"), "AFTER"));
+      expect(fill.error).toBe(`page is still loading ${base}/never2; retry later, or run 'bowser close'`);
 
-    const close = await timed(() => cmdClose(ctx));
-    expect(close.error).toBeUndefined();
-  }, openTimeout(30_000, 60_000));
+      const close = await timed(() => cmdClose(ctx));
+      expect(close.error).toBeUndefined();
+    },
+    openTimeout(30_000, 60_000),
+  );
 });

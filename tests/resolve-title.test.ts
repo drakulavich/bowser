@@ -7,7 +7,10 @@ import { resolveTitle } from "../src/browser.ts";
 describe("resolveTitle", () => {
   test("returns view.title unchanged when non-empty (no evaluate)", async () => {
     let called = false;
-    const out = await resolveTitle("Kitchen Sink", async () => { called = true; return "x"; });
+    const out = await resolveTitle("Kitchen Sink", async () => {
+      called = true;
+      return "x";
+    });
     expect(out).toBe("Kitchen Sink");
     expect(called).toBe(false);
   });
@@ -18,7 +21,9 @@ describe("resolveTitle", () => {
   });
 
   test("returns empty when evaluate throws", async () => {
-    const out = await resolveTitle("", async () => { throw new Error("eval failed"); });
+    const out = await resolveTitle("", async () => {
+      throw new Error("eval failed");
+    });
     expect(out).toBe("");
   });
 

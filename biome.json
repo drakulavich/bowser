@@ -1,12 +1,7 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": [
-      "src/**",
-      "tests/**",
-      "bench/**",
-      "!!.worktrees"
-    ]
+    "includes": ["src/**", "tests/**", "bench/**", "!!.worktrees"]
   },
   "formatter": {
     "enabled": false
@@ -45,10 +40,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "./**",
-                      "../**"
-                    ],
+                    "group": ["./**", "../**"],
                     "message": "Leaf modules import nothing from src: every other layer may depend on them, never the other way. Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]
@@ -59,10 +51,7 @@
       }
     },
     {
-      "includes": [
-        "src/state.ts",
-        "src/snapshot.ts"
-      ],
+      "includes": ["src/state.ts", "src/snapshot.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -71,14 +60,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "./browser.ts",
-                      "./daemon/**",
-                      "./commands/**",
-                      "./cli/**",
-                      "./mcp.ts",
-                      "./cli.ts"
-                    ],
+                    "group": ["./browser.ts", "./daemon/**", "./commands/**", "./cli/**", "./mcp.ts", "./cli.ts"],
                     "message": "src/state.ts and src/snapshot.ts may import only leaf modules and each other. Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]
@@ -89,9 +71,7 @@
       }
     },
     {
-      "includes": [
-        "src/browser.ts"
-      ],
+      "includes": ["src/browser.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -118,12 +98,7 @@
       }
     },
     {
-      "includes": [
-        "src/daemon/**",
-        "!src/daemon/protocol.ts",
-        "!src/daemon/pidfile.ts",
-        "!src/daemon/client.ts"
-      ],
+      "includes": ["src/daemon/**", "!src/daemon/protocol.ts", "!src/daemon/pidfile.ts", "!src/daemon/client.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -132,12 +107,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "../commands/**",
-                      "../cli/**",
-                      "../mcp.ts",
-                      "../cli.ts"
-                    ],
+                    "group": ["../commands/**", "../cli/**", "../mcp.ts", "../cli.ts"],
                     "message": "src/daemon may import only leaf modules, state, snapshot, browser and daemon: commands reach the daemon, never the other way. Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]
@@ -148,9 +118,7 @@
       }
     },
     {
-      "includes": [
-        "src/daemon/client.ts"
-      ],
+      "includes": ["src/daemon/client.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -178,9 +146,7 @@
       }
     },
     {
-      "includes": [
-        "src/commands/**"
-      ],
+      "includes": ["src/commands/**"],
       "linter": {
         "rules": {
           "style": {
@@ -208,9 +174,7 @@
       }
     },
     {
-      "includes": [
-        "src/cli/**"
-      ],
+      "includes": ["src/cli/**"],
       "linter": {
         "rules": {
           "style": {
@@ -219,12 +183,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "../browser.ts",
-                      "../daemon/**",
-                      "../mcp.ts",
-                      "../cli.ts"
-                    ],
+                    "group": ["../browser.ts", "../daemon/**", "../mcp.ts", "../cli.ts"],
                     "message": "src/cli may import only cli, commands and leaf modules: it reaches the daemon through commands. Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]
@@ -235,9 +194,7 @@
       }
     },
     {
-      "includes": [
-        "src/mcp.ts"
-      ],
+      "includes": ["src/mcp.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -246,11 +203,7 @@
               "options": {
                 "patterns": [
                   {
-                    "group": [
-                      "./cli.ts",
-                      "./browser.ts",
-                      "./daemon/**"
-                    ],
+                    "group": ["./cli.ts", "./browser.ts", "./daemon/**"],
                     "message": "src/mcp.ts may import cli, commands and leaf modules, never cli.ts: cli.ts is mid-evaluation when it loads mcp.ts, and importing it back deadlocked the old compiled binary. Layers depend only downward: leaves (errors, page-scripts, serialize, socket-write, daemon/protocol, daemon/pidfile) → state, snapshot → browser → daemon → commands → cli → mcp → cli.ts."
                   }
                 ]

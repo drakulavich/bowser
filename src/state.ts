@@ -139,15 +139,12 @@ export function resolveRef(state: SessionState, ref: string): Ref {
     if (/^f\d+e\d+$/.test(ref)) {
       throw new UserError(`'${ref}' is a playwright-cli frame ref; bowser does not snapshot iframe contents`);
     }
-    throw new UserError(
-      `expected a ref like 'e1', got '${ref}'. Run 'bowser snapshot' first.`,
-    );
+    throw new UserError(`expected a ref like 'e1', got '${ref}'. Run 'bowser snapshot' first.`);
   }
   const found = state.refs.find((r) => r.id === ref);
   if (!found) {
     throw new UserError(
-      `ref '${ref}' not found in last snapshot of session '${state.name}'. ` +
-        `Run 'bowser snapshot' to refresh.`,
+      `ref '${ref}' not found in last snapshot of session '${state.name}'. ` + `Run 'bowser snapshot' to refresh.`,
     );
   }
   return found;

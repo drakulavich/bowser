@@ -70,7 +70,11 @@ function meanwhile<T>(work: () => Promise<T>): Promise<T> {
  *  a daemon of this version on the socket, answering `state` with `url` and
  *  `profile`, as a spawned one would. The old one shows `oldUrl`, else `url`,
  *  or answers `state` with `oldState`. */
-async function upgrade(session: string, answer: string, page: { url?: string; oldUrl?: string; oldState?: unknown; profile?: string }) {
+async function upgrade(
+  session: string,
+  answer: string,
+  page: { url?: string; oldUrl?: string; oldState?: unknown; profile?: string },
+) {
   const url = page.url ?? "about:blank";
   let next: FakeDaemon | undefined;
   const old: FakeDaemon = await fakeDaemon(session, (req) => {
@@ -79,12 +83,20 @@ async function upgrade(session: string, answer: string, page: { url?: string; ol
     return daemonOf(answer, page.oldUrl ?? url)(req);
   });
   const current: Answer = (req) =>
-    req.op === "state" ? { url, title: "", profile: page.profile } satisfies PageState : daemonOf(pkg.version)(req);
+    req.op === "state" ? ({ url, title: "", profile: page.profile } satisfies PageState) : daemonOf(pkg.version)(req);
   const connect = async (s: string, o?: ConnectOptions) => {
     if (old.ops.includes("shutdown") && !next) next = await fakeDaemon(session, current);
     return connectOrSpawn(s, o);
   };
-  return { old, next: () => next, connect, stop: () => { old.stop(); next?.stop(); } };
+  return {
+    old,
+    next: () => next,
+    connect,
+    stop: () => {
+      old.stop();
+      next?.stop();
+    },
+  };
 }
 
 describe("F2: a daemon from another bowser version", () => {
@@ -96,7 +108,14 @@ describe("F2: a daemon from another bowser version", () => {
   for (const { label, answer, v } of cases) {
     test(`${label}: restarts an older daemon and says what was lost`, async () => {
       const session = `ver-${answer.replaceAll(".", "")}`;
-      await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [], updatedAt: 0, profile: null });
+      await saveState({
+        name: session,
+        url: "https://example.com/cart",
+        title: "Cart",
+        refs: [],
+        updatedAt: 0,
+        profile: null,
+      });
       const up = await upgrade(session, answer, { url: "https://example.com/cart" });
       try {
         const notices: string[] = [];
@@ -177,7 +196,10 @@ describe("F2: a daemon from another bowser version", () => {
     const session = "ver-newer-after-lock";
     const d = await fakeDaemon(session, daemonOf("99.0.0"));
     try {
-      const err = await restartSession({ session, json: false, notices: [] }, new OlderDaemon("old", "0.6.1")).then(() => undefined, (e: unknown) => e);
+      const err = await restartSession({ session, json: false, notices: [] }, new OlderDaemon("old", "0.6.1")).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect((err as Error).message).toBe(
         `session '${session}' is running bowser 99.0.0 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
       );
@@ -232,7 +254,15 @@ describe("F2: a daemon from another bowser version", () => {
   test("a restart whose reload fails clears the saved refs (#149)", async () => {
     const session = "ver-noreload";
     const ref = { id: "e1", role: "button", name: "Add", tag: "button" };
-    await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [ref], doc: "d1", updatedAt: 0, profile: null });
+    await saveState({
+      name: session,
+      url: "https://example.com/cart",
+      title: "Cart",
+      refs: [ref],
+      doc: "d1",
+      updatedAt: 0,
+      profile: null,
+    });
     const up = await upgrade(session, "0.6.1", { oldUrl: "https://example.com/cart" });
     try {
       const notices: string[] = [];
@@ -249,12 +279,23 @@ describe("F2: a daemon from another bowser version", () => {
   test("a restart whose stop fails keeps the saved refs (#149)", async () => {
     const session = "ver-nostop";
     const ref = { id: "e1", role: "button", name: "Add", tag: "button" };
-    await saveState({ name: session, url: "https://example.com/cart", title: "Cart", refs: [ref], doc: "d1", updatedAt: 0, profile: null });
+    await saveState({
+      name: session,
+      url: "https://example.com/cart",
+      title: "Cart",
+      refs: [ref],
+      doc: "d1",
+      updatedAt: 0,
+      profile: null,
+    });
     // A live pid that is not a daemon of ours: the stop refuses to signal it.
     await Bun.write(join(sessionDir(session), "pid"), String(process.ppid));
     const up = await upgrade(session, "0.6.1", {});
     try {
-      const err = await run(["eval", "1", "-s", session], { connect: up.connect, notices: [] }).then(() => undefined, (e: unknown) => e);
+      const err = await run(["eval", "1", "-s", session], { connect: up.connect, notices: [] }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect((err as Error).message).toContain("does not look like a bowser daemon");
       expect((await loadState(session))?.refs).toEqual([ref]);
     } finally {
@@ -266,9 +307,13 @@ describe("F2: a daemon from another bowser version", () => {
   test("with no package.json on disk, an older daemon is still refused", async () => {
     const session = "ver-noinstall";
     const d = await fakeDaemon(session, daemonOf("0.6.1"));
-    const connect = (s: string, o?: ConnectOptions) => connectOrSpawn(s, { ...o, installedVersion: async () => undefined });
+    const connect = (s: string, o?: ConnectOptions) =>
+      connectOrSpawn(s, { ...o, installedVersion: async () => undefined });
     try {
-      const err = await run(["snapshot", "-s", session], { connect }).then(() => undefined, (e: unknown) => e);
+      const err = await run(["snapshot", "-s", session], { connect }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect(reportFailure(err).stderr).toBe(
         `bowser: session '${session}' is running bowser 0.6.1 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
       );
@@ -343,9 +388,15 @@ describe("F2: a daemon from another bowser version", () => {
 
   describe("a process whose version differs from the installed bowser (#79)", () => {
     const refusal = (session: string, installedVersion: () => Promise<string | undefined>) =>
-      connectOrSpawn(session, { installedVersion }).then(() => "no refusal", (e: unknown) => (e as Error).message);
+      connectOrSpawn(session, { installedVersion }).then(
+        () => "no refusal",
+        (e: unknown) => (e as Error).message,
+      );
 
-    for (const [label, installed] of [["an upgrade", "99.0.0"], ["a downgrade", "0.0.1"]] as const) {
+    for (const [label, installed] of [
+      ["an upgrade", "99.0.0"],
+      ["a downgrade", "0.0.1"],
+    ] as const) {
       test(`${label}: a daemon of the installed version: restart this process`, async () => {
         const session = `ver-stale-${installed.replaceAll(".", "")}`;
         const d = await fakeDaemon(session, daemonOf(installed));
@@ -430,7 +481,11 @@ describe("F3: close of a silent daemon with no pidfile", () => {
     const session = "stale3";
     await ensureSessionDir(session);
     // A unix socket file nobody listens on: connect is refused.
-    const bound = Bun.spawnSync([process.execPath, "-e", `require("node:net").createServer().listen(${JSON.stringify(socketPath(session))}, () => process.kill(process.pid, "SIGKILL"))`]);
+    const bound = Bun.spawnSync([
+      process.execPath,
+      "-e",
+      `require("node:net").createServer().listen(${JSON.stringify(socketPath(session))}, () => process.kill(process.pid, "SIGKILL"))`,
+    ]);
     expect(bound.exitCode).not.toBe(0);
     expect(existsSync(socketPath(session))).toBe(true);
     expect(await run(["close", "-s", session])).toBe(`closed session '${session}'`);
@@ -443,7 +498,11 @@ describe("F32: list", () => {
    *  time, and how long it lived after its last output. */
   async function timedList(home = tmp): Promise<{ out: string; ms: number; afterOutput: number }> {
     const started = performance.now();
-    const proc = Bun.spawn([process.execPath, CLI, "list"], { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn([process.execPath, CLI, "list"], {
+      env: { ...process.env, HOME: home },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     let out = "";
     let printed = started;
     const decoder = new TextDecoder();
@@ -500,8 +559,12 @@ describe("F21: a timeout names the command", () => {
       unix: socketPath(session),
       socket: lineSocket((s, line) => {
         dispatch(JSON.parse(line) as DaemonRequest, {
-          handle, serialize, timeoutMs: 50,
-          reply: (res) => { s.write(JSON.stringify(res) + "\n"); },
+          handle,
+          serialize,
+          timeoutMs: 50,
+          reply: (res) => {
+            s.write(JSON.stringify(res) + "\n");
+          },
         });
       }),
     });
@@ -509,7 +572,10 @@ describe("F21: a timeout names the command", () => {
 
   async function seed(session: string) {
     await saveState({
-      name: session, url: "https://x", title: "X", updatedAt: 1,
+      name: session,
+      url: "https://x",
+      title: "X",
+      updatedAt: 1,
       refs: [{ id: "e2", role: "textbox", name: "Under", tag: "input" }],
     });
   }
@@ -578,7 +644,8 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
     const d = await fakeDaemon(session, (req) =>
       req.op === "evaluate"
         ? Bun.sleep(1300).then(() => ({ ok: false, error: "'eval' timed out after 300ms" }))
-        : daemonOf(pkg.version)(req));
+        : daemonOf(pkg.version)(req),
+    );
     try {
       expect(await withBudget("300", () => failure(["eval", "1", "-s", session]))).toEqual({
         stderr: "bowser: 'eval' timed out after 300ms",
@@ -592,7 +659,8 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
   test("ET-59: budget 0 sets no client deadline", async () => {
     const session = "et59zero";
     const d = await fakeDaemon(session, (req) =>
-      req.op === "evaluate" ? Bun.sleep(2500).then(() => 1) : daemonOf(pkg.version)(req));
+      req.op === "evaluate" ? Bun.sleep(2500).then(() => 1) : daemonOf(pkg.version)(req),
+    );
     try {
       expect(await withBudget("0", () => run(["eval", "1", "-s", session]))).toBe("1");
     } finally {
@@ -607,15 +675,22 @@ describe("ET-59: a daemon that stops answering mid-op", () => {
       if (req.op === "evaluate") frozen = true;
       return frozen ? SILENT : daemonOf(pkg.version)(req);
     });
-    const answered: Array<{ at: number; res: { id: number; result: { isError?: boolean; content: Array<{ text: string }> } } }> = [];
+    const answered: Array<{
+      at: number;
+      res: { id: number; result: { isError?: boolean; content: Array<{ text: string }> } };
+    }> = [];
     const server = createMcpServer({ version: pkg.version, run }, (line) => {
       answered.push({ at: Date.now(), res: JSON.parse(line) });
     });
     const call = (id: number) =>
-      server.accept(JSON.stringify({
-        jsonrpc: "2.0", id, method: "tools/call",
-        params: { name: "eval", arguments: { expression: "1", session } },
-      }));
+      server.accept(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: { name: "eval", arguments: { expression: "1", session } },
+        }),
+      );
     try {
       const t0 = Date.now();
       await withBudget("300", async () => {
@@ -663,7 +738,13 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
   /** A connector that records the options of every connect. */
   function recording() {
     const calls: ConnectOptions[] = [];
-    return { calls, connect: (s: string, o: ConnectOptions = {}) => { calls.push(o); return connectOrSpawn(s, o); } };
+    return {
+      calls,
+      connect: (s: string, o: ConnectOptions = {}) => {
+        calls.push(o);
+        return connectOrSpawn(s, o);
+      },
+    };
   }
   async function failing(argv: string[], base: Parameters<typeof run>[1]) {
     return run(argv, base).then((out) => ({ stderr: `no failure: ${out}`, code: 0 }), reportFailure);
@@ -707,7 +788,11 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
         await unlink(join(dir, LOCK));
       },
     },
-    { label: "no daemon (BrowserExited)", noDaemon: true, close: (s) => rm(sessionDir(s), { recursive: true, force: true }) },
+    {
+      label: "no daemon (BrowserExited)",
+      noDaemon: true,
+      close: (s) => rm(sessionDir(s), { recursive: true, force: true }),
+    },
   ];
   for (const [i, c] of waitedForClose.entries()) {
     test(`a restart that waited for close fails and starts nothing (ET-32): ${c.label}`, async () => {
@@ -721,7 +806,10 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       });
       const r = recording();
       try {
-        expect(await failing(["eval", "1", "-s", session], { connect: r.connect })).toEqual({ stderr: closedWhileWaiting(session), code: 1 });
+        expect(await failing(["eval", "1", "-s", session], { connect: r.connect })).toEqual({
+          stderr: closedWhileWaiting(session),
+          code: 1,
+        });
         expect(r.calls.slice(1).every((o) => o.spawn === false)).toBe(true);
         expect(left(session)).toEqual([]);
         expect(await run(["list"])).not.toContain(session);
@@ -764,7 +852,9 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       await rm(sessionDir(session), { recursive: true, force: true });
       return claimSession(...args);
     };
-    expect(await closeOne({ session, json: false }, session, undefined, claim)).toBe(`session '${session}' is not open`);
+    expect(await closeOne({ session, json: false }, session, undefined, claim)).toBe(
+      `session '${session}' is not open`,
+    );
     expect(claimed).toBe(true);
   });
 
@@ -865,8 +955,16 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     await Bun.write(msgOf(session), text);
     const d = await fakeDaemon(session, daemonOf(pkg.version));
     const cli = async () => {
-      const proc = Bun.spawn([process.execPath, CLI, "eval", "1", "-s", session], { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
-      const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      const proc = Bun.spawn([process.execPath, CLI, "eval", "1", "-s", session], {
+        env: { ...process.env, HOME: home },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [out, err] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
       return { out, err };
     };
     try {
@@ -962,7 +1060,13 @@ describe("#152: the restart keeps the session's page and budget", () => {
     const calls: ConnectOptions[] = [];
     const notices: string[] = [];
     try {
-      const out = await run(["eval", "1", "-s", session], { connect: (s, o = {}) => { calls.push(o); return up.connect(s, o); }, notices });
+      const out = await run(["eval", "1", "-s", session], {
+        connect: (s, o = {}) => {
+          calls.push(o);
+          return up.connect(s, o);
+        },
+        notices,
+      });
       return { out, notices, calls, old: up.old.ops };
     } finally {
       up.stop();
@@ -990,7 +1094,9 @@ describe("#152: the restart keeps the session's page and budget", () => {
   });
 
   test("ET-30: the new daemon gets the old one's budget, not the restarting command's", async () => {
-    const r = await withBudget("200", () => restart("et30-kept", { url: start, oldState: { url: start, title: "", budgetMs: 45000 } }));
+    const r = await withBudget("200", () =>
+      restart("et30-kept", { url: start, oldState: { url: start, title: "", budgetMs: 45000 } }),
+    );
     expect(budgets(r.calls)).toEqual([45000]);
   });
 
@@ -1000,7 +1106,9 @@ describe("#152: the restart keeps the session's page and budget", () => {
   });
 
   test("ET-30, no cap: a budget of 0 stays 0", async () => {
-    const r = await withBudget("200", () => restart("et30-zero", { url: start, oldState: { url: start, title: "", budgetMs: 0 } }));
+    const r = await withBudget("200", () =>
+      restart("et30-zero", { url: start, oldState: { url: start, title: "", budgetMs: 0 } }),
+    );
     expect(budgets(r.calls)).toEqual([0]);
   });
 

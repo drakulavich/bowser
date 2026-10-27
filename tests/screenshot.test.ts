@@ -3,8 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { pngBytesFrom } from "../src/browser.ts";
 import { maxCaptureHeight, nextAvailablePath } from "../src/commands/snapshot.ts";
 
-const PNG_B64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 describe("pngBytesFrom", () => {
   test("decodes a Blob to its bytes", async () => {
@@ -35,7 +34,9 @@ describe("nextAvailablePath", () => {
     expect(await nextAvailablePath("shot.png", async (p) => taken.has(p))).toBe("shot-3.png");
   });
   test("inserts the suffix before the extension", async () => {
-    expect(await nextAvailablePath("a/b/screenshot-x.png", async (p) => p === "a/b/screenshot-x.png")).toBe("a/b/screenshot-x-1.png");
+    expect(await nextAvailablePath("a/b/screenshot-x.png", async (p) => p === "a/b/screenshot-x.png")).toBe(
+      "a/b/screenshot-x-1.png",
+    );
   });
   test("handles a name with no extension", async () => {
     expect(await nextAvailablePath("shot", async (p) => p === "shot")).toBe("shot-1");

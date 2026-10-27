@@ -3,9 +3,19 @@
 // string. These pin that for every builder that takes user input.
 import { describe, expect, test } from "bun:test";
 import {
-  fillScript, hoverScript, runCodeScript, selectScript, setCheckedScript,
-  storageDeleteScript, storageGetScript, storageListScript, storageRestoreScript, storageSetScript,
-  storageScript, resolveRefScript, SNAPSHOT_SCRIPT,
+  fillScript,
+  hoverScript,
+  runCodeScript,
+  selectScript,
+  setCheckedScript,
+  storageDeleteScript,
+  storageGetScript,
+  storageListScript,
+  storageRestoreScript,
+  storageSetScript,
+  storageScript,
+  resolveRefScript,
+  SNAPSHOT_SCRIPT,
 } from "../src/page-scripts.ts";
 
 const nasty = `a"b'c\\d`;
@@ -13,7 +23,12 @@ const quoted = JSON.stringify(nasty);
 
 describe("page scripts quote their inputs", () => {
   test("selector builders embed JSON.stringify(selector)", () => {
-    for (const s of [hoverScript(nasty), selectScript(nasty, "v"), setCheckedScript(nasty, true), fillScript(nasty, "v")]) {
+    for (const s of [
+      hoverScript(nasty),
+      selectScript(nasty, "v"),
+      setCheckedScript(nasty, true),
+      fillScript(nasty, "v"),
+    ]) {
       expect(s).toContain(`document.querySelector(${quoted})`);
     }
     expect(selectScript("#s", nasty)).toContain(`const want = ${quoted};`);
@@ -24,13 +39,21 @@ describe("page scripts quote their inputs", () => {
     expect(storageGetScript("localStorage", nasty)).toContain(`localStorage.getItem(${quoted})`);
     expect(storageSetScript("sessionStorage", nasty, nasty)).toContain(`sessionStorage.setItem(${quoted}, ${quoted})`);
     expect(storageDeleteScript("localStorage", nasty)).toContain(`localStorage.removeItem(${quoted})`);
-    expect(storageRestoreScript("localStorage", [{ name: nasty, value: "1" }])).toContain(`localStorage.setItem(${quoted}, "1");`);
-    expect(storageScript("localStorage", "x")).toBe("(() => { try { x } catch (e) { throw new Error('localStorage: ' + (e && e.message || e)); } })()");
+    expect(storageRestoreScript("localStorage", [{ name: nasty, value: "1" }])).toContain(
+      `localStorage.setItem(${quoted}, "1");`,
+    );
+    expect(storageScript("localStorage", "x")).toBe(
+      "(() => { try { x } catch (e) { throw new Error('localStorage: ' + (e && e.message || e)); } })()",
+    );
   });
 
   test("the list builder is the storage dump every list command shares", () => {
-    expect(storageListScript("localStorage")).toBe(storageScript("localStorage",
-      "const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o;"));
+    expect(storageListScript("localStorage")).toBe(
+      storageScript(
+        "localStorage",
+        "const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o;",
+      ),
+    );
   });
 
   // The script runs here in Bun: none of these codes touch the page.
@@ -82,9 +105,16 @@ describe("the snapshot walker reads values only through valueOf", () => {
   }
 
   test("the check sees a planted read and ignores assignments", () => {
-    const planted = SNAPSHOT_SCRIPT.replace("// ---- the walk ----", "// ---- the walk ----\n  const leak = (el) => el.value;");
-    expect(valueReads(planted).sort()).toEqual([...valueReads(SNAPSHOT_SCRIPT), "const leak = (el) => el.value;"].sort());
-    expect(valueReads("saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')")).toEqual(["saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')"]);
+    const planted = SNAPSHOT_SCRIPT.replace(
+      "// ---- the walk ----",
+      "// ---- the walk ----\n  const leak = (el) => el.value;",
+    );
+    expect(valueReads(planted).sort()).toEqual(
+      [...valueReads(SNAPSHOT_SCRIPT), "const leak = (el) => el.value;"].sort(),
+    );
+    expect(valueReads("saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')")).toEqual([
+      "saved.value = x; a.value == b; el.valueOf; el.getAttribute('value')",
+    ]);
   });
 });
 
@@ -94,7 +124,9 @@ describe("a ref resolves only in the document whose snapshot saved it", () => {
   const ref = { id: "e2", role: "button", name: "OK" };
   const inWindow = (win: object, doc: string | undefined) =>
     new Function("window", `return ${resolveRefScript(ref, { doc })}`)(win);
-  const store = (doc?: string) => ({ [Symbol.for("bowser.aria-refs")]: { refs: new WeakMap(), byRef: new Map(), last: 2, doc } });
+  const store = (doc?: string) => ({
+    [Symbol.for("bowser.aria-refs")]: { refs: new WeakMap(), byRef: new Map(), last: 2, doc },
+  });
 
   test("another document's id is refused", () => {
     expect(inWindow(store("page-b"), "page-a")).toEqual({ gone: true });

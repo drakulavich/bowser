@@ -19,13 +19,23 @@ const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.ski
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 const WAITING = "(waiting for another client's command on this session)";
 
-interface Result { code: number; out: string; err: string; ms: number }
+interface Result {
+  code: number;
+  out: string;
+  err: string;
+  ms: number;
+}
 // Subprocess.kill("SIGSTOP") is a silent no-op on Bun 1.4; process.kill sends it.
 function signal(proc: Subprocess, sig: NodeJS.Signals): void {
-  try { process.kill(proc.pid, sig); } catch {}
+  try {
+    process.kill(proc.pid, sig);
+  } catch {}
 }
 
-interface Running { proc: Subprocess<"ignore", "pipe", "pipe">; result: Promise<Result> }
+interface Running {
+  proc: Subprocess<"ignore", "pipe", "pipe">;
+  result: Promise<Result>;
+}
 
 runOrSkip("e2e: one command at a time per session (#77)", () => {
   let tmp: string;
@@ -41,9 +51,10 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
     return s;
   };
 
-  const page = (title: string, body: string) => new Response(`<title>${title}</title>${body}`, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+  const page = (title: string, body: string) =>
+    new Response(`<title>${title}</title>${body}`, {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
 
   beforeAll(async () => {
     origHome = process.env.HOME;
@@ -55,15 +66,24 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
         const path = new URL(req.url).pathname;
         hits.set(path, (hits.get(path) ?? 0) + 1);
         if (path === "/form") {
-          return page("form", `<label>Name <input id="n"></label>
+          return page(
+            "form",
+            `<label>Name <input id="n"></label>
             <label>Password <input id="p" type="password"></label>
-            <label>Email <input id="e" type="email"></label>`);
+            <label>Email <input id="e" type="email"></label>`,
+          );
         }
         if (path === "/one") {
-          return page("one", `<button onclick="navigator.sendBeacon('/hit/A'); document.title = 'clicked-A'">Buy A</button>`);
+          return page(
+            "one",
+            `<button onclick="navigator.sendBeacon('/hit/A'); document.title = 'clicked-A'">Buy A</button>`,
+          );
         }
         if (path === "/two") {
-          return page("two", `<button onclick="navigator.sendBeacon('/hit/DELETE'); document.title = 'clicked-DELETE'">DELETE</button>`);
+          return page(
+            "two",
+            `<button onclick="navigator.sendBeacon('/hit/DELETE'); document.title = 'clicked-DELETE'">DELETE</button>`,
+          );
         }
         return page(path.slice(1) || "root", `<p>${path}</p>`);
       },
@@ -77,7 +97,9 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
       signal(p, "SIGKILL");
     }
     for (const s of sessions) {
-      try { await cmdClose({ session: s, json: true }); } catch {}
+      try {
+        await cmdClose({ session: s, json: true });
+      } catch {}
       await killDaemons(s);
     }
     server?.stop(true);
@@ -91,22 +113,22 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
     const t0 = Date.now();
     const proc = Bun.spawn([process.execPath, CLI, `-s=${s}`, ...args], {
       env: { ...process.env, HOME: tmp, BOWSER_OP_TIMEOUT_MS: String(budgetMs) },
-      stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
     live.add(proc);
     const deadline = setTimeout(() => {
       signal(proc, "SIGCONT");
       signal(proc, "SIGKILL");
     }, deadlineMs);
-    const result = Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]).then(([out, err, code]) => {
-      clearTimeout(deadline);
-      live.delete(proc);
-      return { code, out: out.trim(), err: err.trim(), ms: Date.now() - t0 };
-    });
+    const result = Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]).then(
+      ([out, err, code]) => {
+        clearTimeout(deadline);
+        live.delete(proc);
+        return { code, out: out.trim(), err: err.trim(), ms: Date.now() - t0 };
+      },
+    );
     return { proc, result };
   }
 
@@ -150,8 +172,11 @@ runOrSkip("e2e: one command at a time per session (#77)", () => {
         expect(f.code).toBe(0);
         expect(f.out).toStartWith("filled ");
       }
-      expect(JSON.parse(await ok(s, ["eval", "JSON.stringify([n.value, p.value, e.value])"])))
-        .toEqual([texts.Name, texts.Password, texts.Email]);
+      expect(JSON.parse(await ok(s, ["eval", "JSON.stringify([n.value, p.value, e.value])"]))).toEqual([
+        texts.Name,
+        texts.Password,
+        texts.Email,
+      ]);
       expect(await ok(s, ["snapshot"])).not.toContain(texts.Password);
     }
   }, 180_000);

@@ -11,9 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { CommandContext } from "../src/commands/context.ts";
-import {
-  cmdCheck, cmdClick, cmdFill, cmdHover, cmdSelect, cmdUncheck,
-} from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdFill, cmdHover, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdHistory, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -73,7 +71,12 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       idleTimeout: 30,
       async fetch(req) {
         const path = new URL(req.url).pathname;
-        const doc = { "/doc-a": docPage("A", "/doc-b"), "/doc-b": docPage("B", "/doc-a"), "/doc-pending": docPage("A", "/doc-slow"), "/doc-slow": docPage("S", "/doc-a") }[path];
+        const doc = {
+          "/doc-a": docPage("A", "/doc-b"),
+          "/doc-b": docPage("B", "/doc-a"),
+          "/doc-pending": docPage("A", "/doc-slow"),
+          "/doc-slow": docPage("S", "/doc-a"),
+        }[path];
         if (path === "/doc-slow") await Bun.sleep(14_000);
         if (doc) return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8" } });
         const inline = { "/relabel.html": RELABEL, "/form.html": FORM }[path];
@@ -89,7 +92,9 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -212,7 +217,10 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     const hover = await refNamed("Hover me");
     // Still connected, no longer visible. check and hover act through page
     // scripts that do not wait for visibility, so today both go through.
-    await cmdEval(ctx, "(document.getElementById('agree').style.visibility = 'hidden', document.getElementById('hoverme').style.display = 'none')");
+    await cmdEval(
+      ctx,
+      "(document.getElementById('agree').style.visibility = 'hidden', document.getElementById('hoverme').style.display = 'none')",
+    );
     await cmdCheck(ctx, agree);
     expect(await checked("Agree")).toBe("true");
     await cmdHover(ctx, hover);
@@ -221,7 +229,10 @@ runOrSkip("e2e: a stale ref fails at once", () => {
 
   // The name of an element hidden now leaves out only descendants hidden in
   // their own right, as the snapshot of the visible element did.
-  for (const [how, hide] of [["display", "display = 'none'"], ["visibility", "visibility = 'hidden'"]] as const) {
+  for (const [how, hide] of [
+    ["display", "display = 'none'"],
+    ["visibility", "visibility = 'hidden'"],
+  ] as const) {
     test(`#80: a ref hidden by ${how} since the snapshot keeps its name and is not refused`, async () => {
       await cmdOpen(ctx, `${base}/relabel.html`);
       await cmdSnapshot(ctx);
@@ -250,7 +261,9 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       stderr: "pipe",
     });
     const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
-    expect(stderr).toContain(`ref '${buy}' now points to button "Delete account", not button "Buy A"; take a new snapshot`);
+    expect(stderr).toContain(
+      `ref '${buy}' now points to button "Delete account", not button "Buy A"; take a new snapshot`,
+    );
     expect(code).toBe(1);
     expect(await cmdEval(ctx, clicks)).toBe("1");
   }, 60_000);

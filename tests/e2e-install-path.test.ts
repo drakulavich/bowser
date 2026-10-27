@@ -16,7 +16,11 @@ const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.ski
 
 const ROOT = join(import.meta.dir, "..");
 
-interface Result { code: number; out: string; err: string }
+interface Result {
+  code: number;
+  out: string;
+  err: string;
+}
 
 runOrSkip("e2e: installed under a path with a space, # or % (#150)", () => {
   let tmp: string;
@@ -26,9 +30,16 @@ runOrSkip("e2e: installed under a path with a space, # or % (#150)", () => {
 
   async function run(args: string[]): Promise<Result> {
     const proc = Bun.spawn([process.execPath, join(dir, "src", "cli.ts"), `-s=${session}`, ...args], {
-      env: { ...process.env, HOME: home }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      env: { ...process.env, HOME: home },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
-    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
     return { code, out: out.trim(), err: err.trim() };
   }
 

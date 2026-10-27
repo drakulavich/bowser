@@ -80,12 +80,16 @@ run("e2e: dialogs", () => {
       fetch: (req) => {
         const u = new URL(req.url);
         const pages: Record<string, string> = {
-          "?keys=1": KEYS_PAGE, "?other=1": OTHER_PAGE, "?form=1": FORM_PAGE, "?own=1": OWN_PAGE,
-          "?frame=1": FRAME_PAGE("/?inner=1"), "?inner=1": INNER_PAGE,
+          "?keys=1": KEYS_PAGE,
+          "?other=1": OTHER_PAGE,
+          "?form=1": FORM_PAGE,
+          "?own=1": OWN_PAGE,
+          "?frame=1": FRAME_PAGE("/?inner=1"),
+          "?inner=1": INNER_PAGE,
           // localhost and 127.0.0.1 are different origins.
           "?xframe=1": FRAME_PAGE(`http://127.0.0.1:${u.port}/?inner=1`),
         };
-        const body = u.pathname === "/two" ? OTHER_PAGE : pages[u.search] ?? PAGE;
+        const body = u.pathname === "/two" ? OTHER_PAGE : (pages[u.search] ?? PAGE);
         return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
       },
     });
@@ -93,7 +97,9 @@ run("e2e: dialogs", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -220,7 +226,10 @@ run("e2e: dialogs", () => {
   test("an iframe navigating does not drop the page's one-shot answer", async () => {
     await fresh();
     await cmdDialog(ctx, true);
-    await cmdEval(ctx, "(document.body.append(Object.assign(document.createElement('iframe'), { src: '/?other=1' })), 1)");
+    await cmdEval(
+      ctx,
+      "(document.body.append(Object.assign(document.createElement('iframe'), { src: '/?other=1' })), 1)",
+    );
     await Bun.sleep(500);
     await cmdEval(ctx, "(document.querySelector('iframe').src = '/?other=2', 1)");
     await Bun.sleep(500);
@@ -233,7 +242,13 @@ run("e2e: dialogs", () => {
     // Through the real CLI, so stderr and the exit code are the ones a user sees.
     // An expression: eval does not take statements.
     const p = Bun.spawnSync(
-      ["bun", join(import.meta.dir, "../src/cli.ts"), `--session=${ctx.session}`, "eval", "(confirm('sure?'), (() => { throw new Error('boom') })())"],
+      [
+        "bun",
+        join(import.meta.dir, "../src/cli.ts"),
+        `--session=${ctx.session}`,
+        "eval",
+        "(confirm('sure?'), (() => { throw new Error('boom') })())",
+      ],
       { env: { ...process.env, HOME: tmp }, stdout: "pipe", stderr: "pipe" },
     );
     const stderr = p.stderr.toString();
@@ -336,7 +351,10 @@ run("e2e: dialogs", () => {
   test("a confirm from a button inside a same-origin iframe is reported", async () => {
     await cmdOpen(ctx, `${url}?frame=1`);
     await cmdDialog(ctx, true);
-    const text = await cmdEval(ctx, "(frames[0].document.querySelector('button').click(), frames[0].document.body.dataset.r)");
+    const text = await cmdEval(
+      ctx,
+      "(frames[0].document.querySelector('button').click(), frames[0].document.body.dataset.r)",
+    );
     expect(text).toStartWith("true");
     expect(text).toContain(line("confirm", "inner", "accepted"));
   }, 60_000);

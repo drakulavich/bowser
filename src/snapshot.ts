@@ -8,7 +8,7 @@ import type { Ref } from "./state.ts";
 
 export interface AriaNode {
   role: string;
-  name: string;                    // "" = no name
+  name: string; // "" = no name
   checked?: true | "mixed";
   disabled?: true;
   expanded?: true;
@@ -16,43 +16,54 @@ export interface AriaNode {
   level?: number;
   pressed?: true | "mixed";
   selected?: true;
-  ref?: string;                    // "eN"
-  cursor?: true;                   // walker already applied the no-ancestor-cursor rule
+  ref?: string; // "eN"
+  cursor?: true; // walker already applied the no-ancestor-cursor rule
   props?: { url?: string; placeholder?: string };
-  children: Array<AriaNode | string>;   // strings are text lines, already normalized/merged
+  children: Array<AriaNode | string>; // strings are text lines, already normalized/merged
 }
 
 export interface SnapshotResult {
   url: string;
   title: string;
-  tree: Array<AriaNode | string>;  // top level after generic collapse (usually one node)
-  refs: Ref[];                     // every ref-bearing node, for state.json
-  doc: string;                     // the document's id; its refs resolve only there
+  tree: Array<AriaNode | string>; // top level after generic collapse (usually one node)
+  refs: Ref[]; // every ref-bearing node, for state.json
+  doc: string; // the document's id; its refs resolve only there
 }
 
 const YAML_WORDS = ["y", "n", "yes", "no", "true", "false", "on", "off", "null"];
 
 /** playwright's yamlStringNeedsQuotes, plus tab (spec 3.5: any control char). */
 function needsQuotes(s: string): boolean {
-  return s === ""
-    || /^\s|\s$/.test(s)
-    || /[\x00-\x1f\x7f-\x9f]/.test(s)
-    || /^[-&*\],?!>|@"'#%[]/.test(s)
-    || /:(\s|$)/.test(s)
-    || /\s#/.test(s)
-    || /[{}`]/.test(s)
-    || !isNaN(Number(s))
-    || YAML_WORDS.includes(s.toLowerCase());
+  return (
+    s === "" ||
+    /^\s|\s$/.test(s) ||
+    /[\x00-\x1f\x7f-\x9f]/.test(s) ||
+    /^[-&*\],?!>|@"'#%[]/.test(s) ||
+    /:(\s|$)/.test(s) ||
+    /\s#/.test(s) ||
+    /[{}`]/.test(s) ||
+    !isNaN(Number(s)) ||
+    YAML_WORDS.includes(s.toLowerCase())
+  );
 }
 
 const ESCAPES: Record<string, string> = {
-  "\\": "\\\\", '"': '\\"', "\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t",
+  "\\": "\\\\",
+  '"': '\\"',
+  "\b": "\\b",
+  "\f": "\\f",
+  "\n": "\\n",
+  "\r": "\\r",
+  "\t": "\\t",
 };
 
 function quoteValue(s: string): string {
   if (!needsQuotes(s)) return s;
-  return '"' + s.replace(/[\\"\x00-\x1f\x7f-\x9f]/g, (c) =>
-    ESCAPES[c] ?? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")) + '"';
+  return (
+    '"' +
+    s.replace(/[\\"\x00-\x1f\x7f-\x9f]/g, (c) => ESCAPES[c] ?? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")) +
+    '"'
+  );
 }
 
 function quoteKey(s: string): string {

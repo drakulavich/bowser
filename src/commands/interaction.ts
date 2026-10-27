@@ -5,7 +5,18 @@
 import { fillScript, type FillOutcome } from "../page-scripts.ts";
 import type { KeyModifier } from "../daemon/protocol.ts";
 import type { Ref } from "../state.ts";
-import { liveSelector, loadRef, readStdin, reply, replyPage, syncState, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
+import {
+  liveSelector,
+  loadRef,
+  readStdin,
+  reply,
+  replyPage,
+  syncState,
+  withClient,
+  withPageClient,
+  type CommandContext,
+  type Command,
+} from "./context.ts";
 import { UserError } from "../errors.ts";
 
 // Snapshots give refs to non-interactive nodes too (listitems, paragraphs), so
@@ -29,16 +40,18 @@ function requireKind(kind: keyof typeof KINDS, ref: string, target: Ref): void {
   if (!k.ok(target)) throw new UserError(`ref '${ref}' is not ${k.what} (${target.role})`);
 }
 
-export async function cmdClick(
-  ctx: CommandContext,
-  ref: string,
-): Promise<string> {
+export async function cmdClick(ctx: CommandContext, ref: string): Promise<string> {
   const { prev, target, doc } = await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
     await c.request("click", [await liveSelector(c, target, { enabled: true, doc, hit: true })]);
     const state = await c.request("state");
     await syncState(prev, state);
-    return replyPage(ctx, c, { ok: true, ref, element: element(target), url: state.url }, `clicked ${ref} (${target.role} "${target.name}")`);
+    return replyPage(
+      ctx,
+      c,
+      { ok: true, ref, element: element(target), url: state.url },
+      `clicked ${ref} (${target.role} "${target.name}")`,
+    );
   });
 }
 
@@ -102,11 +115,17 @@ export async function cmdFill(
     await c.request("click", [selector]);
     const found = await withholdingText("fill", value, () => c.request("evaluate", [fillScript(selector, value)]));
     const { outcome, type } = readFillAnswer(found);
-    if (outcome === "disabled" || outcome === "readonly") throw new UserError(`ref '${ref}' is not an editable element (${outcome})`);
+    if (outcome === "disabled" || outcome === "readonly")
+      throw new UserError(`ref '${ref}' is not an editable element (${outcome})`);
     if (outcome === "nan") throw new UserError(`ref '${ref}' needs a number (input[type=number])`);
     if (outcome === "rejected") throw new UserError(`ref '${ref}' did not accept the value for input[type=${type}]`);
     if (outcome !== "set") await withholdingText("fill", value, () => c.request("type", [value]));
-    return replyPage(ctx, c, { ok: true, ref, element: element(target) }, `filled ${ref} (${target.role} "${target.name}")`);
+    return replyPage(
+      ctx,
+      c,
+      { ok: true, ref, element: element(target) },
+      `filled ${ref} (${target.role} "${target.name}")`,
+    );
   });
 }
 
@@ -122,13 +141,29 @@ export async function cmdType(ctx: CommandContext, text: string): Promise<string
 /** The named keys Bun.WebView can press (Bun 1.4.2); any other key must be
  *  one character. */
 const NAMED_KEYS = [
-  "Enter", "Tab", "Space", "Backspace", "Delete", "Escape",
-  "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown",
+  "Enter",
+  "Tab",
+  "Space",
+  "Backspace",
+  "Delete",
+  "Escape",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
 ];
 /** playwright-cli's modifier names, case and all. bowser runs on macOS
  *  only, so ControlOrMeta is Meta. */
 const MODIFIERS: Record<string, KeyModifier> = {
-  Shift: "Shift", Control: "Control", Alt: "Alt", Meta: "Meta", ControlOrMeta: "Meta",
+  Shift: "Shift",
+  Control: "Control",
+  Alt: "Alt",
+  Meta: "Meta",
+  ControlOrMeta: "Meta",
 };
 
 /** Splits playwright-cli's `Modifier+…+Key` (#55). The key is the last word,
@@ -142,7 +177,9 @@ function parseKey(input: string): { key: string; modifiers: KeyModifier[] } {
   for (const word of parts) {
     const m = MODIFIERS[word];
     if (!m) {
-      throw new UserError(`usage: bowser press: unknown modifier '${word}' in '${input}'; use Shift, Control, Alt, Meta or ControlOrMeta`);
+      throw new UserError(
+        `usage: bowser press: unknown modifier '${word}' in '${input}'; use Shift, Control, Alt, Meta or ControlOrMeta`,
+      );
     }
     if (modifiers.includes(m)) throw new UserError(`usage: bowser press: modifier '${word}' repeated in '${input}'`);
     modifiers.push(m);
@@ -196,7 +233,8 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
   requireKind("check", ref, target);
   return withPageClient(ctx, async (c) => {
     const done = await c.request("uncheck", [await liveSelector(c, target, { enabled: true, doc })]);
-    if (done === false) throw new UserError(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
+    if (done === false)
+      throw new UserError(`ref '${ref}' is a radio button; select another option in its group to uncheck it`);
     return replyPage(ctx, c, { ok: true, ref, element: element(target) }, `unchecked ${ref}`);
   });
 }
@@ -206,11 +244,7 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
  *  of range. It must be >= 1 and <= 16384` (F22). */
 const MAX_VIEWPORT_SIDE = 16384;
 
-export async function cmdResize(
-  ctx: CommandContext,
-  widthArg: string,
-  heightArg: string,
-): Promise<string> {
+export async function cmdResize(ctx: CommandContext, widthArg: string, heightArg: string): Promise<string> {
   const width = Number(widthArg);
   const height = Number(heightArg);
   // Number("") is 0, so an empty argument fails the lower bound.
@@ -236,7 +270,10 @@ export const COMMANDS: Command[] = [
     name: "fill",
     summary: "Fill the element with the given ref with text, or with piped stdin under --stdin",
     mcpSummary: "Fill the element with the given ref with text",
-    positional: [{ name: "ref", required: true }, { name: "text", required: false, mcpRequired: true }],
+    positional: [
+      { name: "ref", required: true },
+      { name: "text", required: false, mcpRequired: true },
+    ],
     // Not over MCP: the text is already a JSON string there, and the server's
     // own stdin is the JSON-RPC stream.
     flags: [{ name: "stdin", kind: "boolean", mcp: false }],
@@ -266,7 +303,10 @@ export const COMMANDS: Command[] = [
   {
     name: "select",
     summary: "Select the option with the given value or label in the element with the given ref",
-    positional: [{ name: "ref", required: true }, { name: "value", required: true }],
+    positional: [
+      { name: "ref", required: true },
+      { name: "value", required: true },
+    ],
     flags: [],
     run: (ctx, a) => cmdSelect(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
   },
@@ -287,7 +327,10 @@ export const COMMANDS: Command[] = [
   {
     name: "resize",
     summary: "Set the viewport size in pixels",
-    positional: [{ name: "width", required: true }, { name: "height", required: true }],
+    positional: [
+      { name: "width", required: true },
+      { name: "height", required: true },
+    ],
     flags: [],
     run: (ctx, a) => cmdResize(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
   },

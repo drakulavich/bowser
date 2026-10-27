@@ -153,11 +153,7 @@ export async function cmdStateLoad(ctx: CommandContext, file: string): Promise<s
         ? `, ${originsSkipped} skipped — navigate to each origin then load again to restore its localStorage`
         : "") +
       ")";
-    return reply(
-      ctx,
-      { ok: true, file: target, cookiesSkipped, originsRestored, originsSkipped },
-      text,
-    );
+    return reply(ctx, { ok: true, file: target, cookiesSkipped, originsRestored, originsSkipped }, text);
   });
 }
 

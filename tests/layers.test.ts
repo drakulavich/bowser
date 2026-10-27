@@ -47,13 +47,19 @@ const RULES: Rule[] = [
   {
     name: "only src/daemon/server.ts calls openBrowser",
     // browser.ts is exempt because the regex also matches its own definition site.
-    violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
+    violates: (file, text) =>
+      file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
     name: "page-scripts.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
     violates: (file, text) =>
-      ["src/page-scripts.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
-      valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
+      [
+        "src/page-scripts.ts",
+        "src/snapshot.ts",
+        "src/serialize.ts",
+        "src/socket-write.ts",
+        "src/daemon/protocol.ts",
+      ].includes(file) && valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
     name: "commands/* talk to the daemon only through client.ts and protocol.ts (never browser.ts or daemon/server.ts)",
@@ -135,7 +141,9 @@ const RULES: Rule[] = [
     // only; a message built elsewhere and passed in is held by
     // tests/exit-codes.test.ts, site by site.
     violates: (_file, text) =>
-      /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(text),
+      /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(
+        text,
+      ),
   },
 ];
 

@@ -5,7 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UserError } from "../src/errors.ts";
 import {
-  ensureSessionDir, maxSessionNameLength, profileDir, resolveRef, sessionDir, sessionsRoot, type Ref, type SessionState,
+  ensureSessionDir,
+  maxSessionNameLength,
+  profileDir,
+  resolveRef,
+  sessionDir,
+  sessionsRoot,
+  type Ref,
+  type SessionState,
 } from "../src/state.ts";
 import { longHomePath } from "./helpers/long-home.ts";
 
@@ -77,7 +84,8 @@ describe("paths under HOME are resolved at call time", () => {
       expect(sessionsRoot()).toBe("/tmp/bowser-home-b/.bowser/sessions");
       expect(profileDir("x")).toBe("/tmp/bowser-home-b/.bowser/profiles/x");
     } finally {
-      if (orig !== undefined) process.env.HOME = orig; else delete process.env.HOME;
+      if (orig !== undefined) process.env.HOME = orig;
+      else delete process.env.HOME;
     }
   });
 });
@@ -115,7 +123,10 @@ describe("state roundtrip (real fs)", () => {
     const { loadState, resolveRef, saveState, statePath, ensureSessionDir } = await import("../src/state.ts");
     await ensureSessionDir("old");
     const old = {
-      name: "old", url: "https://example.com/", title: "Example", updatedAt: 1,
+      name: "old",
+      url: "https://example.com/",
+      title: "Example",
+      updatedAt: 1,
       refs: [{ id: "e1", selector: "html > body > a", role: "link", name: "More", tag: "a", href: "/more" }],
     };
     await Bun.write(statePath("old"), JSON.stringify(old));
@@ -138,8 +149,12 @@ describe("state roundtrip (real fs)", () => {
 // daemon's pidfile claim (`<dir>/pid.<pid>.tmp`), as "did not start in time".
 describe("the longest session name for this HOME (F35)", () => {
   let prevHome: string | undefined;
-  beforeEach(() => { prevHome = process.env.HOME; });
-  afterEach(() => { process.env.HOME = prevHome; });
+  beforeEach(() => {
+    prevHome = process.env.HOME;
+  });
+  afterEach(() => {
+    process.env.HOME = prevHome;
+  });
 
   test("a short HOME: 255, the file-name limit", () => {
     process.env.HOME = "/Users/someone";

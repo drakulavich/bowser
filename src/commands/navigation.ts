@@ -7,10 +7,27 @@ import { str } from "../cli/parser.ts";
 import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
 import { claimSession, isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import {
-  ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, statePath, type SessionState,
+  ensureSessionDir,
+  isValidSessionName,
+  loadState,
+  profileDir,
+  saveState,
+  sessionDir,
+  sessionsRoot,
+  statePath,
+  type SessionState,
 } from "../state.ts";
 import { claimRestartLock, LOCK, releaseRestartLock } from "./restart-lock.ts";
-import { connector, emptyState, reply, replyPage, syncState, withPageClient, type CommandContext, type Command } from "./context.ts";
+import {
+  connector,
+  emptyState,
+  reply,
+  replyPage,
+  syncState,
+  withPageClient,
+  type CommandContext,
+  type Command,
+} from "./context.ts";
 import { UserError } from "../errors.ts";
 
 /** Fail loud when a real navigation still reports about:blank. The daemon's
@@ -72,39 +89,46 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
     throw new UserError("usage: --profile needs a directory, e.g. --profile=./profile");
   }
   await ensureSessionDir(ctx.session);
-  const profile = opts.profile !== undefined
-    ? resolve(opts.profile)
-    : opts.persistent ? profileDir(ctx.session) : undefined;
+  const profile =
+    opts.profile !== undefined ? resolve(opts.profile) : opts.persistent ? profileDir(ctx.session) : undefined;
   // The directory is created only when a new daemon is spawned for it
   // (spawnDaemon), so a refused open (below) leaves nothing behind.
-  return withPageClient(ctx, async (c) => {
-    const before = await c.request("state");
-    // The store is fixed when the daemon starts. A daemon that was already
-    // running may have another one, and navigating it would silently lose
-    // the persistence asked for, so refuse before touching the page.
-    if (profile && before.profile !== profile) {
-      throw new UserError(
-        `usage: session '${ctx.session}' is already open with a different profile; run 'bowser close' first`,
-      );
-    }
-    if (url) {
-      const saved = await loadState(ctx.session);
-      await saveState({
-        ...(saved ?? { name: ctx.session, url: before.url, title: before.title, refs: [], updatedAt: Date.now() }),
-        profile: before.profile ?? null,
-      });
-      await c.request("navigate", [url]);
-    }
-    const state = url ? await c.request("state") : before;
-    if (url) assertNavigated(url, state.url);
-    const next: SessionState = {
-      name: ctx.session, url: state.url, title: state.title, refs: [], updatedAt: Date.now(),
-      profile: state.profile ?? null,
-    };
-    await saveState(next);
-    const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
-    return replyPage(ctx, c, { ok: true, url: state.url, title: state.title }, text);
-  }, { profile, reopen: true, ...(opts.daemonBudgetMs !== undefined && { daemonBudgetMs: opts.daemonBudgetMs }) });
+  return withPageClient(
+    ctx,
+    async (c) => {
+      const before = await c.request("state");
+      // The store is fixed when the daemon starts. A daemon that was already
+      // running may have another one, and navigating it would silently lose
+      // the persistence asked for, so refuse before touching the page.
+      if (profile && before.profile !== profile) {
+        throw new UserError(
+          `usage: session '${ctx.session}' is already open with a different profile; run 'bowser close' first`,
+        );
+      }
+      if (url) {
+        const saved = await loadState(ctx.session);
+        await saveState({
+          ...(saved ?? { name: ctx.session, url: before.url, title: before.title, refs: [], updatedAt: Date.now() }),
+          profile: before.profile ?? null,
+        });
+        await c.request("navigate", [url]);
+      }
+      const state = url ? await c.request("state") : before;
+      if (url) assertNavigated(url, state.url);
+      const next: SessionState = {
+        name: ctx.session,
+        url: state.url,
+        title: state.title,
+        refs: [],
+        updatedAt: Date.now(),
+        profile: state.profile ?? null,
+      };
+      await saveState(next);
+      const text = url ? `opened ${state.url}  "${state.title}"` : `session '${ctx.session}' ready`;
+      return replyPage(ctx, c, { ok: true, url: state.url, title: state.title }, text);
+    },
+    { profile, reopen: true, ...(opts.daemonBudgetMs !== undefined && { daemonBudgetMs: opts.daemonBudgetMs }) },
+  );
 }
 
 export async function cmdGoto(ctx: CommandContext, typed: string): Promise<string> {
@@ -141,10 +165,7 @@ export async function cmdWaitFor(ctx: CommandContext, opts: { url?: string; text
   });
 }
 
-export async function cmdHistory(
-  ctx: CommandContext,
-  which: "back" | "forward" | "reload",
-): Promise<string> {
+export async function cmdHistory(ctx: CommandContext, which: "back" | "forward" | "reload"): Promise<string> {
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withPageClient(ctx, async (c) => {
     await c.request(which, []);
@@ -299,7 +320,12 @@ async function closeSession(
   }
 }
 
-async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOps, locked: boolean): Promise<{ text: string; open: boolean }> {
+async function closeLocked(
+  ctx: CommandContext,
+  session: string,
+  proc: ProcessOps,
+  locked: boolean,
+): Promise<{ text: string; open: boolean }> {
   const files = [statePath(session), pidPath(session), socketPath(session)].some((p) => existsSync(p));
   const { pid, ended, answered } = await stopDaemon(ctx, session, proc);
   const open = files || answered;
@@ -309,9 +335,7 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
   // pidfile while it runs — the very orphan this command exists to prevent.
   const current = await readPid(session);
   if (current !== null && current !== pid && proc.alive(current)) {
-    throw new Error(
-      `close: session '${session}' was reopened while closing (pid ${current}); left it running`,
-    );
+    throw new Error(`close: session '${session}' was reopened while closing (pid ${current}); left it running`);
   }
 
   // The directory outlives nothing now: keeping it is what let closed sessions
@@ -334,9 +358,7 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
   }
 
   if (!open) return { open, text: reply(ctx, { ok: true, session, ended, open }, `session '${session}' is not open`) };
-  const text = ended
-    ? `closed session '${session}' (ended unreachable daemon ${pid})`
-    : `closed session '${session}'`;
+  const text = ended ? `closed session '${session}' (ended unreachable daemon ${pid})` : `closed session '${session}'`;
   return { open, text: reply(ctx, { ok: true, session, ended, open }, text) };
 }
 
@@ -355,7 +377,7 @@ async function closeLegacy(name: string): Promise<boolean> {
   // A legacy daemon may predate pidfiles. Its socket is not enough to identify
   // a process safely, but it is enough to avoid deleting the only path back to
   // one that may still be alive.
-  if (pid === null && await Bun.file(join(dir, "sock")).exists()) {
+  if (pid === null && (await Bun.file(join(dir, "sock")).exists())) {
     throw new Error(`close: legacy session ${JSON.stringify(name)} has no pidfile but still has a socket`);
   }
   await rm(dir, { recursive: true, force: true });
@@ -374,19 +396,22 @@ async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> 
   } catch {
     // no sessions root; nothing to close
   }
-  const results = await Promise.all(names.map(async (name) => {
-    try {
-      const open = isValidSessionName(name) ? (await closeSession(ctx, name, proc)).open : await closeLegacy(name);
-      return { name, open, error: undefined };
-    } catch (err) {
-      return { name, open: true, error: err instanceof Error ? err.message : String(err) };
-    }
-  }));
+  const results = await Promise.all(
+    names.map(async (name) => {
+      try {
+        const open = isValidSessionName(name) ? (await closeSession(ctx, name, proc)).open : await closeLegacy(name);
+        return { name, open, error: undefined };
+      } catch (err) {
+        return { name, open: true, error: err instanceof Error ? err.message : String(err) };
+      }
+    }),
+  );
   const closed = results.filter((r) => r.error === undefined && r.open).map((r) => r.name);
   const failed = results.filter((r) => r.error !== undefined).map((r) => `- ${r.name}: ${r.error}`);
-  const done = closed.length > 0
-    ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}`
-    : "";
+  const done =
+    closed.length > 0
+      ? `closed ${closed.length} ${closed.length === 1 ? "session" : "sessions"}: ${closed.join(", ")}`
+      : "";
   if (failed.length > 0) {
     const word = failed.length === 1 ? "session" : "sessions";
     throw new Error(`close --all: ${done ? `${done}; ` : ""}failed ${failed.length} ${word}:\n${failed.join("\n")}`);
@@ -435,10 +460,11 @@ export const COMMANDS: Command[] = [
       { name: "persistent", kind: "boolean" },
       { name: "profile", kind: "string" },
     ],
-    run: (ctx, a) => cmdOpen(ctx, a.positional[0], {
-      persistent: Boolean(a.flags.persistent),
-      profile: str(a.flags, "profile"),
-    }),
+    run: (ctx, a) =>
+      cmdOpen(ctx, a.positional[0], {
+        persistent: Boolean(a.flags.persistent),
+        profile: str(a.flags, "profile"),
+      }),
   },
   {
     name: "goto",
@@ -451,7 +477,10 @@ export const COMMANDS: Command[] = [
     name: "wait-for",
     summary: "Wait until the page URL or its visible text contains a value",
     positional: [],
-    flags: [{ name: "url", kind: "string" }, { name: "text", kind: "string" }],
+    flags: [
+      { name: "url", kind: "string" },
+      { name: "text", kind: "string" },
+    ],
     run: (ctx, a) => cmdWaitFor(ctx, { url: str(a.flags, "url"), text: str(a.flags, "text") }),
   },
   {
@@ -464,25 +493,29 @@ export const COMMANDS: Command[] = [
   {
     name: "go-back",
     summary: "Navigate back in history",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdHistory(ctx, "back"),
   },
   {
     name: "go-forward",
     summary: "Navigate forward in history",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdHistory(ctx, "forward"),
   },
   {
     name: "reload",
     summary: "Reload the current page",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdHistory(ctx, "reload"),
   },
   {
     name: "list",
     summary: "List sessions whose daemon is running",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdList(ctx),
   },
 ];

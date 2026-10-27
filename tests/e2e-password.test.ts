@@ -95,7 +95,9 @@ runOrSkip("e2e: snapshot never reveals a password field's value", () => {
   }, 60_000);
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     else delete process.env.HOME;
@@ -120,21 +122,27 @@ runOrSkip("e2e: snapshot never reveals a password field's value", () => {
   }
 
   test("a filled password field prints as a leaf with its label name", () => {
-    const lines = tree(plain).split("\n").map((l) => l.trim());
+    const lines = tree(plain)
+      .split("\n")
+      .map((l) => l.trim());
     expect(lines).toContain(`- textbox "Password" [ref=${ids.Password}]`);
     expect(lines).toContain(`- textbox "PIN" [ref=${ids.PIN}]`);
     expect(lines).toContain(`- combobox "Code" [ref=${ids.Code}]`);
   });
 
   test("aria-labelledby a password field adds nothing to a button's name", () => {
-    const lines = tree(plain).split("\n").map((l) => l.trim());
+    const lines = tree(plain)
+      .split("\n")
+      .map((l) => l.trim());
     for (const name of ["Go", "Pin go", "Code go", "Odd go", "Attribute go"]) {
       expect(lines.some((l) => l.startsWith(`- button ${JSON.stringify(name)} [ref=e`))).toBe(true);
     }
   });
 
   test("a text field still shows its value", () => {
-    const lines = tree(plain).split("\n").map((l) => l.trim());
+    const lines = tree(plain)
+      .split("\n")
+      .map((l) => l.trim());
     expect(lines).toContain(`- textbox "User" [active] [ref=${ids.User}]: ${USER}`);
     const saved = JSON.parse(stateText).refs.find((r: { id: string }) => r.id === ids.User);
     expect(saved.value).toBe(USER);
@@ -155,7 +163,11 @@ runOrSkip("e2e: snapshot never reveals a password field's value", () => {
     expect(p).not.toContain(STDIN_SECRET);
     expect(j).not.toContain(STDIN_SECRET);
     expect(st).not.toContain(STDIN_SECRET);
-    expect(tree(p).split("\n").map((l) => l.trim())).toContain(`- textbox "Password" [active] [ref=${pw}]`);
+    expect(
+      tree(p)
+        .split("\n")
+        .map((l) => l.trim()),
+    ).toContain(`- textbox "Password" [active] [ref=${pw}]`);
   }, 60_000);
 
   test("the saved refs of password fields carry no value", () => {

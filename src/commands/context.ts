@@ -2,7 +2,14 @@
 // connection with its close, the empty session state, and ref lookup.
 
 import type { FlagSpec } from "../cli/parser.ts";
-import { BrowserExited, browserExited, connectOrSpawn, NoDaemon, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
+import {
+  BrowserExited,
+  browserExited,
+  connectOrSpawn,
+  NoDaemon,
+  OlderDaemon,
+  type ConnectOptions,
+} from "../daemon/client.ts";
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, statePath, type Ref, type SessionState } from "../state.ts";
@@ -34,7 +41,10 @@ interface Positional {
    *  <text>, which the CLI can replace with --stdin and MCP cannot. */
   mcpRequired?: true;
 }
-interface CommandArgs { positional: string[]; flags: Record<string, string | boolean> }
+interface CommandArgs {
+  positional: string[];
+  flags: Record<string, string | boolean>;
+}
 
 export interface Command {
   name: string;
@@ -57,7 +67,9 @@ export async function readStdin(
   read: () => Promise<string> = () => Bun.stdin.text(),
 ): Promise<string> {
   if (stdin.isTTY) {
-    throw new UserError("usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin");
+    throw new UserError(
+      "usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin",
+    );
   }
   return read();
 }
@@ -111,7 +123,9 @@ function takeNotice(ctx: CommandContext, own: boolean): void {
   const text = readNotice(ctx.session);
   if (!text || ctx.notices.includes(text)) return;
   ctx.notices.push(text);
-  ctx.acks?.push(() => { if (readNotice(ctx.session) === text) removeNotice(ctx.session); });
+  ctx.acks?.push(() => {
+    if (readNotice(ctx.session) === text) removeNotice(ctx.session);
+  });
 }
 
 export function emptyState(name: string): SessionState {
@@ -134,7 +148,11 @@ export async function loadRef(session: string, ref: string) {
  *  since the snapshot (#80). With `enabled`, a disabled element fails too, at
  *  once, and nothing is clicked (F20). With `hit`, so does one another
  *  element covers at its click point (#112). One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {}): Promise<string> {
+export async function liveSelector(
+  c: DaemonConnection,
+  target: Ref,
+  opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {},
+): Promise<string> {
   const ref = target.id;
   const selector = await c.request("resolve", [resolveRefScript(target, opts)]);
   if ((selector as { gone?: unknown } | null)?.gone === true) {
@@ -171,14 +189,20 @@ export function reply(ctx: CommandContext, json: Record<string, unknown>, text: 
 /** One answered dialog, as `["confirm" dialog with message "sure?"]: accepted`. */
 function dialogLine(d: DialogReport): string {
   // No hint for an alert: accepting and dismissing it are the same.
-  const what = d.unanswered && d.type !== "alert" ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
+  const what =
+    d.unanswered && d.type !== "alert" ? "dismissed (run dialog-accept before the action to accept it)" : d.state;
   return `[${JSON.stringify(d.type)} dialog with message ${JSON.stringify(d.message)}]: ${what}`;
 }
 
 /** `reply` for a command that acts on the page: the dialogs the daemon
  *  answered while it ran follow the answer as playwright-cli's
  *  `### Modal state` (`dialogs` under --json, without `unanswered`). */
-export function replyPage(ctx: CommandContext, c: DaemonConnection, json: Record<string, unknown>, text: string): string {
+export function replyPage(
+  ctx: CommandContext,
+  c: DaemonConnection,
+  json: Record<string, unknown>,
+  text: string,
+): string {
   const modal = modalState(c);
   if (!modal) return reply(ctx, json, text);
   return reply(ctx, { ...json, dialogs: dialogsJson(c) }, `${text}\n${modal}`);
@@ -213,19 +237,23 @@ export function withPageClient<T>(
   fn: (c: DaemonConnection) => Promise<T>,
   opts: ConnectOptions = {},
 ): Promise<T> {
-  return withClient(ctx, async (c) => {
-    c.reportDialogs();
-    try {
-      return await fn(c);
-    } catch (err) {
-      // The daemon handed this command its reports, so they are printed with
-      // the error or never: the error stays the same object (its class sets
-      // the exit code), and the dialogs ride along on it.
-      const dialogs = c.dialogs();
-      if (dialogs.length === 0) throw err;
-      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { dialogs });
-    }
-  }, opts);
+  return withClient(
+    ctx,
+    async (c) => {
+      c.reportDialogs();
+      try {
+        return await fn(c);
+      } catch (err) {
+        // The daemon handed this command its reports, so they are printed with
+        // the error or never: the error stays the same object (its class sets
+        // the exit code), and the dialogs ride along on it.
+        const dialogs = c.dialogs();
+        if (dialogs.length === 0) throw err;
+        throw Object.assign(err instanceof Error ? err : new Error(String(err)), { dialogs });
+      }
+    },
+    opts,
+  );
 }
 
 /** After an action that may have navigated, persist the page the daemon

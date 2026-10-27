@@ -105,7 +105,9 @@ describe("state-save", () => {
   test("on about:blank writes an empty file without reading localStorage", async () => {
     const c = fakeClient({
       state: () => ({ url: "about:blank", title: "" }),
-      evaluate: () => { throw new Error("Error: localStorage: The operation is insecure."); },
+      evaluate: () => {
+        throw new Error("Error: localStorage: The operation is insecure.");
+      },
     });
     const file = tmpFile();
     const out = await cmdStateSave({ ...ctx({ json: true }), connect: async () => c }, file);
@@ -127,7 +129,16 @@ describe("state-load", () => {
     return file;
   }
 
-  const cookie = (name: string) => ({ name, value: "v", domain: "example.com", path: "/", expires: -1, httpOnly: false, secure: false, sameSite: "Lax" });
+  const cookie = (name: string) => ({
+    name,
+    value: "v",
+    domain: "example.com",
+    path: "/",
+    expires: -1,
+    httpOnly: false,
+    secure: false,
+    sameSite: "Lax",
+  });
 
   test("restores localStorage for the current origin", async () => {
     await seedUrl("https://example.com/");
@@ -210,7 +221,9 @@ describe("state-load", () => {
 
   test("errors clearly when the file is missing", async () => {
     const c = fakeClient({});
-    await expect(cmdStateLoad({ ...ctx(), connect: async () => c }, join(tmp, "does-not-exist.json"))).rejects.toThrow(/file not found/);
+    await expect(cmdStateLoad({ ...ctx(), connect: async () => c }, join(tmp, "does-not-exist.json"))).rejects.toThrow(
+      /file not found/,
+    );
   });
 });
 
@@ -223,12 +236,36 @@ describe("state-load checks the file's shape", () => {
     ["the top level is a string", "x", "storageState: expected object, got string"],
     ["cookies is a string", { cookies: "nope" }, "storageState.cookies: expected array, got string"],
     ["an origin is a number", { origins: [5] }, "storageState.origins[0]: expected object, got number"],
-    ["an origin has no origin string", { origins: [{ localStorage: [] }] }, "storageState.origins[0].origin: expected string, got undefined"],
-    ["localStorage is an object", { origins: [{ origin: "https://example.com", localStorage: {} }] }, "storageState.origins[0].localStorage: expected array, got object"],
-    ["an entry has no value", { origins: [{ origin: "https://example.com", localStorage: [{ name: "n1" }] }] }, "storageState.origins[0].localStorage[0].value: expected string, got undefined"],
-    ["an entry's value is a number", { origins: [{ origin: "https://example.com", localStorage: [{ name: "n2", value: 5 }] }] }, "storageState.origins[0].localStorage[0].value: expected string, got number"],
-    ["an entry's name is null", { origins: [{ origin: "https://example.com", localStorage: [{ name: null, value: "v" }] }] }, "storageState.origins[0].localStorage[0].name: expected string, got null"],
-    ["an entry is an array", { origins: [{ origin: "https://example.com", localStorage: [["k", "v"]] }] }, "storageState.origins[0].localStorage[0]: expected object, got array"],
+    [
+      "an origin has no origin string",
+      { origins: [{ localStorage: [] }] },
+      "storageState.origins[0].origin: expected string, got undefined",
+    ],
+    [
+      "localStorage is an object",
+      { origins: [{ origin: "https://example.com", localStorage: {} }] },
+      "storageState.origins[0].localStorage: expected array, got object",
+    ],
+    [
+      "an entry has no value",
+      { origins: [{ origin: "https://example.com", localStorage: [{ name: "n1" }] }] },
+      "storageState.origins[0].localStorage[0].value: expected string, got undefined",
+    ],
+    [
+      "an entry's value is a number",
+      { origins: [{ origin: "https://example.com", localStorage: [{ name: "n2", value: 5 }] }] },
+      "storageState.origins[0].localStorage[0].value: expected string, got number",
+    ],
+    [
+      "an entry's name is null",
+      { origins: [{ origin: "https://example.com", localStorage: [{ name: null, value: "v" }] }] },
+      "storageState.origins[0].localStorage[0].name: expected string, got null",
+    ],
+    [
+      "an entry is an array",
+      { origins: [{ origin: "https://example.com", localStorage: [["k", "v"]] }] },
+      "storageState.origins[0].localStorage[0]: expected object, got array",
+    ],
   ];
   for (const [label, content, message] of cases) {
     test(`${label}: refused with the field, nothing sent to the daemon`, async () => {

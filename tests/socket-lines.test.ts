@@ -35,8 +35,12 @@ describe("lineReader", () => {
 
 describe("DaemonClient reads a reply split inside a character", () => {
   let dir: string;
-  beforeAll(async () => { dir = await mkdtemp(join(tmpdir(), "bowser-lines-")); });
-  afterAll(async () => { await rm(dir, { recursive: true, force: true }); });
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "bowser-lines-"));
+  });
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
 
   test("the result has no U+FFFD", async () => {
     const sock = join(dir, "sock");

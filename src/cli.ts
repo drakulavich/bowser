@@ -34,7 +34,13 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   if (args.positional.length < command.positional.filter((p) => p.required).length) {
     throw new UserError(`usage: bowser ${usageOf(command)}`);
   }
-  const ctx: CommandContext = { restart: restartSession, ...base, session: args.session, json: args.json, command: command.name };
+  const ctx: CommandContext = {
+    restart: restartSession,
+    ...base,
+    session: args.session,
+    json: args.json,
+    command: command.name,
+  };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 

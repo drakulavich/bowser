@@ -47,7 +47,9 @@ runOrSkip("e2e: non-ASCII text over the daemon socket (#75)", () => {
   }, 30_000);
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     else delete process.env.HOME;
@@ -73,8 +75,12 @@ runOrSkip("e2e: non-ASCII text over the daemon socket (#75)", () => {
     expect(new TextEncoder().encode(text).length).toBeGreaterThan(16_000);
     await cmdFill(ctx, box, text);
     // Asked in the page, so the answer is short ASCII: only the way in is tested.
-    expect(await cmdEval(ctx, "[...document.querySelector('input').value].filter((c) => c === '\\uFFFD').length")).toMatch(/^0$/m);
-    expect(await cmdEval(ctx, "document.querySelector('input').value.length")).toMatch(new RegExp(`^${text.length}$`, "m"));
+    expect(
+      await cmdEval(ctx, "[...document.querySelector('input').value].filter((c) => c === '\\uFFFD').length"),
+    ).toMatch(/^0$/m);
+    expect(await cmdEval(ctx, "document.querySelector('input').value.length")).toMatch(
+      new RegExp(`^${text.length}$`, "m"),
+    );
     const value = await cmdEval(ctx, "document.querySelector('input').value");
     expect(value).not.toContain("\uFFFD");
     expect(value).toContain(text);

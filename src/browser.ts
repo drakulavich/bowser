@@ -2,8 +2,22 @@
 // instantiates Bun.WebView, always with the native WebKit backend (macOS).
 
 import {
-  CANCEL_PENDING_NAVIGATION, KEY_CODES, LEAVE_INITIAL_DOCUMENT, NAV_ARM, NAV_COUNT, NAV_DESTINATION, NO_OP, READ_TITLE, READ_URL, RELOAD,
-  hoverScript, keyCommandScript, keyWatchScript, readable, selectScript, setCheckedScript,
+  CANCEL_PENDING_NAVIGATION,
+  KEY_CODES,
+  LEAVE_INITIAL_DOCUMENT,
+  NAV_ARM,
+  NAV_COUNT,
+  NAV_DESTINATION,
+  NO_OP,
+  READ_TITLE,
+  READ_URL,
+  RELOAD,
+  hoverScript,
+  keyCommandScript,
+  keyWatchScript,
+  readable,
+  selectScript,
+  setCheckedScript,
 } from "./page-scripts.ts";
 import type { KeyModifier } from "./daemon/protocol.ts";
 
@@ -53,10 +67,7 @@ export interface ViewLike {
  *  replaceState, a hash change) and is "" before the first navigation; in
  *  every other case the two agree (measured, Bun 1.4.2). `view.url` is the
  *  fallback when the page cannot answer. */
-export async function resolveUrl(
-  viewUrl: string,
-  evalHref: () => Promise<unknown>,
-): Promise<string> {
+export async function resolveUrl(viewUrl: string, evalHref: () => Promise<unknown>): Promise<string> {
   try {
     const loc = await evalHref();
     return typeof loc === "string" && loc ? loc : viewUrl;
@@ -68,10 +79,7 @@ export async function resolveUrl(
 /** Resolve the page title. On WebKit `view.title` is still "" when
  *  navigate() resolves even though document.title is set. When the native
  *  getter is empty, read it from the page. */
-export async function resolveTitle(
-  viewTitle: string,
-  evalTitle: () => Promise<unknown>,
-): Promise<string> {
+export async function resolveTitle(viewTitle: string, evalTitle: () => Promise<unknown>): Promise<string> {
   if (viewTitle) return viewTitle;
   try {
     const t = await evalTitle();
@@ -236,10 +244,20 @@ function stallGuard(stalls: StallKick | undefined, clock: Clock) {
     }
     if (!evaluating) {
       evaluating = true;
-      kicker.evaluate(NO_OP).catch(() => {}).finally(() => { evaluating = false; });
+      kicker
+        .evaluate(NO_OP)
+        .catch(() => {})
+        .finally(() => {
+          evaluating = false;
+        });
     } else if (!resizing) {
       resizing = true;
-      kicker.resize(KICKER_SIZE, KICKER_SIZE).catch(() => {}).finally(() => { resizing = false; });
+      kicker
+        .resize(KICKER_SIZE, KICKER_SIZE)
+        .catch(() => {})
+        .finally(() => {
+          resizing = false;
+        });
     }
   };
   const tick = () => {
@@ -257,7 +275,9 @@ function stallGuard(stalls: StallKick | undefined, clock: Clock) {
         if (--pending === 0) clock.clearTimeout(timer);
       });
     },
-    get opened() { return kicker !== undefined; },
+    get opened() {
+      return kicker !== undefined;
+    },
     close() {
       clock.clearTimeout(timer);
       kicker?.close?.();
@@ -294,11 +314,17 @@ const STORAGE_COMMIT_WAIT_MS = 1000;
  *  keydown (F11, #168), so its macOS character goes as a raw key event. With a
  *  modifier the named key fires its keydown; only Tab is swapped then. */
 const RAW_KEYS: Record<string, string> = {
-  Tab: "\t", Enter: "\r", Backspace: "\x7f", Delete: "\uF728",
-  ArrowUp: "\uF700", ArrowDown: "\uF701", ArrowLeft: "\uF702", ArrowRight: "\uF703",
+  Tab: "\t",
+  Enter: "\r",
+  Backspace: "\x7f",
+  Delete: "\uF728",
+  ArrowUp: "\uF700",
+  ArrowDown: "\uF701",
+  ArrowLeft: "\uF702",
+  ArrowRight: "\uF703",
 };
 function pressKey(key: string, modifiers: KeyModifier[]): string {
-  return (key === "Tab" || modifiers.length === 0) ? RAW_KEYS[key] ?? key : key;
+  return key === "Tab" || modifiers.length === 0 ? (RAW_KEYS[key] ?? key) : key;
 }
 
 /** The editing command macOS runs for a menu shortcut, which Bun.WebView
@@ -349,13 +375,20 @@ function navigationWatch(
   let landed = 0;
   let arrived = 0;
   let failure: Error | undefined;
-  view.onNavigated = () => { landed++; arrived++; onNavigation(); };
+  view.onNavigated = () => {
+    landed++;
+    arrived++;
+    onNavigation();
+  };
   view.onNavigationFailed = (error) => {
     landed++;
     failure = error;
     if (phase === "idle" && pendingAt === landed - 1) void replaced();
   };
-  const sleep = (ms: number) => new Promise<void>((r) => { clock.setTimeout(r, ms); });
+  const sleep = (ms: number) =>
+    new Promise<void>((r) => {
+      clock.setTimeout(r, ms);
+    });
   /** Evaluate a watch script, waiting at most `ms`: a page that cannot
    *  answer in time, or at all, reads as "no". Every page read in `act` goes
    *  through here, so none can hold it past its deadline. Only the waiting
@@ -367,7 +400,9 @@ function navigationWatch(
     try {
       return await Promise.race([
         evaluate(expr),
-        new Promise<undefined>((r) => { timer = clock.setTimeout(() => r(undefined), ms); }),
+        new Promise<undefined>((r) => {
+          timer = clock.setTimeout(() => r(undefined), ms);
+        }),
       ]);
     } catch {
       return undefined;
@@ -414,7 +449,7 @@ function navigationWatch(
     // evaluate, and fewer of them means fewer chances to race the commit.
     if (landed !== before) return;
     // A page busy right after the action answers late, not "no navigation" (#170).
-    if (await count(timing.settleMs) < 1) return;
+    if ((await count(timing.settleMs)) < 1) return;
     await follow(timing.settleMs);
   };
   /** Whether more navigations started since NAV_ARM than landed since:
@@ -461,10 +496,18 @@ function navigationWatch(
   // A reload is a navigation the page's count never sees (#116), so its own landing is not counted.
   let armedAt = 0;
   return {
-    get phase() { return phase; },
-    cancelAction() { actionCancelled = true; },
-    resetActionCancellation() { actionCancelled = false; },
-    get pending() { return pendingAt === landed; },
+    get phase() {
+      return phase;
+    },
+    cancelAction() {
+      actionCancelled = true;
+    },
+    resetActionCancellation() {
+      actionCancelled = false;
+    },
+    get pending() {
+      return pendingAt === landed;
+    },
     async destination(maxWaitMs = timing.graceMs): Promise<string> {
       const url = await ask(NAV_DESTINATION, maxWaitMs);
       return typeof url === "string" && url ? url : view.url;
@@ -495,7 +538,8 @@ function navigationWatch(
         const ended = arrived !== arrivedBefore || (landed !== landedBefore && !cancelled(failure));
         if (kind !== "navigates") await awaitNavigation(before, wasLoading);
         else if (!ended) await follow(Infinity);
-        if (kind !== "acts" && arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure)) throw failure;
+        if (kind !== "acts" && arrived === arrivedBefore && landed !== landedBefore && failure && !cancelled(failure))
+          throw failure;
         return result;
       } finally {
         phase = "idle";
@@ -516,7 +560,9 @@ function navigationWatch(
       while (landed - before < 2) await sleep(10);
       if (arrived !== arrivedBefore) return;
       if (failure && !cancelled(failure)) throw failure;
-      throw new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
+      throw new Error(
+        `navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`,
+      );
     },
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
@@ -533,8 +579,15 @@ function navigationWatch(
         // is pending WebKit refuses this one at once, where the queue
         // would run it later over whatever page is there then.
         let timer: unknown;
-        const leave = Promise.resolve().then(() => view.evaluate(LEAVE_INITIAL_DOCUMENT)).then(() => true, () => false);
-        const leaveBound = new Promise<false>((r) => { timer = clock.setTimeout(() => r(false), timing.settleMs); });
+        const leave = Promise.resolve()
+          .then(() => view.evaluate(LEAVE_INITIAL_DOCUMENT))
+          .then(
+            () => true,
+            () => false,
+          );
+        const leaveBound = new Promise<false>((r) => {
+          timer = clock.setTimeout(() => r(false), timing.settleMs);
+        });
         const left = await Promise.race([leave, leaveBound]);
         clock.clearTimeout(timer);
         if (left) {
@@ -547,9 +600,14 @@ function navigationWatch(
           // own resolution is the landing, so there is no settle after it.
           // Awaited up to settleMs; one that never settles is left to
           // WebKit and the lane moves on (the next op may then be refused).
-          const navigate = view.navigate("about:blank").then(() => true, () => false);
+          const navigate = view.navigate("about:blank").then(
+            () => true,
+            () => false,
+          );
           timer = undefined;
-          const bound = new Promise<boolean>((r) => { timer = clock.setTimeout(() => r(false), timing.settleMs); });
+          const bound = new Promise<boolean>((r) => {
+            timer = clock.setTimeout(() => r(false), timing.settleMs);
+          });
           const ok = await Promise.race([navigate, bound]);
           clock.clearTimeout(timer);
           return ok;
@@ -557,8 +615,15 @@ function navigationWatch(
       }
       if (typeof view.reload !== "function") return false;
       let timer: unknown;
-      const reloadAttempt = Promise.resolve().then(() => view.reload!()).then(() => "ok" as const, () => "failed" as const);
-      const reloadBound = new Promise<"timeout">((r) => { timer = clock.setTimeout(() => r("timeout"), timing.settleMs); });
+      const reloadAttempt = Promise.resolve()
+        .then(() => view.reload!())
+        .then(
+          () => "ok" as const,
+          () => "failed" as const,
+        );
+      const reloadBound = new Promise<"timeout">((r) => {
+        timer = clock.setTimeout(() => r("timeout"), timing.settleMs);
+      });
       const reloadResult = await Promise.race([reloadAttempt, reloadBound]);
       clock.clearTimeout(timer);
       if (reloadResult === "timeout") return false;
@@ -566,9 +631,14 @@ function navigationWatch(
         // Refused while a selector click is hung on a pending page
         // navigation (#78); a script reload still cancels it. Straight to
         // the view, as above: wrapView's queue may be held by that page.
-        const sent = view.evaluate(CANCEL_PENDING_NAVIGATION).then(() => true, () => false);
+        const sent = view.evaluate(CANCEL_PENDING_NAVIGATION).then(
+          () => true,
+          () => false,
+        );
         timer = undefined;
-        const bound = new Promise<boolean>((r) => { timer = clock.setTimeout(() => r(false), timing.settleMs); });
+        const bound = new Promise<boolean>((r) => {
+          timer = clock.setTimeout(() => r(false), timing.settleMs);
+        });
         const ok = await Promise.race([sent, bound]);
         clock.clearTimeout(timer);
         if (!ok) return false;
@@ -608,33 +678,51 @@ export function wrapView(
   const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
 
   return {
-    get url() { return view.url; },
-    get title() { return view.title; },
-    get phase() { return nav.phase; },
+    get url() {
+      return view.url;
+    },
+    get title() {
+      return view.title;
+    },
+    get phase() {
+      return nav.phase;
+    },
     cancelAction: () => nav.cancelAction(),
     resetActionCancellation: () => nav.resetActionCancellation(),
-    get navigationPending() { return nav.pending; },
+    get navigationPending() {
+      return nav.pending;
+    },
     navigationDestination: (maxWaitMs) => nav.destination(maxWaitMs),
     realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
-    click: (selector, timeoutMs) => guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
+    click: (selector, timeoutMs) =>
+      guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
     type: (text) => guard(nav.act(() => view.type(text))),
-    press: (key, modifiers = []) => guard(nav.act(async () => {
-      const command = menuCommand(key, modifiers);
-      if (command) await evaluate(keyWatchScript(key));
-      const sent = pressKey(key, modifiers);
-      if (sent !== key) await evaluate(KEY_CODES);
-      await view.press(sent, modifiers.length ? { modifiers } : undefined);
-      if (command) await evaluate(keyCommandScript(command));
-    })),
+    press: (key, modifiers = []) =>
+      guard(
+        nav.act(async () => {
+          const command = menuCommand(key, modifiers);
+          if (command) await evaluate(keyWatchScript(key));
+          const sent = pressKey(key, modifiers);
+          if (sent !== key) await evaluate(KEY_CODES);
+          await view.press(sent, modifiers.length ? { modifiers } : undefined);
+          if (command) await evaluate(keyCommandScript(command));
+        }),
+      ),
     // A page's change or mouse handler can navigate, so the page-script
     // actions go through the watch too (#51: a select whose onchange set
     // location.href left the next snapshot on the old page).
-    hover: (selector) => guard(nav.act(async () => { await evaluate(hoverScript(selector)); })),
+    hover: (selector) =>
+      guard(
+        nav.act(async () => {
+          await evaluate(hoverScript(selector));
+        }),
+      ),
     select: (selector, value) => guard(nav.act(async () => (await evaluate(selectScript(selector, value))) === true)),
-    setChecked: (selector, checked) => guard(nav.act(async () => (await evaluate(setCheckedScript(selector, checked))) !== false)),
+    setChecked: (selector, checked) =>
+      guard(nav.act(async () => (await evaluate(setCheckedScript(selector, checked))) !== false)),
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
       // takes no full-page option. Element-bounded screenshots are not supported.
@@ -654,10 +742,16 @@ export function wrapView(
     // no navigate event (#116, measured on Bun 1.4.2). So its landing is
     // always awaited, except where nothing has committed and reload() does
     // nothing.
-    reload: () => guard(nav.act(async () => {
-      if (typeof view.reload === "function") await view.reload();
-      else await evaluate(RELOAD);
-    }, view.url !== "" ? "navigates" : "acts")),
+    reload: () =>
+      guard(
+        nav.act(
+          async () => {
+            if (typeof view.reload === "function") await view.reload();
+            else await evaluate(RELOAD);
+          },
+          view.url !== "" ? "navigates" : "acts",
+        ),
+      ),
     close: async () => {
       // WebKit commits localStorage in a transaction 500 ms after a write
       // (measured ~530 ms, also with the CPU saturated), and Bun force-kills
@@ -692,7 +786,9 @@ export function wrapView(
     // nothing: it asks the view directly, which WebKit refuses at once
     // while another evaluate is pending (#48).
     interrupt: () => guard(nav.interrupt()),
-    get kickerOpened() { return stall.opened; },
+    get kickerOpened() {
+      return stall.opened;
+    },
     watchNavigation(on) {
       navigated = on;
     },
@@ -704,7 +800,7 @@ function cancelled(err: unknown): boolean {
   return err instanceof Error && err.message.includes("NSURLErrorDomain error -999");
 }
 
-const PNG_SIGNATURE =[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /** Cheap sanity check that `bytes` is a real PNG: the 8-byte signature plus a
  *  plausible minimum length (a 1x1 PNG is ~67 bytes; the broken capture writes

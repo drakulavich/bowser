@@ -29,21 +29,30 @@ runOrSkip("e2e: reload of a page whose server is down (#123)", () => {
     process.env.HOME = tmp;
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response(`<!doctype html><title>${new URL(req.url).pathname}</title>`, {
-        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-      }),
+      fetch: (req) =>
+        new Response(`<!doctype html><title>${new URL(req.url).pathname}</title>`, {
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+        }),
     });
     base = `http://127.0.0.1:${server.port}`;
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });
 
-  const failure = (p: Promise<unknown>) => p.then(() => { throw new Error("expected a failure"); }, (e: Error) => e);
+  const failure = (p: Promise<unknown>) =>
+    p.then(
+      () => {
+        throw new Error("expected a failure");
+      },
+      (e: Error) => e,
+    );
 
   test("reload fails with the connection failure, exit 2, as goto does", async () => {
     await cmdOpen(ctx, `${base}/doc`);
@@ -70,21 +79,28 @@ runOrSkip("e2e: go-back and go-forward to a page whose server is down (#127)", (
     process.env.HOME = tmp;
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response(`<!doctype html><title>${new URL(req.url).pathname}</title>`, {
-        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-      }),
+      fetch: (req) =>
+        new Response(`<!doctype html><title>${new URL(req.url).pathname}</title>`, {
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+        }),
     });
     base = `http://127.0.0.1:${server.port}`;
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });
 
-  const outcome = (p: Promise<string>) => p.then((text) => text, (e: Error) => reportFailure(e).stderr);
+  const outcome = (p: Promise<string>) =>
+    p.then(
+      (text) => text,
+      (e: Error) => reportFailure(e).stderr,
+    );
 
   test("a back or forward that answers has moved; the one that cannot load fails with the reason", async () => {
     await cmdOpen(ctx, `${base}/p0`);

@@ -24,7 +24,10 @@ const HELP = renderHelp(COMMANDS);
 const PICK: Command = {
   name: "pick",
   summary: "Pick a size",
-  positional: [{ name: "first-choice", required: true }, { name: "second-choice", required: false }],
+  positional: [
+    { name: "first-choice", required: true },
+    { name: "second-choice", required: false },
+  ],
   flags: [{ name: "until", kind: "string" }],
   run: async () => "",
 };
@@ -155,7 +158,8 @@ describe("per-command help", () => {
   // help existed: the scan for help must skip what the parser consumes.
   test("snapshot --filename -h writes a file named -h", async () => {
     const snap = {
-      url: "https://x", title: "X",
+      url: "https://x",
+      title: "X",
       tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
       refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
     };
@@ -163,7 +167,9 @@ describe("per-command help", () => {
     const cwd = process.cwd();
     process.chdir(tmp);
     try {
-      expect(await run(["-s", "snap", "snapshot", "--filename", "-h"], { connect: async () => c })).toBe(`wrote ${join(realpathSync(tmp), "-h")}`);
+      expect(await run(["-s", "snap", "snapshot", "--filename", "-h"], { connect: async () => c })).toBe(
+        `wrote ${join(realpathSync(tmp), "-h")}`,
+      );
       expect(await Bun.file(join(tmp, "-h")).text()).toContain('link "Home" [ref=e1]');
     } finally {
       process.chdir(cwd);
@@ -215,25 +221,29 @@ describe("per-command help", () => {
     [["close", "--bogus", "--help"]],
     [["mcp", "--bogus", "--help"]],
     [["mcp", "-x", "-h"]],
-  ])("the CLI entry prints help and exits 0 for %j, starting no server", async (argv) => {
-    const name = argv[0]!;
-    {
-      const proc = Bun.spawn({
-        cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), ...argv],
-        env: { ...process.env, HOME: tmp },
-        // A pipe held open: a started MCP server would wait on it forever.
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const timer = setTimeout(() => proc.kill(), 5_000);
-      const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-      clearTimeout(timer);
-      const cmd = COMMANDS.find((c) => c.name === name)!;
-      expect(stdout.split("\n")[0]).toBe(`bowser ${usageOf(cmd)}`);
-      expect(code).toBe(0);
-    }
-  }, 15_000);
+  ])(
+    "the CLI entry prints help and exits 0 for %j, starting no server",
+    async (argv) => {
+      const name = argv[0]!;
+      {
+        const proc = Bun.spawn({
+          cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), ...argv],
+          env: { ...process.env, HOME: tmp },
+          // A pipe held open: a started MCP server would wait on it forever.
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const timer = setTimeout(() => proc.kill(), 5_000);
+        const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+        clearTimeout(timer);
+        const cmd = COMMANDS.find((c) => c.name === name)!;
+        expect(stdout.split("\n")[0]).toBe(`bowser ${usageOf(cmd)}`);
+        expect(code).toBe(0);
+      }
+    },
+    15_000,
+  );
 });
 
 // ET-27: the CLI reports its own version, as `playwright-cli --version` does.

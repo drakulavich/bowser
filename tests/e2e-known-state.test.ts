@@ -21,7 +21,12 @@ const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.ski
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 const stuck = (cmd: string) => `bowser: session is stuck: '${cmd}' is still running after a reload; run 'bowser close'`;
 
-interface Result { code: number; out: string; err: string; ms: number }
+interface Result {
+  code: number;
+  out: string;
+  err: string;
+  ms: number;
+}
 
 runOrSkip("e2e: a known state after a timeout (#78)", () => {
   let tmp: string;
@@ -36,9 +41,10 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
     return s;
   };
 
-  const html = (body: string) => new Response(`<!doctype html>${body}`, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+  const html = (body: string) =>
+    new Response(`<!doctype html>${body}`, {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
 
   beforeAll(async () => {
     origHome = process.env.HOME;
@@ -75,7 +81,9 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
   afterAll(async () => {
     for (const p of live) p.kill("SIGKILL");
     for (const s of sessions) {
-      try { await cmdClose({ session: s, json: true }); } catch {}
+      try {
+        await cmdClose({ session: s, json: true });
+      } catch {}
       await killDaemons(s);
     }
     server?.stop(true);
@@ -89,7 +97,9 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
     const t0 = Date.now();
     const proc = Bun.spawn([process.execPath, CLI, `-s=${s}`, ...args], {
       env: { ...process.env, HOME: tmp, BOWSER_OP_TIMEOUT_MS: String(budgetMs) },
-      stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
     live.add(proc);
     const deadline = setTimeout(() => proc.kill("SIGKILL"), deadlineMs);
@@ -271,7 +281,9 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
       `bowser: 'click' timed out after ${budget}ms; the click was delivered, check the page before retrying`,
     ]);
     await Bun.sleep(2500); // past the recovery grace
-    expect(await settledEval(s, "performance.getEntriesByType('navigation')[0].type + ' ' + window.added")).toBe("navigate 1");
+    expect(await settledEval(s, "performance.getEntriesByType('navigation')[0].type + ' ' + window.added")).toBe(
+      "navigate 1",
+    );
 
     await closesFast(s);
   }, 60_000);

@@ -4,16 +4,18 @@
 // JSON encoding is implied.
 
 import {
-  storageClearScript, storageDeleteScript, storageGetScript, storageListScript, storageSetScript,
+  storageClearScript,
+  storageDeleteScript,
+  storageGetScript,
+  storageListScript,
+  storageSetScript,
 } from "../page-scripts.ts";
 import { reply, withClient, type CommandContext, type Command } from "./context.ts";
 import { UserError } from "../errors.ts";
 
 async function storageList(ctx: CommandContext, area: "localStorage" | "sessionStorage"): Promise<string> {
   return withClient(ctx, async (c) => {
-    const entries = (await c.request("evaluate", [
-      storageListScript(area),
-    ])) as Record<string, string> | null;
+    const entries = (await c.request("evaluate", [storageListScript(area)])) as Record<string, string> | null;
     const obj = entries ?? {};
     if (ctx.json) return JSON.stringify(obj);
     const keys = Object.keys(obj);
@@ -30,9 +32,7 @@ async function storageGet(
 ): Promise<string> {
   if (!key) throw new UserError(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
-    const val = (await c.request("evaluate", [
-      storageGetScript(area, key),
-    ])) as string | null;
+    const val = (await c.request("evaluate", [storageGetScript(area, key)])) as string | null;
     return reply(ctx, { ok: true, key, value: val }, val ?? "");
   });
 }
@@ -46,9 +46,7 @@ async function storageSet(
 ): Promise<string> {
   if (!key) throw new UserError(`usage: bowser ${command} <key> <value>`);
   return withClient(ctx, async (c) => {
-    await c.request("evaluate", [
-      storageSetScript(area, key, value),
-    ]);
+    await c.request("evaluate", [storageSetScript(area, key, value)]);
     return reply(ctx, { ok: true, key, value }, `set ${key}`);
   });
 }
@@ -61,9 +59,7 @@ async function storageDelete(
 ): Promise<string> {
   if (!key) throw new UserError(`usage: bowser ${command} <key>`);
   return withClient(ctx, async (c) => {
-    await c.request("evaluate", [
-      storageDeleteScript(area, key),
-    ]);
+    await c.request("evaluate", [storageDeleteScript(area, key)]);
     return reply(ctx, { ok: true, key }, `deleted ${key}`);
   });
 }
@@ -97,7 +93,8 @@ export const COMMANDS: Command[] = [
   {
     name: "localstorage-list",
     summary: "List all localStorage entries",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdLocalStorageList(ctx),
   },
   {
@@ -110,7 +107,10 @@ export const COMMANDS: Command[] = [
   {
     name: "localstorage-set",
     summary: "Write a localStorage entry",
-    positional: [{ name: "key", required: true }, { name: "value", required: true }],
+    positional: [
+      { name: "key", required: true },
+      { name: "value", required: true },
+    ],
     flags: [],
     run: (ctx, a) => cmdLocalStorageSet(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
   },
@@ -124,13 +124,15 @@ export const COMMANDS: Command[] = [
   {
     name: "localstorage-clear",
     summary: "Clear all localStorage entries",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdLocalStorageClear(ctx),
   },
   {
     name: "sessionstorage-list",
     summary: "List all sessionStorage entries",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdSessionStorageList(ctx),
   },
   {
@@ -143,7 +145,10 @@ export const COMMANDS: Command[] = [
   {
     name: "sessionstorage-set",
     summary: "Write a sessionStorage entry",
-    positional: [{ name: "key", required: true }, { name: "value", required: true }],
+    positional: [
+      { name: "key", required: true },
+      { name: "value", required: true },
+    ],
     flags: [],
     run: (ctx, a) => cmdSessionStorageSet(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
   },
@@ -157,7 +162,8 @@ export const COMMANDS: Command[] = [
   {
     name: "sessionstorage-clear",
     summary: "Clear all sessionStorage entries",
-    positional: [], flags: [],
+    positional: [],
+    flags: [],
     run: (ctx) => cmdSessionStorageClear(ctx),
   },
 ];

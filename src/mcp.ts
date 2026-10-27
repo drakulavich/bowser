@@ -115,7 +115,9 @@ export function toArgv(schema: CommandSchema, args: Record<string, unknown>): st
   const session = args.session;
   if (session !== undefined && session !== null) {
     if (typeof session !== "string" || session === "") {
-      throw new UserError(`usage: argument 'session' of '${schema.name}' must be a non-empty string, got ${kindOf(session)}`);
+      throw new UserError(
+        `usage: argument 'session' of '${schema.name}' must be a non-empty string, got ${kindOf(session)}`,
+      );
     }
     argv.push("--session", session);
   }
@@ -176,9 +178,7 @@ function toolResult(id: unknown, text: string, isError?: boolean) {
 /** A tools/call split in two: `reply` when it is answered without running
  *  anything (an unknown tool's -32602, an argument the tool refuses), otherwise the argv to
  *  run and the session it runs in. */
-type PreparedCall =
-  | { reply: object }
-  | { argv: string[]; session: string | null };
+type PreparedCall = { reply: object } | { argv: string[]; session: string | null };
 
 function prepareToolCall(id: unknown, params: unknown): PreparedCall {
   const p = (params ?? {}) as { name?: string; arguments?: unknown };
@@ -246,7 +246,8 @@ export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<obj
   switch (r.method) {
     case "initialize": {
       const requested = (r.params as { protocolVersion?: unknown } | undefined)?.protocolVersion;
-      const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ?? SUPPORTED_PROTOCOL_VERSIONS[0];
+      const protocolVersion =
+        SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ?? SUPPORTED_PROTOCOL_VERSIONS[0];
       return jsonRpcResult(r.id, {
         protocolVersion,
         capabilities: { tools: {} },
@@ -323,7 +324,10 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
 
   function schedule(id: unknown, params: unknown): void {
     const prepared = prepareToolCall(id, params);
-    if ("reply" in prepared) { track(send(prepared.reply)); return; }
+    if ("reply" in prepared) {
+      track(send(prepared.reply));
+      return;
+    }
     const { argv, session } = prepared;
     const token = { cancelled: false };
     inFlight.set(id, token);
@@ -351,7 +355,10 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     try {
       req = JSON.parse(line);
     } catch {
-      { track(send(jsonRpcError(null, -32700, "Parse error"))); return; }
+      {
+        track(send(jsonRpcError(null, -32700, "Parse error")));
+        return;
+      }
     }
     const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
     const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
@@ -363,9 +370,11 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
       return;
     }
     // Everything else never touches a daemon: answer it now.
-    track(handleMcpRequest(req, deps).then(async (res) => {
-      if (res !== null) await send(res);
-    }));
+    track(
+      handleMcpRequest(req, deps).then(async (res) => {
+        if (res !== null) await send(res);
+      }),
+    );
   }
 
   async function idle(): Promise<void> {
@@ -480,7 +489,9 @@ export async function serveLines(
   let handover: Handover | undefined;
   for await (const line of input) {
     let req: { id?: unknown; method?: unknown } | undefined;
-    try { req = JSON.parse(line); } catch {}
+    try {
+      req = JSON.parse(line);
+    } catch {}
     if (handover) {
       // A call it cancels may still be running here.
       if (req?.method === "notifications/cancelled") server.accept(line);
@@ -540,7 +551,9 @@ function startHandover(
 
   const refuse = (line: string): Promise<void> | undefined => {
     let req: { id?: unknown; method?: unknown } | undefined;
-    try { req = JSON.parse(line); } catch {}
+    try {
+      req = JSON.parse(line);
+    } catch {}
     if (!req || req.id === undefined || req.id === null) return;
     const text = `bowser mcp could not hand over to the installed bowser ${installed}: ${failed}; restart the MCP server`;
     const res = req.method === "tools/call" ? toolResult(req.id, text, true) : jsonRpcError(req.id, -32603, text);
@@ -550,7 +563,11 @@ function startHandover(
   const ready = (async () => {
     // The old server writes nothing after this: the child is the only writer.
     await server.idle();
-    const stdin = new ReadableStream<Uint8Array>({ start: (c) => { input = c; } });
+    const stdin = new ReadableStream<Uint8Array>({
+      start: (c) => {
+        input = c;
+      },
+    });
     child = Bun.spawn(command, { stdin, stdout: "pipe", stderr: "inherit", env: process.env, cwd: process.cwd() });
     const out = lines(child.stdout)[Symbol.asyncIterator]();
     if (init) {
@@ -564,7 +581,8 @@ function startHandover(
       })();
       const timeout = Bun.sleep(HANDOVER_MS).then(() => "timeout" as const);
       const got = await Promise.race([answered, timeout]);
-      if (got !== true) throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
+      if (got !== true)
+        throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
     }
     forwarded = (async () => {
       for (let r = await out.next(); !r.done; r = await out.next()) {
@@ -599,7 +617,9 @@ function startHandover(
       await order;
       if (!child) return 0;
       // Throws once the child has exited: Bun has cancelled its stdin.
-      try { input.close(); } catch {}
+      try {
+        input.close();
+      } catch {}
       return exited;
     },
   };
