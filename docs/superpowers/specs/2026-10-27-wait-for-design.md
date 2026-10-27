@@ -28,24 +28,41 @@ On success it prints the page's URL (`--json`: `{ "ok": true, "url": "…" }`) a
 state, as `click` does, so a later ref command sees the page it is on. When the condition is already true it
 answers at once.
 
-The wait is bounded by the command's budget (`BOWSER_OP_TIMEOUT_MS`, default 30 s). When it runs out:
+The wait is bounded by the command's budget: the one the daemon started with (`BOWSER_OP_TIMEOUT_MS`, default
+30 s), or a smaller one set on the command, as for every command. When it runs out:
 
 ```
 wait-for: no URL containing '/login' after 30000ms; the page is at https://www.carrefouruae.com/mafuae/en/
 wait-for: no text "Order placed" after 30000ms; the page is at https://shop.example/checkout
 ```
 
-exit 2, as other timeouts. With `BOWSER_OP_TIMEOUT_MS=0` it waits until the condition holds.
+exit 2, as other timeouts. `BOWSER_OP_TIMEOUT_MS=0` on the command does not lift the daemon's budget (the
+client then sends none, and the daemon applies its own); only a session opened with `0` waits until the
+condition holds.
 
 ### Where the loop runs
 
 A new daemon op, `waitFor` (`args: [kind: "url" | "text", value: string]`, result `{ met: boolean; url: string }`),
-loops in the daemon: evaluate the check, and when it is false wait 100 ms and evaluate again. One read at a time:
-the next evaluate starts only after the previous one settled, so a page that does not answer queues nothing
-behind it (the same rule as the ET-52 load cap). A read that throws (the document is being replaced) counts as
-"not yet". The op stops at the `deadline` `dispatch` already hands every handler (50 ms before the request's
-timer) and answers `{ met: false, url }`, so the command can print its own message instead of the generic
-`'wait-for' timed out`. It is not in `ACTS`: it does not act on the page.
+loops in the daemon: evaluate the check, and when it is false wait 100 ms and evaluate again.
+
+- **The check** is `waitForScript(kind, value)` in `src/page-scripts.ts`, which puts the value in the script
+  with `JSON.stringify`, never by concatenation: `--text "it's there"` must match, and no value can break out
+  of the string.
+- **The deadline.** `createHandler`'s `handle` sends `waitFor` down the same path as `resolve`: through
+  `afterPendingNavigation(req, deadline)`, which waits out a navigation an earlier command left pending (so a
+  read never answers from the document about to go) and hands the op the `deadline` `dispatch` computes, 50 ms
+  before the request's timer. The op's handler takes that deadline as an argument; with no budget it is
+  `undefined` and means no end.
+- **The wait between reads** is `min(100 ms, deadline - now)`. When the deadline has passed after a read, the op
+  answers `{ met: false, url }` (`url` from `realUrl`), so the command prints its own message.
+- **One read at a time.** The next evaluate starts only after the previous one settled. A read is not raced
+  against the deadline: one that does not settle holds the op, the request's timer fires, and the client gets
+  the generic `'wait-for' timed out after …` while the daemon recovers the page, as for any wedged evaluate.
+  Returning early instead would leave that read in `wrapView`'s queue, and the next command's evaluates would
+  wait behind it with no recovery.
+- A read that throws (the document is being replaced) counts as "not yet".
+
+It is not in `ACTS`: it does not act on the page.
 
 ```mermaid
 sequenceDiagram
@@ -54,7 +71,7 @@ sequenceDiagram
   participant P as page
   CLI->>D: waitFor ["url", "/login"]
   loop until met or deadline
-    D->>P: location.href.includes("/login")
+    D->>P: waitForScript("url", "/login")
     P-->>D: false
     Note over D: 100 ms
   end
@@ -86,11 +103,15 @@ measured, since no case waits for text on such a page.
 
 ## Definition of Done
 
-- `tests/daemon-handler.test.ts`, with a fake browser and a manual deadline:
+- `tests/daemon-handler.test.ts`, driving `createHandler(...).handle(req, deadline)` with a fake browser (not the
+  op function alone, so the deadline's path through `handle` is under test):
   - a check that turns true on the third read answers `{ met: true, url }` after two 100 ms waits;
-  - a check that never turns true answers `{ met: false, url }` at the deadline, not after it;
+  - a check that never turns true answers `{ met: false, url }` by the deadline, not after it;
+  - with no deadline, the op is still reading past 1 s;
   - a read that throws counts as "not yet";
-  - a read that does not answer: no second read is sent.
+  - a read that does not settle: no second read is sent, and the op has not answered at the deadline;
+  - with `navigationPending` true, the first read comes after the pending navigation lands;
+  - the value `it's "there"` reaches the page as that string.
 - `tests/commands.test.ts`, with a fake client: `wait-for` with both flags or neither exits 1 with a usage line;
   `{ met: false }` gives the message above, exit 2; `{ met: true }` prints the URL and saves it to state.
 - `tests/e2e-actions.test.ts` (or a new e2e file), on a fixture page whose button does `pushState('/moved')`
@@ -98,5 +119,6 @@ measured, since no case waits for text on such a page.
   within 3 s; `wait-for --text Moved` answers; with `BOWSER_OP_TIMEOUT_MS=1500`, `wait-for --text Never` exits 2
   with the message above within 2.5 s. Today: `bun src/cli.ts wait-for --url /x` exits 1 with
   `bowser: unknown command: wait-for`.
-- `docs-drift` passes: README command table, `skills/bowser/SKILL.md`, `skills/bowser/references/commands.md`.
+- `docs-drift` passes (it checks the README command table and `skills/bowser/SKILL.md`);
+  `skills/bowser/references/commands.md` gets a `wait-for` row by hand, which docs-drift does not check.
 - Each new test goes red under one mutation of the line it names, quoted in the PR.
