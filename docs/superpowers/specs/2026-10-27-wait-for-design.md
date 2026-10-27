@@ -21,7 +21,8 @@ bowser wait-for --url <part>     # until location.href contains <part>
 bowser wait-for --text <text>    # until the page's visible text (document.body.innerText) contains <text>
 ```
 
-Exactly one of the two flags; both or neither is a usage error (exit 1). The match is a plain substring,
+Exactly one of the two flags, with a value that is not empty; both, neither, or an empty value is a usage error
+(exit 1): `includes("")` would match every page (Grok's Optional #296, taken on approval). The match is a plain substring,
 case-sensitive: `--url /login` matches `https://www.carrefouruae.com/mafuae/en/login/phone`.
 
 On success it prints the page's URL (`--json`: `{ "ok": true, "url": "…" }`) and saves it to the session
@@ -42,7 +43,7 @@ condition holds.
 
 ### Where the loop runs
 
-A new daemon op, `waitFor` (`args: [kind: "url" | "text", value: string]`, result `{ met: boolean; url: string }`),
+A new daemon op, `waitFor` (`args: [kind: "url" | "text", value: string]`, result `{ met: boolean; url: string; title: string }`),
 loops in the daemon: evaluate the check, and when it is false wait 100 ms and evaluate again.
 
 - **The check** is `waitForScript(kind, value)` in `src/page-scripts.ts`, which puts the value in the script
@@ -54,7 +55,9 @@ loops in the daemon: evaluate the check, and when it is false wait 100 ms and ev
   before the request's timer. The op's handler takes that deadline as an argument; with no budget it is
   `undefined` and means no end.
 - **The wait between reads** is `min(100 ms, deadline - now)`. When the deadline has passed after a read, the op
-  answers `{ met: false, url }` (`url` from `realUrl`), so the command prints its own message.
+  answers `{ met: false, url, title }` (`realUrl`, `realTitle`), so the command prints its own message. On
+  success the op answers the same shape, and the command saves `url` and `title` with `syncState`: no separate
+  `state` request, which near the deadline would have no budget left (Grok's FYI #298).
 - **One read at a time.** The next evaluate starts only after the previous one settled. A read is not raced
   against the deadline: one that does not settle holds the op, the request's timer fires, and the client gets
   the generic `'wait-for' timed out after …` while the daemon recovers the page, as for any wedged evaluate.
@@ -76,8 +79,8 @@ sequenceDiagram
     Note over D: 100 ms
   end
   P-->>D: true
-  D-->>CLI: { met: true, url }
-  CLI->>D: state (save the URL)
+  D-->>CLI: { met: true, url, title }
+  Note over CLI: save url and title to state
 ```
 
 A loop in the CLI (one `evaluate` request per check) was the alternative. Each request would carry the budget

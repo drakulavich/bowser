@@ -31,7 +31,7 @@ import {
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
 import { claimSession } from "./pidfile.ts";
-import { AWAIT_FONTS, dialogAnswerScript, dialogSyncScript, READ_VIEWPORT, withDialogShim } from "../page-scripts.ts";
+import { AWAIT_FONTS, dialogAnswerScript, dialogSyncScript, READ_VIEWPORT, waitForScript, withDialogShim } from "../page-scripts.ts";
 
 /** What the daemon knows that the page cannot be asked for. `url` and `title`
  *  are deliberately NOT here: they are read live from the page on every
@@ -127,6 +127,7 @@ const RECOVERY_GRACE_MS = 2000;
 /** How long before its timer a handler's own failure is due, so that failure,
  *  not the plain timeout, is what the client hears. */
 const REPLY_MARGIN_MS = 50;
+const WAIT_POLL_MS = 100;
 /** How long a running op whose client went away may still finish on its own:
  *  a killed upgrade restart's page reload is one that does (ET-29). */
 const CLOSED_MS = 5000;
@@ -294,8 +295,9 @@ function timeoutMessage(req: DaemonRequest, ms: number, phase?: ActPhase): strin
 
 // `state` and `dialog-answer` are excluded: they alone need the DaemonState
 // the daemon owns, so createHandler() answers them with closures instead.
+// `waitFor` needs the request's deadline and the handler's clock.
 type Handlers = {
-  [O in Exclude<Op, "state" | "dialog-answer">]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
+  [O in Exclude<Op, "state" | "dialog-answer" | "waitFor">]: (browser: Browser, ...args: ArgsOf<O>) => Promise<ResultOf<O>>;
 };
 
 const handlers: Handlers = {
@@ -408,7 +410,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     if (!IS_URGENT.has(req.op)) browser.resetActionCancellation?.();
     // A ref resolved before the pending navigation lands would be acted on
     // in the next document (#105).
-    const res = ACTS.has(req.op) || req.op === "resolve" ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
+    const res = ACTS.has(req.op) || req.op === "resolve" || req.op === "waitFor" ? await afterPendingNavigation(req, deadline) : await runShimmed(req);
     const dialogs = claim(req);
     return dialogs ? { ...res, dialogs } : res;
   };
@@ -458,7 +460,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
           take(fromPage(await b.evaluate(dialogAnswerScript(text === undefined ? { accept } : { accept, text }))));
           shimmed = true;
         }
-      : Object.hasOwn(handlers, req.op) ? handlers[req.op] : undefined;
+      : Object.hasOwn(handlers, req.op) ? handlers[req.op as keyof Handlers] : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
     try {
       // The one cast at the wire boundary: args arrived as JSON, the handler
@@ -495,6 +497,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
       take(r?.dialogs);
       return r?.value === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result: r.value };
     }
+    if (req.op === "waitFor") return waitFor(req, deadline);
     if (!ACTS.has(req.op) && !NAVIGATES.has(req.op)) return run(req);
     // Before: an action installs the shim if the page lacks it; either op
     // reads the log of a page that has it. A navigating op on a page with no
@@ -511,6 +514,26 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
       : req);
     await sync();
     return res;
+  }
+
+  /** Read the check until it holds or `deadline` passes, one read at a time.
+   *  A read is never raced: one that does not settle holds the op, so the
+   *  request's timer and recovery deal with the wedged page (#114). */
+  async function waitFor(req: DaemonRequest, deadline: number): Promise<DaemonResponse> {
+    const [kind, value] = (req.args ?? []) as ArgsOf<"waitFor">;
+    const script = waitForScript(kind, value);
+    for (;;) {
+      let met = false;
+      try {
+        met = (await browser.evaluate(script)) === true;
+      } catch {
+        // The document is being replaced: not yet.
+      }
+      if (met || clock.now() >= deadline) {
+        return { id: req.id, ok: true, result: { met, url: await browser.realUrl(), title: await browser.realTitle() } };
+      }
+      await new Promise<void>((r) => { clock.setTimeout(r, Math.min(WAIT_POLL_MS, deadline - clock.now())); });
+    }
   }
 
   /** Install the shim if the page lacks it, and take its log. */
