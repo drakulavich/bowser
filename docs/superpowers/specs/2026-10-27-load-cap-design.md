@@ -30,7 +30,8 @@ After the stop `view.url` and `view.title` stay `""` (they change only on a comp
 
 `navigationWatch.navigate` (`src/browser.ts`) runs a watcher next to `go()`:
 
-1. Before `go()`, read `performance.timeOrigin` of the current document (`ask`, bounded by `graceMs`). If
+1. Before `go()`, read `performance.timeOrigin` of the current document (`ask`, bounded by 1 s: a new view's
+   first evaluate took past the 100 ms `graceMs` in CI run 40415723808, and the cap never started). If
    that read gives no number, there is no baseline to compare with, and the watcher does not run: the
    navigation waits for `load` as today.
 2. Read `[performance.timeOrigin, document.readyState]`, one read at a time: the next read starts 100 ms
@@ -76,6 +77,13 @@ fallback, `navigate("about:blank")` (#67).
 5 s matches the fixed cap `markdown` gives a Markdown alternate (ET-61, #204). It is not tied to the budget: a
 budget shorter than DOMContentLoaded plus 5 s times out as today.
 
+### Recovery while the watcher reads
+
+WebKit refuses a direct `evaluate` while another is pending, and `interrupt()` evaluates
+`LEAVE_INITIAL_DOCUMENT` directly. A recovery that lands while a step 2 read is in flight then falls back to
+`navigate("about:blank")`, which is refused too while the stuck navigation is pending (#48 failed this way in
+CI run 40415723808). So `interrupt()` first ends the watcher and waits for its read to settle, up to 1 s.
+
 ### Recovery after a stopped load
 
 `interrupt()` takes `view.url === ""` to mean "nothing has committed yet" and leaves the document with
@@ -113,6 +121,8 @@ them broken), which is the trade for the command answering at all.
     `navigate` promise is still pending;
   - a baseline read that gives no number: no read of step 2 and no stop, `navigate` waits for `go()`;
   - a read that never settles: no second read is queued behind it;
+  - a baseline read that takes 300 ms still starts the watcher;
+  - a recovery during a read evaluates `LEAVE_INITIAL_DOCUMENT` after the read settles, not `navigate("about:blank")`;
   - a stop after which `NAV_COUNT` reads 1, with `view.loading` false: `navigate` does not resolve on the
     -999 and waits for the next landing, as #116.
 - `tests/e2e-hangs.test.ts`, "ET-52": on a page whose `<img>` never answers, `open` and then `goto` both

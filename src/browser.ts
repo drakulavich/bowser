@@ -276,6 +276,9 @@ const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 /** How long navigate() waits for `load` once the new document is parsed (ET-52). */
 const LOAD_CAP_MS = 5000;
 const LOAD_POLL_MS = 100;
+/** A new view's first evaluate can take a few hundred ms (CI run 40415723808). */
+const LOAD_READ_MS = 1000;
+interface LoadWatch { over: boolean; stopped: boolean; read?: Promise<unknown> }
 
 /** What wrapView reads the time from and waits on. */
 export interface Clock {
@@ -461,11 +464,12 @@ function navigationWatch(
   /** Stop a navigation's loads LOAD_CAP_MS after its new document is parsed:
    *  a subresource that never finishes would hold `load` for good (ET-52).
    *  One read at a time, so a page that does not answer queues no more. */
-  const capLoad = async (origin: number, load: { over: boolean; stopped: boolean }): Promise<void> => {
+  const capLoad = async (origin: number, load: LoadWatch): Promise<void> => {
     let doc: number | undefined;
     let since = 0;
     while (!load.over) {
-      const read = await evaluate(LOAD_STATE).catch(() => undefined);
+      load.read = evaluate(LOAD_STATE).catch(() => undefined);
+      const read = await load.read;
       if (load.over) return;
       if (Array.isArray(read) && read[0] !== origin && read[1] !== "loading") {
         if (read[0] !== doc) {
@@ -480,6 +484,7 @@ function navigationWatch(
       await sleep(LOAD_POLL_MS);
     }
   };
+  let loadWatch: LoadWatch | undefined;
   let phase: ActPhase = "idle";
   let actionCancelled = false;
   let pendingAt: number | undefined;
@@ -533,8 +538,9 @@ function navigationWatch(
     async navigate(url: string, go: () => Promise<void>): Promise<void> {
       const before = landed;
       const arrivedBefore = arrived;
-      const origin = await ask(TIME_ORIGIN, timing.graceMs);
-      const load = { over: false, stopped: false };
+      const origin = await ask(TIME_ORIGIN, LOAD_READ_MS);
+      const load: LoadWatch = { over: false, stopped: false };
+      loadWatch = load;
       if (typeof origin === "number") void capLoad(origin, load);
       try {
         return await go();
@@ -552,6 +558,13 @@ function navigationWatch(
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
     async interrupt(): Promise<boolean> {
+      // WebKit refuses the evaluates below while the load cap's read is pending.
+      if (loadWatch && !loadWatch.over) {
+        loadWatch.over = true;
+        let timer: unknown;
+        await Promise.race([loadWatch.read, new Promise<void>((r) => { timer = clock.setTimeout(r, LOAD_READ_MS); })]);
+        clock.clearTimeout(timer);
+      }
       const before = landed;
       const arrivedBefore = arrived;
       if (view.url === "") {

@@ -1382,6 +1382,45 @@ describe("navigate caps its wait for load (ET-52)", () => {
     expect(evaluated(v, LOAD_STATE)).toBeLessThanOrEqual(2);
   });
 
+  // CI run 40415723808: a new view's first evaluate took past graceMs.
+  test("a baseline read that takes 300 ms still starts the watcher", async () => {
+    const clock = manualClock();
+    const { v } = hangingLoad(clock, {
+      read: (expr) => expr === TIME_ORIGIN ? new Promise((r) => { clock.setTimeout(() => r(1), 300); }) : undefined,
+    });
+    const b = onClock(v, fast, clock);
+    await clock.fulfilledAt(b.navigate("https://x/hang"));
+    expect(evaluated(v, STOP_LOADING)).toBe(1);
+  });
+
+  // #48 in CI run 40415723808: WebKit refuses a direct evaluate while another
+  // is pending, so a recovery during a read lost LEAVE_INITIAL_DOCUMENT.
+  test("a recovery waits for the watcher's read before it leaves the initial document", async () => {
+    const clock = manualClock();
+    let pending = 0;
+    let readDone!: () => void;
+    const { v } = hangingLoad(clock, {
+      state: "loading",
+      read: (expr) => {
+        if (expr === LEAVE_INITIAL_DOCUMENT) {
+          if (pending > 0) return Promise.reject(new Error("an evaluate is already pending"));
+          return Promise.resolve(undefined);
+        }
+        if (expr !== LOAD_STATE || pending > 0) return undefined;
+        pending++;
+        return new Promise((r) => { readDone = () => { pending--; r([1, "complete"]); }; clock.setTimeout(readDone, 400); });
+      },
+    });
+    v.url = "";
+    const b = onClock(v, fast, clock);
+    void b.navigate("https://x/never");
+    await new Promise((r) => setImmediate(r));
+    await clock.settledAt(b.interrupt());
+    expect(v.calls.filter(([n, a]) => (n === "evaluate" && a[0] === LEAVE_INITIAL_DOCUMENT) || (n === "navigate" && a[0] === "about:blank"))).toEqual([
+      ["evaluate", [LEAVE_INITIAL_DOCUMENT]],
+    ]);
+  });
+
   test("after a stop, a navigation the page started keeps navigate waiting for its landing (#116)", async () => {
     const clock = manualClock();
     let v!: Fake;
