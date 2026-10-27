@@ -271,6 +271,8 @@ export interface NavTiming {
   graceMs: number;
   /** Cap on waiting for a navigation that did begin. */
   settleMs: number;
+  /** Between the load cap's reads (default LOAD_POLL_MS). */
+  loadPollMs?: number;
 }
 const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 /** How long navigate() waits for `load` once the new document is parsed (ET-52). */
@@ -481,7 +483,7 @@ function navigationWatch(
           return;
         }
       }
-      await sleep(LOAD_POLL_MS);
+      await sleep(timing.loadPollMs ?? LOAD_POLL_MS);
     }
   };
   let loadWatch: LoadWatch | undefined;

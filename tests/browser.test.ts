@@ -1285,6 +1285,10 @@ describe("every ACTS op runs inside the navigation watch", () => {
 // it. Once the new document is parsed, navigate waits LOAD_CAP_MS more, then
 // stops the loads; the stop's own -999 is a landing on the page.
 describe("navigate caps its wait for load (ET-52)", () => {
+  // Few reads: each manual-clock step can take 100 ms in a busy suite (CI run 40481354188).
+  const capped = { ...fast, loadPollMs: 500 };
+  // In the full suite a manual-clock step waited up to 900 ms for the event loop (seed 1331868760).
+  const CAP_TEST_MS = 20_000;
   /** A page that commits a new document (timeOrigin 2) 50 ms after navigate()
    *  and never fires load. stop() rejects the pending navigate with -999, as
    *  WebKit does; `afterStop` runs then, to start a page navigation of its own. */
@@ -1330,38 +1334,38 @@ describe("navigate caps its wait for load (ET-52)", () => {
   test("stops the loads 5 s after the new document is parsed, and resolves on the stop's -999", async () => {
     const clock = manualClock();
     const { v } = hangingLoad(clock);
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
     expect(evaluated(v, STOP_LOADING)).toBe(1);
-    // Parsed at the first read after 50 ms (100), stopped one poll past 5100.
-    expect(at).toBeGreaterThanOrEqual(5100);
-    expect(at).toBeLessThan(5300);
-  });
+    // Parsed at the first read after 50 ms (500), stopped one read past 5500.
+    expect(at).toBeGreaterThanOrEqual(5500);
+    expect(at).toBeLessThan(6100);
+  }, CAP_TEST_MS);
 
   test("a page that loads within the cap is not stopped", async () => {
     const clock = manualClock();
     const { v } = hangingLoad(clock, { loadAt: 3000 });
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     expect(await clock.fulfilledAt(b.navigate("https://x/slow"))).toBe(3000);
     expect(evaluated(v, STOP_LOADING)).toBe(0);
-  });
+  }, CAP_TEST_MS);
 
   test("a document that stays loading is not stopped, and navigate keeps waiting", async () => {
     const clock = manualClock();
     const { v } = hangingLoad(clock, { state: "loading" });
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     await expect(clock.settledAt(b.navigate("https://x/never-parsed"), 8000)).rejects.toThrow("still pending at clock");
-    expect(clock.now()).toBeGreaterThan(5100);
+    expect(clock.now()).toBeGreaterThan(6000);
     expect(evaluated(v, STOP_LOADING)).toBe(0);
-  });
+  }, CAP_TEST_MS);
 
   test("with no baseline timeOrigin there is no watcher: no reads, no stop", async () => {
     const clock = manualClock();
     const { v } = hangingLoad(clock, { origin: undefined });
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     await expect(clock.settledAt(b.navigate("https://x/hang"), 8000)).rejects.toThrow("still pending at clock");
     expect([evaluated(v, LOAD_STATE), evaluated(v, STOP_LOADING)]).toEqual([0, 0]);
-  });
+  }, CAP_TEST_MS);
 
   test("a read that does not answer queues no second read behind it", async () => {
     const clock = manualClock();
@@ -1374,13 +1378,13 @@ describe("navigate caps its wait for load (ET-52)", () => {
         return new Promise((r) => { release = r; });
       },
     });
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     await expect(clock.settledAt(b.navigate("https://x/hang"), 3000)).rejects.toThrow("still pending at clock");
     // Freed later: one read follows it, not the dozens a 100 ms timer would have queued.
     release([1, "complete"]);
     await new Promise((r) => setImmediate(r));
     expect(evaluated(v, LOAD_STATE)).toBeLessThanOrEqual(2);
-  });
+  }, CAP_TEST_MS);
 
   // CI run 40415723808: a new view's first evaluate took past graceMs.
   test("a baseline read that takes 300 ms still starts the watcher", async () => {
@@ -1388,10 +1392,10 @@ describe("navigate caps its wait for load (ET-52)", () => {
     const { v } = hangingLoad(clock, {
       read: (expr) => expr === TIME_ORIGIN ? new Promise((r) => { clock.setTimeout(() => r(1), 300); }) : undefined,
     });
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     await clock.fulfilledAt(b.navigate("https://x/hang"));
     expect(evaluated(v, STOP_LOADING)).toBe(1);
-  });
+  }, CAP_TEST_MS);
 
   // #48 in CI run 40415723808: WebKit refuses a direct evaluate while another
   // is pending, so a recovery during a read lost LEAVE_INITIAL_DOCUMENT.
@@ -1412,14 +1416,14 @@ describe("navigate caps its wait for load (ET-52)", () => {
       },
     });
     v.url = "";
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     void b.navigate("https://x/never");
     await new Promise((r) => setImmediate(r));
     await clock.settledAt(b.interrupt());
     expect(v.calls.filter(([n, a]) => (n === "evaluate" && a[0] === LEAVE_INITIAL_DOCUMENT) || (n === "navigate" && a[0] === "about:blank"))).toEqual([
       ["evaluate", [LEAVE_INITIAL_DOCUMENT]],
     ]);
-  });
+  }, CAP_TEST_MS);
 
   // Greptile on #214: go() rejected with the replaced navigation's -999
   // (#116) ended the watcher, and the new page's hanging image held goto.
@@ -1433,11 +1437,11 @@ describe("navigate caps its wait for load (ET-52)", () => {
       v.onNavigationFailed?.(err);
       return Promise.reject(err);
     };
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
     expect(evaluated(v, STOP_LOADING)).toBe(1);
-    expect(at).toBeLessThan(5300);
-  });
+    expect(at).toBeLessThan(6100);
+  }, CAP_TEST_MS);
 
   // Greptile on #214: the 1 s baseline read can outlast a short budget.
   test("a navigation whose request timed out during the baseline read is never sent", async () => {
@@ -1445,11 +1449,11 @@ describe("navigate caps its wait for load (ET-52)", () => {
     const { v } = hangingLoad(clock, {
       read: (expr) => expr === TIME_ORIGIN ? new Promise((r) => { clock.setTimeout(() => r(1), 300); }) : undefined,
     });
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     clock.setTimeout(() => b.cancelAction?.(), 200);
     await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
     expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
-  });
+  }, CAP_TEST_MS);
 
   test("after a stop, a navigation the page started keeps navigate waiting for its landing (#116)", async () => {
     const clock = manualClock();
@@ -1460,10 +1464,10 @@ describe("navigate caps its wait for load (ET-52)", () => {
         clock.setTimeout(() => v.land("https://x/next"), 1000);
       },
     }));
-    const b = onClock(v, fast, clock);
+    const b = onClock(v, capped, clock);
     const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
     expect(evaluated(v, STOP_LOADING)).toBe(1);
-    // Not at the stop (about 5100), at the page's own landing a second later.
-    expect(at).toBeGreaterThanOrEqual(6100);
-  });
+    // Not at the stop (5500), at the page's own landing a second later.
+    expect(at).toBeGreaterThanOrEqual(6500);
+  }, CAP_TEST_MS);
 });
