@@ -70,6 +70,8 @@ interface DaemonOps {
   back:             { args: [];                                          result: void };
   forward:          { args: [];                                          result: void };
   reload:           { args: [];                                          result: void };
+  /** Poll until the URL or the page text contains `value`, up to the request's deadline (#114). */
+  waitFor:          { args: [kind: "url" | "text", value: string];       result: { met: boolean; url: string; title: string } };
 }
 
 export type Op = keyof DaemonOps;

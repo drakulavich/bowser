@@ -120,6 +120,27 @@ export async function cmdGoto(ctx: CommandContext, typed: string): Promise<strin
   });
 }
 
+const WAIT_FOR_USAGE = "usage: bowser wait-for --url <part> or bowser wait-for --text <text>";
+
+/** Wait until the page's URL or its visible text contains a value (#114). */
+export async function cmdWaitFor(ctx: CommandContext, opts: { url?: string; text?: string }): Promise<string> {
+  if ((opts.url === undefined) === (opts.text === undefined)) throw new UserError(WAIT_FOR_USAGE);
+  const kind = opts.url !== undefined ? "url" : "text";
+  const value = (opts.url ?? opts.text)!;
+  if (!value) throw new UserError(WAIT_FOR_USAGE);
+  const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
+  const started = Date.now();
+  return withPageClient(ctx, async (c) => {
+    const { met, url, title } = await c.request("waitFor", [kind, value]);
+    if (!met) {
+      const what = kind === "url" ? `URL containing '${value}'` : `text ${JSON.stringify(value)}`;
+      throw new Error(`wait-for: no ${what} after ${Date.now() - started}ms; the page is at ${url}`);
+    }
+    await syncState(prev, { url, title });
+    return replyPage(ctx, c, { ok: true, url }, url);
+  });
+}
+
 export async function cmdHistory(
   ctx: CommandContext,
   which: "back" | "forward" | "reload",
@@ -425,6 +446,13 @@ export const COMMANDS: Command[] = [
     positional: [{ name: "url", required: true }],
     flags: [],
     run: (ctx, a) => cmdGoto(ctx, a.positional[0] ?? ""),
+  },
+  {
+    name: "wait-for",
+    summary: "Wait until the page URL or its visible text contains a value",
+    positional: [],
+    flags: [{ name: "url", kind: "string" }, { name: "text", kind: "string" }],
+    run: (ctx, a) => cmdWaitFor(ctx, { url: str(a.flags, "url"), text: str(a.flags, "text") }),
   },
   {
     name: "close",

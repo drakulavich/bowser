@@ -6,6 +6,7 @@ The full notes behind the command table in `SKILL.md`.
 | --- | --- |
 | `bowser open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies/localStorage/IndexedDB in `~/.bowser/profiles/<session>/` across `close`; `--profile=dir` uses `dir` (implies `--persistent`). `close` keeps the profile; `rm -rf` it to delete. One running session per profile. |
 | `bowser goto <url>` | Navigate within current session. `open` and `goto` add a missing scheme: `http://` for `localhost`, `127.0.0.1`, `[::1]` (`localhost:3000/x`), `https://` otherwise (`example.com`); a URL with a scheme is used as typed |
+| `bowser wait-for --url <part>` / `--text <text>` | Wait until `location.href` or the page's visible text contains the value; prints the URL and saves it. Bounded by the budget: `wait-for: no text "<text>" after <ms>ms; the page is at <url>` (exit 2) |
 | `bowser snapshot [--filename=f] [--depth=N]` | Full aria tree with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited); `--filename` writes the `### Page` text to `f` and answers with its absolute path |
 | `bowser markdown [ref] [--filename=f]` | The page as Markdown, for reading: the page's own Markdown when it has some (a claude.ai artifact, `rel="alternate" type="text/markdown"`), else `<main>` or the body converted. A ref converts only that element. `--json` adds `"source":"page"\|"converted"` |
 | `bowser click <ref>` | Click an element by ref. A `[disabled]` one fails at once with exit 1 and is not clicked |

@@ -17,7 +17,7 @@ import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "../src/commands/interaction.ts";
 import {
-  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen,
+  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, cmdWaitFor,
   type ProcessOps,
 } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
@@ -2490,5 +2490,36 @@ describe("an empty --filename (#193)", () => {
         expect(c.calls).toEqual([]);
       }
     }
+  });
+});
+
+describe("wait-for (#114)", () => {
+  const USAGE = "usage: bowser wait-for --url <part> or bowser wait-for --text <text>";
+
+  test("both flags, neither, or an empty value is a usage error, with no request", async () => {
+    const c = fakeClient({});
+    for (const opts of [{}, { url: "/a", text: "b" }, { url: "" }, { text: "" }]) {
+      const err = await cmdWaitFor({ ...ctx(), connect: async () => c }, opts).then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(UserError);
+      expect((err as Error).message).toBe(USAGE);
+    }
+    expect(c.calls).toEqual([]);
+  });
+
+  test("a check that never held says what was awaited, how long it waited and where the page is", async () => {
+    const c = fakeClient({ waitFor: async () => { await Bun.sleep(200); return { met: false, url: "https://x/home", title: "Home" }; } });
+    const err = await cmdWaitFor({ ...ctx(), connect: async () => c }, { text: `it's "done"` }).then(() => undefined, (e: unknown) => e);
+    expect(err).not.toBeInstanceOf(UserError);
+    const m = (err as Error).message.match(/^wait-for: no text "it's \\"done\\"" after (\d+)ms; the page is at https:\/\/x\/home$/);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(200);
+    expect(Number(m?.[1])).toBeLessThan(10_000);
+  });
+
+  test("a check that held prints the URL and saves the page to the session state", async () => {
+    const c = fakeClient({ waitFor: () => ({ met: true, url: "https://x/moved", title: "Moved" }) });
+    const session = ctx().session;
+    expect(await cmdWaitFor({ ...ctx(), session, connect: async () => c }, { url: "/moved" })).toBe("https://x/moved");
+    expect(c.calls).toContainEqual(["waitFor", ["url", "/moved"]]);
+    expect(await loadState(session)).toMatchObject({ url: "https://x/moved", title: "Moved" });
   });
 });
