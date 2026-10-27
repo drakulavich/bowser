@@ -539,21 +539,29 @@ function navigationWatch(
       const before = landed;
       const arrivedBefore = arrived;
       const origin = await ask(TIME_ORIGIN, LOAD_READ_MS);
+      // The baseline read can outlast the budget: the command has been told it failed.
+      if (actionCancelled) throw new Error("request timed out before the navigation was sent");
       const load: LoadWatch = { over: false, stopped: false };
       loadWatch = load;
       if (typeof origin === "number") void capLoad(origin, load);
+      // The stop's own -999, with no navigation the page started after it.
+      const ownStop = async () => load.stopped && (await ask(NAV_COUNT, timing.graceMs)) === 0;
       try {
-        return await go();
-      } catch (err) {
-        if (!cancelled(err)) throw err;
-        if (load.stopped && (await ask(NAV_COUNT, timing.graceMs)) === 0) return;
+        try {
+          return await go();
+        } catch (err) {
+          if (!cancelled(err)) throw err;
+          if (await ownStop()) return;
+        }
+        // The watcher stays on: this page may be the one whose load never ends.
+        while (landed - before < 2) await sleep(10);
+        if (arrived !== arrivedBefore) return;
+        if (failure && !cancelled(failure)) throw failure;
+        if (await ownStop()) return;
+        throw new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
       } finally {
         load.over = true;
       }
-      while (landed - before < 2) await sleep(10);
-      if (arrived !== arrivedBefore) return;
-      if (failure && !cancelled(failure)) throw failure;
-      throw new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
     },
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */

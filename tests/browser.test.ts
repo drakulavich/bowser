@@ -1421,6 +1421,36 @@ describe("navigate caps its wait for load (ET-52)", () => {
     ]);
   });
 
+  // Greptile on #214: go() rejected with the replaced navigation's -999
+  // (#116) ended the watcher, and the new page's hanging image held goto.
+  test("a goto that replaces a navigation in flight still has its load capped", async () => {
+    const clock = manualClock();
+    const { v } = hangingLoad(clock);
+    const load = v.navigate;
+    v.navigate = (url) => {
+      load(url).catch(() => {});
+      const err = new Error(CANCELLED);
+      v.onNavigationFailed?.(err);
+      return Promise.reject(err);
+    };
+    const b = onClock(v, fast, clock);
+    const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+    expect(evaluated(v, STOP_LOADING)).toBe(1);
+    expect(at).toBeLessThan(5300);
+  });
+
+  // Greptile on #214: the 1 s baseline read can outlast a short budget.
+  test("a navigation whose request timed out during the baseline read is never sent", async () => {
+    const clock = manualClock();
+    const { v } = hangingLoad(clock, {
+      read: (expr) => expr === TIME_ORIGIN ? new Promise((r) => { clock.setTimeout(() => r(1), 300); }) : undefined,
+    });
+    const b = onClock(v, fast, clock);
+    clock.setTimeout(() => b.cancelAction?.(), 200);
+    await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
+    expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
+  });
+
   test("after a stop, a navigation the page started keeps navigate waiting for its landing (#116)", async () => {
     const clock = manualClock();
     let v!: Fake;
