@@ -19,7 +19,9 @@ export async function daemonPids(session: string): Promise<number[]> {
  *  left several (the bug it tests). */
 export async function killDaemons(session: string): Promise<void> {
   for (const pid of await daemonPids(session)) {
-    try { process.kill(pid, "SIGKILL"); } catch {}
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
   }
 }
 

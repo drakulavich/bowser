@@ -25,7 +25,8 @@ const html = (body: string) => new Response(body, { headers: { "content-type": "
 
 const TALL = `<!doctype html><title>tall</title><div style="height: 3000px">Top</div><article><p>Far below</p></article>`;
 const HIDDEN = `<!doctype html><title>hidden</title><p><code>shown<span hidden>secret</span></code></p><pre>a<span style="display: none">secret</span>b</pre><table><tr hidden><td>secret</td></tr></table><p>after</p>`;
-const EDGES = "<!doctype html><title>edges</title><main><h2>Heading ref</h2><p><strong>bold </strong>text and <em> it</em>alic</p><table><tr><th>A</th><th>B</th></tr><tr><td>a<br>b</td><td>c</td></tr></table><p><code>a`b</code></p><pre>before\n```\nafter</pre></main>";
+const EDGES =
+  "<!doctype html><title>edges</title><main><h2>Heading ref</h2><p><strong>bold </strong>text and <em> it</em>alic</p><table><tr><th>A</th><th>B</th></tr><tr><td>a<br>b</td><td>c</td></tr></table><p><code>a`b</code></p><pre>before\n```\nafter</pre></main>";
 const FIDELITY = `<!doctype html><title>Fidelity</title><main>
 <p><del>$99</del> <s>old</s> <strike>gone</strike> $49</p>
 <table><caption>Prices</caption><tr><th>A</th></tr><tr><td>1</td></tr></table>
@@ -104,17 +105,27 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
         if (path === "/fidelity.html") return html(FIDELITY);
         if (path === "/review.html") return html(REVIEW);
-        const fidelity = { "/spans.html": SPANS, "/data.html": DATA, "/glued.html": GLUED, "/langs.html": LANGS, "/lists.html": LISTS }[path];
+        const fidelity = {
+          "/spans.html": SPANS,
+          "/data.html": DATA,
+          "/glued.html": GLUED,
+          "/langs.html": LANGS,
+          "/lists.html": LISTS,
+        }[path];
         if (fidelity) return html(fidelity);
         if (path === "/blank.html") return html("<!doctype html><title>Just a moment...</title><main></main>");
         if (path === "/alt-slow.html") return html(ALT("/slow.md"));
-        if (path === "/slow.md") { await Bun.sleep(20_000); return new Response("# Late"); }
+        if (path === "/slow.md") {
+          await Bun.sleep(20_000);
+          return new Response("# Late");
+        }
         if (path === "/alt-signin.html") return html(ALT("/private.md"));
         if (path === "/private.md") return Response.redirect("/signin.html", 302);
         if (path === "/signin.html") return html("<!doctype html><title>Sign in</title><form>Sign in</form>");
         if (path === "/alt-shell.html") return html(ALT("/shell.md"));
         if (path === "/shell.md") return html("<!doctype html><div id=root>Loading</div>");
-        if (path === "/alert.html") return html("<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>");
+        if (path === "/alert.html")
+          return html("<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>");
         if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
         return new Response("not found", { status: 404 });
       },
@@ -123,7 +134,9 @@ runOrSkip("e2e: markdown", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -137,21 +150,23 @@ runOrSkip("e2e: markdown", () => {
 
   test("converts <main>: blocks, inline marks, tables, and nothing hidden, interactive or outside <main>", async () => {
     await cmdOpen(ctx, `${base}/fixture.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "# Title",
-      `Plain **bold** and *it* with \`x = 1\`, a [link](${base}/docs) and a jump.`,
-      "- One\n- Two\n  - Inner",
-      "1. First\n2. Second",
-      "| Name | Qty |\n| --- | --- |\n| Apple | 2 |",
-      "Layout cell",
-      "```\nline 1\n  line 2\n```",
-      "> Quoted",
-      "---",
-      `![Logo](${base}/a.png)`,
-      "Email",
-      "## Article",
-      "Body text.",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [
+        "# Title",
+        `Plain **bold** and *it* with \`x = 1\`, a [link](${base}/docs) and a jump.`,
+        "- One\n- Two\n  - Inner",
+        "1. First\n2. Second",
+        "| Name | Qty |\n| --- | --- |\n| Apple | 2 |",
+        "Layout cell",
+        "```\nline 1\n  line 2\n```",
+        "> Quoted",
+        "---",
+        `![Logo](${base}/a.png)`,
+        "Email",
+        "## Article",
+        "Body text.",
+      ].join("\n\n"),
+    );
   }, 60_000);
 
   test("hidden text inside code, pre and a table stays out, and an all-hidden table converts to nothing", async () => {
@@ -161,13 +176,9 @@ runOrSkip("e2e: markdown", () => {
 
   test("emphasis keeps the spaces at its edges, a <br> in a cell keeps the row, and code fences outgrow the backticks inside", async () => {
     await cmdGoto(ctx, `${base}/edges.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "## Heading ref",
-      "**bold** text and *it*alic",
-      "| A | B |\n| --- | --- |\n| a b | c |",
-      "``a`b``",
-      "````\nbefore\n```\nafter\n````",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      ["## Heading ref", "**bold** text and *it*alic", "| A | B |\n| --- | --- |\n| a b | c |", "``a`b``", "````\nbefore\n```\nafter\n````"].join("\n\n"),
+    );
   }, 60_000);
 
   test("a ref to a heading keeps the heading's own Markdown", async () => {
@@ -178,82 +189,76 @@ runOrSkip("e2e: markdown", () => {
 
   test("strikethrough, captions, visibility, details, escaping, sub/sup, code language, images, empty tables, pre-wrapped text, key-value rows", async () => {
     await cmdGoto(ctx, `${base}/fidelity.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "~~$99~~ ~~old~~ ~~gone~~ $49",
-      "Prices",
-      "| A |\n| --- |\n| 1 |",
-      "shown child",
-      "More",
-      "Open",
-      "open body",
-      "\\# not a heading",
-      "1\\. not a list",
-      "\\- dash and \\<b>tag",
-      "H<sub>2</sub>O x<sup>2</sup>",
-      "```python3\nprint(1)\n```",
-      "```js\nlet a\n```",
-      `![A \\[b\\]](${base}/a.png) ![D]()`,
-      "line one\nline two",
-      "Developer: Apple",
-      "Engine: WebKit",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [
+        "~~$99~~ ~~old~~ ~~gone~~ $49",
+        "Prices",
+        "| A |\n| --- |\n| 1 |",
+        "shown child",
+        "More",
+        "Open",
+        "open body",
+        "\\# not a heading",
+        "1\\. not a list",
+        "\\- dash and \\<b>tag",
+        "H<sub>2</sub>O x<sup>2</sup>",
+        "```python3\nprint(1)\n```",
+        "```js\nlet a\n```",
+        `![A \\[b\\]](${base}/a.png) ![D]()`,
+        "line one\nline two",
+        "Developer: Apple",
+        "Engine: WebKit",
+      ].join("\n\n"),
+    );
   }, 60_000);
 
   test("a closed details in a key cell, hidden images and rules, a list as a row's value, and parentheses in URLs", async () => {
     await cmdGoto(ctx, `${base}/review.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "Key more: v",
-      "List:",
-      "- A\n- B",
-      "Lines: one two",
-      `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`,
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      ["Key more: v", "List:", "- A\n- B", "Lines: one two", `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`].join("\n\n"),
+    );
   }, 60_000);
 
   test("ET-45: a rowspan or colspan cell covers every row and column it spans", async () => {
     await cmdGoto(ctx, `${base}/spans.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "| Rank | Building | Country | Height | Height |",
-      "| --- | --- | --- | --- | --- |",
-      "| 1 | Shanghai Tower | China | 632 m | 2,073 ft |",
-      "| 2 | Ping An | China | 599 m | 1,965 ft |",
-      "",
-      // Overlapping spans, an HTML table model error: the earlier cell keeps its slot.
-      "| a | b | c |  |",
-      "| --- | --- | --- | --- |",
-      "| a | d | c | e |",
-      "",
-      "| f | g |",
-      "| --- | --- |",
-      "| f | h |",
-      "",
-      // A rowspan stops at the end of its row group, and a hidden row counts toward it.
-      "| K | V |",
-      "| --- | --- |",
-      "| 1 | 2 |",
-      "",
-      "| p | q |",
-      "| --- | --- |",
-      "| s | t |",
-    ].join("\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [
+        "| Rank | Building | Country | Height | Height |",
+        "| --- | --- | --- | --- | --- |",
+        "| 1 | Shanghai Tower | China | 632 m | 2,073 ft |",
+        "| 2 | Ping An | China | 599 m | 1,965 ft |",
+        "",
+        // Overlapping spans, an HTML table model error: the earlier cell keeps its slot.
+        "| a | b | c |  |",
+        "| --- | --- | --- | --- |",
+        "| a | d | c | e |",
+        "",
+        "| f | g |",
+        "| --- | --- |",
+        "| f | h |",
+        "",
+        // A rowspan stops at the end of its row group, and a hidden row counts toward it.
+        "| K | V |",
+        "| --- | --- |",
+        "| 1 | 2 |",
+        "",
+        "| p | q |",
+        "| --- | --- |",
+        "| s | t |",
+      ].join("\n"),
+    );
   }, 60_000);
 
   test("ET-46: a header row of th cells keeps a table with a block in a cell a table, and a block that is not printed does not count", async () => {
     await cmdGoto(ctx, `${base}/data.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      `| Name | Image |\n| --- | --- |\n| Burj | ![pic](${base}/b.png) |`,
-      "| a | b |\n| --- | --- |",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe([`| Name | Image |\n| --- | --- |\n| Burj | ![pic](${base}/b.png) |`, "| a | b |\n| --- | --- |"].join("\n\n"));
   }, 60_000);
 
   test("ET-47, ET-48: block content inside an inline wrapper is separated, and a block link keeps its URL", async () => {
     await cmdGoto(ctx, `${base}/glued.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      `[Bloodlines What is it?](${base}/g)`,
-      "1. If x, then\n   1. Let y.\n2. Return y.",
-      `[Issues (3.6k)](${base}/issues)`,
-      "**Warning**",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [`[Bloodlines What is it?](${base}/g)`, "1. If x, then\n   1. Let y.\n2. Return y.", `[Issues (3.6k)](${base}/issues)`, "**Warning**"].join("\n\n"),
+    );
   }, 60_000);
 
   test("ET-49: GitHub's highlight-source- and MediaWiki's mw-highlight-lang- classes name the fence's language", async () => {
@@ -275,19 +280,28 @@ runOrSkip("e2e: markdown", () => {
       expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
       expect(performance.now() - t0).toBeLessThan(10_000);
     } finally {
-      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = orig;
     }
   }, 60_000);
 
   test("--json carries the page's URL and title", async () => {
     await cmdGoto(ctx, `${base}/fixture.html`);
-    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ url: `${base}/fixture.html`, title: "Markdown fixture" });
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({
+      url: `${base}/fixture.html`,
+      title: "Markdown fixture",
+    });
   }, 60_000);
 
   test("an empty result says so, with the page's title and URL", async () => {
     await cmdGoto(ctx, `${base}/blank.html`);
     expect(await cmdMarkdown(ctx)).toBe(`markdown: the page has no text ("Just a moment...", ${base}/blank.html)`);
-    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "", source: "converted", url: `${base}/blank.html`, title: "Just a moment..." });
+    expect(JSON.parse(await cmdMarkdown(json))).toEqual({
+      markdown: "",
+      source: "converted",
+      url: `${base}/blank.html`,
+      title: "Just a moment...",
+    });
   }, 60_000);
 
   test("without <main>, the whole body is converted", async () => {
@@ -309,7 +323,11 @@ runOrSkip("e2e: markdown", () => {
     const file = join(tmp, "page.md");
     expect(await cmdMarkdown(ctx, undefined, { filename: file })).toBe(`wrote ${file}`);
     expect(await readFile(file, "utf8")).toBe(`${await cmdMarkdown(ctx)}\n`);
-    expect(JSON.parse(await cmdMarkdown(json, undefined, { filename: file }))).toEqual({ ok: true, filename: file, source: "converted" });
+    expect(JSON.parse(await cmdMarkdown(json, undefined, { filename: file }))).toEqual({
+      ok: true,
+      filename: file,
+      source: "converted",
+    });
   }, 60_000);
 
   test("a rel=alternate Markdown link is used as is", async () => {
@@ -331,7 +349,8 @@ runOrSkip("e2e: markdown", () => {
       expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
       expect(performance.now() - t0).toBeLessThan(4000);
     } finally {
-      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = orig;
     }
   }, 60_000);
 
@@ -344,7 +363,8 @@ runOrSkip("e2e: markdown", () => {
       expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
       expect(performance.now() - t0).toBeLessThan(8000);
     } finally {
-      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = orig;
     }
   }, 60_000);
 
@@ -359,7 +379,9 @@ runOrSkip("e2e: markdown", () => {
     await cmdGoto(ctx, `${base}/alert.html`);
     await Bun.sleep(600);
     expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({
-      markdown: "Alert page", source: "converted", dialogs: [{ type: "alert", message: "hello", state: "dismissed" }],
+      markdown: "Alert page",
+      source: "converted",
+      dialogs: [{ type: "alert", message: "hello", state: "dismissed" }],
     });
     await cmdGoto(ctx, `${base}/alert.html`);
     await Bun.sleep(600);
@@ -400,7 +422,9 @@ runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });

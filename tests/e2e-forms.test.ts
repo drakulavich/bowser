@@ -40,7 +40,9 @@ runOrSkip("e2e: forms on WebKit", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     else delete process.env.HOME;
@@ -60,10 +62,13 @@ runOrSkip("e2e: forms on WebKit", () => {
   }
   const value = (id: string) => cmdEval(ctx, `document.getElementById(${JSON.stringify(id)}).value`);
   const log = () => cmdEval(ctx, "JSON.stringify(window.log)");
-  const failure = (p: Promise<string>) => p.then(
-    (out) => { throw new Error(`expected a failure, got: ${out}`); },
-    (err: Error) => err,
-  );
+  const failure = (p: Promise<string>) =>
+    p.then(
+      (out) => {
+        throw new Error(`expected a failure, got: ${out}`);
+      },
+      (err: Error) => err,
+    );
 
   describe("F12: select", () => {
     test("by value", async () => {

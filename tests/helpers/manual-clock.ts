@@ -11,11 +11,20 @@ export function manualClock() {
       timers.set(++seq, { at: now + Math.max(0, ms), fn });
       return seq;
     },
-    clearTimeout(timer: unknown) { timers.delete(timer as number); },
+    clearTimeout(timer: unknown) {
+      timers.delete(timer as number);
+    },
     /** Fire timers in order until `p` settles; answers the clock time it settled at. */
     async settledAt(p: Promise<unknown>, capMs = 60_000): Promise<number> {
       let at: number | undefined;
-      p.then(() => { at = now; }, () => { at = now; });
+      p.then(
+        () => {
+          at = now;
+        },
+        () => {
+          at = now;
+        },
+      );
       for (;;) {
         await drain();
         if (at !== undefined) return at;

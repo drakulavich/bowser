@@ -45,7 +45,10 @@ runOrSkip("e2e: two WebKit sessions at once (ET-02)", () => {
   });
 
   afterAll(async () => {
-    for (const ctx of [a, b]) try { await cmdClose(ctx); } catch {}
+    for (const ctx of [a, b])
+      try {
+        await cmdClose(ctx);
+      } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -74,7 +77,10 @@ runOrSkip("e2e: two WebKit sessions at once (ET-02)", () => {
     const other = await cmdSnapshot(b);
     expect(other).toContain(`textbox "New todo"`);
     expect(other).not.toContain("Toggle probe");
-    for (const [ctx, owner] of [[a, "A"], [b, "B"]] as const) {
+    for (const [ctx, owner] of [
+      [a, "A"],
+      [b, "B"],
+    ] as const) {
       expect(await cmdEval(ctx, "location.href")).toBe(url);
       expect(await cmdEval(ctx, "localStorage.getItem('owner')")).toBe(owner);
     }

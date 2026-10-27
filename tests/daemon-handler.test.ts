@@ -16,10 +16,16 @@ import { AWAIT_FONTS, READ_VIEWPORT } from "../src/page-scripts.ts";
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
   const calls: Array<[string, unknown[]]> = [];
-  const rec = <T>(name: string, ret: T) => async (...a: unknown[]) => { calls.push([name, a]); return ret; };
+  const rec =
+    <T>(name: string, ret: T) =>
+    async (...a: unknown[]) => {
+      calls.push([name, a]);
+      return ret;
+    };
   const b: Browser & { calls: typeof calls } = {
     calls,
-    url: "https://x/", title: "X",
+    url: "https://x/",
+    title: "X",
     realUrl: rec("realUrl", "https://x/"),
     realTitle: rec("realTitle", "X"),
     navigate: rec("navigate", undefined),
@@ -79,7 +85,11 @@ describe("createHandler", () => {
 
   test("an urgent ping keeps a timed-out op's action cancelled", async () => {
     let resets = 0;
-    const b = fakeBrowser({ resetActionCancellation: () => { resets++; } });
+    const b = fakeBrowser({
+      resetActionCancellation: () => {
+        resets++;
+      },
+    });
     await createHandler(b)(req("ping"));
     expect(resets).toBe(0);
     await createHandler(b)(req("state"));
@@ -88,13 +98,25 @@ describe("createHandler", () => {
 
   test("state returns the resolved url and title", async () => {
     const b = fakeBrowser();
-    expect(await createHandler(b)(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X" } });
+    expect(await createHandler(b)(req("state"))).toEqual({
+      id: 7,
+      ok: true,
+      result: { url: "https://x/", title: "X" },
+    });
   });
 
   test("state reports the budget the daemon started with (#152)", async () => {
     const b = fakeBrowser();
-    expect(await createHandler(b, { budgetMs: 45000 })(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X", budgetMs: 45000 } });
-    expect(await createHandler(b, { budgetMs: 0 })(req("state"))).toEqual({ id: 7, ok: true, result: { url: "https://x/", title: "X", budgetMs: 0 } });
+    expect(await createHandler(b, { budgetMs: 45000 })(req("state"))).toEqual({
+      id: 7,
+      ok: true,
+      result: { url: "https://x/", title: "X", budgetMs: 45000 },
+    });
+    expect(await createHandler(b, { budgetMs: 0 })(req("state"))).toEqual({
+      id: 7,
+      ok: true,
+      result: { url: "https://x/", title: "X", budgetMs: 0 },
+    });
   });
 
   test("state reports the page's live url and title, not a cached copy", async () => {
@@ -129,7 +151,11 @@ describe("createHandler", () => {
     await h(req("navigate", ["https://y/"]));
     await h(req("select", ["#s", "blue"]));
     await h(req("resize", [900, 700]));
-    expect(actions(b)).toEqual([["navigate", ["https://y/"]], ["select", ["#s", "blue"]], ["resize", [900, 700]]]);
+    expect(actions(b)).toEqual([
+      ["navigate", ["https://y/"]],
+      ["select", ["#s", "blue"]],
+      ["resize", [900, 700]],
+    ]);
   });
 
   test("check and uncheck map to setChecked", async () => {
@@ -137,7 +163,10 @@ describe("createHandler", () => {
     const h = createHandler(b);
     await h(req("check", ["#c"]));
     await h(req("uncheck", ["#c"]));
-    expect(actions(b)).toEqual([["setChecked", ["#c", true]], ["setChecked", ["#c", false]]]);
+    expect(actions(b)).toEqual([
+      ["setChecked", ["#c", true]],
+      ["setChecked", ["#c", false]],
+    ]);
   });
 
   test("screenshot with a path writes the file and returns { path }", async () => {
@@ -153,24 +182,31 @@ describe("createHandler", () => {
   });
 
   describe("screenshot --scale", () => {
-    const ONE_PX = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-      "base64",
-    );
-    const ihdr = (b: Uint8Array) => { const v = new DataView(b.buffer, b.byteOffset); return [v.getUint32(16), v.getUint32(20)]; };
+    const ONE_PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+    const ihdr = (b: Uint8Array) => {
+      const v = new DataView(b.buffer, b.byteOffset);
+      return [v.getUint32(16), v.getUint32(20)];
+    };
     /** A browser at pixel ratio 2 whose capture is a real 4×4 PNG; `captures` counts the captures. */
     async function atRatio2(capture?: () => Promise<string>) {
       const png = Buffer.from(await new Bun.Image(ONE_PX).resize(4, 4, { fit: "fill" }).png().bytes());
       const seen = { captures: 0 };
       const b = fakeBrowser({
         evaluate: async () => [2, 2, 2],
-        screenshot: async () => { seen.captures++; return capture ? capture() : png.toString("base64"); },
+        screenshot: async () => {
+          seen.captures++;
+          return capture ? capture() : png.toString("base64");
+        },
       });
       return { b, seen };
     }
     async function inDir(fn: (path: string) => Promise<void>) {
       const dir = await mkdtemp(join(tmpdir(), "bowser-handler-"));
-      try { await fn(join(dir, "shot.png")); } finally { await rm(dir, { recursive: true, force: true }); }
+      try {
+        await fn(join(dir, "shot.png"));
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     }
 
     test("screenshot --scale below the ratio writes the scaled PNG", async () => {
@@ -203,7 +239,9 @@ describe("createHandler", () => {
 
     test("screenshot --scale keeps a failed capture's error", async () => {
       await inDir(async (path) => {
-        const { b } = await atRatio2(async () => { throw new Error("An unknown error occurred"); });
+        const { b } = await atRatio2(async () => {
+          throw new Error("An unknown error occurred");
+        });
         const res = await createHandler(b)(req("screenshot", [path, 1]));
         expect(res).toMatchObject({ ok: false, error: expect.stringContaining("An unknown error occurred") });
         expect(await Bun.file(path).exists()).toBe(false);
@@ -214,13 +252,20 @@ describe("createHandler", () => {
   describe("screenshot fonts", () => {
     async function inDir(fn: (path: string) => Promise<void>) {
       const dir = await mkdtemp(join(tmpdir(), "bowser-handler-"));
-      try { await fn(join(dir, "shot.png")); } finally { await rm(dir, { recursive: true, force: true }); }
+      try {
+        await fn(join(dir, "shot.png"));
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     }
     /** A browser whose evaluate answers AWAIT_FONTS with `answer()` and READ_VIEWPORT with ratio 2,
      *  recording every evaluate and capture in `calls`. */
     function withFonts(answer: () => unknown) {
       const b = fakeBrowser({
-        evaluate: async (expr) => { b.calls.push(["evaluate", [expr]]); return expr === AWAIT_FONTS ? answer() : [2, 2, 2]; },
+        evaluate: async (expr) => {
+          b.calls.push(["evaluate", [expr]]);
+          return expr === AWAIT_FONTS ? answer() : [2, 2, 2];
+        },
       });
       return b;
     }
@@ -241,14 +286,20 @@ describe("createHandler", () => {
     test("fonts still loading are reported and the file is still written", async () => {
       await inDir(async (path) => {
         const b = withFonts(() => true);
-        expect(await createHandler(b)(req("screenshot", [path]))).toEqual({ id: 7, ok: true, result: { path, fontsLoading: true } });
+        expect(await createHandler(b)(req("screenshot", [path]))).toEqual({
+          id: 7,
+          ok: true,
+          result: { path, fontsLoading: true },
+        });
         expect(await Bun.file(path).exists()).toBe(true);
       });
     });
 
     test("a failed font wait fails the screenshot", async () => {
       await inDir(async (path) => {
-        const b = withFonts(() => { throw new Error("page gone"); });
+        const b = withFonts(() => {
+          throw new Error("page gone");
+        });
         const res = await createHandler(b)(req("screenshot", [path]));
         expect(res).toMatchObject({ ok: false, error: expect.stringContaining("page gone") });
         expect(b.calls.some(([name]) => name === "screenshot")).toBe(false);
@@ -274,20 +325,38 @@ describe("createHandler", () => {
   });
 
   test("a throwing browser method becomes { ok: false, error }", async () => {
-    const b = fakeBrowser({ click: async () => { throw new Error("click: element not found"); } });
-    expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({ id: 7, ok: false, error: "click: element not found" });
+    const b = fakeBrowser({
+      click: async () => {
+        throw new Error("click: element not found");
+      },
+    });
+    expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({
+      id: 7,
+      ok: false,
+      error: "click: element not found",
+    });
   });
 
   // Spec F34: after its web process died twice, WebKit fails every page op
   // with this message; the reply names the crash and the way out.
   test("the engine's dead-page message becomes the crash message; other errors pass through", async () => {
-    const dead = async () => { throw new Error("JavaScript execution returned a result of an unsupported type"); };
+    const dead = async () => {
+      throw new Error("JavaScript execution returned a result of an unsupported type");
+    };
     const crashed = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
     const b = fakeBrowser({ evaluate: dead, click: dead });
     expect(await createHandler(b)(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
     expect(await createHandler(b)(req("click", ["#a"]))).toEqual({ id: 7, ok: false, error: crashed });
-    const other = fakeBrowser({ evaluate: async () => { throw new Error("TypeError: x is not a function"); } });
-    expect(await createHandler(other)(req("evaluate", ["x()"]))).toEqual({ id: 7, ok: false, error: "TypeError: x is not a function" });
+    const other = fakeBrowser({
+      evaluate: async () => {
+        throw new Error("TypeError: x is not a function");
+      },
+    });
+    expect(await createHandler(other)(req("evaluate", ["x()"]))).toEqual({
+      id: 7,
+      ok: false,
+      error: "TypeError: x is not a function",
+    });
   });
 
   // The measured behaviour (spec F34, measured manually): a dead page fails
@@ -302,7 +371,10 @@ describe("createHandler", () => {
         // The shim's answer crosses as JSON text (#76).
         return JSON.stringify({ value: 2, dialogs: [] });
       },
-      reload: async () => { b.calls.push(["reload", []]); dead = false; },
+      reload: async () => {
+        b.calls.push(["reload", []]);
+        dead = false;
+      },
     });
     const h = createHandler(b);
     expect(await h(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
@@ -322,10 +394,14 @@ describe("createHandler", () => {
     // macrotask or it runs first and every close hangs (PR 3, Ruling 4).
     const order: string[] = [];
     const realExit = process.exit;
-    process.exit = ((code?: number) => { order.push(`exit:${code}`); }) as never;
+    process.exit = ((code?: number) => {
+      order.push(`exit:${code}`);
+    }) as never;
     const b = fakeBrowser();
     try {
-      await createHandler(b)(req("shutdown")).then((res) => { order.push(`reply:${res.ok}`); });
+      await createHandler(b)(req("shutdown")).then((res) => {
+        order.push(`reply:${res.ok}`);
+      });
       await waitFor(() => order.length >= 2, 3000);
     } finally {
       process.exit = realExit;
@@ -349,7 +425,9 @@ test("an urgent op answers while a queued op is wedged", async () => {
   // `ping` waits for the wedged op, so a stuck daemon can never be shut down.
   const replies: string[] = [];
   let release!: () => void;
-  const wedged = new Promise<void>((r) => { release = r; });
+  const wedged = new Promise<void>((r) => {
+    release = r;
+  });
   const serialize = createSerializer();
   const lane = {
     handle: async (req: DaemonRequest) => {
@@ -358,7 +436,9 @@ test("an urgent op answers while a queued op is wedged", async () => {
     },
     serialize,
     timeoutMs: 0,
-    reply: (res: DaemonResponse) => { replies.push(String(res.ok && res.result)); },
+    reply: (res: DaemonResponse) => {
+      replies.push(String(res.ok && res.result));
+    },
   };
 
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
@@ -382,25 +462,42 @@ test("a queued op that overruns its budget answers with a timeout error", async 
     handle: () => new Promise<DaemonResponse>(() => {}), // never settles
     serialize: createSerializer(),
     timeoutMs: 5,
-    reply: (res: DaemonResponse) => { replies.push(res); },
+    reply: (res: DaemonResponse) => {
+      replies.push(res);
+    },
   };
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
   await waitFor(() => replies.length >= 1, 3000);
-  expect(replies).toEqual([
-    { id: 1, ok: false, error: "'click' timed out after 5ms" },
-  ]);
+  expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 5ms" }]);
 });
 
 test("a timeout while awaiting navigation says the click was delivered", async () => {
   const b = fakeBrowser({ phase: "awaiting-navigation", click: () => new Promise<void>(() => {}) });
   const replies: DaemonResponse[] = [];
-  const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r: DaemonResponse) => { replies.push(r); } };
+  const lane = {
+    handle: createHandler(b),
+    serialize: createSerializer(),
+    timeoutMs: 20,
+    phase: () => b.phase,
+    reply: (r: DaemonResponse) => {
+      replies.push(r);
+    },
+  };
   dispatch({ id: 1, op: "click", args: ["#go"], cmd: "click" }, lane);
   dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
   await waitFor(() => replies.length >= 2, 3000);
   expect(replies).toEqual([
-    { id: 1, ok: false, error: "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying" },
-    { id: 2, ok: false, error: "'fill' timed out after 20ms waiting for the page its click opened; the click was delivered but the fill did not finish, check the page before retrying" },
+    {
+      id: 1,
+      ok: false,
+      error: "'click' timed out after 20ms waiting for the page it opened; the click was delivered, check the page before retrying",
+    },
+    {
+      id: 2,
+      ok: false,
+      error:
+        "'fill' timed out after 20ms waiting for the page its click opened; the click was delivered but the fill did not finish, check the page before retrying",
+    },
   ]);
 });
 
@@ -429,35 +526,64 @@ describe("a timeout says how far the action got, per phase", () => {
     test(phase, async () => {
       const b = fakeBrowser({ phase, click: () => new Promise<void>(() => {}) });
       const replies: DaemonResponse[] = [];
-      const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 20, phase: () => b.phase, reply: (r: DaemonResponse) => { replies.push(r); } };
+      const lane = {
+        handle: createHandler(b),
+        serialize: createSerializer(),
+        timeoutMs: 20,
+        phase: () => b.phase,
+        reply: (r: DaemonResponse) => {
+          replies.push(r);
+        },
+      };
       dispatch({ id: 1, op: "click", args: ["#go"], cmd: "click" }, lane);
       dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
       await waitFor(() => replies.length >= 2, 3000);
-      expect(replies).toEqual([{ id: 1, ok: false, error: own }, { id: 2, ok: false, error: step }]);
+      expect(replies).toEqual([
+        { id: 1, ok: false, error: own },
+        { id: 2, ok: false, error: step },
+      ]);
     });
   }
 });
 
 test("an op that overruns its budget: the timeout reply carries the reports queued before it, and its own late ones wait for the next printing request", async () => {
   let release!: () => void;
-  const hang = new Promise<void>((r) => { release = r; });
+  const hang = new Promise<void>((r) => {
+    release = r;
+  });
   const b = webkitBrowser();
-  b.click = async () => { await hang; b.page("prompt", "name?", "def"); };
+  b.click = async () => {
+    await hang;
+    b.page("prompt", "name?", "def");
+  };
   const handle = createHandler(b);
   // An op that prints nothing reads the page's confirm and leaves it queued.
   await handle(req("evaluate", ["window.confirm('sure?')"]));
   const replies: DaemonResponse[] = [];
   const settled: number[] = [];
   const lane = {
-    handle: async (r: DaemonRequest) => { const res = await handle(r); settled.push(r.id); return res; },
-    serialize: createSerializer(), timeoutMs: 20, reply: (r: DaemonResponse) => { replies.push(r); }, timedOut: handle.timedOut,
+    handle: async (r: DaemonRequest) => {
+      const res = await handle(r);
+      settled.push(r.id);
+      return res;
+    },
+    serialize: createSerializer(),
+    timeoutMs: 20,
+    reply: (r: DaemonResponse) => {
+      replies.push(r);
+    },
+    timedOut: handle.timedOut,
   };
   dispatch({ id: 1, op: "click", args: ["#go"], report: true }, lane);
   await waitFor(() => replies.length >= 1, 3000);
-  expect(replies).toEqual([{
-    id: 1, ok: false, error: "'click' timed out after 20ms",
-    dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
-  }]);
+  expect(replies).toEqual([
+    {
+      id: 1,
+      ok: false,
+      error: "'click' timed out after 20ms",
+      dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
+    },
+  ]);
   release();
   await waitFor(() => settled.length >= 1, 3000);
   // The late op's report was not spent on a reply nobody reads.
@@ -468,16 +594,27 @@ test("an op that overruns its budget: the timeout reply carries the reports queu
 
 test("a timed-out request that prints nothing leaves the queued reports alone", async () => {
   const b = webkitBrowser();
-  b.click = async () => { await new Promise(() => {}); };
+  b.click = async () => {
+    await new Promise(() => {});
+  };
   const handle = createHandler(b);
   await handle(req("evaluate", ["window.confirm('sure?')"]));
   const replies: DaemonResponse[] = [];
-  dispatch({ id: 1, op: "click", args: ["#go"] }, { handle, serialize: createSerializer(), timeoutMs: 20, reply: (r) => { replies.push(r); }, timedOut: handle.timedOut });
+  dispatch(
+    { id: 1, op: "click", args: ["#go"] },
+    {
+      handle,
+      serialize: createSerializer(),
+      timeoutMs: 20,
+      reply: (r) => {
+        replies.push(r);
+      },
+      timedOut: handle.timedOut,
+    },
+  );
   await waitFor(() => replies.length >= 1, 3000);
   expect(replies).toEqual([{ id: 1, ok: false, error: "'click' timed out after 20ms" }]);
-  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([
-    { type: "confirm", message: "sure?", state: "dismissed", unanswered: true },
-  ]);
+  expect((await handle(rep("evaluate", ["1"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
 });
 
 test("a non-urgent op waits its turn behind the one before it", async () => {
@@ -485,7 +622,9 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
   // at once. Proves the urgent lane above is a real exception, not the norm.
   const replies: string[] = [];
   let release!: () => void;
-  const first = new Promise<void>((r) => { release = r; });
+  const first = new Promise<void>((r) => {
+    release = r;
+  });
   const serialize = createSerializer();
   const lane = {
     handle: async (req: DaemonRequest) => {
@@ -494,7 +633,9 @@ test("a non-urgent op waits its turn behind the one before it", async () => {
     },
     serialize,
     timeoutMs: 0,
-    reply: (res: DaemonResponse) => { replies.push(String(res.ok && res.result)); },
+    reply: (res: DaemonResponse) => {
+      replies.push(String(res.ok && res.result));
+    },
   };
 
   dispatch({ id: 1, op: "click", args: ["#x"] } as DaemonRequest, lane);
@@ -514,8 +655,15 @@ describe("a closed connection", () => {
   function connection() {
     const closing = new Set<() => void>();
     return {
-      onClose: (fn: () => void) => { closing.add(fn); return () => { closing.delete(fn); }; },
-      close: () => { for (const fn of [...closing]) fn(); },
+      onClose: (fn: () => void) => {
+        closing.add(fn);
+        return () => {
+          closing.delete(fn);
+        };
+      },
+      close: () => {
+        for (const fn of [...closing]) fn();
+      },
     };
   }
 
@@ -527,8 +675,13 @@ describe("a closed connection", () => {
       handle: () => new Promise<DaemonResponse>(() => {}),
       serialize: createSerializer(),
       timeoutMs: 0,
-      reply: (r: DaemonResponse) => { replies.push(r); },
-      recover: async () => { recoveries++; return false; },
+      reply: (r: DaemonResponse) => {
+        replies.push(r);
+      },
+      recover: async () => {
+        recoveries++;
+        return false;
+      },
       onClose: c.onClose,
       closedMs: 10,
     };
@@ -546,11 +699,18 @@ describe("a closed connection", () => {
     let settled = false;
     const c = connection();
     const lane = {
-      handle: async (req: DaemonRequest) => { await Bun.sleep(2500); settled = true; return { id: req.id, ok: true as const }; },
+      handle: async (req: DaemonRequest) => {
+        await Bun.sleep(2500);
+        settled = true;
+        return { id: req.id, ok: true as const };
+      },
       serialize: createSerializer(),
       timeoutMs: 0,
       reply: () => {},
-      recover: async () => { recoveries++; return false; },
+      recover: async () => {
+        recoveries++;
+        return false;
+      },
       onClose: c.onClose,
       closedMs: 3000,
     };
@@ -564,7 +724,9 @@ describe("a closed connection", () => {
   test("drops its queued op, so the op never runs", async () => {
     const ran: number[] = [];
     let release!: () => void;
-    const first = new Promise<void>((r) => { release = r; });
+    const first = new Promise<void>((r) => {
+      release = r;
+    });
     const c = connection();
     const lane = {
       handle: async (req: DaemonRequest) => {
@@ -597,7 +759,9 @@ describe("the queue-time budget", () => {
     const replies: Array<[number, DaemonResponse]> = [];
     const ran: number[] = [];
     let release!: () => void;
-    const stuck = new Promise<void>((r) => { release = r; });
+    const stuck = new Promise<void>((r) => {
+      release = r;
+    });
     const t0 = Date.now();
     const lane = {
       handle: async (req: DaemonRequest) => {
@@ -607,7 +771,9 @@ describe("the queue-time budget", () => {
       },
       serialize: createSerializer(),
       timeoutMs: 400,
-      reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+      reply: (res: DaemonResponse) => {
+        replies.push([Date.now() - t0, res]);
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     await Bun.sleep(50); // the scenario: op 2 arrives 50 ms after op 1
@@ -634,7 +800,9 @@ describe("the queue-time budget", () => {
       handle: () => new Promise<DaemonResponse>(() => {}), // never settles
       serialize: createSerializer(),
       timeoutMs: 30,
-      reply: (res: DaemonResponse) => { replies.push(res); },
+      reply: (res: DaemonResponse) => {
+        replies.push(res);
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"], cmd: "click" }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["1"], cmd: "snapshot" }, lane);
@@ -642,8 +810,10 @@ describe("the queue-time budget", () => {
     expect(replies).toEqual([
       { id: 1, ok: false, error: "'click' timed out after 30ms" },
       {
-        id: 2, ok: false,
-        error: "'snapshot' timed out after 30ms (in its 'evaluate' step) (waiting for 'click', which timed out and is still running; run 'bowser close' if the session stays stuck)",
+        id: 2,
+        ok: false,
+        error:
+          "'snapshot' timed out after 30ms (in its 'evaluate' step) (waiting for 'click', which timed out and is still running; run 'bowser close' if the session stays stuck)",
       },
     ]);
   });
@@ -657,7 +827,9 @@ describe("the queue-time budget", () => {
       },
       serialize: createSerializer(),
       timeoutMs: 200,
-      reply: (res: DaemonResponse) => { replies.push(res); },
+      reply: (res: DaemonResponse) => {
+        replies.push(res);
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
@@ -673,7 +845,8 @@ describe("the queue-time budget", () => {
     // overrun it while running. It was not queued at its deadline, so it
     // gets no "waiting for" tail (seen on CI, run 36299769857).
     const replies: Array<[number, DaemonResponse]> = [];
-    const BUDGET = 1000, RUN = 600;
+    const BUDGET = 1000,
+      RUN = 600;
     const t0 = Date.now();
     const lane = {
       handle: async (req: DaemonRequest) => {
@@ -682,7 +855,9 @@ describe("the queue-time budget", () => {
       },
       serialize: createSerializer(),
       timeoutMs: BUDGET,
-      reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+      reply: (res: DaemonResponse) => {
+        replies.push([Date.now() - t0, res]);
+      },
     };
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["location.href"] }, lane);
@@ -705,7 +880,9 @@ describe("the queue-time budget", () => {
       },
       serialize: createSerializer(),
       timeoutMs: 10,
-      reply: (res: DaemonResponse) => { replies.push(res); },
+      reply: (res: DaemonResponse) => {
+        replies.push(res);
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane);
@@ -719,21 +896,33 @@ describe("the queue-time budget", () => {
   test("an op that times out while running tries recovery once, and the queue waits for it", async () => {
     const events: string[] = [];
     let release!: () => void;
-    const stuck = new Promise<void>((r) => { release = r; });
+    const stuck = new Promise<void>((r) => {
+      release = r;
+    });
     let settled = false;
     let recovered!: () => void;
     const lane = {
       handle: async (req: DaemonRequest) => {
         events.push(`run ${req.op}`);
-        if (req.id === 1) { await stuck; settled = true; }
+        if (req.id === 1) {
+          await stuck;
+          settled = true;
+        }
         return { id: req.id, ok: true as const };
       },
       serialize: createSerializer(),
       timeoutMs: 20,
-      reply: (res: DaemonResponse) => { events.push(`reply ${res.id} ${res.ok}`); },
+      reply: (res: DaemonResponse) => {
+        events.push(`reply ${res.id} ${res.ok}`);
+      },
       recover: () => {
         events.push("recover");
-        return new Promise<boolean>((r) => { recovered = () => { events.push("recovered"); r(true); }; });
+        return new Promise<boolean>((r) => {
+          recovered = () => {
+            events.push("recovered");
+            r(true);
+          };
+        });
       },
     };
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane);
@@ -757,7 +946,9 @@ describe("the queue-time budget", () => {
   test("an op that settles within the grace after its timeout is not recovered, and the next op does not wait out the grace", async () => {
     let recoveries = 0;
     let release!: () => void;
-    const slow = new Promise<void>((r) => { release = r; });
+    const slow = new Promise<void>((r) => {
+      release = r;
+    });
     const replies: Array<[number, DaemonResponse]> = [];
     const BUDGET = 300;
     const lane = {
@@ -767,8 +958,13 @@ describe("the queue-time budget", () => {
       },
       serialize: createSerializer(),
       timeoutMs: BUDGET,
-      reply: (res: DaemonResponse) => { replies.push([Date.now(), res]); },
-      recover: async () => { recoveries++; return false; },
+      reply: (res: DaemonResponse) => {
+        replies.push([Date.now(), res]);
+      },
+      recover: async () => {
+        recoveries++;
+        return false;
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     await waitFor(() => replies.length >= 1, 3000);
@@ -795,7 +991,10 @@ describe("the queue-time budget", () => {
       serialize: createSerializer(),
       timeoutMs: 30,
       reply: () => {},
-      recover: async () => { recoveries++; return false; },
+      recover: async () => {
+        recoveries++;
+        return false;
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     // Negative checks: none before the grace ends, and no second one after.
@@ -822,7 +1021,10 @@ describe("the queue-time budget", () => {
       timeoutMs: 20,
       phase: () => phase,
       reply: () => {},
-      recover: async () => { recoveries++; return true; },
+      recover: async () => {
+        recoveries++;
+        return true;
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     // Negative check: no recovery while delivered, nor after the op settles at 100.
@@ -839,7 +1041,10 @@ describe("the queue-time budget", () => {
       timeoutMs: 20,
       phase: () => phase,
       reply: () => {},
-      recover: async () => { recoveries++; return false; },
+      recover: async () => {
+        recoveries++;
+        return false;
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     await Bun.sleep(80); // negative check: timed out at 20, grace ended at 40
@@ -856,7 +1061,10 @@ describe("the queue-time budget", () => {
       serialize: createSerializer(),
       timeoutMs: 10,
       reply: () => {},
-      recover: async () => { recoveries++; return false; },
+      recover: async () => {
+        recoveries++;
+        return false;
+      },
     };
     dispatch({ id: 1, op: "click", args: ["#x"] }, lane);
     dispatch({ id: 2, op: "click", args: ["#y"] }, lane);
@@ -871,28 +1079,38 @@ describe("the queue-time budget", () => {
 // #77: requests of different connections on one session run one connection
 // at a time, through the gate, before the serializer.
 describe("the session gate", () => {
-  const WAITING = (op: string, ms: number) =>
-    `'${op}' timed out after ${ms}ms (waiting for another client's command on this session)`;
+  const WAITING = (op: string, ms: number) => `'${op}' timed out after ${ms}ms (waiting for another client's command on this session)`;
 
   function lanes(handle: (req: DaemonRequest) => Promise<DaemonResponse>, timeoutMs: number, idleMs = timeoutMs) {
     const gate = createGate(idleMs);
     const serialize = createSerializer();
     const replies: DaemonResponse[] = [];
-    const lane = (conn: object, ms = timeoutMs) =>
-      ({ handle, serialize, gate, conn, timeoutMs: ms, reply: (r: DaemonResponse) => { replies.push(r); } });
+    const lane = (conn: object, ms = timeoutMs) => ({
+      handle,
+      serialize,
+      gate,
+      conn,
+      timeoutMs: ms,
+      reply: (r: DaemonResponse) => {
+        replies.push(r);
+      },
+    });
     return { gate, lane, replies };
   }
 
   test("requests of a second connection wait until the first connection closes", async () => {
     const started: number[] = [];
     let release!: () => void;
-    const slow = new Promise<void>((r) => { release = r; });
+    const slow = new Promise<void>((r) => {
+      release = r;
+    });
     const { gate, lane, replies } = lanes(async (req) => {
       started.push(req.id);
       if (req.id === 1) await slow;
       return { id: req.id, ok: true as const };
     }, 0);
-    const A = {}, B = {};
+    const A = {},
+      B = {};
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B));
     dispatch({ id: 3, op: "evaluate", args: ["3"] }, lane(A));
@@ -931,12 +1149,18 @@ describe("the session gate", () => {
   test("a closed holder whose op timed out passes the gate on, and the next op still waits for that op at the serializer", async () => {
     const started: number[] = [];
     let release!: () => void;
-    const stuck = new Promise<void>((r) => { release = r; });
-    const { gate, lane, replies } = lanes(async (req) => {
-      started.push(req.id);
-      if (req.id === 1) await stuck;
-      return { id: req.id, ok: true as const };
-    }, 20, 0);
+    const stuck = new Promise<void>((r) => {
+      release = r;
+    });
+    const { gate, lane, replies } = lanes(
+      async (req) => {
+        started.push(req.id);
+        if (req.id === 1) await stuck;
+        return { id: req.id, ok: true as const };
+      },
+      20,
+      0,
+    );
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
     await waitFor(() => replies.length >= 1, 3000);
@@ -947,7 +1171,11 @@ describe("the session gate", () => {
     await waitFor(() => replies.length >= 2, 3000);
     expect(replies).toEqual([
       { id: 1, ok: false, error: "'evaluate' timed out after 20ms" },
-      { id: 2, ok: false, error: "'evaluate' timed out after 30ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)" },
+      {
+        id: 2,
+        ok: false,
+        error: "'evaluate' timed out after 30ms (waiting for 'evaluate', which timed out and is still running; run 'bowser close' if the session stays stuck)",
+      },
     ]);
     expect(started).toEqual([1]);
     release();
@@ -958,7 +1186,9 @@ describe("the session gate", () => {
   test("a holder that closes with a later request still queued at the serializer passes the gate on only after it settles", async () => {
     const started: number[] = [];
     let release!: () => void;
-    const slow = new Promise<void>((r) => { release = r; });
+    const slow = new Promise<void>((r) => {
+      release = r;
+    });
     const { gate, lane } = lanes(async (req) => {
       started.push(req.id);
       if (req.id === 1) await slow;
@@ -982,12 +1212,18 @@ describe("the session gate", () => {
   test("a request that timed out at the gate does not hold it once its turn comes", async () => {
     const started: number[] = [];
     let hold!: () => void;
-    const held = new Promise<void>((r) => { hold = r; });
-    const { gate, lane, replies } = lanes(async (req) => {
-      started.push(req.id);
-      if (req.id === 1) await held;
-      return { id: req.id, ok: true as const };
-    }, 0, 30);
+    const held = new Promise<void>((r) => {
+      hold = r;
+    });
+    const { gate, lane, replies } = lanes(
+      async (req) => {
+        started.push(req.id);
+        if (req.id === 1) await held;
+        return { id: req.id, ok: true as const };
+      },
+      0,
+      30,
+    );
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A));
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane({}, 20));
@@ -1003,13 +1239,20 @@ describe("the session gate", () => {
   test("a waiting connection that closes is never run and never answered", async () => {
     const started: number[] = [];
     let release!: () => void;
-    const slow = new Promise<void>((r) => { release = r; });
-    const { gate, lane, replies } = lanes(async (req) => {
-      started.push(req.id);
-      if (req.id === 1) await slow;
-      return { id: req.id, ok: true as const };
-    }, 50, 0);
-    const A = {}, B = {};
+    const slow = new Promise<void>((r) => {
+      release = r;
+    });
+    const { gate, lane, replies } = lanes(
+      async (req) => {
+        started.push(req.id);
+        if (req.id === 1) await slow;
+        return { id: req.id, ok: true as const };
+      },
+      50,
+      0,
+    );
+    const A = {},
+      B = {};
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane(A, 0));
     dispatch({ id: 2, op: "evaluate", args: ["2"] }, lane(B));
     gate.leave(B);
@@ -1035,7 +1278,9 @@ describe("a stuck session", () => {
     const replies: Array<[number, DaemonResponse]> = [];
     const started: number[] = [];
     let release!: () => void;
-    const held = new Promise<void>((r) => { release = r; });
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
     const t0 = Date.now();
     const handle = async (req: DaemonRequest): Promise<DaemonResponse> => {
       started.push(req.id);
@@ -1043,8 +1288,16 @@ describe("a stuck session", () => {
       return { id: req.id, ok: true, result: req.op };
     };
     const lane = (conn: object, ms = 20) => ({
-      handle, serialize, gate, conn, mark, timeoutMs: ms, recover,
-      reply: (r: DaemonResponse) => { replies.push([Date.now() - t0, r]); },
+      handle,
+      serialize,
+      gate,
+      conn,
+      mark,
+      timeoutMs: ms,
+      recover,
+      reply: (r: DaemonResponse) => {
+        replies.push([Date.now() - t0, r]);
+      },
     });
     return { lane, replies, started, release, mark, t0 };
   }
@@ -1078,7 +1331,12 @@ describe("a stuck session", () => {
     let lane!: ReturnType<typeof stuckLanes>["lane"];
     let release!: () => void;
     let recovered = false;
-    const s = stuckLanes(async () => { release(); await Bun.sleep(5); recovered = true; return false; });
+    const s = stuckLanes(async () => {
+      release();
+      await Bun.sleep(5);
+      recovered = true;
+      return false;
+    });
     ({ lane, release } = s);
     dispatch({ id: 1, op: "evaluate", args: ["1"] }, lane({}));
     await waitFor(() => recovered, 3000);
@@ -1162,7 +1420,10 @@ describe("a stuck session", () => {
 
   test("a second timed-out op while stuck does not recover twice", async () => {
     let recoveries = 0;
-    const { lane } = stuckLanes(async () => { recoveries++; return false; });
+    const { lane } = stuckLanes(async () => {
+      recoveries++;
+      return false;
+    });
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A));
     dispatch({ id: 2, op: "evaluate", args: ["1"] }, lane(A));
@@ -1175,7 +1436,10 @@ describe("a stuck session", () => {
 
   test("with budgets off no mark is ever set", async () => {
     let recoveries = 0;
-    const { lane, replies, mark } = stuckLanes(async () => { recoveries++; return false; });
+    const { lane, replies, mark } = stuckLanes(async () => {
+      recoveries++;
+      return false;
+    });
     const A = {};
     dispatch({ id: 1, op: "evaluate", args: ["new Promise(() => {})"] }, lane(A, 0));
     await Bun.sleep(60);
@@ -1202,14 +1466,22 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
     return {
       // Bound, so Function.prototype.toString says [native code], as it
       // does for the engine's own functions.
-      alert: (() => undefined).bind(null), confirm: (() => false).bind(null), prompt: (() => null).bind(null),
-      addEventListener: (type: string, fn: () => void) => { if (type === "pagehide") hide.push(fn); },
-      leave: () => { if (pagehide) hide.forEach((fn) => fn()); },
+      alert: (() => undefined).bind(null),
+      confirm: (() => false).bind(null),
+      prompt: (() => null).bind(null),
+      addEventListener: (type: string, fn: () => void) => {
+        if (type === "pagehide") hide.push(fn);
+      },
+      leave: () => {
+        if (pagehide) hide.forEach((fn) => fn());
+      },
     } as Record<string | symbol, unknown>;
   };
   let win = engine();
   const b = fakeBrowser({
-    watchNavigation: (fn) => { on = fn; },
+    watchNavigation: (fn) => {
+      on = fn;
+    },
     // Like Bun.WebView: the expression is awaited and comes back through JSON.
     evaluate: async (expr) => {
       b.calls.push(["evaluate", [expr]]);
@@ -1217,9 +1489,16 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
       const json = JSON.stringify(v);
       return json === undefined ? undefined : JSON.parse(json);
     },
-    navigate: async (url) => { b.calls.push(["navigate", [url]]); load(); },
+    navigate: async (url) => {
+      b.calls.push(["navigate", [url]]);
+      load();
+    },
   });
-  const go = (next: typeof win) => { (win.leave as () => void)(); win = next; if (callback) on!(); };
+  const go = (next: typeof win) => {
+    (win.leave as () => void)();
+    win = next;
+    if (callback) on!();
+  };
   const load = () => go(engine());
   /** The page's own call, as a click handler makes it. */
   const page = <T>(name: "alert" | "confirm" | "prompt", ...a: unknown[]) => (win[name] as (...a: unknown[]) => T)(...a);
@@ -1230,7 +1509,14 @@ function webkitBrowser({ callback = true, pagehide = true } = {}) {
    *  can reach, or a cross-origin one whose every property read throws. */
   const addFrame = (crossOrigin = false) => {
     const f = crossOrigin
-      ? new Proxy({}, { get: () => { throw new Error("SecurityError: cross-origin"); } }) as typeof win
+      ? (new Proxy(
+          {},
+          {
+            get: () => {
+              throw new Error("SecurityError: cross-origin");
+            },
+          },
+        ) as typeof win)
       : engine();
     const n = (win.length as number | undefined) ?? 0;
     win[n] = f;
@@ -1265,14 +1551,18 @@ describe("a page's Array.prototype.toJSON (#76)", () => {
     const h = createHandler(b);
     const res = await patched(() => h(rep("evaluate", ["(window.confirm('sure?'), ['x', ['y']])"])));
     expect(res).toEqual({
-      id: 7, ok: true, result: ["x", ["y"]],
+      id: 7,
+      ok: true,
+      result: ["x", ["y"]],
       dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
     });
   });
 
   test("the dialog log read around an action keeps its entries", async () => {
     const b = webkitBrowser();
-    b.click = async () => { b.page("alert", "hi"); };
+    b.click = async () => {
+      b.page("alert", "hi");
+    };
     const h = createHandler(b);
     const res = await patched(() => h(rep("click", ["#go"])));
     expect(res.dialogs).toEqual([{ type: "alert", message: "hi", state: "dismissed", unanswered: true }]);
@@ -1280,7 +1570,11 @@ describe("a page's Array.prototype.toJSON (#76)", () => {
 
   test("the user's own JSON.stringify still sees the page's toJSON", async () => {
     const h = createHandler(webkitBrowser());
-    expect(await patched(() => h(req("evaluate", ["JSON.stringify(['x'])"])))).toEqual({ id: 7, ok: true, result: '"proto"' });
+    expect(await patched(() => h(req("evaluate", ["JSON.stringify(['x'])"])))).toEqual({
+      id: 7,
+      ok: true,
+      result: '"proto"',
+    });
   });
 });
 
@@ -1309,7 +1603,10 @@ describe("dialogs on webkit: the page shim answers them", () => {
     const b = webkitBrowser();
     const h = createHandler(b);
     expect(await h(rep("evaluate", ["window.confirm('sure?')"]))).toEqual({
-      id: 7, ok: true, result: false, dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
+      id: 7,
+      ok: true,
+      result: false,
+      dialogs: [{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }],
     });
     expect(await h(rep("evaluate", ["({ a: [1, 'x'] })"]))).toEqual({ id: 7, ok: true, result: { a: [1, "x"] } });
     expect(await h(rep("evaluate", ["undefined"]))).toEqual({ id: 7, ok: true });
@@ -1319,15 +1616,13 @@ describe("dialogs on webkit: the page shim answers them", () => {
   test("dialog-answer reaches the page before the action: a click's prompt gets the text, once", async () => {
     const b = webkitBrowser();
     const got: unknown[] = [];
-    b.click = async () => { got.push(b.page("prompt", "name?", "def")); };
+    b.click = async () => {
+      got.push(b.page("prompt", "name?", "def"));
+    };
     const h = createHandler(b);
     await h(rep("dialog-answer", [true, "typed"]));
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" },
-    ]);
-    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([
-      { type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true },
-    ]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "prompt", message: "name?", defaultValue: "def", state: "accepted", answer: "typed" }]);
+    expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "prompt", message: "name?", defaultValue: "def", state: "dismissed", unanswered: true }]);
     expect(got).toEqual(["typed", null]);
   });
 
@@ -1353,7 +1648,9 @@ describe("dialogs on webkit: the page shim answers them", () => {
   test("a new document has no shim and so no answer: dialog-answer, then goto, then the confirm is dismissed", async () => {
     const b = webkitBrowser();
     const got: unknown[] = [];
-    b.click = async () => { got.push(b.page("confirm", "sure?")); };
+    b.click = async () => {
+      got.push(b.page("confirm", "sure?"));
+    };
     const h = createHandler(b);
     await h(rep("dialog-answer", [true]));
     await h(rep("navigate", ["https://x/next"]));
@@ -1364,12 +1661,16 @@ describe("dialogs on webkit: the page shim answers them", () => {
   test("a document restored by back keeps its shim but not its answer: the navigation dropped it", async () => {
     const b = webkitBrowser();
     const got: unknown[] = [];
-    b.click = async () => { got.push(b.page("confirm", "sure?")); };
+    b.click = async () => {
+      got.push(b.page("confirm", "sure?"));
+    };
     const h = createHandler(b);
     await h(rep("dialog-answer", [true]));
     const first = b.window();
     await h(rep("navigate", ["https://x/next"]));
-    b.back = async () => { b.restore(first); }; // the back-forward cache
+    b.back = async () => {
+      b.restore(first);
+    }; // the back-forward cache
     await h(rep("back"));
     expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
@@ -1378,12 +1679,16 @@ describe("dialogs on webkit: the page shim answers them", () => {
   test("with no navigation callback at all, back to a cached document still has no answer: the navigating op drops it", async () => {
     const b = webkitBrowser({ callback: false, pagehide: false });
     const got: unknown[] = [];
-    b.click = async () => { got.push(b.page("confirm", "sure?")); };
+    b.click = async () => {
+      got.push(b.page("confirm", "sure?"));
+    };
     const h = createHandler(b);
     await h(rep("dialog-answer", [true]));
     const first = b.window();
     await h(rep("navigate", ["https://x/next"]));
-    b.back = async () => { b.restore(first); };
+    b.back = async () => {
+      b.restore(first);
+    };
     await h(rep("back"));
     expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
@@ -1394,19 +1699,27 @@ describe("dialogs on webkit: the page shim answers them", () => {
     const h = createHandler(b);
     await h(rep("dialog-answer", [true]));
     const first = b.window();
-    b.click = async () => { b.load(); }; // a link
+    b.click = async () => {
+      b.load();
+    }; // a link
     await h(rep("click", ["a"]));
-    b.click = async () => { b.restore(first); }; // history.back() in a handler, from the cache
+    b.click = async () => {
+      b.restore(first);
+    }; // history.back() in a handler, from the cache
     await h(rep("click", ["#back"]));
     const got: unknown[] = [];
-    b.click = async () => { got.push(b.page("confirm", "sure?")); };
+    b.click = async () => {
+      got.push(b.page("confirm", "sure?"));
+    };
     expect((await h(rep("click", ["#go"]))).dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([false]);
   });
 
   test("after the page navigates itself, the shim is installed again before a native action, so its dialog is reported", async () => {
     const b = webkitBrowser();
-    b.press = async () => { b.page("alert", "hi"); };
+    b.press = async () => {
+      b.page("alert", "hi");
+    };
     const h = createHandler(b);
     await h(rep("evaluate", ["1"]));
     b.load(); // a page script navigated, between commands
@@ -1429,17 +1742,24 @@ describe("dialogs on webkit: the page shim answers them", () => {
     const b = webkitBrowser();
     const h = createHandler(b);
     expect(await h(rep("evaluate", ["(window.confirm('x'), null.boom)"]))).toMatchObject({
-      ok: false, error: expect.stringContaining("null"), dialogs: [{ type: "confirm", message: "x", state: "dismissed", unanswered: true }],
+      ok: false,
+      error: expect.stringContaining("null"),
+      dialogs: [{ type: "confirm", message: "x", state: "dismissed", unanswered: true }],
     });
     expect((await h(rep("evaluate", ["1"]))).dialogs).toBeUndefined();
   });
 
   test("a native action that fails after a dialog reports it with the error", async () => {
     const b = webkitBrowser();
-    b.click = async () => { b.page("alert", "hi"); throw new Error("click: gone"); };
+    b.click = async () => {
+      b.page("alert", "hi");
+      throw new Error("click: gone");
+    };
     const h = createHandler(b);
     expect(await h(rep("click", ["#go"]))).toMatchObject({
-      ok: false, error: "click: gone", dialogs: [{ type: "alert", message: "hi", state: "dismissed", unanswered: true }],
+      ok: false,
+      error: "click: gone",
+      dialogs: [{ type: "alert", message: "hi", state: "dismissed", unanswered: true }],
     });
   });
 
@@ -1485,7 +1805,10 @@ describe("a dialog logged before an op that leaves the document is reported by t
       const h = createHandler(b);
       await h(rep("evaluate", ["1"]));
       b.page("confirm", "timer"); // a timer, between commands
-      (b as unknown as Record<string, unknown>)[method] = async () => { b.load(); return true; };
+      (b as unknown as Record<string, unknown>)[method] = async () => {
+        b.load();
+        return true;
+      };
       expect((await h(rep(op, args))).dialogs).toEqual([TIMER]);
     });
   }
@@ -1496,15 +1819,23 @@ describe("a dialog logged before an op that leaves the document is reported by t
     await h(rep("evaluate", ["1"]));
     b.page("confirm", "timer");
     const first = b.window();
-    b.press = async () => { b.load(); }; // Enter submits the form
+    b.press = async () => {
+      b.load();
+    }; // Enter submits the form
     expect((await h(rep("press", ["Enter"]))).dialogs).toEqual([TIMER]);
-    b.back = async () => { b.restore(first); };
+    b.back = async () => {
+      b.restore(first);
+    };
     expect((await h(rep("back"))).dialogs).toBeUndefined();
     expect((await h(rep("evaluate", ["1"]))).dialogs).toBeUndefined();
   });
 
   test("a page that cannot evaluate reports nothing, and the navigation still runs", async () => {
-    const b = fakeBrowser({ evaluate: async () => { throw new Error("busy"); } });
+    const b = fakeBrowser({
+      evaluate: async () => {
+        throw new Error("busy");
+      },
+    });
     const h = createHandler(b);
     expect(await h(rep("reload"))).toEqual({ id: 7, ok: true });
     expect(actions(b).map(([n]) => n)).toEqual(["reload"]);
@@ -1517,7 +1848,11 @@ describe("a page's own alert, confirm or prompt is left alone", () => {
     const b = webkitBrowser();
     b.window().confirm = (m: string) => "custom:" + m;
     const h = createHandler(b);
-    expect(await h(rep("evaluate", ["window.confirm('really')"]))).toEqual({ id: 7, ok: true, result: "custom:really" });
+    expect(await h(rep("evaluate", ["window.confirm('really')"]))).toEqual({
+      id: 7,
+      ok: true,
+      result: "custom:really",
+    });
   });
 
   test("the ones the page did not define are still shimmed", async () => {
@@ -1525,7 +1860,10 @@ describe("a page's own alert, confirm or prompt is left alone", () => {
     b.window().alert = () => "page alert";
     const h = createHandler(b);
     expect(await h(rep("evaluate", ["[window.alert('a'), window.confirm('c')]"]))).toEqual({
-      id: 7, ok: true, result: ["page alert", false], dialogs: [{ type: "confirm", message: "c", state: "dismissed", unanswered: true }],
+      id: 7,
+      ok: true,
+      result: ["page alert", false],
+      dialogs: [{ type: "confirm", message: "c", state: "dismissed", unanswered: true }],
     });
   });
 });
@@ -1538,9 +1876,13 @@ describe("dialogs in same-origin frames", () => {
     const h = createHandler(b);
     await h(rep("dialog-answer", [true]));
     const got: unknown[] = [];
-    b.click = async () => { got.push(b.inFrame(frame, "confirm", "frame")); };
+    b.click = async () => {
+      got.push(b.inFrame(frame, "confirm", "frame"));
+    };
     expect((await h(rep("click", ["#via"]))).dialogs).toEqual([{ type: "confirm", message: "frame", state: "accepted" }]);
-    b.click = async () => { got.push(b.page("confirm", "top")); };
+    b.click = async () => {
+      got.push(b.page("confirm", "top"));
+    };
     expect((await h(rep("click", ["#top"]))).dialogs).toEqual([{ type: "confirm", message: "top", state: "dismissed", unanswered: true }]);
     expect(got).toEqual([true, false]);
   });
@@ -1557,7 +1899,11 @@ describe("dialogs in same-origin frames", () => {
 
     function engine2(parent: Record<string | symbol, unknown>) {
       parent.length = 1;
-      return { alert: (() => undefined).bind(null), confirm: (() => false).bind(null), prompt: (() => null).bind(null) } as Record<string | symbol, unknown>;
+      return {
+        alert: (() => undefined).bind(null),
+        confirm: (() => false).bind(null),
+        prompt: (() => null).bind(null),
+      } as Record<string | symbol, unknown>;
     }
   });
 
@@ -1587,7 +1933,9 @@ describe("the command budget (budgetMs)", () => {
     handle: () => new Promise<DaemonResponse>(() => {}), // never settles
     serialize: createSerializer(),
     timeoutMs,
-    reply: (res: DaemonResponse) => { replies.push([Date.now() - t0, res]); },
+    reply: (res: DaemonResponse) => {
+      replies.push([Date.now() - t0, res]);
+    },
   });
 
   test("a request with budgetMs smaller than the daemon's budget times out at budgetMs", async () => {
@@ -1634,11 +1982,22 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
   const stillLoading = "page is still loading https://x/; retry later, or run 'bowser close'";
 
   test("fails with 'page is still loading' before its own timer, which counts queue time and budgetMs", async () => {
-    for (const [timeoutMs, budgetMs] of [[600, undefined], [0, 600], [3000, 600]] as const) {
+    for (const [timeoutMs, budgetMs] of [
+      [600, undefined],
+      [0, 600],
+      [3000, 600],
+    ] as const) {
       const b = fakeBrowser({ navigationPending: true });
       const replies: Array<[number, DaemonResponse]> = [];
       const t0 = Date.now();
-      const lane = { handle: createHandler(b), serialize: createSerializer(), timeoutMs, reply: (r: DaemonResponse) => { replies.push([Date.now() - t0, r]); } };
+      const lane = {
+        handle: createHandler(b),
+        serialize: createSerializer(),
+        timeoutMs,
+        reply: (r: DaemonResponse) => {
+          replies.push([Date.now() - t0, r]);
+        },
+      };
       lane.serialize(() => Bun.sleep(300), "evaluate");
       dispatch({ id: 1, op: "click", args: ["#b"], cmd: "fill", ...(budgetMs ? { budgetMs } : {}) }, lane);
       await waitFor(() => replies.length >= 1, 5000);
@@ -1654,7 +2013,17 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
     const b = fakeBrowser();
     Object.defineProperty(b, "navigationPending", { get: () => pending });
     const replies: DaemonResponse[] = [];
-    dispatch({ id: 1, op: "click", args: ["#b"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 0, reply: (r) => { replies.push(r); } });
+    dispatch(
+      { id: 1, op: "click", args: ["#b"] },
+      {
+        handle: createHandler(b),
+        serialize: createSerializer(),
+        timeoutMs: 0,
+        reply: (r) => {
+          replies.push(r);
+        },
+      },
+    );
     // Negative check: no answer while the navigation is pending.
     await Bun.sleep(100);
     expect(replies).toEqual([]);
@@ -1669,7 +2038,17 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
     const b = fakeBrowser();
     Object.defineProperty(b, "navigationPending", { get: () => pending });
     const replies: DaemonResponse[] = [];
-    dispatch({ id: 1, op: "resolve", args: ["resolve-script"] }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 0, reply: (r) => { replies.push(r); } });
+    dispatch(
+      { id: 1, op: "resolve", args: ["resolve-script"] },
+      {
+        handle: createHandler(b),
+        serialize: createSerializer(),
+        timeoutMs: 0,
+        reply: (r) => {
+          replies.push(r);
+        },
+      },
+    );
     // Negative check: no answer and no evaluate while the navigation is pending.
     await Bun.sleep(100);
     expect(replies).toEqual([]);
@@ -1683,7 +2062,17 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
   test("a ref resolve fails with 'page is still loading' when its budget ends first (#105)", async () => {
     const b = fakeBrowser({ navigationPending: true });
     const replies: DaemonResponse[] = [];
-    dispatch({ id: 1, op: "resolve", args: ["resolve-script"], budgetMs: 100 }, { handle: createHandler(b), serialize: createSerializer(), timeoutMs: 1000, reply: (r) => { replies.push(r); } });
+    dispatch(
+      { id: 1, op: "resolve", args: ["resolve-script"], budgetMs: 100 },
+      {
+        handle: createHandler(b),
+        serialize: createSerializer(),
+        timeoutMs: 1000,
+        reply: (r) => {
+          replies.push(r);
+        },
+      },
+    );
     await waitFor(() => replies.length >= 1, 3000);
     expect(replies).toEqual([{ id: 1, ok: false, error: stillLoading }]);
     expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
@@ -1694,7 +2083,11 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
 // request's deadline passes. Driven through handle(), so the deadline's way
 // in is under test too.
 describe("the waitFor op", () => {
-  const WAIT = (id = 1, kind: "url" | "text" = "url", value = "/moved"): DaemonRequest => ({ id, op: "waitFor", args: [kind, value] });
+  const WAIT = (id = 1, kind: "url" | "text" = "url", value = "/moved"): DaemonRequest => ({
+    id,
+    op: "waitFor",
+    args: [kind, value],
+  });
   /** A browser whose check answers `answers[i]` on read i (the last one after), on `clock`. */
   function reads(answers: Array<boolean | Error | "hang">, over: Partial<Browser> = {}) {
     let i = 0;
@@ -1741,7 +2134,9 @@ describe("the waitFor op", () => {
     const p = createHandler(b, {}, clock)({ ...WAIT(), report: true }, 10_000);
     await clock.fulfilledAt(p);
     expect(await p).toEqual({
-      id: 1, ok: true, result: { met: true, url: "https://x/moved", title: "X" },
+      id: 1,
+      ok: true,
+      result: { met: true, url: "https://x/moved", title: "X" },
       dialogs: [{ type: "confirm", message: "sure?", state: "accepted" }],
     });
   });
@@ -1780,8 +2175,16 @@ describe("the waitFor op", () => {
     const clock = manualClock();
     const events: string[] = [];
     let pending = true;
-    clock.setTimeout(() => { pending = false; events.push("landed"); }, 300);
-    const b = reads([true], { evaluate: async (expr: string) => { if (!expr.includes("log.splice")) events.push("read"); return true; } });
+    clock.setTimeout(() => {
+      pending = false;
+      events.push("landed");
+    }, 300);
+    const b = reads([true], {
+      evaluate: async (expr: string) => {
+        if (!expr.includes("log.splice")) events.push("read");
+        return true;
+      },
+    });
     // A getter, not a value: fakeBrowser's spread would copy a value once.
     Object.defineProperty(b, "navigationPending", { get: () => pending });
     await clock.fulfilledAt(createHandler(b, {}, clock)(WAIT(), 10_000));

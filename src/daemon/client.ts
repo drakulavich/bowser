@@ -114,18 +114,27 @@ export class DaemonClient implements DaemonConnection {
     const budget = opTimeoutMs();
     if (op !== "ping") this.start ??= Date.now();
     const timed = budget > 0 && this.start !== undefined;
-    const line = JSON.stringify({
-      id, op, args,
-      ...(this.report ? { report: true } : {}),
-      ...(this.command ? { cmd: this.command } : {}),
-      ...(timed ? { budgetMs: budget - (Date.now() - this.start!), budgetTotalMs: budget } : {}),
-    }) + "\n";
+    const line =
+      JSON.stringify({
+        id,
+        op,
+        args,
+        ...(this.report ? { report: true } : {}),
+        ...(this.command ? { cmd: this.command } : {}),
+        ...(timed ? { budgetMs: budget - (Date.now() - this.start!), budgetTotalMs: budget } : {}),
+      }) + "\n";
     return new Promise((resolve, reject) => {
       // Cleared on every settle: a pending timer keeps the CLI alive after it printed.
       const timer = timed ? setTimeout(() => this.giveUp(), this.start! + budget + CLIENT_MARGIN_MS - Date.now()) : undefined;
       this.pending.set(id, {
-        resolve: (result) => { clearTimeout(timer); resolve(result as ResultOf<O>); },
-        reject: (err) => { clearTimeout(timer); reject(err); },
+        resolve: (result) => {
+          clearTimeout(timer);
+          resolve(result as ResultOf<O>);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
       });
       socketWriteAll(this.sock! as unknown as WritableSocket, line);
     });
@@ -198,7 +207,10 @@ export class NoDaemon extends Error {
 }
 
 export class OlderDaemon extends UserError {
-  constructor(message: string, readonly was: string) {
+  constructor(
+    message: string,
+    readonly was: string,
+  ) {
     super(message);
   }
 }
@@ -289,10 +301,7 @@ function unsupportedBun(runtime: BunRuntime): string | undefined {
 export const DAEMON_PROFILE_ENV = "BOWSER_DAEMON_PROFILE";
 
 /** Connect to a session's daemon, or spawn one if it isn't running. */
-export async function connectOrSpawn(
-  session: string,
-  opts: ConnectOptions = {},
-): Promise<DaemonClient> {
+export async function connectOrSpawn(session: string, opts: ConnectOptions = {}): Promise<DaemonClient> {
   const sock = socketPath(session);
   const client = new DaemonClient(sock, session, opts.command);
   let connected = false;
@@ -346,9 +355,7 @@ export async function connectOrSpawn(
       }
       return checked(c, session, reply, opts);
     }
-    const log = process.env.BOWSER_DAEMON_DEBUG === "1"
-      ? `; its output is in ${daemonLogPath(session)}`
-      : "; rerun with BOWSER_DAEMON_DEBUG=1 to see why";
+    const log = process.env.BOWSER_DAEMON_DEBUG === "1" ? `; its output is in ${daemonLogPath(session)}` : "; rerun with BOWSER_DAEMON_DEBUG=1 to see why";
     throw new Error(`daemon for session '${session}' did not start in time${log}`);
   }
   // Checked outside the try: its refusal must not fall into the spawn path.

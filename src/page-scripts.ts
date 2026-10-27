@@ -964,14 +964,8 @@ export function storageClearScript(area: StorageArea): string {
   return storageScript(area, `${area}.clear();`);
 }
 
-export function storageRestoreScript(
-  area: StorageArea,
-  entries: Array<{ name: string; value: string }>,
-): string {
-  return storageScript(
-    area,
-    entries.map((e) => `${area}.setItem(${JSON.stringify(e.name)}, ${JSON.stringify(e.value)});`).join(" "),
-  );
+export function storageRestoreScript(area: StorageArea, entries: Array<{ name: string; value: string }>): string {
+  return storageScript(area, entries.map((e) => `${area}.setItem(${JSON.stringify(e.name)}, ${JSON.stringify(e.value)});`).join(" "));
 }
 
 const TO_MARKDOWN = String.raw`
@@ -1127,7 +1121,9 @@ const TO_MARKDOWN = String.raw`
   };`;
 
 export function markdownScript(selector?: string, fetchMs?: number): string {
-  const own = selector === undefined ? String.raw`
+  const own =
+    selector === undefined
+      ? String.raw`
   const signal = ${fetchMs ? `AbortSignal.timeout(${fetchMs})` : "undefined"};
   const artifact = location.hostname === 'claude.ai' && /^\/public\/artifacts\/([0-9a-f-]+)\/?$/.exec(location.pathname);
   if (artifact) {
@@ -1143,10 +1139,12 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
       const r = await fetch(link.href, { signal });
       if (r.ok && !/html/i.test(r.headers.get('content-type') || '')) return { markdown: (await r.text()).trimEnd(), source: 'page' };
     } catch {}
-  }` : "";
-  const nodes = selector === undefined
-    ? `(document.querySelector('main, [role=main]') || document.body).childNodes`
-    : `[document.querySelector(${JSON.stringify(selector)})]`;
+  }`
+      : "";
+  const nodes =
+    selector === undefined
+      ? `(document.querySelector('main, [role=main]') || document.body).childNodes`
+      : `[document.querySelector(${JSON.stringify(selector)})]`;
   return String.raw`(async () => {
   const result = await (async () => {${own}
   ${TO_MARKDOWN}
@@ -1159,7 +1157,12 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
 // Compiles `body` without running it: whether the code parses that way.
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (body: string) => unknown;
 function parses(body: string): boolean {
-  try { new AsyncFunction(body); return true; } catch { return false; }
+  try {
+    new AsyncFunction(body);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** `run-code`'s script (spec F18). Code that parses as one expression is
@@ -1191,21 +1194,31 @@ export function runCodeScript(code: string): string {
  *  an element still covered at its centre after the scroll answers
  *  { covered: { role, name, tag } } for what covers it: the native click
  *  would wait out the budget for it, or press what the page put there (#112). */
-export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {}): string {
+export function resolveRefScript(
+  ref: { id: string; role: string; name: string },
+  opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {},
+): string {
   // With `enabled`, a disabled element (DISABLED, the snapshot's rule)
   // answers { disabled: true } instead, before any scroll: click, check and
   // uncheck refuse it at no extra round trip.
-  const enabled = opts.enabled ? String.raw`
-  if (isDisabled(el, role)) return { disabled: true };` : "";
+  const enabled = opts.enabled
+    ? String.raw`
+  if (isDisabled(el, role)) return { disabled: true };`
+    : "";
   // Bun's selector click waits on this same test (kActionabilityJS in its
   // WebViewHost.cpp): a stricter one would refuse what it clicks.
-  const covered = opts.hit ? String.raw`
+  const covered = opts.hit
+    ? String.raw`
   const area = el.getBoundingClientRect();
   const top = document.elementFromPoint(area.left + area.width / 2, area.top + area.height / 2);
   if (top && top !== el && !el.contains(top)) {
     return { covered: { role: ariaRole(top) || 'generic', name: nameOf(top), tag: tagOf(top).toLowerCase() } };
-  }` : "";
-  const scroll = opts.scroll === false ? "" : String.raw`
+  }`
+    : "";
+  const scroll =
+    opts.scroll === false
+      ? ""
+      : String.raw`
   const r = el.getBoundingClientRect();
   const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
   // In view but under something else, like a fixed header: the point a

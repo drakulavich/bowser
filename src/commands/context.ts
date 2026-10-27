@@ -34,7 +34,10 @@ interface Positional {
    *  <text>, which the CLI can replace with --stdin and MCP cannot. */
   mcpRequired?: true;
 }
-interface CommandArgs { positional: string[]; flags: Record<string, string | boolean> }
+interface CommandArgs {
+  positional: string[];
+  flags: Record<string, string | boolean>;
+}
 
 export interface Command {
   name: string;
@@ -52,10 +55,7 @@ export interface Command {
 
 /** All of standard input as UTF-8. A terminal is refused rather than read:
  *  reading it would block until the user typed an end-of-file. */
-export async function readStdin(
-  stdin: { isTTY?: boolean } = process.stdin,
-  read: () => Promise<string> = () => Bun.stdin.text(),
-): Promise<string> {
+export async function readStdin(stdin: { isTTY?: boolean } = process.stdin, read: () => Promise<string> = () => Bun.stdin.text()): Promise<string> {
   if (stdin.isTTY) {
     throw new UserError("usage: --stdin reads piped input, not a terminal: op read op://vault/item/password | bowser fill e4 --stdin");
   }
@@ -66,11 +66,7 @@ export function connector(ctx: CommandContext): (session: string, opts?: Connect
   return ctx.connect ?? connectOrSpawn;
 }
 
-export async function withClient<T>(
-  ctx: CommandContext,
-  fn: (c: DaemonConnection) => Promise<T>,
-  opts: ConnectOptions = {},
-): Promise<T> {
+export async function withClient<T>(ctx: CommandContext, fn: (c: DaemonConnection) => Promise<T>, opts: ConnectOptions = {}): Promise<T> {
   const connect = (o: ConnectOptions) => connector(ctx)(ctx.session, ctx.command ? { ...o, command: ctx.command } : o);
   let client: DaemonConnection;
   let read = true;
@@ -111,7 +107,9 @@ function takeNotice(ctx: CommandContext, own: boolean): void {
   const text = readNotice(ctx.session);
   if (!text || ctx.notices.includes(text)) return;
   ctx.notices.push(text);
-  ctx.acks?.push(() => { if (readNotice(ctx.session) === text) removeNotice(ctx.session); });
+  ctx.acks?.push(() => {
+    if (readNotice(ctx.session) === text) removeNotice(ctx.session);
+  });
 }
 
 export function emptyState(name: string): SessionState {
@@ -134,7 +132,11 @@ export async function loadRef(session: string, ref: string) {
  *  since the snapshot (#80). With `enabled`, a disabled element fails too, at
  *  once, and nothing is clicked (F20). With `hit`, so does one another
  *  element covers at its click point (#112). One daemon round trip. */
-export async function liveSelector(c: DaemonConnection, target: Ref, opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {}): Promise<string> {
+export async function liveSelector(
+  c: DaemonConnection,
+  target: Ref,
+  opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {},
+): Promise<string> {
   const ref = target.id;
   const selector = await c.request("resolve", [resolveRefScript(target, opts)]);
   if ((selector as { gone?: unknown } | null)?.gone === true) {
@@ -208,24 +210,24 @@ export function dialogsJson(c: DaemonConnection): Omit<DialogReport, "unanswered
 /** `withClient` for a command that prints the dialogs the daemon answered
  *  (through `replyPage` or `modalState`): only such a command takes them,
  *  so a report is never lost to one that would not print it. */
-export function withPageClient<T>(
-  ctx: CommandContext,
-  fn: (c: DaemonConnection) => Promise<T>,
-  opts: ConnectOptions = {},
-): Promise<T> {
-  return withClient(ctx, async (c) => {
-    c.reportDialogs();
-    try {
-      return await fn(c);
-    } catch (err) {
-      // The daemon handed this command its reports, so they are printed with
-      // the error or never: the error stays the same object (its class sets
-      // the exit code), and the dialogs ride along on it.
-      const dialogs = c.dialogs();
-      if (dialogs.length === 0) throw err;
-      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { dialogs });
-    }
-  }, opts);
+export function withPageClient<T>(ctx: CommandContext, fn: (c: DaemonConnection) => Promise<T>, opts: ConnectOptions = {}): Promise<T> {
+  return withClient(
+    ctx,
+    async (c) => {
+      c.reportDialogs();
+      try {
+        return await fn(c);
+      } catch (err) {
+        // The daemon handed this command its reports, so they are printed with
+        // the error or never: the error stays the same object (its class sets
+        // the exit code), and the dialogs ride along on it.
+        const dialogs = c.dialogs();
+        if (dialogs.length === 0) throw err;
+        throw Object.assign(err instanceof Error ? err : new Error(String(err)), { dialogs });
+      }
+    },
+    opts,
+  );
 }
 
 /** After an action that may have navigated, persist the page the daemon

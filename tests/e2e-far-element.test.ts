@@ -59,15 +59,18 @@ runOrSkip("e2e: click and fill reach an element below the fold", () => {
     process.env.BOWSER_OP_TIMEOUT_MS = "8000";
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response({ "/covered": COVERED, "/scroll-alert": SCROLL_ALERT }[new URL(req.url).pathname] ?? LONG, {
-        headers: { "content-type": "text/html; charset=utf-8" },
-      }),
+      fetch: (req) =>
+        new Response({ "/covered": COVERED, "/scroll-alert": SCROLL_ALERT }[new URL(req.url).pathname] ?? LONG, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
     });
     base = server.url.toString().replace(/\/$/, "");
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     if (origTimeout === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;

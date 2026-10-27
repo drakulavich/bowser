@@ -23,7 +23,11 @@ const runOrSkip = E2E && process.platform === "darwin" ? describe : describe.ski
 const ROOT = join(import.meta.dir, "..");
 const CLI = join(ROOT, "src", "cli.ts");
 
-interface Result { code: number; out: string; err: string }
+interface Result {
+  code: number;
+  out: string;
+  err: string;
+}
 
 runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
   let tmp: string;
@@ -52,7 +56,10 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
 
   async function run(cli: string, s: string, args: string[]): Promise<Result> {
     const proc = Bun.spawn([process.execPath, cli, `-s=${s}`, ...args], {
-      env: { ...process.env, HOME: home }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      env: { ...process.env, HOME: home },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
     const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     return { code, out: out.trim(), err: err.trim() };
@@ -64,8 +71,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     return r.out;
   }
 
-  const notice = (s: string, was: string, rest: string) =>
-    `bowser: session '${s}' restarted for bowser ${pkg.version} (was ${was}): ${rest}`;
+  const notice = (s: string, was: string, rest: string) => `bowser: session '${s}' restarted for bowser ${pkg.version} (was ${was}): ${rest}`;
 
   beforeAll(async () => {
     tmp = await mkdtemp(join(tmpdir(), "bowser-upgrade-"));
@@ -75,7 +81,10 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       port: 0,
       async fetch(req) {
         const path = new URL(req.url).pathname;
-        if (path === "/hit") { hits++; return new Response("ok"); }
+        if (path === "/hit") {
+          hits++;
+          return new Response("ok");
+        }
         if (path === "/slow" && slow) await Bun.sleep(4000);
         if (path === "/cart") return html(`<title>Cart</title><button onclick="fetch('/hit')">Add</button>`);
         return html("<title>Home</title><h1>Home</h1>");
@@ -95,12 +104,16 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     const s = session("push");
     await ok(old, s, ["open", `${base}/cart`]);
     await ok(old, s, ["eval", "(history.pushState(null, '', '/moved'), location.href)"]);
-    const saved = JSON.parse(await Bun.file(join(home, ".bowser", "sessions", s, "state.json")).text()) as { url: string };
+    const saved = JSON.parse(await Bun.file(join(home, ".bowser", "sessions", s, "state.json")).text()) as {
+      url: string;
+    };
     expect(saved.url).toBe(`${base}/cart`);
     const r = await run(CLI, s, ["eval", "location.pathname"]);
     expect(r.code).toBe(0);
     expect(r.out).toBe("/moved");
-    expect(r.err).toBe(notice(s, "0.0.1", `page reloaded at ${base}/moved; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`));
+    expect(r.err).toBe(
+      notice(s, "0.0.1", `page reloaded at ${base}/moved; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`),
+    );
   });
 
   test("snapshot restarts an older daemon, reopens the page and says what was lost", async () => {
@@ -110,7 +123,9 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     const r = await run(CLI, s, ["snapshot"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain('button "Add"');
-    expect(r.err).toBe(notice(s, "0.0.1", `page reloaded at ${base}/cart; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`));
+    expect(r.err).toBe(
+      notice(s, "0.0.1", `page reloaded at ${base}/cart; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`),
+    );
     expect(await daemonPids(s)).toHaveLength(1);
   }, 60_000);
 
@@ -149,7 +164,10 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     expect(hits).toBe(0);
   }, 60_000);
 
-  for (const [label, lockedBy] of [["", undefined], [" with a dead holder's lock left behind", "dead"]] as const) {
+  for (const [label, lockedBy] of [
+    ["", undefined],
+    [" with a dead holder's lock left behind", "dead"],
+  ] as const) {
     test(`two commands at once restart the session once${label}`, async () => {
       const old = await copyAt(`old-d${lockedBy ?? ""}`, "0.0.1");
       const s = session(`twice${lockedBy ?? ""}`);
@@ -203,14 +221,19 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     slow = true;
     try {
       const proc = Bun.spawn([process.execPath, CLI, `-s=${s}`, "localstorage-get", "tok"], {
-        env: { ...process.env, HOME: home }, stdin: "ignore", stdout: "ignore", stderr: "ignore",
+        env: { ...process.env, HOME: home },
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
       });
       await Bun.sleep(1200);
       proc.kill("SIGKILL");
       await proc.exited;
       const next = await run(CLI, s, ["eval", "1"]);
       expect(next.code).toBe(0);
-      expect(next.err).toBe(notice(s, "0.0.1", `page reload at ${base}/slow was interrupted; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`));
+      expect(next.err).toBe(
+        notice(s, "0.0.1", `page reload at ${base}/slow was interrupted; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`),
+      );
       const after = await run(CLI, s, ["eval", "1"]);
       expect(after).toEqual({ code: 0, out: "1", err: "" });
     } finally {
@@ -236,7 +259,12 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
   test("a running bowser mcp hands over to the installed version after an upgrade", async () => {
     const cli = await copyAt("old-mcp", "0.0.1");
     const s = session("mcp");
-    const proc = Bun.spawn([process.execPath, cli, "mcp"], { env: { ...process.env, HOME: home }, stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+    const proc = Bun.spawn([process.execPath, cli, "mcp"], {
+      env: { ...process.env, HOME: home },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "inherit",
+    });
     const lines: string[] = [];
     const reading = (async () => {
       const decoder = new TextDecoder();
@@ -244,10 +272,16 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       for await (const chunk of proc.stdout) {
         buf += decoder.decode(chunk, { stream: true });
         let i: number;
-        while ((i = buf.indexOf("\n")) !== -1) { lines.push(buf.slice(0, i)); buf = buf.slice(i + 1); }
+        while ((i = buf.indexOf("\n")) !== -1) {
+          lines.push(buf.slice(0, i));
+          buf = buf.slice(i + 1);
+        }
       }
     })();
-    const send = (...msgs: object[]) => { proc.stdin.write(msgs.map((m) => JSON.stringify(m) + "\n").join("")); proc.stdin.flush(); };
+    const send = (...msgs: object[]) => {
+      proc.stdin.write(msgs.map((m) => JSON.stringify(m) + "\n").join(""));
+      proc.stdin.flush();
+    };
     const answer = async (id: number) => {
       for (let t = 0; t < 600; t++) {
         const hit = lines.map((l) => JSON.parse(l)).find((r) => r.id === id);
@@ -256,7 +290,12 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       }
       throw new Error(`no answer for id ${id}`);
     };
-    const call = (id: number, name: string, args: object) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: { session: s, ...args } } });
+    const call = (id: number, name: string, args: object) => ({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name, arguments: { session: s, ...args } },
+    });
     try {
       send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
       send({ jsonrpc: "2.0", method: "notifications/initialized" });

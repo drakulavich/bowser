@@ -49,7 +49,10 @@ const claimed = (text: string): string[] => {
 const REGISTERED = new Set(COMMANDS.map((c) => c.name));
 
 describe("the command-reference table matches the registry", () => {
-  for (const [file, text] of [["README", README], ["SKILL.md", SKILL]] as const) {
+  for (const [file, text] of [
+    ["README", README],
+    ["SKILL.md", SKILL],
+  ] as const) {
     test(`${file}: every registered command has a row`, () => {
       const rows = tableCommands(text);
       expect([...REGISTERED].filter((n) => !rows.has(n))).toEqual([]);
@@ -86,26 +89,23 @@ describe("screenshot is documented as the viewport", () => {
 });
 
 // The Bun floor is engines.bun in package.json; the runtime guard reads it
-// there. The docs, the openspec notes and CI state it by hand, and a bump that
-// missed one would go unnoticed. Every statement must name the floor, and each
-// file must keep at least one, so a deleted statement fails too.
+// there. The docs and the openspec notes state it by hand, CI runs the Bun in
+// .bun-version, and a bump that missed one would go unnoticed. Every statement
+// must name the floor, and each file must keep at least one, so a deleted
+// statement fails too.
 describe("every statement of the Bun floor names engines.bun", () => {
   const floor = pkg.engines.bun.replace(/^>=\s*/, "");
-  const FLOOR_FILES = [
-    "README.md",
-    "skills/bowser/SKILL.md",
-    ".github/workflows/test.yml",
-    "openspec/config.yaml",
-    "openspec/specs/GLOSSARY.md",
-  ];
+  const FLOOR_FILES = ["README.md", "skills/bowser/SKILL.md", "openspec/config.yaml", "openspec/specs/GLOSSARY.md"];
   for (const file of FLOOR_FILES) {
     test(file, () => {
       const text = readFileSync(join(ROOT, file), "utf8");
-      const stated = [...text.matchAll(/Bun\s*(?:≥|>=)\s*([\d.]+)|bun-version:\s*"?>=\s*([\d.]+)/g)].map((m) =>
-        (m[1] ?? m[2]!).replace(/\.$/, ""),
-      );
+      const stated = [...text.matchAll(/Bun\s*(?:≥|>=)\s*([\d.]+)|bun-version:\s*"?>=\s*([\d.]+)/g)].map((m) => (m[1] ?? m[2]!).replace(/\.$/, ""));
       expect(stated.length).toBeGreaterThan(0);
       expect(stated.filter((v) => v !== floor)).toEqual([]);
     });
   }
+
+  test(".bun-version", () => {
+    expect(readFileSync(join(ROOT, ".bun-version"), "utf8").trim()).toBe(floor);
+  });
 });

@@ -91,10 +91,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
         i++;
         continue;
       }
-      const value =
-        spec.kind === "boolean"
-          ? (eq >= 0 ? a.slice(eq + 1) === "true" : true)
-          : (eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? ""));
+      const value = spec.kind === "boolean" ? (eq >= 0 ? a.slice(eq + 1) === "true" : true) : eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? "");
       assignFlag(out, spec, value);
       i++;
       continue;
@@ -109,10 +106,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
         i++;
         continue;
       }
-      const value =
-        spec.kind === "boolean"
-          ? (eq >= 0 ? a.slice(eq + 1) === "true" : true)
-          : (eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? ""));
+      const value = spec.kind === "boolean" ? (eq >= 0 ? a.slice(eq + 1) === "true" : true) : eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? "");
       assignFlag(out, spec, value);
       i++;
       continue;

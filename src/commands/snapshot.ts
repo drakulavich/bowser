@@ -14,10 +14,7 @@ function checkFilename(filename: string | undefined): void {
   if (filename !== undefined && !filename.trim()) throw new UserError("usage: --filename needs a file name");
 }
 
-export async function cmdSnapshot(
-  ctx: CommandContext,
-  opts: { filename?: string; depth?: string } = {},
-): Promise<string> {
+export async function cmdSnapshot(ctx: CommandContext, opts: { filename?: string; depth?: string } = {}): Promise<string> {
   checkFilename(opts.filename);
   // 0 (the default) means unlimited, as in playwright-cli.
   if (opts.depth !== undefined && !/^\d+$/.test(opts.depth)) {
@@ -28,7 +25,12 @@ export async function cmdSnapshot(
     const snap = (await c.request("evaluate", [SNAPSHOT_SCRIPT])) as SnapshotResult;
     await saveState({
       ...(await loadState(ctx.session)),
-      name: ctx.session, url: snap.url, title: snap.title, refs: snap.refs, doc: snap.doc, updatedAt: Date.now(),
+      name: ctx.session,
+      url: snap.url,
+      title: snap.title,
+      refs: snap.refs,
+      doc: snap.doc,
+      updatedAt: Date.now(),
     });
     // Dialogs the daemon answered since the last command that printed them
     // (a page timer's, say). Nothing is blocked, so the tree renders too.
@@ -44,9 +46,7 @@ export async function cmdSnapshot(
       await Bun.write(abs, renderPage(snap, depth, modalState(c)) + "\n");
       return reply(ctx, { ok: true, filename: abs, ...withDialogs }, `wrote ${abs}`);
     }
-    return ctx.json
-      ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...withDialogs }, null, 2)
-      : renderPage(snap, depth, modalState(c));
+    return ctx.json ? JSON.stringify({ snapshot: renderTree(snap.tree, depth), ...withDialogs }, null, 2) : renderPage(snap, depth, modalState(c));
   });
 }
 
@@ -55,18 +55,19 @@ export async function cmdSnapshot(
  *  session (ET-61, #154). */
 const ALTERNATE_MS = 5000;
 
-export async function cmdMarkdown(
-  ctx: CommandContext,
-  ref?: string,
-  opts: { filename?: string } = {},
-): Promise<string> {
+export async function cmdMarkdown(ctx: CommandContext, ref?: string, opts: { filename?: string } = {}): Promise<string> {
   checkFilename(opts.filename);
   const saved = ref === undefined ? undefined : await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
     const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
     const budget = opTimeoutMs();
     const fetchMs = Math.min(ALTERNATE_MS, budget ? Math.floor(budget / 2) : ALTERNATE_MS);
-    const { markdown, source, url, title } = (await c.request("evaluate", [markdownScript(selector, fetchMs)])) as { markdown: string; source: string; url: string; title: string };
+    const { markdown, source, url, title } = (await c.request("evaluate", [markdownScript(selector, fetchMs)])) as {
+      markdown: string;
+      source: string;
+      url: string;
+      title: string;
+    };
     if (opts.filename) {
       const abs = resolve(opts.filename);
       await Bun.write(abs, markdown + "\n");
@@ -81,10 +82,7 @@ export async function cmdMarkdown(
  *  (suffix inserted before the extension). `exists` is injected for testing.
  *  Best-effort: there is a small check-then-write window, acceptable for a
  *  single-user CLI. */
-export async function nextAvailablePath(
-  base: string,
-  exists: (p: string) => Promise<boolean>,
-): Promise<string> {
+export async function nextAvailablePath(base: string, exists: (p: string) => Promise<boolean>): Promise<string> {
   if (!(await exists(base))) return base;
   const slash = base.lastIndexOf("/");
   const dot = base.lastIndexOf(".");
@@ -131,7 +129,7 @@ async function tooLargeToCapture(c: DaemonConnection): Promise<UserError | undef
     if (height <= maxHeight) return undefined;
     return new UserError(
       `screenshot: WebKit cannot capture a ${width}x${height} viewport at pixel ratio ${dpr} (its pixels would fill 4 GiB); ` +
-      `run 'bowser resize ${width} ${maxHeight}' or smaller`,
+        `run 'bowser resize ${width} ${maxHeight}' or smaller`,
     );
   } catch {
     return undefined;
@@ -147,17 +145,12 @@ function parseScale(raw: string): number {
   return n;
 }
 
-export async function cmdScreenshot(
-  ctx: CommandContext,
-  opts: { filename?: string; scale?: string } = {},
-): Promise<string> {
+export async function cmdScreenshot(ctx: CommandContext, opts: { filename?: string; scale?: string } = {}): Promise<string> {
   checkFilename(opts.filename);
   const scale = opts.scale === undefined ? undefined : parseScale(opts.scale);
   // The viewport only, as playwright-cli without --full-page. The default name auto-increments so repeated screenshots
   // don't clobber each other; an explicit --filename writes exactly there.
-  const filename =
-    opts.filename ??
-    (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
+  const filename = opts.filename ?? (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
   // Resolve against the CLI's cwd and let the daemon write the file. The daemon
   // runs with a different cwd, and its PNG payload (~140 KB base64) must not be
   // shipped back over the socket — so we hand it an absolute target path.
@@ -188,11 +181,15 @@ export const COMMANDS: Command[] = [
     name: "snapshot",
     summary: "Capture an aria-tree YAML snapshot of the page (refs for interaction)",
     positional: [],
-    flags: [{ name: "filename", kind: "string" }, { name: "depth", kind: "string" }],
-    run: (ctx, a) => cmdSnapshot(ctx, {
-      filename: str(a.flags, "filename"),
-      depth: str(a.flags, "depth"),
-    }),
+    flags: [
+      { name: "filename", kind: "string" },
+      { name: "depth", kind: "string" },
+    ],
+    run: (ctx, a) =>
+      cmdSnapshot(ctx, {
+        filename: str(a.flags, "filename"),
+        depth: str(a.flags, "depth"),
+      }),
   },
   {
     name: "markdown",
@@ -205,7 +202,10 @@ export const COMMANDS: Command[] = [
     name: "screenshot",
     summary: "Save a PNG screenshot of the viewport",
     positional: [],
-    flags: [{ name: "filename", kind: "string" }, { name: "scale", kind: "string" }],
+    flags: [
+      { name: "filename", kind: "string" },
+      { name: "scale", kind: "string" },
+    ],
     run: (ctx, a) => cmdScreenshot(ctx, { filename: str(a.flags, "filename"), scale: str(a.flags, "scale") }),
   },
 ];

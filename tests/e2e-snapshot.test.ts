@@ -150,7 +150,9 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -178,7 +180,10 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     // capture focuses the button.
     const webkitFocus: Deviation[] = [
       { line: "- generic [ref=e1]:", becomes: "- generic [active] [ref=e1]:" },
-      { line: '    - button "Add" [active] [ref=e5] [cursor=pointer]', becomes: '    - button "Add" [ref=e5] [cursor=pointer]' },
+      {
+        line: '    - button "Add" [active] [ref=e5] [cursor=pointer]',
+        becomes: '    - button "Add" [ref=e5] [cursor=pointer]',
+      },
     ];
     expect(added).toBe(withDeviations(await golden("todo-app-added"), webkitFocus));
     // Sticky: unchanged elements keep their refs, new ones continue the counter.
@@ -242,17 +247,19 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     // Differs from playwright-cli (above) only by the ruled iframe leaves and
     // spec 3.6: playwright hard-codes pointer events on for iframes, bowser
     // requires them, so the first iframe has no ref and the second is e6.
-    expect(tree(await cmdSnapshot(ctx))).toBe([
-      "- generic [active] [ref=e1]:",
-      "  - paragraph [ref=e2]: a focusable span b",
-      "  - paragraph [ref=e3]: c clickable span d",
-      "  - paragraph [ref=e4]:",
-      "    - text: e",
-      '    - button "role span" [ref=e5]',
-      "    - text: f",
-      "  - iframe",
-      "  - iframe [ref=e6]",
-    ].join("\n"));
+    expect(tree(await cmdSnapshot(ctx))).toBe(
+      [
+        "- generic [active] [ref=e1]:",
+        "  - paragraph [ref=e2]: a focusable span b",
+        "  - paragraph [ref=e3]: c clickable span d",
+        "  - paragraph [ref=e4]:",
+        "    - text: e",
+        '    - button "role span" [ref=e5]',
+        "    - text: f",
+        "  - iframe",
+        "  - iframe [ref=e6]",
+      ].join("\n"),
+    );
   }, 60_000);
 
   test("fill accepts a contenteditable ref and replaces its text", async () => {

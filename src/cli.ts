@@ -23,9 +23,7 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   // once printed 1. Words after `--` count too.
   const declared = command.positional.length;
   if (args.positional.length > declared) {
-    throw new UserError(
-      `usage: too many arguments for '${command.name}': expected ${declared}, received ${args.positional.length}`,
-    );
+    throw new UserError(`usage: too many arguments for '${command.name}': expected ${declared}, received ${args.positional.length}`);
   }
   // A missing required positional is refused here too (#60): the commands
   // used to see "" for it, so `select e3` selected the empty value. An empty
@@ -34,7 +32,13 @@ export async function run(argv: string[], base: Partial<CommandContext> = {}): P
   if (args.positional.length < command.positional.filter((p) => p.required).length) {
     throw new UserError(`usage: bowser ${usageOf(command)}`);
   }
-  const ctx: CommandContext = { restart: restartSession, ...base, session: args.session, json: args.json, command: command.name };
+  const ctx: CommandContext = {
+    restart: restartSession,
+    ...base,
+    session: args.session,
+    json: args.json,
+    command: command.name,
+  };
   return command.run(ctx, { positional: args.positional, flags: args.flags });
 }
 

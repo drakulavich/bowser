@@ -6,9 +6,7 @@ import { withTimeout } from "../serialize.ts";
 import { loadState, saveState } from "../state.ts";
 import { connector, type CommandContext } from "./context.ts";
 import { cmdOpen, stopDaemon } from "./navigation.ts";
-import {
-  beingRestarted, claimRestartLock, otherHolder, releaseRestartLock, removeNotice, writeNotice,
-} from "./restart-lock.ts";
+import { beingRestarted, claimRestartLock, otherHolder, releaseRestartLock, removeNotice, writeNotice } from "./restart-lock.ts";
 import { UserError } from "../errors.ts";
 
 /** Whether this command restarted the session. False when it waited for

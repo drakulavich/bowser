@@ -132,19 +132,23 @@ runOrSkip("e2e: real browser", () => {
   function lateFontPage(font: () => Promise<Response>) {
     return Bun.serve({
       port: 0,
-      fetch: (req) => new URL(req.url).pathname === "/f.ttf"
-        ? font()
-        : new Response(
-          "<style>@font-face{font-family:Late;src:url(/f.ttf);font-display:block}p{font:40px Late}</style>" +
-          "<div id=a></div><script>setTimeout(() => { a.innerHTML = '<p>late</p>' }, 300)</script>",
-          { headers: { "content-type": "text/html" } },
-        ),
+      fetch: (req) =>
+        new URL(req.url).pathname === "/f.ttf"
+          ? font()
+          : new Response(
+              "<style>@font-face{font-family:Late;src:url(/f.ttf);font-display:block}p{font:40px Late}</style>" +
+                "<div id=a></div><script>setTimeout(() => { a.innerHTML = '<p>late</p>' }, 300)</script>",
+              { headers: { "content-type": "text/html" } },
+            ),
     });
   }
   const fontBytes = () => new Response("x", { headers: { "content-type": "font/ttf" } });
 
   test("screenshot waits for a late font", async () => {
-    const server = lateFontPage(async () => { await Bun.sleep(3000); return fontBytes(); });
+    const server = lateFontPage(async () => {
+      await Bun.sleep(3000);
+      return fontBytes();
+    });
     try {
       await cmdOpen({ session, json: false }, server.url.toString());
       const probe = await cmdRunCode({ session, json: false }, "await new Promise((r) => setTimeout(r, 500)); return document.fonts.status");
@@ -246,9 +250,7 @@ runOrSkip("e2e: real browser", () => {
       port: 0,
       fetch: (req) => {
         const u = new URL(req.url);
-        const body = u.pathname === "/long"
-          ? "<title>long</title><p>landed</p>"
-          : `<title>start</title><a href="/long?${u.searchParams.get("i")}-${q}">go</a>`;
+        const body = u.pathname === "/long" ? "<title>long</title><p>landed</p>" : `<title>start</title><a href="/long?${u.searchParams.get("i")}-${q}">go</a>`;
         return new Response(body, { headers: { "content-type": "text/html" } });
       },
     });

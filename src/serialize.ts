@@ -16,13 +16,18 @@ export function createSerializer(): Serializer {
   let running: string | undefined;
   const start = <T>(task: () => Promise<T>, label?: string): Promise<T> => {
     running = label;
-    return task().finally(() => { running = undefined; });
+    return task().finally(() => {
+      running = undefined;
+    });
   };
   const serialize = <T>(task: () => Promise<T>, label?: string): Promise<T> => {
     // Run after the previous task settles, regardless of its outcome. Using
     // arrow wrappers (not `tail.then(task, task)`) keeps task zero-arg — a
     // rejection reason can never leak in as an argument.
-    const run = tail.then(() => start(task, label), () => start(task, label));
+    const run = tail.then(
+      () => start(task, label),
+      () => start(task, label),
+    );
     // Keep tail's rejection handled so the chain continues; `run` still
     // propagates the rejection to the caller.
     tail = run.catch(() => {});
@@ -36,13 +41,16 @@ export function createSerializer(): Serializer {
 export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   if (!(ms > 0)) return p;
   return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(
-      () => reject(new Error(`operation '${label}' timed out after ${ms}ms`)),
-      ms,
-    );
+    const t = setTimeout(() => reject(new Error(`operation '${label}' timed out after ${ms}ms`)), ms);
     p.then(
-      (v) => { clearTimeout(t); resolve(v); },
-      (e) => { clearTimeout(t); reject(e); },
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
     );
   });
 }

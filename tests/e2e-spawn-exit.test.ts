@@ -35,27 +35,34 @@ runOrSkip("e2e: a daemon-spawning command exits (F7)", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose({ session, json: true }); } catch {}
+    try {
+      await cmdClose({ session, json: true });
+    } catch {}
     await killDaemons(session);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });
 
-  test("`open` on a new session prints its answer and exits", async () => {
-    const proc = Bun.spawn(
-      [process.execPath, CLI, `-s=${session}`, "open", "data:text/html,<title>spawn</title><h1>x</h1>"],
-      { env: { ...process.env }, stdout: "pipe", stderr: "pipe" },
-    );
-    const started = Date.now();
-    const timer = setTimeout(() => proc.kill("SIGKILL"), BOUND_MS);
-    const code = await proc.exited;
-    clearTimeout(timer);
-    const out = await new Response(proc.stdout).text();
-    expect(out).toContain("spawn");
-    expect(proc.signalCode).toBeNull();
-    expect(code).toBe(0);
-    expect(Date.now() - started).toBeLessThan(BOUND_MS);
-  }, BOUND_MS + 10_000);
+  test(
+    "`open` on a new session prints its answer and exits",
+    async () => {
+      const proc = Bun.spawn([process.execPath, CLI, `-s=${session}`, "open", "data:text/html,<title>spawn</title><h1>x</h1>"], {
+        env: { ...process.env },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const started = Date.now();
+      const timer = setTimeout(() => proc.kill("SIGKILL"), BOUND_MS);
+      const code = await proc.exited;
+      clearTimeout(timer);
+      const out = await new Response(proc.stdout).text();
+      expect(out).toContain("spawn");
+      expect(proc.signalCode).toBeNull();
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(BOUND_MS);
+    },
+    BOUND_MS + 10_000,
+  );
 });
 
 // F6: with BOWSER_DAEMON_DEBUG=1 the daemon used to inherit the caller's
@@ -79,7 +86,9 @@ runOrSkip("e2e: BOWSER_DAEMON_DEBUG writes the daemon's output to a log, never t
 
   afterAll(async () => {
     for (const session of [ok, broken, hinted]) {
-      try { await cmdClose({ session, json: true }); } catch {}
+      try {
+        await cmdClose({ session, json: true });
+      } catch {}
       await killDaemons(session);
     }
     if (origHome !== undefined) process.env.HOME = origHome;
@@ -90,7 +99,9 @@ runOrSkip("e2e: BOWSER_DAEMON_DEBUG writes the daemon's output to a log, never t
    *  give up at EOF_MS: a daemon holding the pipe keeps EOF away. */
   const runPiped = async (args: string[]) => {
     const proc = Bun.spawn([process.execPath, CLI, ...args], {
-      env: { ...process.env, BOWSER_DAEMON_DEBUG: "1" }, stdout: "pipe", stderr: "pipe",
+      env: { ...process.env, BOWSER_DAEMON_DEBUG: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
     });
     const both = Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     const timeout = Bun.sleep(EOF_MS).then(() => "no EOF" as const);
@@ -99,34 +110,48 @@ runOrSkip("e2e: BOWSER_DAEMON_DEBUG writes the daemon's output to a log, never t
     return got;
   };
 
-  test("a piped `open` that spawns the daemon reaches EOF", async () => {
-    const got = await runPiped([`-s=${ok}`, "open", "data:text/html,<title>debug</title><h1>x</h1>"]);
-    expect(got).not.toBe("no EOF");
-    const [out, , code] = got as [string, string, number];
-    expect(out).toContain("debug");
-    expect(code).toBe(0);
-  }, EOF_MS + 10_000);
+  test(
+    "a piped `open` that spawns the daemon reaches EOF",
+    async () => {
+      const got = await runPiped([`-s=${ok}`, "open", "data:text/html,<title>debug</title><h1>x</h1>"]);
+      expect(got).not.toBe("no EOF");
+      const [out, , code] = got as [string, string, number];
+      expect(out).toContain("debug");
+      expect(code).toBe(0);
+    },
+    EOF_MS + 10_000,
+  );
 
-  test("a daemon that fails to start leaves its error in daemon.log, and the CLI names the file", async () => {
-    // A directory where the socket goes: the daemon's listen fails.
-    await mkdir(join(sessionDir(broken), "sock", "x"), { recursive: true });
-    const got = await runPiped([`-s=${broken}`, "open", "data:text/html,x"]);
-    expect(got).not.toBe("no EOF");
-    const [, err, code] = got as [string, string, number];
-    expect(code).toBe(2);
-    expect(err).toContain(`did not start in time; its output is in ${daemonLogPath(broken)}`);
-    expect(await Bun.file(daemonLogPath(broken)).text()).toContain("EADDRINUSE");
-  }, EOF_MS + 10_000);
+  test(
+    "a daemon that fails to start leaves its error in daemon.log, and the CLI names the file",
+    async () => {
+      // A directory where the socket goes: the daemon's listen fails.
+      await mkdir(join(sessionDir(broken), "sock", "x"), { recursive: true });
+      const got = await runPiped([`-s=${broken}`, "open", "data:text/html,x"]);
+      expect(got).not.toBe("no EOF");
+      const [, err, code] = got as [string, string, number];
+      expect(code).toBe(2);
+      expect(err).toContain(`did not start in time; its output is in ${daemonLogPath(broken)}`);
+      expect(await Bun.file(daemonLogPath(broken)).text()).toContain("EADDRINUSE");
+    },
+    EOF_MS + 10_000,
+  );
 
-  test("says to rerun with BOWSER_DAEMON_DEBUG=1 when the daemon fails to start", async () => {
-    await mkdir(join(sessionDir(hinted), "sock", "x"), { recursive: true });
-    const { BOWSER_DAEMON_DEBUG: _, ...env } = process.env;
-    const proc = Bun.spawn([process.execPath, CLI, `-s=${hinted}`, "open", "data:text/html,x", "--persistent"], {
-      env, stdout: "pipe", stderr: "pipe",
-    });
-    const [err, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-    expect(code).toBe(2);
-    expect(err).toContain("did not start in time; rerun with BOWSER_DAEMON_DEBUG=1 to see why");
-    expect(err).not.toContain("may not support");
-  }, EOF_MS + 10_000);
+  test(
+    "says to rerun with BOWSER_DAEMON_DEBUG=1 when the daemon fails to start",
+    async () => {
+      await mkdir(join(sessionDir(hinted), "sock", "x"), { recursive: true });
+      const { BOWSER_DAEMON_DEBUG: _, ...env } = process.env;
+      const proc = Bun.spawn([process.execPath, CLI, `-s=${hinted}`, "open", "data:text/html,x", "--persistent"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [err, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+      expect(code).toBe(2);
+      expect(err).toContain("did not start in time; rerun with BOWSER_DAEMON_DEBUG=1 to see why");
+      expect(err).not.toContain("may not support");
+    },
+    EOF_MS + 10_000,
+  );
 });

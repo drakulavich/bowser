@@ -26,8 +26,16 @@ import { opTimeoutMs } from "../budget.ts";
 import { lineReader } from "../socket-lines.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
-  IS_URGENT, pngSize,
-  type ArgsOf, type DaemonRequest, type DaemonResponse, type DialogReport, type DialogState, type Op, type PageState, type ResultOf,
+  IS_URGENT,
+  pngSize,
+  type ArgsOf,
+  type DaemonRequest,
+  type DaemonResponse,
+  type DialogReport,
+  type DialogState,
+  type Op,
+  type PageState,
+  type ResultOf,
 } from "./protocol.ts";
 import { pidPath, socketPath } from "./client.ts";
 import { claimSession } from "./pidfile.ts";
@@ -134,9 +142,12 @@ const CLOSED_MS = 5000;
 
 export function dispatch(req: DaemonRequest, lane: Lane): void {
   if (IS_URGENT.has(req.op)) {
-    lane.handle(req).then(lane.reply).catch(() => {
-      // handle() never rejects; mirrors the guard on the serialized path.
-    });
+    lane
+      .handle(req)
+      .then(lane.reply)
+      .catch(() => {
+        // handle() never rejects; mirrors the guard on the serialized path.
+      });
     return;
   }
   if (lane.mark?.stuck) {
@@ -188,7 +199,11 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     }
     if (!running) {
       const prev = lane.serialize.running ?? "an earlier operation";
-      answer({ id: req.id, ok: false, error: `${timedOut} (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)` });
+      answer({
+        id: req.id,
+        ok: false,
+        error: `${timedOut} (waiting for '${prev}', which timed out and is still running; run 'bowser close' if the session stays stuck)`,
+      });
       return;
     }
     const dialogs = lane.timedOut?.(req);
@@ -211,11 +226,14 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
         grace = setTimeout(recover, graceMs);
         return;
       }
-      recovery = lane.recover?.().catch(() => false).then(() => {
-        if (settled || !lane.mark) return;
-        lane.mark.stuck = mine;
-        for (const w of [...waiting ?? []]) w(mine.op);
-      });
+      recovery = lane
+        .recover?.()
+        .catch(() => false)
+        .then(() => {
+          if (settled || !lane.mark) return;
+          lane.mark.stuck = mine;
+          for (const w of [...(waiting ?? [])]) w(mine.op);
+        });
     };
     grace = setTimeout(recover, graceMs);
   };
@@ -226,47 +244,55 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
     gone = true;
     if (answered) return;
     if (!running) expire();
-    else orphan = setTimeout(() => { if (!answered) expire(); }, lane.closedMs ?? CLOSED_MS);
+    else
+      orphan = setTimeout(() => {
+        if (!answered) expire();
+      }, lane.closedMs ?? CLOSED_MS);
   });
   const queue = (): void => {
-    lane.serialize(async () => {
-      if (answered) return;
-      running = true;
-      waiting?.delete(onStuck);
-      let res = await lane.handle(req, deadline);
-      if (!res.ok && req.op === "click" && res.error === `timeout waiting for '${req.args?.[0]}' to be actionable`) {
-        res = { ...res, error: timeoutMessage(req, budget, "acting") };
-      }
-      settled = true;
-      if (lane.mark?.stuck === mine) lane.mark.stuck = undefined;
-      // Settled within the grace: no reload, and the next op starts now.
-      clearTimeout(grace);
-      answer(res);
-      // Hold the lane until the recovery's reload has landed, so the next op
-      // sees the page it left rather than racing it.
-      await recovery;
-    }, req.op).catch(() => {
-      // handle() never rejects; guards against an unhandled rejection.
-    });
+    lane
+      .serialize(async () => {
+        if (answered) return;
+        running = true;
+        waiting?.delete(onStuck);
+        let res = await lane.handle(req, deadline);
+        if (!res.ok && req.op === "click" && res.error === `timeout waiting for '${req.args?.[0]}' to be actionable`) {
+          res = { ...res, error: timeoutMessage(req, budget, "acting") };
+        }
+        settled = true;
+        if (lane.mark?.stuck === mine) lane.mark.stuck = undefined;
+        // Settled within the grace: no reload, and the next op starts now.
+        clearTimeout(grace);
+        answer(res);
+        // Hold the lane until the recovery's reload has landed, so the next op
+        // sees the page it left rather than racing it.
+        await recovery;
+      }, req.op)
+      .catch(() => {
+        // handle() never rejects; guards against an unhandled rejection.
+      });
   };
   if (!lane.gate || !lane.conn) {
     queue();
     return;
   }
   atGate = true;
-  lane.gate.enter(lane.conn).then((done) => {
-    atGate = false;
-    if (answered) done();
-    else {
-      leaveGate = done;
-      queue();
-    }
-  }, () => {
-    // Its connection closed while it waited: nobody is left to answer.
-    answered = true;
-    waiting?.delete(onStuck);
-    clearTimeout(timer);
-  });
+  lane.gate.enter(lane.conn).then(
+    (done) => {
+      atGate = false;
+      if (answered) done();
+      else {
+        leaveGate = done;
+        queue();
+      }
+    },
+    () => {
+      // Its connection closed while it waited: nobody is left to answer.
+      answered = true;
+      waiting?.delete(onStuck);
+      clearTimeout(timer);
+    },
+  );
 }
 
 function stuckMessage(op: string): string {
@@ -323,7 +349,9 @@ const handlers: Handlers = {
   press: (browser, key, modifiers) => browser.press(key, modifiers),
   hover: (browser, selector) => browser.hover(selector),
   select: (browser, selector, value) => browser.select(selector, value),
-  check: async (browser, selector) => { await browser.setChecked(selector, true); },
+  check: async (browser, selector) => {
+    await browser.setChecked(selector, true);
+  },
   uncheck: (browser, selector) => browser.setChecked(selector, false),
   screenshot: async (browser, path, scale) => {
     // When the CLI passes an absolute path, the daemon writes the PNG itself
@@ -393,7 +421,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
   // Whether the page has the shim, as far as the daemon knows. False after a
   // navigation, which also means the page's answer must be dropped.
   let shimmed = false;
-  browser.watchNavigation(() => { shimmed = false; });
+  browser.watchNavigation(() => {
+    shimmed = false;
+  });
   // Requests that overran their budget: their late replies reach nobody, so
   // they must not take reports.
   const abandoned = new WeakSet<DaemonRequest>();
@@ -443,7 +473,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     while (browser.navigationPending) {
       const left = deadline - clock.now();
       if (left <= 0) return { id: req.id, ok: false, error: `page is still loading ${url}; retry later, or run 'bowser close'` };
-      await new Promise<void>((r) => { clock.setTimeout(r, Math.min(10, left)); });
+      await new Promise<void>((r) => {
+        clock.setTimeout(r, Math.min(10, left));
+      });
     }
     return runShimmed(req, deadline);
   }
@@ -453,21 +485,24 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     // `handlers`: they are the ops that use the daemon's own state, and
     // threading it through the other handlers would be a change with two
     // consumers.
-    const fn = req.op === "state"
-      ? async (b: Browser): Promise<PageState> => ({
-          url: await b.realUrl(),
-          title: await b.realTitle(),
-          ...(state.profile ? { profile: state.profile } : {}),
-          ...(state.budgetMs !== undefined ? { budgetMs: state.budgetMs } : {}),
-        })
-      : req.op === "dialog-answer"
-      ? async (b: Browser, accept: boolean, text?: string): Promise<void> => {
-          // The shim holds the one-shot answer in the page, so a new
-          // document starts without one.
-          take(fromPage(await b.evaluate(dialogAnswerScript(text === undefined ? { accept } : { accept, text }))));
-          shimmed = true;
-        }
-      : Object.hasOwn(handlers, req.op) ? handlers[req.op as keyof Handlers] : undefined;
+    const fn =
+      req.op === "state"
+        ? async (b: Browser): Promise<PageState> => ({
+            url: await b.realUrl(),
+            title: await b.realTitle(),
+            ...(state.profile ? { profile: state.profile } : {}),
+            ...(state.budgetMs !== undefined ? { budgetMs: state.budgetMs } : {}),
+          })
+        : req.op === "dialog-answer"
+          ? async (b: Browser, accept: boolean, text?: string): Promise<void> => {
+              // The shim holds the one-shot answer in the page, so a new
+              // document starts without one.
+              take(fromPage(await b.evaluate(dialogAnswerScript(text === undefined ? { accept } : { accept, text }))));
+              shimmed = true;
+            }
+          : Object.hasOwn(handlers, req.op)
+            ? handlers[req.op as keyof Handlers]
+            : undefined;
     if (!fn) return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
     try {
       // The one cast at the wire boundary: args arrived as JSON, the handler
@@ -516,9 +551,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     if (NAVIGATES.has(req.op)) shimmed = false;
     // Bun's click otherwise waits 30 s for a covered target, past the
     // recovery reload, which leaves the session stuck (#112).
-    const res = await run(req.op === "click" && deadline !== Infinity
-      ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - clock.now())] }
-      : req);
+    const res = await run(
+      req.op === "click" && deadline !== Infinity ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - clock.now())] } : req,
+    );
     await sync();
     return res;
   }
@@ -539,9 +574,15 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
       if (cancelled) return { id: req.id, ok: false, error: "wait-for: cancelled" };
       if (met || clock.now() >= deadline) {
         await sync();
-        return { id: req.id, ok: true, result: { met, url: await browser.realUrl(), title: await browser.realTitle() } };
+        return {
+          id: req.id,
+          ok: true,
+          result: { met, url: await browser.realUrl(), title: await browser.realTitle() },
+        };
       }
-      await new Promise<void>((r) => { clock.setTimeout(r, Math.min(WAIT_POLL_MS, deadline - clock.now())); });
+      await new Promise<void>((r) => {
+        clock.setTimeout(r, Math.min(WAIT_POLL_MS, deadline - clock.now()));
+      });
     }
   }
 
@@ -629,24 +670,43 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
       open(socket) {
         const conn = {};
         const closing = new Set<() => void>();
-        const onClose = (fn: () => void) => { closing.add(fn); return () => { closing.delete(fn); }; };
+        const onClose = (fn: () => void) => {
+          closing.add(fn);
+          return () => {
+            closing.delete(fn);
+          };
+        };
         // Requests are newline-delimited, one reader per connection.
-        socket.data = { conn, closing, read: lineReader((line) => {
-          if (!line) return;
-          let req: DaemonRequest;
-          try {
-            req = JSON.parse(line) as DaemonRequest;
-          } catch (err) {
-            socketWriteAll(
-              socket as unknown as WritableSocket,
-              JSON.stringify({ id: -1, ok: false, error: "invalid JSON: " + String(err) }) + "\n",
-            );
-            return;
-          }
-          dispatch(req, { handle, serialize, gate, conn, onClose, mark, timeoutMs, timedOut: handle.timedOut, cancelAction: handle.cancelAction, recover: () => browser.interrupt(), phase: () => browser.phase, reply: (res) => {
-            socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
-          } });
-        }) };
+        socket.data = {
+          conn,
+          closing,
+          read: lineReader((line) => {
+            if (!line) return;
+            let req: DaemonRequest;
+            try {
+              req = JSON.parse(line) as DaemonRequest;
+            } catch (err) {
+              socketWriteAll(socket as unknown as WritableSocket, JSON.stringify({ id: -1, ok: false, error: "invalid JSON: " + String(err) }) + "\n");
+              return;
+            }
+            dispatch(req, {
+              handle,
+              serialize,
+              gate,
+              conn,
+              onClose,
+              mark,
+              timeoutMs,
+              timedOut: handle.timedOut,
+              cancelAction: handle.cancelAction,
+              recover: () => browser.interrupt(),
+              phase: () => browser.phase,
+              reply: (res) => {
+                socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
+              },
+            });
+          }),
+        };
       },
       close(socket) {
         gate.leave(socket.data.conn);

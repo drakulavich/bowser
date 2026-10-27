@@ -52,7 +52,9 @@ type LineSocket = Socket<(chunk: Uint8Array) => void>;
 export function lineSocket(onLine: (s: LineSocket, line: string) => void): SocketHandler<(chunk: Uint8Array) => void> {
   return {
     open(s) {
-      s.data = lineReader((line) => { if (line) onLine(s, line); });
+      s.data = lineReader((line) => {
+        if (line) onLine(s, line);
+      });
     },
     data(s, chunk) {
       s.data(chunk);
@@ -63,7 +65,12 @@ export function lineSocket(onLine: (s: LineSocket, line: string) => void): Socke
 /** A daemon of a given version: `ping` answers `version` ("pong" is every
  *  daemon through 0.7), `state` a blank page, `evaluate` 1. */
 export function daemonOf(version: string, url = "about:blank"): Answer {
-  return (req) => (req.op === "ping" ? version satisfies ResultOf<"ping">
-    : req.op === "state" ? { url, title: "" } satisfies ResultOf<"state">
-    : req.op === "evaluate" ? 1 : undefined);
+  return (req) =>
+    req.op === "ping"
+      ? (version satisfies ResultOf<"ping">)
+      : req.op === "state"
+        ? ({ url, title: "" } satisfies ResultOf<"state">)
+        : req.op === "evaluate"
+          ? 1
+          : undefined;
 }

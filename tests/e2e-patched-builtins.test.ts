@@ -72,7 +72,9 @@ runOrSkip("e2e: a page with patched builtins (#76)", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     else delete process.env.HOME;
@@ -127,7 +129,10 @@ runOrSkip("e2e: a page with patched builtins (#76)", () => {
     });
   }
 
-  for (const [variant, what] of [["?stringify", /JSON\.stringify/], ["?locked", /toJSON/]] as const) {
+  for (const [variant, what] of [
+    ["?stringify", /JSON\.stringify/],
+    ["?locked", /toJSON/],
+  ] as const) {
     test(`a page bowser cannot read (${variant}) fails loudly instead of answering its own text`, async () => {
       // open itself reads the page, so it may already refuse.
       const opened = await cmdOpen(ctx, server!.url.toString() + variant).then(
@@ -137,7 +142,12 @@ runOrSkip("e2e: a page with patched builtins (#76)", () => {
         },
         (e: Error) => e,
       );
-      const err = opened ?? (await cmdEval(ctx, "1").then(() => null, (e: Error) => e));
+      const err =
+        opened ??
+        (await cmdEval(ctx, "1").then(
+          () => null,
+          (e: Error) => e,
+        ));
       expect(err).not.toBeNull();
       expect(String(err)).toMatch(what);
       expect(String(err)).not.toContain("pwned");

@@ -57,14 +57,11 @@ const RULES: Rule[] = [
   },
   {
     name: "commands/* talk to the daemon only through client.ts and protocol.ts (never browser.ts or daemon/server.ts)",
-    violates: (file, text) =>
-      file.startsWith("src/commands/") &&
-      valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
+    violates: (file, text) => file.startsWith("src/commands/") && valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
   },
   {
     name: "daemon/client.ts does not import browser.ts",
-    violates: (file, text) =>
-      file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
+    violates: (file, text) => file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
   },
   {
     name: "only src/page-scripts.ts builds a script string for the page",
@@ -106,8 +103,7 @@ const RULES: Rule[] = [
     // Bun's socket.write() accepts what the buffer takes (about 8 KB on a
     // macOS Unix socket) and silently drops the rest; screenshot hung for 30 s
     // on it (#9). socketWriteAll() queues the remainder for `drain`.
-    violates: (file, text) =>
-      file !== "src/socket-write.ts" && /(?<!\bBun|\bprocess\.std(?:out|err))\.write\s*\(/.test(text),
+    violates: (file, text) => file !== "src/socket-write.ts" && /(?<!\bBun|\bprocess\.std(?:out|err))\.write\s*\(/.test(text),
   },
   {
     name: "a file that opens a Bun socket wires a drain handler",
@@ -123,9 +119,7 @@ const RULES: Rule[] = [
     // Any assignment outside browser.ts breaks it, and so does a count other
     // than one inside it (a deleted watch too).
     violates: (file, text) =>
-      [/\bonNavigated\s*=(?!=)/g, /\bonNavigationFailed\s*=(?!=)/g].some(
-        (re) => (text.match(re)?.length ?? 0) !== (file === "src/browser.ts" ? 1 : 0),
-      ),
+      [/\bonNavigated\s*=(?!=)/g, /\bonNavigationFailed\s*=(?!=)/g].some((re) => (text.match(re)?.length ?? 0) !== (file === "src/browser.ts" ? 1 : 0)),
   },
   {
     name: "a user error's message goes out as a UserError, never a plain Error",
@@ -134,8 +128,7 @@ const RULES: Rule[] = [
     // with a user-error message would quietly exit 2. This sees literals
     // only; a message built elsewhere and passed in is held by
     // tests/exit-codes.test.ts, site by site.
-    violates: (_file, text) =>
-      /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(text),
+    violates: (_file, text) => /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(text),
   },
 ];
 

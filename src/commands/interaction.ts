@@ -29,10 +29,7 @@ function requireKind(kind: keyof typeof KINDS, ref: string, target: Ref): void {
   if (!k.ok(target)) throw new UserError(`ref '${ref}' is not ${k.what} (${target.role})`);
 }
 
-export async function cmdClick(
-  ctx: CommandContext,
-  ref: string,
-): Promise<string> {
+export async function cmdClick(ctx: CommandContext, ref: string): Promise<string> {
   const { prev, target, doc } = await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
     await c.request("click", [await liveSelector(c, target, { enabled: true, doc, hit: true })]);
@@ -86,12 +83,7 @@ function readFillAnswer(found: unknown): { outcome: FillOutcome; type: string } 
 
 /** With `stdin`, the text comes from standard input so a secret never
  *  reaches argv. In every mode the text is never echoed back. */
-export async function cmdFill(
-  ctx: CommandContext,
-  ref: string,
-  text: string | undefined,
-  opts: { stdin?: boolean } = {},
-): Promise<string> {
+export async function cmdFill(ctx: CommandContext, ref: string, text: string | undefined, opts: { stdin?: boolean } = {}): Promise<string> {
   if (opts.stdin && text !== undefined) throw new UserError(`${FILL_USAGE} (not both)`);
   if (!opts.stdin && text === undefined) throw new UserError(FILL_USAGE);
   const value = opts.stdin ? withoutFinalNewline(await (ctx.readStdin ?? readStdin)()) : text!;
@@ -122,13 +114,29 @@ export async function cmdType(ctx: CommandContext, text: string): Promise<string
 /** The named keys Bun.WebView can press (Bun 1.4.2); any other key must be
  *  one character. */
 const NAMED_KEYS = [
-  "Enter", "Tab", "Space", "Backspace", "Delete", "Escape",
-  "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown",
+  "Enter",
+  "Tab",
+  "Space",
+  "Backspace",
+  "Delete",
+  "Escape",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
 ];
 /** playwright-cli's modifier names, case and all. bowser runs on macOS
  *  only, so ControlOrMeta is Meta. */
 const MODIFIERS: Record<string, KeyModifier> = {
-  Shift: "Shift", Control: "Control", Alt: "Alt", Meta: "Meta", ControlOrMeta: "Meta",
+  Shift: "Shift",
+  Control: "Control",
+  Alt: "Alt",
+  Meta: "Meta",
+  ControlOrMeta: "Meta",
 };
 
 /** Splits playwright-cli's `Modifier+…+Key` (#55). The key is the last word,
@@ -206,11 +214,7 @@ export async function cmdUncheck(ctx: CommandContext, ref: string): Promise<stri
  *  of range. It must be >= 1 and <= 16384` (F22). */
 const MAX_VIEWPORT_SIDE = 16384;
 
-export async function cmdResize(
-  ctx: CommandContext,
-  widthArg: string,
-  heightArg: string,
-): Promise<string> {
+export async function cmdResize(ctx: CommandContext, widthArg: string, heightArg: string): Promise<string> {
   const width = Number(widthArg);
   const height = Number(heightArg);
   // Number("") is 0, so an empty argument fails the lower bound.
@@ -236,7 +240,10 @@ export const COMMANDS: Command[] = [
     name: "fill",
     summary: "Fill the element with the given ref with text, or with piped stdin under --stdin",
     mcpSummary: "Fill the element with the given ref with text",
-    positional: [{ name: "ref", required: true }, { name: "text", required: false, mcpRequired: true }],
+    positional: [
+      { name: "ref", required: true },
+      { name: "text", required: false, mcpRequired: true },
+    ],
     // Not over MCP: the text is already a JSON string there, and the server's
     // own stdin is the JSON-RPC stream.
     flags: [{ name: "stdin", kind: "boolean", mcp: false }],
@@ -266,7 +273,10 @@ export const COMMANDS: Command[] = [
   {
     name: "select",
     summary: "Select the option with the given value or label in the element with the given ref",
-    positional: [{ name: "ref", required: true }, { name: "value", required: true }],
+    positional: [
+      { name: "ref", required: true },
+      { name: "value", required: true },
+    ],
     flags: [],
     run: (ctx, a) => cmdSelect(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
   },
@@ -287,7 +297,10 @@ export const COMMANDS: Command[] = [
   {
     name: "resize",
     summary: "Set the viewport size in pixels",
-    positional: [{ name: "width", required: true }, { name: "height", required: true }],
+    positional: [
+      { name: "width", required: true },
+      { name: "height", required: true },
+    ],
     flags: [],
     run: (ctx, a) => cmdResize(ctx, a.positional[0] ?? "", a.positional[1] ?? ""),
   },

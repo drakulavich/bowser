@@ -13,16 +13,20 @@ import { join } from "node:path";
 
 import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
-import {
-  cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
-} from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import {
-  cmdLocalStorageClear, cmdLocalStorageDelete, cmdLocalStorageGet,
-  cmdLocalStorageList, cmdLocalStorageSet, cmdSessionStorageClear,
-  cmdSessionStorageGet, cmdSessionStorageList, cmdSessionStorageSet,
+  cmdLocalStorageClear,
+  cmdLocalStorageDelete,
+  cmdLocalStorageGet,
+  cmdLocalStorageList,
+  cmdLocalStorageSet,
+  cmdSessionStorageClear,
+  cmdSessionStorageGet,
+  cmdSessionStorageList,
+  cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
 import { loadState } from "../src/state.ts";
 
@@ -81,7 +85,9 @@ runOrSkip("e2e: WebKit agent loop", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -284,7 +290,10 @@ runOrSkip("e2e: WebKit agent loop", () => {
     expect(await cmdRunCode(text, "(() => { return 5 })()")).toBe("5");
     expect(await cmdRunCode(text, "await new Promise(r => setTimeout(r, 100)); return 1")).toBe("1");
     expect(await cmdRunCode(text, "document.title")).toBe("Agent Loop");
-    const err = await cmdRunCode(text, "async page => { return await page.title() }").then(() => null, (e: Error) => e);
+    const err = await cmdRunCode(text, "async page => { return await page.title() }").then(
+      () => null,
+      (e: Error) => e,
+    );
     expect(err?.message).toBe("run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return");
     expect(reportFailure(err).code).toBe(1);
   }, 60_000);

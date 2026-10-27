@@ -100,11 +100,7 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
       stderr: "pipe",
       env: { ...process.env, HOME: REAL_HOME },
     });
-    const [out, err, code] = await Promise.all([
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-      p.exited,
-    ]);
+    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
     return { code, out: out + err };
   }
 
@@ -157,15 +153,22 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
   }, 60_000);
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
-    if (pwReady) { try { await pw("close"); } catch {} }
+    try {
+      await cmdClose(ctx);
+    } catch {}
+    if (pwReady) {
+      try {
+        await pw("close");
+      } catch {}
+    }
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   }, 60_000);
 
   test("bowser's refs are a subset of playwright-cli's tree on the fresh page", async () => {
-    if (!pwReady) throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
+    if (!pwReady)
+      throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
     const pwOut = (await pw("snapshot")).out;
     const bowserOut = await cmdSnapshot(text);
     const missing = missingFrom(parseBowser(bowserOut), parsePlaywright(pwOut));
@@ -173,7 +176,8 @@ runOrSkip("e2e: bowser vs playwright-cli on WebKit", () => {
   }, 90_000);
 
   test("after the same fill+click flow both tools see the new todos", async () => {
-    if (!pwReady) throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
+    if (!pwReady)
+      throw new Error("playwright-cli reported WebKit not installed although a webkit-* cache dir exists; run `playwright-cli install-browser webkit`");
     for (const todo of ["buy milk", "write tests"]) {
       // playwright-cli: re-snapshot before each action, refs can shift.
       let snap = (await pw("snapshot")).out;

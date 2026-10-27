@@ -29,10 +29,7 @@ runOrSkip("e2e: local todo app", () => {
     tmp = await mkdtemp(join(tmpdir(), "bowser-todo-"));
     process.env.HOME = tmp;
 
-    const html = await readFile(
-      join(import.meta.dir, "fixtures/todo-app.html"),
-      "utf8",
-    );
+    const html = await readFile(join(import.meta.dir, "fixtures/todo-app.html"), "utf8");
 
     // Serve the fixture on a random port.
     const s = Bun.serve({
@@ -96,14 +93,10 @@ runOrSkip("e2e: local todo app", () => {
           await b.type(text);
           await b.click("#add-btn");
         }
-        const items = (await b.evaluate(
-          "[...document.querySelectorAll('#list li label')].map(el => el.textContent)",
-        )) as string[];
+        const items = (await b.evaluate("[...document.querySelectorAll('#list li label')].map(el => el.textContent)")) as string[];
         expect(items).toEqual(["buy milk", "write tests", "ship bowser"]);
 
-        const remaining = await b.evaluate(
-          "document.getElementById('count').textContent",
-        );
+        const remaining = await b.evaluate("document.getElementById('count').textContent");
         expect(remaining).toBe("3 items left");
       } finally {
         await b.close();

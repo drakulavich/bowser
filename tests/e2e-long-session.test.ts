@@ -36,7 +36,9 @@ runOrSkip("e2e: the longest session name for a long HOME", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose({ session: name, json: false }); } catch {}
+    try {
+      await cmdClose({ session: name, json: false });
+    } catch {}
     await killDaemons(name);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(base, { recursive: true, force: true });
