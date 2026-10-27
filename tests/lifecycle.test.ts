@@ -755,7 +755,7 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     });
   }
 
-  test("a second close that finds the directory gone during its claim answers closed (ET-32)", async () => {
+  test("a second close that finds the directory gone during its claim answers without an error (ET-32)", async () => {
     const session = "et32-second";
     await ensureSessionDir(session);
     let claimed = false;
@@ -764,7 +764,7 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
       await rm(sessionDir(session), { recursive: true, force: true });
       return claimSession(...args);
     };
-    expect(await closeOne({ session, json: false }, session, undefined, claim)).toBe(`closed session '${session}'`);
+    expect(await closeOne({ session, json: false }, session, undefined, claim)).toBe(`session '${session}' is not open`);
     expect(claimed).toBe(true);
   });
 

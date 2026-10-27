@@ -797,6 +797,12 @@ export const LOAD_STATE = "[performance.timeOrigin, document.readyState]";
 export const STOP_LOADING = `(window.stop(), ${NAV_ARM})`;
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
+/** wait-for's check (#114); the value goes in as JSON, never spliced as text. */
+export function waitForScript(kind: "url" | "text", value: string): string {
+  const needle = JSON.stringify(value);
+  return kind === "url" ? `location.href.includes(${needle})` : `(document.body?.innerText ?? '').includes(${needle})`;
+}
+
 // A raw key event (pressKey in browser.ts) has keyCode 65 whatever its key
 // (Bun 1.4.4); pages that test keyCode, like React's TodoMVC, ignore it (#168).
 export const KEY_CODES = String.raw`(() => {

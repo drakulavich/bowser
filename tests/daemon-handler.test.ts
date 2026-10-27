@@ -11,6 +11,7 @@ import { IS_URGENT, type DaemonRequest, type DaemonResponse, type DialogReport }
 import { createGate } from "../src/daemon/gate.ts";
 import { createSerializer } from "../src/serialize.ts";
 import { waitFor } from "./helpers/daemons.ts";
+import { manualClock } from "./helpers/manual-clock.ts";
 import { AWAIT_FONTS, READ_VIEWPORT } from "../src/page-scripts.ts";
 
 function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[string, unknown[]]> } {
@@ -1686,5 +1687,111 @@ describe("an action on a page whose navigation is still pending (ET-10)", () => 
     await waitFor(() => replies.length >= 1, 3000);
     expect(replies).toEqual([{ id: 1, ok: false, error: stillLoading }]);
     expect(b.calls.filter(([n]) => n === "evaluate")).toEqual([]);
+  });
+});
+
+// #114: wait-for reads its check in the daemon until it holds or the
+// request's deadline passes. Driven through handle(), so the deadline's way
+// in is under test too.
+describe("the waitFor op", () => {
+  const WAIT = (id = 1, kind: "url" | "text" = "url", value = "/moved"): DaemonRequest => ({ id, op: "waitFor", args: [kind, value] });
+  /** A browser whose check answers `answers[i]` on read i (the last one after), on `clock`. */
+  function reads(answers: Array<boolean | Error | "hang">, over: Partial<Browser> = {}) {
+    let i = 0;
+    const b = fakeBrowser({
+      evaluate: async (expr: string) => {
+        b.calls.push(["evaluate", [expr]]);
+        const a = answers[Math.min(i++, answers.length - 1)];
+        if (a === "hang") return new Promise(() => {});
+        if (a instanceof Error) throw a;
+        return a;
+      },
+      realUrl: async () => "https://x/moved",
+      ...over,
+    });
+    return b;
+  }
+  const evaluates = (b: { calls: Array<[string, unknown[]]> }) => b.calls.filter(([n]) => n === "evaluate").length;
+
+  test("a check that turns true on the third read answers met after two 100 ms waits", async () => {
+    const clock = manualClock();
+    const b = reads([false, false, true]);
+    const p = createHandler(b, {}, clock)(WAIT(), 10_000);
+    expect(await clock.fulfilledAt(p)).toBe(200);
+    expect(await p).toEqual({ id: 1, ok: true, result: { met: true, url: "https://x/moved", title: "X" } });
+    // Three checks and the dialog log.
+    expect(evaluates(b)).toBe(4);
+  });
+
+  test("with no deadline, a cancelled wait stops at its next read and sends no more", async () => {
+    const clock = manualClock();
+    const b = reads([false]);
+    const h = createHandler(b, {}, clock);
+    const p = h(WAIT());
+    clock.setTimeout(() => h.cancelAction(), 250);
+    expect(await clock.fulfilledAt(p)).toBe(300);
+    expect(await p).toEqual({ id: 1, ok: false, error: "wait-for: cancelled" });
+    expect(evaluates(b)).toBe(4);
+  });
+
+  test("a dialog the page answered during the wait is reported with the result", async () => {
+    const clock = manualClock();
+    const log = JSON.stringify([{ type: "confirm", message: "sure?", state: "accepted" }]);
+    const b = reads([true], { evaluate: async (expr: string) => (expr.includes("log.splice") ? log : true) });
+    const p = createHandler(b, {}, clock)({ ...WAIT(), report: true }, 10_000);
+    await clock.fulfilledAt(p);
+    expect(await p).toEqual({
+      id: 1, ok: true, result: { met: true, url: "https://x/moved", title: "X" },
+      dialogs: [{ type: "confirm", message: "sure?", state: "accepted" }],
+    });
+  });
+
+  test("a check that never holds answers not met by the deadline", async () => {
+    const clock = manualClock();
+    const b = reads([false]);
+    const p = createHandler(b, {}, clock)(WAIT(), 450);
+    expect(await clock.fulfilledAt(p)).toBe(450);
+    expect(await p).toEqual({ id: 1, ok: true, result: { met: false, url: "https://x/moved", title: "X" } });
+  });
+
+  test("with no deadline it is still reading past 1 s", async () => {
+    const clock = manualClock();
+    const b = reads([false]);
+    await expect(clock.settledAt(createHandler(b, {}, clock)(WAIT()), 1500)).rejects.toThrow("still pending at clock 1500");
+    expect(evaluates(b)).toBe(16);
+  });
+
+  test("a read that throws counts as not yet", async () => {
+    const clock = manualClock();
+    const b = reads([new Error("navigated"), true]);
+    const p = createHandler(b, {}, clock)(WAIT(), 10_000);
+    expect(await clock.fulfilledAt(p)).toBe(100);
+    expect((await p).result).toEqual({ met: true, url: "https://x/moved", title: "X" });
+  });
+
+  test("a read that does not settle holds the op past its deadline, and no second read is sent", async () => {
+    const clock = manualClock();
+    const b = reads(["hang"]);
+    await expect(clock.settledAt(createHandler(b, {}, clock)(WAIT(), 450), 2000)).rejects.toThrow("still pending");
+    expect(evaluates(b)).toBe(1);
+  });
+
+  test("a navigation an earlier command left pending lands before the first read", async () => {
+    const clock = manualClock();
+    const events: string[] = [];
+    let pending = true;
+    clock.setTimeout(() => { pending = false; events.push("landed"); }, 300);
+    const b = reads([true], { evaluate: async (expr: string) => { if (!expr.includes("log.splice")) events.push("read"); return true; } });
+    // A getter, not a value: fakeBrowser's spread would copy a value once.
+    Object.defineProperty(b, "navigationPending", { get: () => pending });
+    await clock.fulfilledAt(createHandler(b, {}, clock)(WAIT(), 10_000));
+    expect(events).toEqual(["landed", "read"]);
+  });
+
+  test("the value reaches the page as data, quotes and all", async () => {
+    const clock = manualClock();
+    const b = reads([true]);
+    await clock.fulfilledAt(createHandler(b, {}, clock)(WAIT(1, "text", `it's "there"`), 10_000));
+    expect(b.calls.find(([n]) => n === "evaluate")).toEqual(["evaluate", [`(document.body?.innerText ?? '').includes("it's \\"there\\"")`]]);
   });
 });

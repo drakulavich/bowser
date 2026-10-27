@@ -24,6 +24,7 @@ To read a page rather than act on it, `bowser markdown` costs a fraction of a sn
 | --- | --- |
 | `bowser open [url] [--persistent] [--profile=dir]` | Start a session; `--persistent` keeps cookies and storage across `close` |
 | `bowser goto <url>` | Navigate in the session (adds `https://`, or `http://` for localhost) |
+| `bowser wait-for --url <part>` / `--text <text>` | Wait until the URL or the visible text contains the value, after a click whose result comes later |
 | `bowser snapshot [--filename=f] [--depth=N]` | Aria tree with refs; `--depth` limits levels |
 | `bowser markdown [ref] [--filename=f]` | The page, or one element, as Markdown |
 | `bowser click <ref>` | Click |

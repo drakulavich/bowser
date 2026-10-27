@@ -17,7 +17,7 @@ import {
   cmdCheck, cmdClick, cmdFill, cmdHover, cmdPress, cmdResize, cmdSelect, cmdType, cmdUncheck,
 } from "../src/commands/interaction.ts";
 import {
-  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen,
+  closeOne, cmdClose, cmdGoto, cmdHistory, cmdList, cmdOpen, cmdWaitFor,
   type ProcessOps,
 } from "../src/commands/navigation.ts";
 import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
@@ -612,9 +612,9 @@ describe("close", () => {
     expect(existsSync(sessionDir(session))).toBe(false);
   });
 
-  test("succeeds on a session that never existed", async () => {
+  test("says a session that never existed is not open (ET-28)", async () => {
     const out = await closeOne({ ...ctx(), connect: unreachable }, "never-existed", procOps());
-    expect(out).toContain("closed session 'never-existed'");
+    expect(out).toBe("session 'never-existed' is not open");
   });
 
   test("ends an unreachable daemon that is ours", async () => {
@@ -705,8 +705,17 @@ describe("close", () => {
     test("--all removes a directory whose name predates the naming rule", async () => {
       const legacy = join(sessionsRoot(), " m11-1 m12-2");
       await mkdir(legacy, { recursive: true });
+      await Bun.write(join(legacy, "state.json"), "{}");
       const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
       expect(out).toBe("closed 1 session:  m11-1 m12-2");
+      expect(existsSync(legacy)).toBe(false);
+    });
+
+    // ET-28, Greptile on #215: an empty one was never a session either.
+    test("--all removes an empty directory whose name predates the naming rule without listing it", async () => {
+      const legacy = join(sessionsRoot(), " m13-1");
+      await mkdir(legacy, { recursive: true });
+      expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe("no sessions to close");
       expect(existsSync(legacy)).toBe(false);
     });
 
@@ -721,10 +730,10 @@ describe("close", () => {
         const dir = join(sessionsRoot(), name);
         await mkdir(dir);
         expect(await cmdList({ ...ctx({ json: true }), connect: unreachable })).toBe("[]");
-        expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`closed session '${name}'`);
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`session '${name}' is not open`);
         expect(existsSync(dir)).toBe(false);
         await mkdir(dir);
-        expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe(`closed 1 session: ${name}`);
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe("no sessions to close");
         expect(existsSync(dir)).toBe(false);
       } finally {
         process.env.HOME = prevHome;
@@ -2481,5 +2490,36 @@ describe("an empty --filename (#193)", () => {
         expect(c.calls).toEqual([]);
       }
     }
+  });
+});
+
+describe("wait-for (#114)", () => {
+  const USAGE = "usage: bowser wait-for --url <part> or bowser wait-for --text <text>";
+
+  test("both flags, neither, or an empty value is a usage error, with no request", async () => {
+    const c = fakeClient({});
+    for (const opts of [{}, { url: "/a", text: "b" }, { url: "" }, { text: "" }]) {
+      const err = await cmdWaitFor({ ...ctx(), connect: async () => c }, opts).then(() => undefined, (e: unknown) => e);
+      expect(err).toBeInstanceOf(UserError);
+      expect((err as Error).message).toBe(USAGE);
+    }
+    expect(c.calls).toEqual([]);
+  });
+
+  test("a check that never held says what was awaited, how long it waited and where the page is", async () => {
+    const c = fakeClient({ waitFor: async () => { await Bun.sleep(200); return { met: false, url: "https://x/home", title: "Home" }; } });
+    const err = await cmdWaitFor({ ...ctx(), connect: async () => c }, { text: `it's "done"` }).then(() => undefined, (e: unknown) => e);
+    expect(err).not.toBeInstanceOf(UserError);
+    const m = (err as Error).message.match(/^wait-for: no text "it's \\"done\\"" after (\d+)ms; the page is at https:\/\/x\/home$/);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(200);
+    expect(Number(m?.[1])).toBeLessThan(10_000);
+  });
+
+  test("a check that held prints the URL and saves the page to the session state", async () => {
+    const c = fakeClient({ waitFor: () => ({ met: true, url: "https://x/moved", title: "Moved" }) });
+    const session = ctx().session;
+    expect(await cmdWaitFor({ ...ctx(), session, connect: async () => c }, { url: "/moved" })).toBe("https://x/moved");
+    expect(c.calls).toContainEqual(["waitFor", ["url", "/moved"]]);
+    expect(await loadState(session)).toMatchObject({ url: "https://x/moved", title: "Moved" });
   });
 });
