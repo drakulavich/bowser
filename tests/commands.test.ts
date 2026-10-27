@@ -612,9 +612,9 @@ describe("close", () => {
     expect(existsSync(sessionDir(session))).toBe(false);
   });
 
-  test("succeeds on a session that never existed", async () => {
+  test("says a session that never existed is not open (ET-28)", async () => {
     const out = await closeOne({ ...ctx(), connect: unreachable }, "never-existed", procOps());
-    expect(out).toContain("closed session 'never-existed'");
+    expect(out).toBe("session 'never-existed' is not open");
   });
 
   test("ends an unreachable daemon that is ours", async () => {
@@ -705,8 +705,17 @@ describe("close", () => {
     test("--all removes a directory whose name predates the naming rule", async () => {
       const legacy = join(sessionsRoot(), " m11-1 m12-2");
       await mkdir(legacy, { recursive: true });
+      await Bun.write(join(legacy, "state.json"), "{}");
       const out = await cmdClose({ ...ctx(), connect: unreachable }, { all: true });
       expect(out).toBe("closed 1 session:  m11-1 m12-2");
+      expect(existsSync(legacy)).toBe(false);
+    });
+
+    // ET-28, Greptile on #215: an empty one was never a session either.
+    test("--all removes an empty directory whose name predates the naming rule without listing it", async () => {
+      const legacy = join(sessionsRoot(), " m13-1");
+      await mkdir(legacy, { recursive: true });
+      expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe("no sessions to close");
       expect(existsSync(legacy)).toBe(false);
     });
 
@@ -721,10 +730,10 @@ describe("close", () => {
         const dir = join(sessionsRoot(), name);
         await mkdir(dir);
         expect(await cmdList({ ...ctx({ json: true }), connect: unreachable })).toBe("[]");
-        expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`closed session '${name}'`);
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { name })).toBe(`session '${name}' is not open`);
         expect(existsSync(dir)).toBe(false);
         await mkdir(dir);
-        expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe(`closed 1 session: ${name}`);
+        expect(await cmdClose({ ...ctx(), connect: unreachable }, { all: true })).toBe("no sessions to close");
         expect(existsSync(dir)).toBe(false);
       } finally {
         process.env.HOME = prevHome;
