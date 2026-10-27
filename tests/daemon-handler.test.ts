@@ -289,6 +289,16 @@ describe("createHandler", () => {
     expect(await createHandler(other)(req("evaluate", ["x()"]))).toEqual({ id: 7, ok: false, error: "TypeError: x is not a function" });
   });
 
+  // ET-07: `eval "new Promise(() => {})"` failed with WebKit's own words
+  // when the page collected the promise first (1 of 2 runs, 2026-10-27).
+  test("WebKit's message for a dropped promise says the promise never settles", async () => {
+    const b = fakeBrowser({ evaluate: async () => { throw new Error("Completion handler for function call is no longer reachable"); } });
+    expect(await createHandler(b)(req("evaluate", ["new Promise(() => {})"]))).toEqual({
+      id: 7, ok: false,
+      error: "the expression returned a promise that never settles (the page dropped it); return a value, or a promise that resolves",
+    });
+  });
+
   // The measured behaviour (spec F34, measured manually): a dead page fails
   // every page op until `reload`, which brings it back. The daemon reloads
   // nothing by itself, and after the reload ops answer again.

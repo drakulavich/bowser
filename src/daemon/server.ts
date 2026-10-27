@@ -361,6 +361,10 @@ async function scalePng(png: Uint8Array, factor: number): Promise<Uint8Array> {
  *  1.4.2). No page value gives this message: evaluate serializes page-side. */
 const DEAD_PAGE = "JavaScript execution returned a result of an unsupported type";
 const PAGE_CRASHED = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
+/** What WebKit answers when the page garbage-collects a promise an evaluate
+ *  awaits, one that could never settle (ET-07, Bun 1.4.4). */
+const PROMISE_DROPPED = "Completion handler for function call is no longer reachable";
+const NEVER_SETTLES = "the expression returned a promise that never settles (the page dropped it); return a value, or a promise that resolves";
 
 /** What createHandler returns: the request handler, and the hook `dispatch`
  *  calls when a request overruns its budget. */
@@ -467,7 +471,7 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
       return result === undefined ? { id: req.id, ok: true } : { id: req.id, ok: true, result };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return { id: req.id, ok: false, error: msg.includes(DEAD_PAGE) ? PAGE_CRASHED : msg };
+      return { id: req.id, ok: false, error: msg.includes(DEAD_PAGE) ? PAGE_CRASHED : msg.includes(PROMISE_DROPPED) ? NEVER_SETTLES : msg };
     }
   }
 
