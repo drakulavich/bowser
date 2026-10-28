@@ -1120,11 +1120,70 @@ const TO_MARKDOWN = String.raw`
     return paras.join('\n\n');
   };`;
 
+// Every wait shares one deadline: an unbounded one hung the session at budget 0 (ET-61).
+const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
+    const u = new URL(location.href);
+    if (u.hostname === 'youtu.be') return u.pathname.split('/')[1] || null;
+    if (u.pathname === '/watch') return u.searchParams.get('v');
+    const s = /^\/shorts\/([^/]+)/.exec(u.pathname);
+    return s ? s[1] : null;
+  })();
+  if (video) {
+    const deadline = performance.now() + ${ms};
+    const until = async (f) => {
+      for (;;) {
+        const v = f();
+        if (v || performance.now() >= deadline) return v;
+        await new Promise((r) => setTimeout(r, Math.min(250, deadline - performance.now())));
+      }
+    };
+    const player = await until(() => {
+      const p = document.querySelector('#movie_player');
+      const r = p && typeof p.getPlayerResponse === 'function' ? p.getPlayerResponse() : null;
+      return r && r.videoDetails && r.videoDetails.videoId === video ? r : null;
+    });
+    const tracks = (player && player.captions && player.captions.playerCaptionsTracklistRenderer && player.captions.playerCaptionsTracklistRenderer.captionTracks) || [];
+    if (tracks.length) {
+      const expanded = () => document.querySelector('ytd-engagement-panel-section-list-renderer[target-id=engagement-panel-searchable-transcript]')?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
+      const segments = () => [...document.querySelectorAll('ytd-transcript-segment-renderer')];
+      const shown = () => (expanded() && segments().length ? segments() : null);
+      let got = shown();
+      // Segments under a hidden panel are the previous video's (an in-page navigation leaves them a moment).
+      if (!got && (await until(() => !segments().length))) {
+        const button = () => {
+          const b = document.querySelector('ytd-video-description-transcript-section-renderer button');
+          return b && b.offsetParent ? b : null;
+        };
+        if (!button()) document.querySelector('ytd-watch-metadata #expand')?.click();
+        const b = await until(button);
+        if (b) {
+          b.click();
+          got = await until(shown);
+        }
+      }
+      if (!got) return { markdown: '', source: 'transcript', failed: true };
+      const seconds = (t) => t.split(':').reduce((a, v) => a * 60 + Number(v), 0);
+      const paras = [];
+      for (const s of got) {
+        const ts = (s.querySelector('.segment-timestamp')?.textContent || '').trim();
+        const text = (s.querySelector('.segment-text')?.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        const last = paras[paras.length - 1];
+        if (last && seconds(ts) - last.at < 30) last.text += ' ' + text;
+        else paras.push({ ts, at: seconds(ts), text });
+      }
+      const label = (document.querySelector('ytd-transcript-footer-renderer yt-dropdown-menu')?.textContent || '').trim().split('\n')[0].trim();
+      const head = '# ' + document.title.replace(/ - YouTube$/, '') + '\nhttps://youtu.be/' + video + (label ? ' · ' + label : '');
+      return { markdown: head + '\n\n' + paras.map((p) => '[' + p.ts + '] ' + p.text).join('\n\n'), source: 'transcript' };
+    }
+  }`;
+
 export function markdownScript(selector?: string, fetchMs?: number): string {
   const own =
     selector === undefined
       ? String.raw`
   const signal = ${fetchMs ? `AbortSignal.timeout(${fetchMs})` : "undefined"};
+  ${YOUTUBE_TRANSCRIPT(fetchMs ?? 5000)}
   const artifact = location.hostname === 'claude.ai' && /^\/public\/artifacts\/([0-9a-f-]+)\/?$/.exec(location.pathname);
   if (artifact) {
     try {
