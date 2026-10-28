@@ -3,8 +3,8 @@ export function manualClock() {
   let now = 0;
   let seq = 0;
   const timers = new Map<number, { at: number; fn: () => void }>();
-  // setImmediate runs after every queued promise callback.
-  const drain = () => new Promise<void>((r) => setImmediate(r));
+  // A real 0 ms timer, not setImmediate: under some test orders Bun left an immediate waiting in kevent for up to 30 s (#222).
+  const drain = () => new Promise<void>((r) => setTimeout(r, 0));
   return {
     now: () => now,
     setTimeout(fn: () => void, ms: number) {
