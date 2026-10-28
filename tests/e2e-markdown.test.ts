@@ -484,6 +484,13 @@ runOrSkip("e2e: markdown", () => {
       expect(await clicks()).toEqual({ expand: 0, transcript: 1 });
     }, 60_000);
 
+    test("a timestamp lower than the paragraph start opens a new paragraph", async () => {
+      await cmdGoto(ctx, watch("rewind"));
+      expect(JSON.parse(await cmdMarkdown(json)).markdown).toBe(
+        "# Fixture video\nhttps://youtu.be/abc123def45 · English (auto-generated)\n\n[0:01] one\n\n[0:40] two\n\n[0:10] three",
+      );
+    }, 60_000);
+
     test("a player that boots after load is waited for", async () => {
       await cmdGoto(ctx, watch("late-player"));
       expect(JSON.parse(await cmdMarkdown(json)).source).toBe("transcript");
@@ -526,6 +533,16 @@ runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
       "# How to Build an AI Code Review Agent - Daksh Gupta, Greptile",
       "https://youtu.be/4UtrRVtUN_g · English (auto-generated)",
     ]);
-    expect(lines.filter((l: string) => /^\[\d+:\d\d\] /.test(l)).length).toBeGreaterThanOrEqual(30);
+    const paras = lines.filter((l: string) => /^\[\d+:\d\d\] /.test(l));
+    expect(paras.length).toBeGreaterThanOrEqual(30);
+    const starts = paras.map((l: string) =>
+      l
+        .slice(1, l.indexOf("]"))
+        .split(":")
+        .reduce((a: number, v: string) => a * 60 + Number(v), 0),
+    );
+    expect(starts).toEqual([...starts].sort((a: number, b: number) => a - b));
+    expect(new Set(starts).size).toBe(starts.length);
+    expect(Math.max(...paras.map((l: string) => l.length))).toBeLessThan(3000);
   }, 60_000);
 });

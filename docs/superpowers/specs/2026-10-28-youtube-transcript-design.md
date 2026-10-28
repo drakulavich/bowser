@@ -15,11 +15,11 @@ How YouTube hands out the text, checked on 2026-10-28 in a fresh session, no log
 |---|---|
 | `fetch(captionTrack.baseUrl + '&fmt=json3')` from the page | `200`, empty body (YouTube wants a PO token; `yt-dlp` hits the same) |
 | `POST /youtubei/v1/get_transcript` with `getTranscriptEndpoint.params` from `ytInitialData` | `400` |
-| Expand the description, click "Show transcript", read `ytd-transcript-segment-renderer` | 1,188 segments |
+| Expand the description, click "Show transcript", read `ytd-transcript-segment-renderer` | 594 segments |
 
 So the only working path clicks in the page.
 
-The click path on five URLs:
+The click path on five URLs (segment counts here were taken across both transcript panels, see #225, so they are twice the real number):
 
 | URL | Segments | Click to segments | Panel language |
 |---|---|---|---|
@@ -33,7 +33,7 @@ Two traps showed up:
 
 - **After an in-page navigation** (a click on a related video), `ytInitialPlayerResponse` still describes the
   first video. `document.querySelector('#movie_player').getPlayerResponse()` describes the current one.
-- **The old video's segments stay in the DOM** for a moment after that navigation: 1,188, then 0, with the
+- **The old video's segments stay in the DOM** for a moment after that navigation: 1,188 across both panels, then 0, with the
   transcript panel at `ENGAGEMENT_PANEL_VISIBILITY_HIDDEN`. A read in that window would return the wrong
   video's text.
 
@@ -60,16 +60,16 @@ https://youtu.be/4UtrRVtUN_g · English (auto-generated)
 - `--json` gives `source: "transcript"`; `url` and `title` are the page's, as for any source.
 - `--filename` writes the same text, as for any source.
 
-The format was picked by size, measured on `4UtrRVtUN_g` (1,188 segments, 18 min; tokens ≈ bytes / 4):
+The format was picked by size, measured on `4UtrRVtUN_g` (594 segments, 18 min; tokens ≈ bytes / 4; remeasured after #225):
 
 | Format | Bytes | ≈ tokens |
 |---|---|---|
-| Segment text only, no timestamps | 44,471 | 11k |
-| A link per segment, `[0:01](https://youtu.be/<id>?t=1) text` (what #223 proposed) | 96,109 | 24k |
-| `[0:01] text`, one line per segment | 53,329 | 13k |
-| `[0:01] text`, one paragraph per 30 s (chosen: 36 paragraphs) | 44,774 | 11k |
+| Segment text only, no timestamps | 22,235 | 5.6k |
+| A link per segment, `[0:01](https://youtu.be/<id>?t=1) text` (what #223 proposed) | 48,054 | 12k |
+| `[0:01] text`, one line per segment | 26,664 | 6.7k |
+| `[0:01] text`, one paragraph per 30 s (chosen: 36 paragraphs) | 22,659 | 5.7k |
 
-A link per segment repeats the same 30-byte URL 1,188 times and doubles the size. Paragraphs cost 0.7% over bare
+A link per segment repeats the same 30-byte URL 594 times and doubles the size. Paragraphs cost 2% over bare
 text, and a timestamp every 30 s is enough to point at a moment.
 
 ### Picking the source
@@ -107,8 +107,11 @@ flowchart TD
 - **The panel is current only when expanded.** When
   `ytd-engagement-panel-section-list-renderer[target-id=engagement-panel-searchable-transcript]` has
   `visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"` and holds segments, they are read as is (read on the live
-  page on 2026-10-28 after opening it: 1,188 segments). An in-page navigation sets it to
+  page on 2026-10-28 after opening it: 594 segments). An in-page navigation sets it to
   `ENGAGEMENT_PANEL_VISIBILITY_HIDDEN`; segments under a hidden panel are the previous video's and are never read.
+  The page also keeps a hidden twin of the panel holding the same segments, so segments are read only from
+  inside the expanded panel, never across the document (#225).
+- **A timestamp lower than the current paragraph's start** opens a new paragraph instead of joining it (#225).
 - **Otherwise** the script waits until no `ytd-transcript-segment-renderer` is left in the DOM. It clicks
   `ytd-watch-metadata #expand` only when the transcript button in
   `ytd-video-description-transcript-section-renderer` is not visible (at load the button is in the DOM but
@@ -130,8 +133,8 @@ the page changed. That is accepted: Sora reads a video page to read it, not to a
 ## Cost
 
 No stored data changes. On a video page with captions, `markdown` takes the click and the load: 0.5 to 1.8 s on
-the five URLs, up to `fetchMs`. The output for 18 minutes is 44,774 bytes (≈11k tokens); for an hour, at the same
-rate, about 150 KB (≈37k tokens). `--filename` keeps it out of the context, as for any long page.
+the five URLs, up to `fetchMs`. The output for 18 minutes is 22,659 bytes (≈5.7k tokens); for an hour, at the same
+rate, about 75 KB (≈19k tokens). `--filename` keeps it out of the context, as for any long page.
 
 ## Not in scope
 

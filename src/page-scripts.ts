@@ -1144,9 +1144,12 @@ const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
     });
     const tracks = (player && player.captions && player.captions.playerCaptionsTracklistRenderer && player.captions.playerCaptionsTracklistRenderer.captionTracks) || [];
     if (tracks.length) {
-      const expanded = () => document.querySelector('ytd-engagement-panel-section-list-renderer[target-id=engagement-panel-searchable-transcript]')?.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED';
       const segments = () => [...document.querySelectorAll('ytd-transcript-segment-renderer')];
-      const shown = () => (expanded() && segments().length ? segments() : null);
+      // YouTube keeps a hidden twin panel with the same segments: read only the expanded one.
+      const shown = () => {
+        const s = [...document.querySelectorAll('ytd-engagement-panel-section-list-renderer[target-id=engagement-panel-searchable-transcript][visibility=ENGAGEMENT_PANEL_VISIBILITY_EXPANDED] ytd-transcript-segment-renderer')];
+        return s.length ? s : null;
+      };
       let got = shown();
       // Segments under a hidden panel are the previous video's (an in-page navigation leaves them a moment).
       if (!got && (await until(() => !segments().length))) {
@@ -1169,7 +1172,8 @@ const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
         const text = (s.querySelector('.segment-text')?.textContent || '').replace(/\s+/g, ' ').trim();
         if (!text) continue;
         const last = paras[paras.length - 1];
-        if (last && seconds(ts) - last.at < 30) last.text += ' ' + text;
+        const gap = last ? seconds(ts) - last.at : -1;
+        if (gap >= 0 && gap < 30) last.text += ' ' + text;
         else paras.push({ ts, at: seconds(ts), text });
       }
       const label = (document.querySelector('ytd-transcript-footer-renderer yt-dropdown-menu')?.textContent || '').trim().split('\n')[0].trim();
