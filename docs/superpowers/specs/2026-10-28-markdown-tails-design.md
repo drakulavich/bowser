@@ -1,4 +1,4 @@
-# `markdown`: absolute links in a page's own Markdown, empty pages under `--filename`, task-list state (#154)
+# `markdown`: no relative links from a page's own Markdown, empty pages under `--filename`, task-list state (#154)
 
 **Issue:** #154 (ET-50, ET-51, ET-55; the decision is in the
 [2026-10-28 comment](https://github.com/drakulavich/bowser/issues/154#issuecomment-6467636582)).
@@ -22,27 +22,23 @@ Three things `markdown` does today make Sora believe something false about a pag
 
 ## Change
 
-### ET-50: path-relative links in the alternate Markdown become absolute
+### ET-50: a site's Markdown with relative links gives way to the DOM conversion
 
-When the result comes from the `rel="alternate"` link in `markdownScript` (`src/page-scripts.ts`), each inline
-link or image target that starts with `/`, `./` or `../` is replaced with `new URL(target, link.href)`:
+When the `rel="alternate"` Markdown in `markdownScript` (`src/page-scripts.ts`) holds a link or image target that
+starts with `/`, `./` or `../` (the text matches `/\]\(\s*<?\.{0,2}\//`), `markdown` answers with the DOM conversion
+(`source: "converted"`) instead. The site's Markdown is never rewritten.
 
-- The target is the run after `](<` up to `>`, or else the run after `](` up to the first whitespace or `)`.
-  Only that run is replaced, so a title after it and the `<…>` brackets stay as written, and every other target (a scheme,
-  `#frag`, an empty one, a bare `x`) is never matched.
-- `//host/x` starts with `/`, so it is matched and resolved to the base's scheme.
-- When `new URL` throws (`[a](///)` does), the target stays as written. A target holding a backslash also stays:
-  `new URL` would read the Markdown escapes in `[a](/x\(y\))` as path separators (Greptile on #228).
-- Code is left byte for byte: inline code spans, matched per paragraph since a span may cross lines but not a
-  blank one or the start of a list item, heading or quote and does not open on an escaped backtick (`` \` ``), and fenced code blocks as CommonMark defines them:
-  - a fence opens on a line whose first non-blank characters are three or more backticks or tildes, at any
-    indent (more lenient than CommonMark, which caps the indent: a doubtful line keeps its links as written);
-  - it closes on a line of the same character, at least as long as the opener;
-  - an unclosed fence runs to the end of the document;
-  - indented code blocks (four spaces, no fence) are not detected, since inside a list the same indent is plain
-    continuation text.
+- The conversion reads the rendered page, where every link is already absolute and code is `<code>`, so nothing
+  in it has to tell code from links. On bun.com's server page it gives 0 relative links of 99, and the site's
+  real address `https://bun.com/docs/bundler` where the site's Markdown had `/bundler` (404 even made absolute).
+- The check is coarse on purpose: a relative-looking link inside a code block also selects the conversion, which
+  is still a correct reading of the page.
+- Cost on bun.com: 26,616 characters converted against 21,190 in the site's Markdown (+26%).
+- A Markdown with only absolute links is returned as before, `source: "page"`.
 
-`--json` keeps `source: "page"`.
+The first design rewrote the targets in place. Three review rounds each found a new CommonMark edge case (code
+spans across lines, escapes, list items, block quotes), and two of the fixes corrupted literal code; this design
+removes the parsing (2026-10-28, the user's call).
 
 ### ET-51: the empty-page line under `--filename`
 
@@ -69,39 +65,21 @@ task-list form and a renderer shows it as a task.
 
 ## Cost
 
-No stored data changes; one regular-expression pass over the alternate Markdown, no new reads or waits.
+No stored data changes; one regular-expression test over the alternate Markdown, no new reads or waits.
 
 ## Not in scope
 
-- Bare relative targets (`[t](x)`, `![i](img.png)`): none on the two sites checked.
-- Reference-style definitions (`[t]: /x`): zero on the two sites checked.
-- Raw HTML `<a href>` or `<img src>` inside the Markdown: not counted.
+- Bare relative targets (`[t](x)`, `![i](img.png)`) and reference-style definitions (`[t]: /x`) do not select the
+  conversion: none on the two sites checked.
 - A claude.ai artifact's Markdown: its content comes from an API URL that is not a document base.
-- Catching a site's own wrong link (`/bundler` is 404 at `https://bun.com/bundler` either way); that would need
-  the page's links compared with the Markdown's.
 - Custom-drawn checkboxes with no `input` at all.
 
 ## Definition of Done
 
 - `tests/e2e-markdown.test.ts`, on fixture pages served by the test's server:
-  - an alternate link to `/md/guide.md` from the page `/docs/page.html`: `markdown --json` answers
-    `source: "page"` and a `markdown` string written out in the test. `<base>` is the fixture server's origin
-    (`http://localhost:<port>`):
-
-    | In the Markdown | In the result |
-    |---|---|
-    | `[a](/x)` | `[a](<base>/x)` |
-    | `[b](./y "t")` | `[b](<base>/md/y "t")` |
-    | `[c](../z)` | `[c](<base>/z)` |
-    | `![i](<./sp ace.png>)` | `![i](<<base>/md/sp%20ace.png>)` (as `new URL` encodes it) |
-    | `[p](//cdn.example/a)` | `[p](http://cdn.example/a)` |
-    | `[u](///)` | unchanged |
-    | `[h](https://e.com/q)` | unchanged |
-    | `[w](x)` | unchanged |
-    | a backtick fence at column 0 holding `[k](/k)` | unchanged |
-    | a list item whose body is a tilde fence indented three spaces, holding `[k2](/k2)`, closed by a longer run | unchanged |
-    | an inline code span `` `[j](/j)` `` | unchanged |
-
+  - an alternate link to `/md/guide.md` from the page `/docs/page.html`, whose Markdown holds `[the server](/x)`:
+    `markdown --json` answers `source: "converted"` with the page's own text (`Rendered`); the existing
+    `/alt.html` case (absolute links only) still answers `source: "page"`;
   - `about:blank` with `--filename`: the file holds exactly one newline, the text reply is the two lines above,
     and `--json` has `url: "about:blank"` and `title: ""`; on a page with text, its `url` and `title`;
   - a ref to an empty element with `--filename`: the text reply starts `markdown: ref 'eN' has no text (`;
@@ -111,10 +89,10 @@ No stored data changes; one regular-expression pass over the alternate Markdown,
 - The existing `--filename` test (`tests/e2e-markdown.test.ts`, "--filename writes the Markdown…") changes its
   expected `--json` object to the new fields.
 - `BOWSER_E2E=1 BOWSER_E2E_NET=1`: on `https://bun.com/docs/runtime/http/server`, `markdown --json` has
-  `source: "page"` and no `](/` or `](./` outside code; today it has `](/bundler)`, `](/bundler/fullstack)`,
-  `](./tls)`. On `https://github.com/drakulavich/bowser/issues/140`, the output matches `/\[ \]\s+S2-2/`; today it holds
+  `source: "converted"`, no relative link, and `(https://bun.com/docs/bundler)`; today it has `source: "page"` with
+  `](/bundler)`, `](/bundler/fullstack)`, `](./tls)`. On `https://github.com/drakulavich/bowser/issues/140`, the output matches `/\[ \]\s+S2-2/`; today it holds
   `- S2-2: a table`.
-- The README row for `markdown` says that path-relative links in the page's own Markdown are made absolute;
+- The README row for `markdown` says that a site's Markdown with relative links gives way to the conversion;
   `skills/bowser/references/commands.md` likewise. `docs-drift` passes.
 - `bun run check` and `BOWSER_E2E=1 bun test` pass (CI e2e).
 - Each new test goes red under one mutation of the line it names, quoted in the PR.

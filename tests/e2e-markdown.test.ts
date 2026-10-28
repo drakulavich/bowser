@@ -76,28 +76,7 @@ const LISTS = `<!doctype html><title>lists</title><main>
 <ol><li value="10">ten</li><li>eleven</li></ol>
 </main>`;
 // #154 ET-50: the page's own Markdown, served from another directory than the page.
-const GUIDE = [
-  '[a](/x) [b](./y "t") [c](../z) ![i](<./sp ace.png>) [p](//cdn.example/a) [u](///) [h](https://e.com/q) [w](x) `[j](/j)`',
-  "",
-  "```js",
-  "[k](/k)",
-  "```",
-  "",
-  "- item",
-  "   ~~~",
-  "   [k2](/k2)",
-  "   ~~~~",
-  "",
-  "`foo",
-  "[bar](/x)`",
-  "",
-  "[e](/x\\(y\\))",
-  "",
-  "\\`[g](/x)\\`",
-  "",
-  "- First `",
-  "- [l](/x)`",
-].join("\n");
+const GUIDE = "# Guide\n\nSee [the server](/x) and [the spec](https://e.com/q).";
 // #154 ET-55 and ET-51.
 const TASKS = `<!doctype html><title>tasks</title><main><ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> open</li><li><input type="checkbox" checked hidden> hid</li><li><input type="checkbox" style="display: none"> styled</li><li style="visibility: hidden"><input type="checkbox" checked> gone</li></ul><p><input type="checkbox" checked> outside</p></main>`;
 const EMPTY_REGION = `<!doctype html><title>region</title><main><p>Text</p><button aria-label="Empty"></button></main>`;
@@ -385,34 +364,9 @@ runOrSkip("e2e: markdown", () => {
     expect(out.startsWith(`markdown: ref '${ref}' has no text (`)).toBe(true);
   }, 60_000);
 
-  test("path-relative links in the page's own Markdown become absolute, code untouched (#154)", async () => {
+  test("the page's own Markdown with a relative link gives way to the DOM conversion (#154)", async () => {
     await cmdGoto(ctx, `${base}/docs/page.html`);
-    const out = JSON.parse(await cmdMarkdown(json));
-    expect(out.source).toBe("page");
-    expect(out.markdown).toBe(
-      [
-        `[a](${base}/x) [b](${base}/md/y "t") [c](${base}/z) ![i](<${base}/md/sp%20ace.png>) [p](http://cdn.example/a) [u](///) [h](https://e.com/q) [w](x) \`[j](/j)\``,
-        "",
-        "```js",
-        "[k](/k)",
-        "```",
-        "",
-        "- item",
-        "   ~~~",
-        "   [k2](/k2)",
-        "   ~~~~",
-        "",
-        "`foo",
-        "[bar](/x)`",
-        "",
-        "[e](/x\\(y\\))",
-        "",
-        `\\\`[g](${base}/x)\\\``,
-        "",
-        "- First `",
-        `- [l](${base}/x)\``,
-      ].join("\n"),
-    );
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
   }, 60_000);
 
   test("a checkbox in a list item prints its state (#154)", async () => {
@@ -613,12 +567,12 @@ runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
     expect(out.markdown.startsWith("# Aqara W400")).toBe(true);
   }, 60_000);
 
-  test("bun.com's own Markdown comes back with absolute links (#154)", async () => {
+  test("bun.com's relative links give way to the DOM conversion, with the site's real addresses (#154)", async () => {
     await cmdOpen(ctx, "https://bun.com/docs/runtime/http/server");
     const out = JSON.parse(await cmdMarkdown(ctx));
-    expect(out.source).toBe("page");
-    const prose = out.markdown.replace(/^\s*(`{3,}|~{3,})[\s\S]*?^\s*\1\s*$/gm, "");
-    expect(prose.match(/\]\(\.{0,2}\/(?!\/)/g)).toBeNull();
+    expect(out.source).toBe("converted");
+    expect(out.markdown.match(/\]\((?![a-z][a-z0-9+.-]*:|#)/gi)).toBeNull();
+    expect(out.markdown).toContain("(https://bun.com/docs/bundler)");
   }, 60_000);
 
   test("a GitHub task list keeps its state (#154)", async () => {

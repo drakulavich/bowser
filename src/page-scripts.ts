@@ -1124,38 +1124,6 @@ const TO_MARKDOWN = String.raw`
     return paras.join('\n\n');
   };`;
 
-// Fenced code and code spans must stay byte for byte: `[k](/k)` there is an example, not a link.
-const ABSOLUTE_LINKS = String.raw`const absolute = (md, base) => {
-    const resolve = (t) => { try { return new URL(t, base).href; } catch { return t; } };
-    // A target holding a backslash is left alone: new URL would read its Markdown escapes as path separators.
-    const token = /(?<!\\)(${"`"}+)[\s\S]*?(?<!${"`"})\1(?!${"`"})|\]\(([ \t]*)<(\.{0,2}\/[^<>\n\\]*)>|\]\(([ \t]*)(\.{0,2}\/[^\s)\\]*)(?=[\s)])/g;
-    const rewrite = (para) => para.replace(token, (m, ticks, s1, t1, s2, t2) => ticks ? m : t1 !== undefined ? '](' + s1 + '<' + resolve(t1) + '>' : '](' + s2 + resolve(t2));
-    // Code spans may cross lines but not a blank line or a new block (list item, heading, quote), so a paragraph is matched whole.
-    const out = [];
-    let para = [];
-    let fence = null;
-    const flush = () => { if (para.length) out.push(rewrite(para.join('\n'))); para = []; };
-    for (const line of md.split('\n')) {
-      const f = /^\s*(${"`"}{3,}|~{3,})(.*)$/.exec(line);
-      if (fence) {
-        if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = null;
-        out.push(line);
-      } else if (f && (f[1][0] === '~' || !f[2].includes('${"`"}'))) {
-        flush();
-        fence = f[1];
-        out.push(line);
-      } else if (!line.trim()) {
-        flush();
-        out.push(line);
-      } else {
-        if (/^\s*(([-+*]|\d{1,9}[.)])(\s|$)|#{1,6}(\s|$)|>)/.test(line)) flush();
-        para.push(line);
-      }
-    }
-    flush();
-    return out.join('\n');
-  };`;
-
 // Every wait shares one deadline: an unbounded one hung the session at budget 0 (ET-61).
 const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
     const u = new URL(location.href);
@@ -1233,11 +1201,12 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
     } catch {}
   }
   const link = document.querySelector('link[rel~="alternate"][type="text/markdown"][href]');
-  ${ABSOLUTE_LINKS}
   if (link) {
     try {
       const r = await fetch(link.href, { signal });
-      if (r.ok && !/html/i.test(r.headers.get('content-type') || '')) return { markdown: absolute((await r.text()).trimEnd(), link.href), source: 'page' };
+      // Relative links in the site's Markdown: the DOM conversion has them absolute, so it answers instead (#154).
+      const text = r.ok && !/html/i.test(r.headers.get('content-type') || '') ? (await r.text()).trimEnd() : null;
+      if (text !== null && !/\]\(\s*<?\.{0,2}\//.test(text)) return { markdown: text, source: 'page' };
     } catch {}
   }`
       : "";
