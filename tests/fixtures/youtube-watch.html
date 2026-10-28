@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- Shaped like YouTube's watch page as of 2026-10-28: only the elements `markdown` reads. -->
+<title>Fixture video - YouTube</title>
+<main>
+  <div id="movie_player"></div>
+  <ytd-watch-metadata>
+    <p>Description of the fixture video.</p>
+    <button id="expand">...more</button>
+    <div id="more" hidden>
+      <ytd-video-description-transcript-section-renderer><button>Show transcript</button></ytd-video-description-transcript-section-renderer>
+    </div>
+  </ytd-watch-metadata>
+  <ytd-engagement-panel-section-list-renderer target-id="engagement-panel-searchable-transcript" visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN">
+    <div id="segments"></div>
+    <ytd-transcript-footer-renderer><yt-dropdown-menu>English (auto-generated)</yt-dropdown-menu></ytd-transcript-footer-renderer>
+  </ytd-engagement-panel-section-list-renderer>
+</main>
+<script>
+  const kase = new URLSearchParams(location.search).get("case") || "default";
+  const video = new URLSearchParams(location.search).get("v");
+  const panel = document.querySelector("ytd-engagement-panel-section-list-renderer");
+  const list = document.getElementById("segments");
+  window.clicks = { expand: 0, transcript: 0 };
+  const fill = (rows) => {
+    list.replaceChildren(
+      ...rows.map(([ts, text]) => {
+        const s = document.createElement("ytd-transcript-segment-renderer");
+        s.innerHTML = '<div class="segment-timestamp"></div><span class="segment-text"></span>';
+        s.firstChild.textContent = ts;
+        s.lastChild.textContent = text;
+        return s;
+      }),
+    );
+  };
+  const tracks = kase === "notracks" ? [] : [{ languageCode: "en", kind: "asr" }];
+  const boot = () => {
+    document.getElementById("movie_player").getPlayerResponse = () => ({
+      videoDetails: { videoId: video },
+      captions: { playerCaptionsTracklistRenderer: { captionTracks: tracks } },
+    });
+  };
+  if (kase === "late-player") setTimeout(boot, 400);
+  else boot();
+  if (kase === "notracks") document.getElementById("more").remove();
+  if (kase === "desc-open") document.getElementById("more").hidden = false;
+  if (kase === "stale" || kase === "stale-forever") fill([["0:01", "PREVIOUS VIDEO"]]);
+  if (kase === "stale") setTimeout(() => list.replaceChildren(), 500);
+  if (kase === "expanded") {
+    fill([["0:05", "Already open"]]);
+    panel.setAttribute("visibility", "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED");
+  }
+  document.getElementById("expand").addEventListener("click", () => {
+    window.clicks.expand++;
+    document.getElementById("more").hidden = false;
+  });
+  document.querySelector("ytd-video-description-transcript-section-renderer button")?.addEventListener("click", () => {
+    window.clicks.transcript++;
+    if (kase === "never") return;
+    setTimeout(() => {
+      panel.setAttribute("visibility", "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED");
+      fill([
+        ["0:01", "Hello there"],
+        ["0:15", "# boom"],
+        ["0:31", "a\n- b"],
+      ]);
+    }, 300);
+  });
+</script>

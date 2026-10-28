@@ -62,12 +62,14 @@ export async function cmdMarkdown(ctx: CommandContext, ref?: string, opts: { fil
     const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
     const budget = opTimeoutMs();
     const fetchMs = Math.min(ALTERNATE_MS, budget ? Math.floor(budget / 2) : ALTERNATE_MS);
-    const { markdown, source, url, title } = (await c.request("evaluate", [markdownScript(selector, fetchMs)])) as {
+    const { markdown, source, url, title, failed } = (await c.request("evaluate", [markdownScript(selector, fetchMs)])) as {
       markdown: string;
       source: string;
       url: string;
       title: string;
+      failed?: boolean;
     };
+    if (failed) throw new Error(`markdown: the transcript of ${url} did not load within ${fetchMs}ms`);
     if (opts.filename) {
       const abs = resolve(opts.filename);
       await Bun.write(abs, markdown + "\n");

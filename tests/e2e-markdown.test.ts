@@ -94,6 +94,7 @@ runOrSkip("e2e: markdown", () => {
       async fetch(req) {
         const path = new URL(req.url).pathname;
         if (path === "/fixture.html") return html(await readFile(join(FIXTURES, "markdown.html"), "utf8"));
+        if (path === "/watch") return html(await readFile(join(FIXTURES, "youtube-watch.html"), "utf8"));
         if (path === "/no-main.html") {
           const page = await readFile(join(FIXTURES, "markdown.html"), "utf8");
           return html(page.replace("<main>", "<div>").replace("</main>", "</div>"));
@@ -408,6 +409,86 @@ runOrSkip("e2e: markdown", () => {
     await cmdGoto(ctx, `${base}/fixture.html`);
     await expect(cmdMarkdown(ctx, ref)).rejects.toThrow(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
   }, 60_000);
+  describe("a YouTube video gives its transcript (#223)", () => {
+    const watch = (kase?: string) => `${base}/watch?v=abc123def45${kase ? `&case=${kase}` : ""}`;
+    const withBudget = async <T>(ms: string, run: () => Promise<T>): Promise<T> => {
+      const orig = process.env.BOWSER_OP_TIMEOUT_MS;
+      process.env.BOWSER_OP_TIMEOUT_MS = ms;
+      try {
+        return await run();
+      } finally {
+        if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+        else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      }
+    };
+    const clicks = async () => JSON.parse(await cmdEval(ctx, "JSON.stringify(window.clicks)"));
+
+    test("the transcript, in 30-second paragraphs with one-line segments", async () => {
+      await cmdGoto(ctx, watch());
+      expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({
+        source: "transcript",
+        markdown: "# Fixture video\nhttps://youtu.be/abc123def45 · English (auto-generated)\n\n[0:01] Hello there # boom\n\n[0:31] a - b",
+      });
+      expect(await clicks()).toEqual({ expand: 1, transcript: 1 });
+    }, 60_000);
+
+    test("no caption tracks: the page converted, at once", async () => {
+      await cmdGoto(ctx, watch("notracks"));
+      const t0 = performance.now();
+      expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ source: "converted" });
+      expect(performance.now() - t0).toBeLessThan(1000);
+    }, 60_000);
+
+    test("captions that never load: exit 2 within the budget's half", async () => {
+      await cmdGoto(ctx, watch("never"));
+      await withBudget("2000", async () => {
+        await expect(cmdMarkdown(json)).rejects.toThrow(`markdown: the transcript of ${watch("never")} did not load within 1000ms`);
+      });
+    }, 60_000);
+
+    test("budget 0: the wait still ends, at 5000ms", async () => {
+      await cmdGoto(ctx, watch("never"));
+      const t0 = performance.now();
+      await withBudget("0", async () => {
+        await expect(cmdMarkdown(json)).rejects.toThrow("did not load within 5000ms");
+      });
+      expect(performance.now() - t0).toBeLessThan(6000);
+    }, 60_000);
+
+    test("the previous video's segments under a hidden panel are not read", async () => {
+      await cmdGoto(ctx, watch("stale"));
+      const out = JSON.parse(await cmdMarkdown(json));
+      expect(out.source).toBe("transcript");
+      expect(out.markdown).toContain("[0:01] Hello there");
+      expect(out.markdown).not.toContain("PREVIOUS VIDEO");
+    }, 60_000);
+
+    test("old segments that never leave: exit 2, and their text is nowhere", async () => {
+      await cmdGoto(ctx, watch("stale-forever"));
+      const err = await withBudget("2000", () => cmdMarkdown(json).catch((e: Error) => e));
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe(`markdown: the transcript of ${watch("stale-forever")} did not load within 1000ms`);
+    }, 60_000);
+
+    test("an expanded panel is read as is, without clicking", async () => {
+      await cmdGoto(ctx, watch("expanded"));
+      expect(JSON.parse(await cmdMarkdown(json)).markdown).toBe(
+        "# Fixture video\nhttps://youtu.be/abc123def45 · English (auto-generated)\n\n[0:05] Already open",
+      );
+      expect(await clicks()).toEqual({ expand: 0, transcript: 0 });
+    }, 60_000);
+
+    test("a description already open is not clicked again", async () => {
+      await cmdGoto(ctx, watch("desc-open"));
+      expect(JSON.parse(await cmdMarkdown(json)).source).toBe("transcript");
+      expect(await clicks()).toEqual({ expand: 0, transcript: 1 });
+    }, 60_000);
+
+    test("a player that boots after load is waited for", async () => {
+      await cmdGoto(ctx, watch("late-player"));
+      expect(JSON.parse(await cmdMarkdown(json)).source).toBe("transcript");
+    }, 60_000);
+  });
 });
 
 runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
@@ -434,5 +515,17 @@ runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
     const out = JSON.parse(await cmdMarkdown(ctx));
     expect(out.source).toBe("page");
     expect(out.markdown.startsWith("# Aqara W400")).toBe(true);
+  }, 60_000);
+
+  test("a YouTube video gives its transcript (#223)", async () => {
+    await cmdOpen(ctx, "https://www.youtube.com/watch?v=4UtrRVtUN_g");
+    const out = JSON.parse(await cmdMarkdown(ctx));
+    expect(out.source).toBe("transcript");
+    const lines = out.markdown.split("\n");
+    expect(lines.slice(0, 2)).toEqual([
+      "# How to Build an AI Code Review Agent - Daksh Gupta, Greptile",
+      "https://youtu.be/4UtrRVtUN_g · English (auto-generated)",
+    ]);
+    expect(lines.filter((l: string) => /^\[\d+:\d\d\] /.test(l)).length).toBeGreaterThanOrEqual(30);
   }, 60_000);
 });
