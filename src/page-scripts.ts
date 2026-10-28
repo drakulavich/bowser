@@ -1130,7 +1130,7 @@ const ABSOLUTE_LINKS = String.raw`const absolute = (md, base) => {
     // A target holding a backslash is left alone: new URL would read its Markdown escapes as path separators.
     const token = /(?<!\\)(${"`"}+)[\s\S]*?(?<!${"`"})\1(?!${"`"})|\]\(([ \t]*)<(\.{0,2}\/[^<>\n\\]*)>|\]\(([ \t]*)(\.{0,2}\/[^\s)\\]*)(?=[\s)])/g;
     const rewrite = (para) => para.replace(token, (m, ticks, s1, t1, s2, t2) => ticks ? m : t1 !== undefined ? '](' + s1 + '<' + resolve(t1) + '>' : '](' + s2 + resolve(t2));
-    // Code spans may cross lines but not a blank line, so a paragraph is matched whole.
+    // Code spans may cross lines but not a blank line or a new block (list item, heading, quote), so a paragraph is matched whole.
     const out = [];
     let para = [];
     let fence = null;
@@ -1147,7 +1147,10 @@ const ABSOLUTE_LINKS = String.raw`const absolute = (md, base) => {
       } else if (!line.trim()) {
         flush();
         out.push(line);
-      } else para.push(line);
+      } else {
+        if (/^\s*(([-+*]|\d{1,9}[.)])(\s|$)|#{1,6}(\s|$)|>)/.test(line)) flush();
+        para.push(line);
+      }
     }
     flush();
     return out.join('\n');

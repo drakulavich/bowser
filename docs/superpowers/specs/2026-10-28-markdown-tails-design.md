@@ -34,7 +34,7 @@ link or image target that starts with `/`, `./` or `../` is replaced with `new U
 - When `new URL` throws (`[a](///)` does), the target stays as written. A target holding a backslash also stays:
   `new URL` would read the Markdown escapes in `[a](/x\(y\))` as path separators (Greptile on #228).
 - Code is left byte for byte: inline code spans, matched per paragraph since a span may cross lines but not a
-  blank one and does not open on an escaped backtick (`` \` ``), and fenced code blocks as CommonMark defines them:
+  blank one or the start of a list item, heading or quote and does not open on an escaped backtick (`` \` ``), and fenced code blocks as CommonMark defines them:
   - a fence opens on a line whose first non-blank characters are three or more backticks or tildes, at any
     indent (more lenient than CommonMark, which caps the indent: a doubtful line keeps its links as written);
   - it closes on a line of the same character, at least as long as the opener;
