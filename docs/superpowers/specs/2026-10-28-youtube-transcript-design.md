@@ -55,7 +55,8 @@ https://youtu.be/4UtrRVtUN_g · English (auto-generated)
 - One paragraph per 30 seconds: a new paragraph starts at the first segment 30 s or more after the current
   paragraph's start, and carries that segment's timestamp as YouTube prints it (`m:ss` or `h:mm:ss`). The
   agent cites a moment as `https://youtu.be/<id>?t=<seconds>`, built from the header link.
-- Each paragraph goes through `escapeStarts`, so a segment starting with `# ` or `- ` stays text.
+- Whitespace inside a segment's text, newlines included, collapses to one space, so the only line starts in the
+  transcript are the `[m:ss]` ones and a segment's `# ` or `- ` stays inline text.
 - `--json` gives `source: "transcript"`; `url` and `title` are the page's, as for any source.
 - `--filename` writes the same text, as for any source.
 
@@ -78,38 +79,53 @@ claude.ai artifact step. `markdown <ref>` is unchanged.
 
 ```mermaid
 flowchart TD
-  A["markdown, no ref"] --> B{"#movie_player.getPlayerResponse()<br/>videoId is the URL's video?"}
+  A["markdown, no ref"] --> B{"URL is a video?<br/>/watch?v=, /shorts/, youtu.be"}
   B -- no --> X["claude.ai artifact, alternate link, conversion<br/>(as today)"]
-  B -- yes --> C{"caption tracks > 0?"}
+  B -- yes --> P{"player for this video<br/>before the deadline?"}
+  P -- no --> X
+  P -- yes --> C{"caption tracks > 0?"}
   C -- no --> X
-  C -- yes --> D{"transcript panel expanded<br/>with segments?"}
+  C -- yes --> D{"panel EXPANDED<br/>with segments?"}
   D -- yes --> R["read segments → source: transcript"]
-  D -- no --> E["wait until the old segments are gone,<br/>expand the description, click Show transcript"]
-  E --> F{"segments within fetchMs?"}
+  D -- no --> E["wait until the old segments are gone,<br/>expand the description if the button is hidden,<br/>click Show transcript"]
+  E --> F{"segments before the deadline?"}
   F -- yes --> R
   F -- no --> T["exit 2: the transcript did not load"]
 ```
 
-- **Detection is by the page, not the host.** The step runs when `#movie_player` has `getPlayerResponse` and
-  its `videoDetails.videoId` is the URL's video (`v=` on `/watch`, the last path segment on `/shorts/` and
-  `youtu.be`). No other site has that element, and the e2e fixture on `localhost` can then take the step.
-- **No caption tracks** (the Shorts above): the step falls through at once to the usual sources, without the
-  5 s wait for a button that never comes. The result is `source: "converted"`, no error.
-- **An expanded panel with segments** is the current video's (an in-page navigation hides the panel), so it is
-  read as is.
-- **Otherwise** the script waits until no `ytd-transcript-segment-renderer` is left in the DOM (the previous
-  video's), expands the description (`ytd-watch-metadata #expand`), clicks the button in
-  `ytd-video-description-transcript-section-renderer`, and polls every 250 ms for segments.
-- **The wait** shares `fetchMs` with the other page sources: `min(5000, budget / 2)`, as `cmdMarkdown` computes
-  it today (`src/commands/snapshot.ts:64`). The slowest load measured was 1,769 ms.
-- **Captions exist but nothing loaded in time**: `markdown` exits 2 with
-  `markdown: the transcript of https://www.youtube.com/watch?v=… did not load within 5000ms`. A silent fall back
-  to the page would hide a markup change on YouTube's side, and Sora would summarise the comments believing
-  they were the video.
+- **One deadline for the whole step**: `fetchMs` from the step's start, `min(5000, budget / 2)`, and 5000 at
+  budget 0, as `cmdMarkdown` computes it today (`src/commands/snapshot.ts:64`). Every wait below (the player,
+  the old segments leaving, the new segments) polls every 250 ms against that one deadline, so no wait in the
+  step can outlive it (ET-61). The slowest load measured was 1,769 ms.
+- **Detection.** The step runs when the URL is a video's: `v=` on a `/watch` path, the last path segment on
+  `/shorts/` or on a `youtu.be` host. The host is not checked, so the e2e fixture on `localhost` takes the step.
+  The script then waits for `#movie_player.getPlayerResponse()` whose `videoDetails.videoId` is the URL's video;
+  `ytInitialPlayerResponse` is not used, since it keeps the first video after an in-page navigation. No such
+  player before the deadline: the step falls through to the usual sources.
+- **No caption tracks** (the Shorts above): the step falls through at once, without waiting for a button that
+  never comes. The result is `source: "converted"`, no error.
+- **The panel is current only when expanded.** When
+  `ytd-engagement-panel-section-list-renderer[target-id=engagement-panel-searchable-transcript]` has
+  `visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"` and holds segments, they are read as is (read on the live
+  page on 2026-10-28 after opening it: 1,188 segments). An in-page navigation sets it to
+  `ENGAGEMENT_PANEL_VISIBILITY_HIDDEN`; segments under a hidden panel are the previous video's and are never read.
+- **Otherwise** the script waits until no `ytd-transcript-segment-renderer` is left in the DOM. It clicks
+  `ytd-watch-metadata #expand` only when the transcript button in
+  `ytd-video-description-transcript-section-renderer` is not visible (at load the button is in the DOM but
+  hidden), then clicks that button and waits for segments.
+- **Captions exist but nothing loaded by the deadline** (old segments that never left count too): `markdown`
+  exits 2 with `markdown: the transcript of https://www.youtube.com/watch?v=… did not load within 5000ms`. A
+  silent fall back to the page would hide a markup change on YouTube's side, and Sora would summarise the
+  comments believing they were the video.
 
 The clicks are `element.click()` inside the same `evaluate` that reads the page. They open a side panel and do
-not navigate, so `markdown` stays out of `ACTS`: that set is for native action ops that wait for a navigation
-afterwards (`src/daemon/server.ts:622`). #223 said otherwise; that was wrong.
+not navigate, so `markdown` stays out of `ACTS`: that set is for native action ops, and membership waits out a
+pending navigation and syncs the dialog shim around them (`src/daemon/server.ts:447`, `:622`), which an
+`evaluate` already does for itself. #223 said otherwise; that was wrong.
+
+This breaks one rule of the 2026-10-05 `markdown` design: reading leaves the page as it was. Here the
+description stays expanded and the transcript panel stays open, so refs from an earlier snapshot can report
+the page changed. That is accepted: Sora reads a video page to read it, not to act on it afterwards.
 
 ## Cost
 
@@ -129,17 +145,24 @@ rate, about 150 KB (≈37k tokens). `--filename` keeps it out of the context, as
 
 - `tests/fixtures/youtube-watch.html`, a page shaped like YouTube's watch page as of 2026-10-28: `#movie_player`
   with `getPlayerResponse()`, `ytd-watch-metadata #expand`, a transcript button that adds
-  `ytd-transcript-segment-renderer` nodes (`.segment-timestamp`, `.segment-text`) 300 ms after the click. Query
-  parameters choose the case: no tracks, segments never load, stale segments present at load that leave after
-  500 ms, and a segment text starting with `# `.
+  `ytd-transcript-segment-renderer` nodes (`.segment-timestamp`, `.segment-text`) 300 ms after the click, and the
+  engagement panel's `visibility` attribute. Query parameters choose the case.
 - `tests/e2e-markdown.test.ts`, on that fixture at `/watch?v=abc123def45`:
   - `markdown --json` answers `source: "transcript"` and a `markdown` string written out in the test: the
     header, the link line, and two paragraphs split at 30 s;
   - with no tracks it answers `source: "converted"` in under 1 s;
   - with segments that never load and `BOWSER_OP_TIMEOUT_MS=2000`, it exits 2 with
     `markdown: the transcript of <url> did not load within 1000ms`;
-  - with stale segments, none of their text is in the result;
-  - `# ` at a segment's start comes out as `\# `.
+  - with `BOWSER_OP_TIMEOUT_MS=0` and segments that never load, it exits 2 within 6 s, naming 5000ms;
+  - a hidden panel with segments `PREVIOUS VIDEO` that leave after 500 ms: the result has the new segments and
+    not `PREVIOUS VIDEO`;
+  - a hidden panel with segments `PREVIOUS VIDEO` that never leave: exit 2 by the deadline, and
+    `PREVIOUS VIDEO` is in no output;
+  - an expanded panel already holding segments: those are the result, and the transcript button is not clicked;
+  - a description already expanded at load: the transcript loads, and `#expand` is not clicked;
+  - a player that appears 400 ms after load: `source: "transcript"`;
+  - a segment `# boom` that is not first in its paragraph, and a segment `a\n- b`: the paragraph reads
+    `… # boom …` and `a - b` on its one line.
 - `BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test tests/e2e-markdown.test.ts` on `4UtrRVtUN_g`: `source` is
   `"transcript"`, the first line is `# How to Build an AI Code Review Agent - Daksh Gupta, Greptile`, and there
   are at least 30 paragraphs starting with `[`. Today: `source` is `"converted"`, 4,707 bytes.
@@ -150,9 +173,5 @@ rate, about 150 KB (≈37k tokens). `--filename` keeps it out of the context, as
 
 ## Open Issues
 
-- The panel's visibility attribute is read from
-  `ytd-engagement-panel-section-list-renderer[target-id=engagement-panel-searchable-transcript]`. After an
-  in-page navigation it read `ENGAGEMENT_PANEL_VISIBILITY_HIDDEN`; the expanded value was not read. The
-  implementation checks it on a live page before relying on it.
 - The fixture goes stale when YouTube changes its markup; only the network test notices. The network test is
   the one to run after a report that `markdown` stopped giving transcripts.
