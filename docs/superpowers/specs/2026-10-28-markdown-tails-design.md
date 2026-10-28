@@ -34,8 +34,9 @@ When the result comes from the page's own Markdown (the claude.ai artifact or th
   not start with `#`. `/x`, `./x`, `../x`, `x` and `//host/x` are resolved; `https:`, `mailto:`, `vscode:`,
   `#frag` and an empty target (`[t]()`) stay as written.
 - When `new URL` throws (`[a](///)` does), the target stays as written: one bad link must not cost the page.
-- Only the target is replaced. A link is `(`, optional spaces, the target (`<…>` or a run without spaces), then
-  optionally spaces and a title in one of CommonMark's three forms (`"…"`, `'…'`, `(…)`), then `)`. The title and
+- Only the target is replaced. A link is `(`, optional whitespace (spaces or tabs), the target (`<…>`, which may
+  hold spaces but not `<`, `>` or a newline, or else a run with no whitespace), then optionally whitespace and a
+  title in one of CommonMark's three forms (`"…"`, `'…'`, `(…)`), then `)`. The title and
   `<…>` brackets are kept as written. A link that does not fit that shape is left alone.
 - Code is left byte for byte: inline code spans, and fenced code blocks as CommonMark defines them. A fence
   opens on a line indented by up to three spaces, or nested in a list item, with three or more backticks or
