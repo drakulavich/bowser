@@ -970,6 +970,8 @@ export function storageRestoreScript(area: StorageArea, entries: Array<{ name: s
 
 const TO_MARKDOWN = String.raw`
   const BT = String.fromCharCode(96);
+  // GitHub hides a read-only task checkbox with display: none; its state is still the task's (#154).
+  const task = (el) => el.tagName === 'INPUT' && el.type === 'checkbox' && !!el.closest('li');
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS', 'IFRAME', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
   const BLOCK = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FIGURE', 'FIGCAPTION', 'FORM', 'FIELDSET', 'DETAILS', 'SUMMARY', 'ADDRESS', 'DL', 'DT', 'DD', 'LI', 'BODY', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'TABLE', 'BLOCKQUOTE', 'HR']);
   const skipped = (el) => {
@@ -989,6 +991,7 @@ const TO_MARKDOWN = String.raw`
   const mark = (m, s) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); return core ? lead + m + core + m + trail : lead + trail; };
   const inline = (n) => {
     if (n.nodeType === 3) return text(n);
+    if (n.nodeType === 1 && task(n)) return n.checked ? '[x] ' : '[ ] ';
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
     // A block-level child is a word of its own, as the snapshot's name reads it (ET-47).
@@ -1062,6 +1065,7 @@ const TO_MARKDOWN = String.raw`
   };
   const blocks = (n, out) => {
     if (n.nodeType === 3) { out.push({ inline: text(n) }); return; }
+    if (n.nodeType === 1 && task(n)) { out.push({ inline: inline(n) }); return; }
     if (n.nodeType !== 1 || skipped(n)) return;
     const t = n.tagName;
     const h = /^H([1-6])$/.exec(t);
@@ -1118,6 +1122,22 @@ const TO_MARKDOWN = String.raw`
     }
     end();
     return paras.join('\n\n');
+  };`;
+
+// Fenced code and code spans must stay byte for byte: `[k](/k)` there is an example, not a link.
+const ABSOLUTE_LINKS = String.raw`const absolute = (md, base) => {
+    const resolve = (t) => { try { return new URL(t, base).href; } catch { return t; } };
+    const token = /(${"`"}+)[\s\S]*?(?<!${"`"})\1(?!${"`"})|\]\(([ \t]*)<(\.{0,2}\/[^<>\n]*)>|\]\(([ \t]*)(\.{0,2}\/[^\s)]*)/g;
+    let fence = null;
+    return md.split('\n').map((line) => {
+      const f = /^\s*(${"`"}{3,}|~{3,})(.*)$/.exec(line);
+      if (fence) {
+        if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = null;
+        return line;
+      }
+      if (f && (f[1][0] === '~' || !f[2].includes('${"`"}'))) { fence = f[1]; return line; }
+      return line.replace(token, (m, ticks, s1, t1, s2, t2) => ticks ? m : t1 !== undefined ? '](' + s1 + '<' + resolve(t1) + '>' : '](' + s2 + resolve(t2));
+    }).join('\n');
   };`;
 
 // Every wait shares one deadline: an unbounded one hung the session at budget 0 (ET-61).
@@ -1197,10 +1217,11 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
     } catch {}
   }
   const link = document.querySelector('link[rel~="alternate"][type="text/markdown"][href]');
+  ${ABSOLUTE_LINKS}
   if (link) {
     try {
       const r = await fetch(link.href, { signal });
-      if (r.ok && !/html/i.test(r.headers.get('content-type') || '')) return { markdown: (await r.text()).trimEnd(), source: 'page' };
+      if (r.ok && !/html/i.test(r.headers.get('content-type') || '')) return { markdown: absolute((await r.text()).trimEnd(), link.href), source: 'page' };
     } catch {}
   }`
       : "";

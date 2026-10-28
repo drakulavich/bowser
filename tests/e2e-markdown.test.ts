@@ -75,6 +75,22 @@ const LISTS = `<!doctype html><title>lists</title><main>
 <ol reversed><li>a</li><li hidden>gone</li><li>b</li></ol>
 <ol><li value="10">ten</li><li>eleven</li></ol>
 </main>`;
+// #154 ET-50: the page's own Markdown, served from another directory than the page.
+const GUIDE = [
+  '[a](/x) [b](./y "t") [c](../z) ![i](<./sp ace.png>) [p](//cdn.example/a) [u](///) [h](https://e.com/q) [w](x) `[j](/j)`',
+  "",
+  "```js",
+  "[k](/k)",
+  "```",
+  "",
+  "- item",
+  "   ~~~",
+  "   [k2](/k2)",
+  "   ~~~~",
+].join("\n");
+// #154 ET-55 and ET-51.
+const TASKS = `<!doctype html><title>tasks</title><main><ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> open</li><li><input type="checkbox" checked hidden> hid</li><li><input type="checkbox" style="display: none"> styled</li></ul><p><input type="checkbox" checked> outside</p></main>`;
+const EMPTY_REGION = `<!doctype html><title>region</title><main><p>Text</p><button aria-label="Empty"></button></main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
@@ -127,6 +143,10 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/shell.md") return html("<!doctype html><div id=root>Loading</div>");
         if (path === "/alert.html")
           return html("<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>");
+        if (path === "/docs/page.html") return html(ALT("/md/guide.md"));
+        if (path === "/md/guide.md") return new Response(GUIDE, { headers: { "content-type": "text/markdown" } });
+        if (path === "/tasks.html") return html(TASKS);
+        if (path === "/empty-region.html") return html(EMPTY_REGION);
         if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
         return new Response("not found", { status: 404 });
       },
@@ -328,7 +348,56 @@ runOrSkip("e2e: markdown", () => {
       ok: true,
       filename: file,
       source: "converted",
+      url: `${base}/fixture.html`,
+      title: "Markdown fixture",
     });
+  }, 60_000);
+
+  test("--filename on a page with no text says so, and the file holds only a newline (#154)", async () => {
+    await cmdGoto(ctx, "about:blank");
+    const file = join(tmp, "empty.md");
+    expect(await cmdMarkdown(ctx, undefined, { filename: file })).toBe(`markdown: the page has no text ("", about:blank)\nwrote ${file}`);
+    expect(await readFile(file, "utf8")).toBe("\n");
+    expect(JSON.parse(await cmdMarkdown(json, undefined, { filename: file }))).toEqual({
+      ok: true,
+      filename: file,
+      source: "converted",
+      url: "about:blank",
+      title: "",
+    });
+  }, 60_000);
+
+  test("--filename on a ref with no text names the ref (#154)", async () => {
+    await cmdGoto(ctx, `${base}/empty-region.html`);
+    await cmdSnapshot(ctx);
+    const ref = await refOfRole("button");
+    const out = await cmdMarkdown(ctx, ref, { filename: join(tmp, "region.md") });
+    expect(out.startsWith(`markdown: ref '${ref}' has no text (`)).toBe(true);
+  }, 60_000);
+
+  test("path-relative links in the page's own Markdown become absolute, code untouched (#154)", async () => {
+    await cmdGoto(ctx, `${base}/docs/page.html`);
+    const out = JSON.parse(await cmdMarkdown(json));
+    expect(out.source).toBe("page");
+    expect(out.markdown).toBe(
+      [
+        `[a](${base}/x) [b](${base}/md/y "t") [c](${base}/z) ![i](<${base}/md/sp%20ace.png>) [p](http://cdn.example/a) [u](///) [h](https://e.com/q) [w](x) \`[j](/j)\``,
+        "",
+        "```js",
+        "[k](/k)",
+        "```",
+        "",
+        "- item",
+        "   ~~~",
+        "   [k2](/k2)",
+        "   ~~~~",
+      ].join("\n"),
+    );
+  }, 60_000);
+
+  test("a checkbox in a list item prints its state (#154)", async () => {
+    await cmdGoto(ctx, `${base}/tasks.html`);
+    expect(await cmdMarkdown(ctx)).toBe("- [x] done\n- [ ] open\n- [x] hid\n- [ ] styled\n\noutside");
   }, 60_000);
 
   test("a rel=alternate Markdown link is used as is", async () => {
@@ -522,6 +591,20 @@ runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
     const out = JSON.parse(await cmdMarkdown(ctx));
     expect(out.source).toBe("page");
     expect(out.markdown.startsWith("# Aqara W400")).toBe(true);
+  }, 60_000);
+
+  test("bun.com's own Markdown comes back with absolute links (#154)", async () => {
+    await cmdOpen(ctx, "https://bun.com/docs/runtime/http/server");
+    const out = JSON.parse(await cmdMarkdown(ctx));
+    expect(out.source).toBe("page");
+    const prose = out.markdown.replace(/^\s*(`{3,}|~{3,})[\s\S]*?^\s*\1\s*$/gm, "");
+    expect(prose.match(/\]\(\.{0,2}\/(?!\/)/g)).toBeNull();
+  }, 60_000);
+
+  test("a GitHub task list keeps its state (#154)", async () => {
+    await cmdOpen(ctx, "https://github.com/drakulavich/bowser/issues/140");
+    // GitHub serves two task-list markups; in one the task text is a block after the checkbox.
+    expect(JSON.parse(await cmdMarkdown(ctx)).markdown).toMatch(/\[ \]\s+S2-2/);
   }, 60_000);
 
   test("a YouTube video gives its transcript (#223)", async () => {
