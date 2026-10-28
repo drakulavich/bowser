@@ -971,7 +971,7 @@ export function storageRestoreScript(area: StorageArea, entries: Array<{ name: s
 const TO_MARKDOWN = String.raw`
   const BT = String.fromCharCode(96);
   // GitHub hides a read-only task checkbox with display: none; its state is still the task's (#154).
-  const task = (el) => el.tagName === 'INPUT' && el.type === 'checkbox' && !!el.closest('li');
+  const task = (el) => { const li = el.tagName === 'INPUT' && el.type === 'checkbox' && el.closest('li'); return !!li && getComputedStyle(li).visibility === 'visible'; };
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS', 'IFRAME', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
   const BLOCK = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FIGURE', 'FIGCAPTION', 'FORM', 'FIELDSET', 'DETAILS', 'SUMMARY', 'ADDRESS', 'DL', 'DT', 'DD', 'LI', 'BODY', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'TABLE', 'BLOCKQUOTE', 'HR']);
   const skipped = (el) => {
@@ -1127,17 +1127,30 @@ const TO_MARKDOWN = String.raw`
 // Fenced code and code spans must stay byte for byte: `[k](/k)` there is an example, not a link.
 const ABSOLUTE_LINKS = String.raw`const absolute = (md, base) => {
     const resolve = (t) => { try { return new URL(t, base).href; } catch { return t; } };
-    const token = /(${"`"}+)[\s\S]*?(?<!${"`"})\1(?!${"`"})|\]\(([ \t]*)<(\.{0,2}\/[^<>\n]*)>|\]\(([ \t]*)(\.{0,2}\/[^\s)]*)/g;
+    // A target holding a backslash is left alone: new URL would read its Markdown escapes as path separators.
+    const token = /(?<!\\)(${"`"}+)[\s\S]*?(?<!${"`"})\1(?!${"`"})|\]\(([ \t]*)<(\.{0,2}\/[^<>\n\\]*)>|\]\(([ \t]*)(\.{0,2}\/[^\s)\\]*)(?=[\s)])/g;
+    const rewrite = (para) => para.replace(token, (m, ticks, s1, t1, s2, t2) => ticks ? m : t1 !== undefined ? '](' + s1 + '<' + resolve(t1) + '>' : '](' + s2 + resolve(t2));
+    // Code spans may cross lines but not a blank line, so a paragraph is matched whole.
+    const out = [];
+    let para = [];
     let fence = null;
-    return md.split('\n').map((line) => {
+    const flush = () => { if (para.length) out.push(rewrite(para.join('\n'))); para = []; };
+    for (const line of md.split('\n')) {
       const f = /^\s*(${"`"}{3,}|~{3,})(.*)$/.exec(line);
       if (fence) {
         if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = null;
-        return line;
-      }
-      if (f && (f[1][0] === '~' || !f[2].includes('${"`"}'))) { fence = f[1]; return line; }
-      return line.replace(token, (m, ticks, s1, t1, s2, t2) => ticks ? m : t1 !== undefined ? '](' + s1 + '<' + resolve(t1) + '>' : '](' + s2 + resolve(t2));
-    }).join('\n');
+        out.push(line);
+      } else if (f && (f[1][0] === '~' || !f[2].includes('${"`"}'))) {
+        flush();
+        fence = f[1];
+        out.push(line);
+      } else if (!line.trim()) {
+        flush();
+        out.push(line);
+      } else para.push(line);
+    }
+    flush();
+    return out.join('\n');
   };`;
 
 // Every wait shares one deadline: an unbounded one hung the session at budget 0 (ET-61).

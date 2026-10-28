@@ -31,8 +31,10 @@ link or image target that starts with `/`, `./` or `../` is replaced with `new U
   Only that run is replaced, so a title after it and the `<…>` brackets stay as written, and every other target (a scheme,
   `#frag`, an empty one, a bare `x`) is never matched.
 - `//host/x` starts with `/`, so it is matched and resolved to the base's scheme.
-- When `new URL` throws (`[a](///)` does), the target stays as written.
-- Code is left byte for byte: inline code spans, and fenced code blocks as CommonMark defines them:
+- When `new URL` throws (`[a](///)` does), the target stays as written. A target holding a backslash also stays:
+  `new URL` would read the Markdown escapes in `[a](/x\(y\))` as path separators (Greptile on #228).
+- Code is left byte for byte: inline code spans, matched per paragraph since a span may cross lines but not a
+  blank one and does not open on an escaped backtick (`` \` ``), and fenced code blocks as CommonMark defines them:
   - a fence opens on a line whose first non-blank characters are three or more backticks or tildes, at any
     indent (more lenient than CommonMark, which caps the indent: a doubtful line keeps its links as written);
   - it closes on a line of the same character, at least as long as the opener;
@@ -58,7 +60,7 @@ form of the line (`markdown: ref 'e5' has no text (…)`), as without `--filenam
 ### ET-55: a checkbox in a list item prints its state
 
 A checkbox `input` inside an `li` prints `[x] ` when checked and `[ ] ` when not, where it stands in the item,
-even when the checkbox itself is hidden: GitHub draws a read-only task with its checkbox at `display: none`
+even when the checkbox itself is hidden, as long as the `li` is visible: GitHub draws a read-only task with its checkbox at `display: none`
 (checked on #140 on 2026-10-28), and custom-drawn checkboxes hide the native `input` the same way. A hidden
 `li` still drops the whole item. Every other `input` is still skipped. GitHub serves two markups for the same
 task list (seen on #140 on 2026-10-28): in one the task text is a block after the checkbox, so the item reads

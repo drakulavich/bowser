@@ -87,9 +87,16 @@ const GUIDE = [
   "   ~~~",
   "   [k2](/k2)",
   "   ~~~~",
+  "",
+  "`foo",
+  "[bar](/x)`",
+  "",
+  "[e](/x\\(y\\))",
+  "",
+  "\\`[g](/x)\\`",
 ].join("\n");
 // #154 ET-55 and ET-51.
-const TASKS = `<!doctype html><title>tasks</title><main><ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> open</li><li><input type="checkbox" checked hidden> hid</li><li><input type="checkbox" style="display: none"> styled</li></ul><p><input type="checkbox" checked> outside</p></main>`;
+const TASKS = `<!doctype html><title>tasks</title><main><ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> open</li><li><input type="checkbox" checked hidden> hid</li><li><input type="checkbox" style="display: none"> styled</li><li style="visibility: hidden"><input type="checkbox" checked> gone</li></ul><p><input type="checkbox" checked> outside</p></main>`;
 const EMPTY_REGION = `<!doctype html><title>region</title><main><p>Text</p><button aria-label="Empty"></button></main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
@@ -391,6 +398,13 @@ runOrSkip("e2e: markdown", () => {
         "   ~~~",
         "   [k2](/k2)",
         "   ~~~~",
+        "",
+        "`foo",
+        "[bar](/x)`",
+        "",
+        "[e](/x\\(y\\))",
+        "",
+        `\\\`[g](${base}/x)\\\``,
       ].join("\n"),
     );
   }, 60_000);
