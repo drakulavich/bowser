@@ -140,6 +140,11 @@ const BARE_EDITOR_HTML = `<!doctype html>
   ed.addEventListener("input", () => { const p = document.createElement("p"); p.textContent = ed.textContent; ed.replaceChildren(p); });
 </script></body></html>`;
 
+/** Editors whose text sits right in the editable element (#242 review). */
+const TEXT_EDITORS_HTML = `<!doctype html>
+<html><head><title>Text editors</title></head>
+<body><div contenteditable="true" aria-label="Note">hello</div><p contenteditable="true">para text</p></body></html>`;
+
 runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
   let tmp: string;
@@ -170,6 +175,9 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
         }
         if (new URL(req.url).pathname === "/bare-editor.html") {
           return new Response(BARE_EDITOR_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
+        if (new URL(req.url).pathname === "/text-editors.html") {
+          return new Response(TEXT_EDITORS_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
         }
         if (new URL(req.url).pathname === "/edges.html") {
           return new Response(EDGES_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -323,6 +331,13 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     expect(await cmdEval(ctx, "JSON.stringify(document.getElementById('ed').innerHTML)")).toContain("<p>second</p>");
     await cmdSnapshot(ctx);
     expect(await refNamed("Body")).toBe(ref);
+  }, 60_000);
+
+  test("a contenteditable textbox, and a contenteditable <p>, print the text right inside them", async () => {
+    await cmdGoto(ctx, `${base}/text-editors.html`);
+    const snap = tree(await cmdSnapshot(ctx));
+    expect(snap).toMatch(/- textbox "Note" \[ref=e\d+\]: hello\n/);
+    expect(snap).toMatch(/- paragraph \[ref=e\d+\]: para text/);
   }, 60_000);
 
   // One page, several rules; the golden line that breaks names the rule:

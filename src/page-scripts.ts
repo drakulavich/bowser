@@ -516,7 +516,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   }
   function visit(parent, node, parentVisible) {
     if (node.nodeType === 3) {
-      if (parentVisible && node.nodeValue && parent.role !== 'textbox') parent.children.push(node.nodeValue);
+      if (parentVisible && node.nodeValue && (parent.role !== 'textbox' || node.parentElement.isContentEditable)) parent.children.push(node.nodeValue);
       return;
     }
     if (node.nodeType !== 1 || hiddenSubtree(node)) return;
