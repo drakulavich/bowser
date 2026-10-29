@@ -69,6 +69,16 @@ runOrSkip("e2e: real browser", () => {
     expect(bytes.length).toBeGreaterThan(1000); // a real capture, not a stub
   }, 30_000);
 
+  test("screenshot --filename=x.jpg writes a JPEG of the size it reports (#197)", async () => {
+    await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(html)}`);
+    const file = join(tmp, "e2e-shot.jpg");
+    const out = await cmdScreenshot({ session, json: false }, { filename: file });
+    const { width, height, format } = await Bun.file(file).image().metadata();
+    expect(format).toBe("jpeg");
+    expect(out).toBe(`wrote ${file} (${width}×${height})`);
+    expect(width).toBeGreaterThan(1);
+  }, 30_000);
+
   // Spec F17: Bun.WebView captures the viewport, as playwright-cli does by
   // default; the docs say so. A 3000x5000 CSS px page gives a PNG the size
   // of the viewport (at the display's scale), not of the page.

@@ -179,6 +179,27 @@ describe("createHandler", () => {
     }
   });
 
+  test("screenshot to a .jpg or .jpeg path writes a JPEG, scaled too (#197)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bowser-handler-"));
+    try {
+      const png = Buffer.from(
+        await new Bun.Image(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"))
+          .resize(4, 4, { fit: "fill" })
+          .png()
+          .bytes(),
+      );
+      const b = fakeBrowser({ evaluate: async () => [2, 2, 2], screenshot: async () => png.toString("base64") });
+      const jpg = join(dir, "shot.JPG");
+      await createHandler(b)(req("screenshot", [jpg]));
+      expect(await new Bun.Image(await readFile(jpg)).metadata()).toEqual({ width: 4, height: 4, format: "jpeg" });
+      const jpeg = join(dir, "shot.jpeg");
+      await createHandler(b)(req("screenshot", [jpeg, 1]));
+      expect(await new Bun.Image(await readFile(jpeg)).metadata()).toEqual({ width: 2, height: 2, format: "jpeg" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   describe("screenshot --scale", () => {
     const ONE_PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
     const ihdr = (b: Uint8Array) => {

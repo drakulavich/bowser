@@ -5,6 +5,13 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **`screenshot --filename=x.jpg` writes a JPEG.** The format follows the extension: `.png` is
+  PNG, `.jpg` and `.jpeg` (in any case) are JPEG at quality 80, and the reply reports the JPEG's
+  size. Any other extension, or none, is a usage error (exit 1) before anything is captured; a
+  `--filename` without an extension used to get a PNG. (#197)
+
 ### Changed
 
 - **Breaking: `list --json` is an array of objects.** It was an array of names; it is now
