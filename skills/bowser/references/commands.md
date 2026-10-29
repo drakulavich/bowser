@@ -17,6 +17,7 @@ The full notes behind the command table in `SKILL.md`.
 | `bowser check <ref>` / `uncheck <ref>` | Check or uncheck a checkbox/radio. A `[disabled]` one fails (exit 1); `uncheck` on a checked radio fails (exit 1): select another option in its group. `aria-checked="mixed"` counts as unchecked for `check`, checked for `uncheck` |
 | `bowser screenshot [--filename=f] [--scale=N]` | Screenshot of the viewport (PNG); no full-page capture. Waits up to 5 s for the web fonts the page itself asked for (not its iframes'); `; fonts still loading` in the reply means they did not arrive and the text may be missing or in a fallback font |
 | `bowser resize <width> <height>` | Set the viewport size in pixels, each side 1 to 16384 |
+| `bowser list` | Sessions whose daemon is running, one per line. A daemon that runs but does not answer is marked `<name> (not answering; run 'bowser close -s <name>')`. `--json` gives `[{"name":"…","answering":true\|false}]` |
 | `bowser close [name]` | End a session and remove its data (defaults to `--session`; positional name overrides). Ends a daemon of another bowser version too. Exits 2 and keeps the session when it cannot confirm the browser stopped. A name with no session answers `session '<name>' is not open`, exit 0 |
 | `bowser close --all` | Close every open session; if one fails, the rest are still closed and it exits 2 naming each failure with its reason |
 | `bowser localstorage-list` / `sessionstorage-list` | List entries (`key=value` lines, or JSON) |

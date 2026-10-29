@@ -277,9 +277,15 @@ export async function browserExited(session: string): Promise<string> {
 /** Why a session whose pidfile names a live daemon of ours cannot be used:
  *  its socket is gone or refuses, and only `close` ends it (ET-63). */
 async function unreachableDaemon(session: string): Promise<string | undefined> {
-  const pid = Number((await readFile(pidPath(session), "utf8").catch(() => "")).trim());
-  if (!Number.isInteger(pid) || pid <= 0 || !isAlive(pid) || !(await isOurDaemon(pid, session))) return undefined;
+  const pid = await liveDaemonPid(session);
+  if (pid === null) return undefined;
   return `session '${session}' is not reachable: its daemon (pid ${pid}) is running but does not accept connections; run 'bowser close -s ${session}'`;
+}
+
+/** The pid the session's pidfile names, when it is a live daemon of ours; else null. */
+export async function liveDaemonPid(session: string): Promise<number | null> {
+  const pid = Number((await readFile(pidPath(session), "utf8").catch(() => "")).trim());
+  return Number.isInteger(pid) && pid > 0 && isAlive(pid) && (await isOurDaemon(pid, session)) ? pid : null;
 }
 
 /** The profile the session's `open` recorded, null for none. State from an

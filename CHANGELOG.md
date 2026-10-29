@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: `list --json` is an array of objects.** It was an array of names; it is now
+  `[{"name": "…", "answering": true|false}]`. A session whose daemon is ours and running but does
+  not answer (stopped, or its socket removed) is listed with `answering: false`, and the text
+  output marks it `<name> (not answering; run 'bowser close -s <name>')`. `list` used to leave
+  it out, so an agent that checked `list` before `open` saw a free name. (ET-64, #155)
+
 ## [0.12.0] — 2026-10-21
 
 ### Added
