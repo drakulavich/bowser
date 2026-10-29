@@ -178,18 +178,8 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     expect(await cmdEval(ctx, "document.getElementById('name').value")).toBe("");
   }, 60_000);
 
-  // A long-lived daemon may hold a page the previous bowser snapshotted: its
-  // store has no byRef map. The new scripts must work with it, not throw.
+  // A ref store with no document id, as bowser before #105 wrote.
   const OLD_STORE = "(window[Symbol.for('bowser.aria-refs')] = { refs: new WeakMap(), last: 5 }, 'planted')";
-
-  test("snapshot on a page with a previous version's ref store works and continues its numbering", async () => {
-    await cmdOpen(ctx, `${base}/form.html`);
-    await cmdEval(ctx, OLD_STORE);
-    await cmdSnapshot(ctx);
-    const ids = (await loadState(ctx.session))!.refs.map((r) => Number(r.id.slice(1)));
-    expect(Math.min(...ids)).toBe(6);
-    expect((await loadState(ctx.session))!.doc).toMatch(/^[0-9a-f]{32}$/);
-  }, 60_000);
 
   test("an action on a page with a previous version's ref store is refused as from another page, exit 1", async () => {
     await cmdOpen(ctx, `${base}/form.html`);

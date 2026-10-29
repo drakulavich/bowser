@@ -434,10 +434,7 @@ const ROLE_NAME = String.raw`
 // (resolveRefScript) and uses a path computed at that moment.
 export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const KEY = Symbol.for('bowser.aria-refs');
-  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
-  // A store from a previous bowser version has no byRef or doc.
-  if (!store.byRef) store.byRef = new Map();
-  if (!store.doc) store.doc = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0, doc: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') });
   // Forget refs whose element is gone, so byRef does not grow with every re-render.
   for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
 
