@@ -307,8 +307,8 @@ bowser's scripts run in the page's own JavaScript world, and WebKit returns thei
 
 ```bash
 bun run check                                  # typecheck, lint, then unit tests
-bun run typecheck                              # tsc
-bun run lint                                   # Biome (import cycles, layer rules) and Knip (unused files, exports)
+bun run typecheck                              # bun check
+bun run lint                                   # bun fmt --check, Biome (import cycles, layer rules) and Knip (unused files, exports)
 bun test                                       # unit + command tests with a fake daemon
 BOWSER_E2E=1 bun test                          # + end-to-end on WebKit
 BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub search)
