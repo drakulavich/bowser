@@ -526,6 +526,16 @@ function startHandover(
       return undefined;
     }
   };
+  // The child drops a cancelled call's reply, so its id must not wait to be refused at exit (ET-40).
+  const cancelledId = (line: string): string | undefined => {
+    try {
+      const req = JSON.parse(line) as { method?: unknown; params?: { requestId?: unknown } };
+      const id = req.method === "notifications/cancelled" ? req.params?.requestId : undefined;
+      return id === undefined || id === null ? undefined : JSON.stringify(id);
+    } catch {
+      return undefined;
+    }
+  };
 
   const refuse = (line: string): Promise<void> | undefined => {
     let req: { id?: unknown; method?: unknown } | undefined;
@@ -557,8 +567,12 @@ function startHandover(
         }
         return false;
       })();
-      const timeout = Bun.sleep(HANDOVER_MS).then(() => "timeout" as const);
+      let timer: Timer | undefined;
+      const timeout = new Promise<"timeout">((r) => {
+        timer = setTimeout(() => r("timeout"), HANDOVER_MS);
+      });
       const got = await Promise.race([answered, timeout]);
+      clearTimeout(timer);
       if (got !== true) throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
     }
     forwarded = (async () => {
@@ -587,6 +601,8 @@ function startHandover(
         if (failed !== undefined) return refuse(line);
         const id = idOf(line);
         if (id !== undefined) outstanding.set(id, line);
+        const cancelled = cancelledId(line);
+        if (cancelled !== undefined) outstanding.delete(cancelled);
         toChild(line);
       });
     },
