@@ -907,8 +907,8 @@ export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "re
  *    and `input` and `change`; a value the input does not keep is put back
  *    and refused;
  *  - anything else is emptied, like playwright's fill: an input/textarea's
- *    value, or a contenteditable element's content, with the caret put back
- *    inside it (the text node the click placed it in is gone).
+ *    value, or a contenteditable element's content through a native delete,
+ *    which editors that re-render from their own state (Lexical) apply too.
  *  The only value read is a date-like input's, never a password field's. */
 export function fillScript(selector: string, value: string): string {
   return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
@@ -925,10 +925,8 @@ export function fillScript(selector: string, value: string): string {
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return { outcome: 'set', type };
     }
-    if ('value' in el) el.value = '';
-    else if (el.isContentEditable) { el.textContent = ''; el.focus(); getSelection().collapse(el, 0); }
-    else return { outcome: 'type', type };
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
+    else if (el.isContentEditable) { el.focus(); getSelection().selectAllChildren(el); document.execCommand('delete'); }
     return { outcome: 'type', type }; })()`;
 }
 
