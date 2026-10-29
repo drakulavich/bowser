@@ -300,7 +300,6 @@ const LOAD_READ_MS = 1000;
 const BASELINE_READ_MS = 3000;
 interface LoadWatch {
   over: boolean;
-  stopped: boolean;
   read?: Promise<unknown>;
 }
 
@@ -494,30 +493,38 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     if (landed !== base) return;
     if (!unfinished(now)) pendingAt = undefined;
   };
-  /** Stop a navigation's loads LOAD_CAP_MS after its new document is parsed:
-   *  a subresource that never finishes would hold `load` for good (ET-52).
+  /** True LOAD_CAP_MS after a navigation's new document is parsed: a
+   *  subresource that never finishes would hold `load` for good (ET-52).
    *  One read at a time, so a page that does not answer queues no more. */
-  const capLoad = async (origin: number, load: LoadWatch): Promise<void> => {
+  const capLoad = async (origin: number, load: LoadWatch): Promise<boolean> => {
     let doc: number | undefined;
     let since = 0;
     while (!load.over) {
       load.read = evaluate(LOAD_STATE).catch(() => undefined);
       const read = await load.read;
-      if (load.over) return;
+      if (load.over) return false;
       if (Array.isArray(read) && read[0] !== origin && read[1] !== "loading") {
         if (read[0] !== doc) {
           doc = read[0] as number;
           since = clock.now();
-        } else if (clock.now() - since >= LOAD_CAP_MS) {
-          load.stopped = true;
-          await evaluate(STOP_LOADING).catch(() => {});
-          return;
-        }
+        } else if (clock.now() - since >= LOAD_CAP_MS) return true;
       }
       await sleep(timing.loadPollMs ?? LOAD_POLL_MS);
     }
+    return false;
   };
   let loadWatch: LoadWatch | undefined;
+  let loadLeft = false;
+  /** Stop the load a capped navigate left running, and wait for its -999 to
+   *  land: otherwise it lands inside the next command's own wait (ET-52). */
+  const stopLoadLeft = async (): Promise<void> => {
+    if (!loadLeft) return;
+    loadLeft = false;
+    if (!view.loading) return;
+    const before = landed;
+    await ask(STOP_LOADING, timing.graceMs);
+    await settle(before, () => true);
+  };
   let phase: ActPhase = "idle";
   let actionCancelled = false;
   let pendingAt: number | undefined;
@@ -548,6 +555,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
      *  the page it goes to fails to load (#127). */
     async act<T>(action: () => Promise<T>, kind: "acts" | "navigates" | "history" = "acts"): Promise<T> {
       try {
+        await stopLoadLeft();
         const before = landed;
         // A navigation already in flight is not ours: only a false→true transition
         // of `loading` counts, or one stuck navigation would cost every later
@@ -577,33 +585,40 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
      *  page script's), that one's -999 rejects it while its own still loads
      *  (#116, measured on Bun 1.4.2). Then this waits for the next landing. */
     async navigate(url: string, go: () => Promise<void>): Promise<void> {
+      await stopLoadLeft();
       const before = landed;
       const arrivedBefore = arrived;
       const origin = await ask(TIME_ORIGIN, BASELINE_READ_MS);
       // The baseline read can outlast the budget: the command has been told it failed.
       if (actionCancelled) throw new Error("request timed out before the navigation was sent");
-      const load: LoadWatch = { over: false, stopped: false };
+      const load: LoadWatch = { over: false };
       loadWatch = load;
-      if (typeof origin === "number") void capLoad(origin, load);
-      // The stop's own -999, with no navigation the page started after it.
-      const ownStop = async () => load.stopped && (await ask(NAV_COUNT, timing.graceMs)) === 0;
-      try {
+      const loaded = (async () => {
         try {
           return await go();
         } catch (err) {
           if (!cancelled(err)) throw err;
-          if (await ownStop()) return;
         }
-        // The watcher stays on: this page may be the one whose load never ends.
-        while (landed - before < 2) await sleep(10);
-        if (arrived !== arrivedBefore) return;
+        while (landed - before < 2 && !load.over) await sleep(10);
+        if (load.over || arrived !== arrivedBefore) return;
         if (failure && !cancelled(failure)) throw failure;
-        if (await ownStop()) return;
         throw new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
+      })();
+      const racers = [loaded];
+      if (typeof origin === "number")
+        racers.push(
+          capLoad(origin, load).then((capped) => {
+            if (capped) loadLeft = true;
+          }),
+        );
+      try {
+        await Promise.race(racers);
       } finally {
         load.over = true;
+        loaded.catch(() => {});
       }
     },
+    stopLoadLeft,
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
     async interrupt(): Promise<boolean> {
@@ -794,6 +809,7 @@ export function wrapView(
       // window before closing the view.
       if (profile) {
         try {
+          await nav.stopLoadLeft();
           await guard(view.navigate("about:blank"));
         } catch {}
         await Bun.sleep(commitWaitMs);

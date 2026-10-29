@@ -48,7 +48,7 @@ const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
 /** ET-52: parsed at once, but its image never answers, so `load` never fires. */
-const IMAGE_PAGE = `<!doctype html><title>Image</title><h1>Text is here</h1><img src="/never" alt="">`;
+const IMAGE_PAGE = `<!doctype html><title>Image</title><h1>Text is here</h1><img src="/never" alt=""><a href="/">Home</a>`;
 const SLOW_MS = 3000;
 /** openWith's retry window, from the end of its first open. That open and
  *  the last retry each take up to a budget, so a test that opens with it
@@ -339,7 +339,13 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
 
     expect(await cmdEval(ctx, "document.title + ' / ' + document.querySelector('h1').textContent")).toBe("Image / Text is here");
     expect(await cmdEval(ctx, "location.href")).toBe(`${base}/image`);
-    // The stop ended the navigation: another one is accepted.
+    // The load left running is stopped first: a click on a link lands, and so does a goto.
+    await cmdSnapshot(ctx);
+    const home = (await loadState(ctx.session))!.refs.find((r) => r.name === "Home")!.id;
+    const click = await timed(() => cmdClick(ctx, home));
+    expect(click.error).toBeUndefined();
+    expect(await cmdEval(ctx, "location.href")).toBe(`${base}/`);
+    await cmdGoto(ctx, `${base}/image`);
     expect(await cmdGoto(ctx, `${base}/`)).toContain(`${base}/`);
   }, 60_000);
   // ET-38: a killed client's op used to keep its whole budget in the daemon,

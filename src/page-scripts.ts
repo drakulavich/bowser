@@ -785,9 +785,7 @@ export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
 /** A new document has a new timeOrigin, even at the same URL (ET-52). */
 export const TIME_ORIGIN = "performance.timeOrigin";
 export const LOAD_STATE = "[performance.timeOrigin, document.readyState]";
-/** stop() aborts every navigation the page started before it; NAV_ARM then
- *  counts the ones it starts after (ET-52). */
-export const STOP_LOADING = `(window.stop(), ${NAV_ARM})`;
+export const STOP_LOADING = "window.stop()";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
 /** wait-for's check (#114); the value goes in as JSON, never spliced as text. */
