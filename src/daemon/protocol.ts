@@ -100,8 +100,6 @@ export interface DaemonRequest {
   id: number;
   op: Op;
   args?: unknown[];
-  /** Reserved for tab support. Ignored by the server today; never set by the client. */
-  page?: string;
   /** The sender prints dialog reports: the reply hands over the queued ones.
    *  Without it they stay queued for a command that prints them. */
   report?: true;
