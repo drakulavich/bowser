@@ -12,13 +12,13 @@ import {
   keyWatchScript,
   LANDED_PAGE,
   LEAVE_INITIAL_DOCUMENT,
+  DOC_ID,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
   NAV_COUNT,
   NAV_DESTINATION,
   STOP_LOADING,
-  TIME_ORIGIN,
 } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
@@ -1737,7 +1737,7 @@ describe("wrapView watchNavigation", () => {
     expect(navigated).toBe(1);
     // navigate's own reads: the load cap's baseline (ET-52) and the page it landed on (ET-13); nothing after the landing.
     expect(v.calls).toEqual([
-      ["evaluate", [TIME_ORIGIN]],
+      ["evaluate", [DOC_ID]],
       ["navigate", ["https://x/1"]],
       ["evaluate", [LANDED_PAGE]],
     ]);
@@ -1853,7 +1853,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
   const capped = { ...fast, loadPollMs: 500 };
   // In the full suite a manual-clock step waited up to 900 ms for the event loop (seed 1331868760).
   const CAP_TEST_MS = 20_000;
-  /** A page that commits a new document (timeOrigin 2) 50 ms after navigate()
+  /** A page that commits a new document (id 2) 50 ms after navigate()
    *  and never fires load. stop() ends loading at once and rejects the pending
    *  navigate with -999 5 ms later, as WebKit does (Bun 1.4.4). */
   function hangingLoad(
@@ -1884,7 +1884,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
         v.calls.push(["evaluate", [expr]]);
         const custom = opts.read?.(expr);
         if (custom) return custom;
-        if (expr === TIME_ORIGIN) return "origin" in opts ? opts.origin : page.origin;
+        if (expr === DOC_ID) return "origin" in opts ? opts.origin : page.origin;
         if (expr === LOAD_STATE) return [page.origin, page.state];
         if (expr === STOP_LOADING && fail) {
           const reject = fail;
@@ -1905,7 +1905,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
   /** The calls past the first `skip`, without the watch's own reads. */
   const after = (v: Fake, skip: number) =>
     withoutMute(v.calls.slice(skip)).filter(
-      ([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === TIME_ORIGIN)),
+      ([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === DOC_ID)),
     );
 
   test(
@@ -1923,6 +1923,47 @@ describe("navigate caps its wait for load (ET-52)", () => {
     },
     CAP_TEST_MS,
   );
+
+  // CI run 40854804772: one document's timeOrigin read 1793268461382, then 1793268461383.0002, then 1793268461382.
+  test(
+    "a document whose performance.timeOrigin moves between reads is still capped 5 s after it is parsed",
+    async () => {
+      const clock = manualClock();
+      let reads = 0;
+      const { v, page } = hangingLoad(clock, {
+        read: (expr) => {
+          if (!expr.includes("performance.timeOrigin")) return undefined;
+          const origin = page.origin + (++reads % 2 ? 0 : 1.0002);
+          return Promise.resolve(expr.includes("readyState") ? [origin, page.state] : origin);
+        },
+      });
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"), 8000);
+      expect(at).toBeGreaterThanOrEqual(5500);
+      expect(at).toBeLessThan(6100);
+    },
+    CAP_TEST_MS,
+  );
+
+  // #248 review: the id is stored on the page's own document, which the page can make non-extensible.
+  for (const sealed of ["old", "new"] as const)
+    test(
+      `with the ${sealed} document made non-extensible by the page, the new one is still capped 5 s after it is parsed`,
+      async () => {
+        const clock = manualClock();
+        const docs = { 1: { readyState: "complete" } as object, 2: { readyState: "interactive" } as object };
+        Object.preventExtensions(docs[sealed === "old" ? 1 : 2]);
+        const { v, page } = hangingLoad(clock, {
+          read: (expr) =>
+            expr === DOC_ID || expr === LOAD_STATE ? Promise.resolve(new Function("document", `return (${expr})`)(docs[page.origin as 1 | 2])) : undefined,
+        });
+        const b = onClock(v, capped, clock);
+        const at = await clock.fulfilledAt(b.navigate("https://x/hang"), 8000);
+        expect(at).toBeGreaterThanOrEqual(5500);
+        expect(at).toBeLessThan(6100);
+      },
+      CAP_TEST_MS,
+    );
 
   test(
     "mutes the new document once it is parsed, before answering, though it never lands (#227)",
@@ -2095,7 +2136,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
   );
 
   test(
-    "with no baseline timeOrigin there is no watcher: no reads, navigate waits for load",
+    "with no baseline document id there is no watcher: no reads, navigate waits for load",
     async () => {
       const clock = manualClock();
       const { v } = hangingLoad(clock, { origin: undefined });
@@ -2138,7 +2179,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
       const clock = manualClock();
       const { v } = hangingLoad(clock, {
         read: (expr) =>
-          expr === TIME_ORIGIN
+          expr === DOC_ID
             ? new Promise((r) => {
                 clock.setTimeout(() => r(1), 1500);
               })
@@ -2238,7 +2279,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
       const clock = manualClock();
       const { v } = hangingLoad(clock, {
         read: (expr) =>
-          expr === TIME_ORIGIN
+          expr === DOC_ID
             ? new Promise((r) => {
                 clock.setTimeout(() => r(1), 300);
               })

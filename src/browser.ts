@@ -6,6 +6,7 @@ import {
   KEY_CODES,
   LEAVE_INITIAL_DOCUMENT,
   LANDED_PAGE,
+  DOC_ID,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
@@ -15,7 +16,6 @@ import {
   READ_TITLE,
   READ_URL,
   STOP_LOADING,
-  TIME_ORIGIN,
   hoverScript,
   keyCommandScript,
   keyWatchScript,
@@ -499,8 +499,8 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   /** True LOAD_CAP_MS after a navigation's new document is parsed: a
    *  subresource that never finishes would hold `load` for good (ET-52).
    *  One read at a time, so a page that does not answer queues no more. */
-  const capLoad = async (origin: number, load: LoadWatch): Promise<boolean> => {
-    let doc: number | undefined;
+  const capLoad = async (origin: unknown, load: LoadWatch): Promise<boolean> => {
+    let doc: unknown;
     let since = 0;
     while (!load.over) {
       load.read = evaluate(LOAD_STATE).catch(() => undefined);
@@ -508,7 +508,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       if (load.over) return false;
       if (Array.isArray(read) && read[0] !== origin && read[1] !== "loading") {
         if (read[0] !== doc) {
-          doc = read[0] as number;
+          doc = read[0];
           since = clock.now();
           // A capped load never reaches onNavigated, which mutes the rest (#227).
           load.read = evaluate(MUTE_MEDIA).catch(() => undefined);
@@ -611,7 +611,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       await stopLoadLeft();
       const before = landed;
       const arrivedBefore = arrived;
-      const origin = await ask(TIME_ORIGIN, BASELINE_READ_MS);
+      const origin = await ask(DOC_ID, BASELINE_READ_MS);
       // The baseline read can outlast the budget: the command has been told it failed.
       if (actionCancelled) throw new Error("request timed out before the navigation was sent");
       const load: LoadWatch = { over: false };
@@ -634,7 +634,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
         if (!(await ownLanding(url, leaving, load))) throw replacedBy();
       })();
       const racers = [loaded];
-      if (typeof origin === "number")
+      if (origin !== undefined)
         racers.push(
           // A watcher ended by interrupt() must not finish navigate: go() is still pending.
           capLoad(origin, load).then((capped) => {
