@@ -37,8 +37,7 @@ function wav(): Uint8Array {
 }
 
 const PAGE = `<!doctype html><title>Media</title>
-<audio id="now" src="/tone.wav" autoplay></audio>
-<script>setTimeout(() => { const a = document.createElement('audio'); a.id = 'late'; a.src = '/tone.wav'; a.autoplay = true; document.body.append(a) }, 500)</script>`;
+<audio id="now" src="/tone.wav" autoplay></audio>`;
 
 // An image that never finishes holds load: open answers on the 5 s cap (ET-52).
 const HANGING_PAGE = `<!doctype html><title>Hanging</title>
@@ -86,7 +85,22 @@ run("e2e: mute", () => {
   test("autoplaying media, on the page and added later, plays muted after open", async () => {
     await cmdOpen(ctx, url);
     expect(await cmdEval(ctx, playing("now"))).toBe("[false,true]");
+    await cmdEval(
+      ctx,
+      "(() => { const a = document.createElement('audio'); a.id = 'late'; a.src = '/tone.wav'; a.autoplay = true; document.body.append(a) })()",
+    );
     expect(await cmdEval(ctx, playing("late"))).toBe("[false,true]");
+  }, 60_000);
+
+  test("a playing element the page unmutes is muted again", async () => {
+    await cmdOpen(ctx, url);
+    expect(await cmdEval(ctx, playing("now"))).toBe("[false,true]");
+    await cmdEval(ctx, "document.getElementById('now').muted = false");
+    const remuted = `new Promise((r) => {
+      const check = () => { const e = document.getElementById('now'); if (e.muted) r(JSON.stringify([e.paused, e.muted])); else setTimeout(check, 20); };
+      check();
+    })`;
+    expect(await cmdEval(ctx, remuted)).toBe("[false,true]");
   }, 60_000);
 
   test("autoplaying media plays muted after an open that the load cap ends", async () => {
