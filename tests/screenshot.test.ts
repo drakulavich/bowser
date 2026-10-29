@@ -8,7 +8,9 @@ describe("screenshotFormat (#197)", () => {
     expect(["shot.png", "a/b.PNG", "x.jpg", "x.JPG", "x.jpeg", "x.Jpeg"].map(screenshotFormat)).toEqual(["png", "png", "jpeg", "jpeg", "jpeg", "jpeg"]);
   });
   test("any other extension, or none, has no format", () => {
-    expect(["x.webp", "x.gif", "x.png.txt", "shot", "a.png/shot", "x."].map(screenshotFormat)).toEqual([
+    expect(["x.webp", "x.gif", "x.png.txt", "shot", "a.png/shot", "x.", ".jpg", "/tmp/.png"].map(screenshotFormat)).toEqual([
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,

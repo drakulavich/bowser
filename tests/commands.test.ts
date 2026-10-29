@@ -1774,7 +1774,7 @@ describe("screenshot", () => {
   });
 
   test("a --filename with another extension, or none, is a usage error before any request (#197)", async () => {
-    for (const name of ["shot.webp", "shot"]) {
+    for (const name of ["shot.webp", "shot", ".jpg"]) {
       const c = fakeClient({ screenshot: () => PNG_B64 });
       const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, name) }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(UserError);

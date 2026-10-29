@@ -6,6 +6,8 @@
 // Wire format is unchanged from before this file existed: newline-delimited
 // JSON, requests `{ id, op, args }`, responses `{ id, ok, result | error }`.
 
+import { extname } from "node:path";
+
 /** A modifier held for `press`: Bun.WebView's names, which are also
  *  playwright-cli's (ControlOrMeta is resolved before it gets here). */
 export type KeyModifier = "Shift" | "Control" | "Alt" | "Meta";
@@ -136,11 +138,11 @@ export interface DaemonConnection {
 }
 
 /** The image format a screenshot path asks for by its extension, in any case;
- *  undefined for any other extension or none (#197). */
+ *  undefined for any other extension or none, as for the dotfile `.jpg` (#197). */
 export function screenshotFormat(path: string): "png" | "jpeg" | undefined {
-  const ext = /\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase();
-  if (ext === "png") return "png";
-  if (ext === "jpg" || ext === "jpeg") return "jpeg";
+  const ext = extname(path).toLowerCase();
+  if (ext === ".png") return "png";
+  if (ext === ".jpg" || ext === ".jpeg") return "jpeg";
   return undefined;
 }
 
