@@ -16,8 +16,6 @@ export interface Ref {
   role: string;
   name: string;
   tag: string;
-  href?: string;
-  value?: string;
   /** The element is contentEditable; `fill` accepts it whatever its role. */
   editable?: boolean;
 }
