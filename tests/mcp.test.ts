@@ -1,6 +1,6 @@
 // Unit tests for the MCP bridge (src/mcp.ts).
 //
-// The protocol core (handleMcpRequest) takes an injected `run`, so these tests
+// The server loop (createMcpServer) takes an injected `run`, so these tests
 // exercise the full request/response surface with NO real stdio or daemon.
 
 import { describe, expect, test } from "bun:test";
@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { serveLines, buildTools, createMcpServer, toArgv, handleMcpRequest, handleMcpLine, type McpDeps } from "../src/mcp.ts";
+import { serveLines, buildTools, createMcpServer, toArgv, handleMcpRequest, type McpDeps } from "../src/mcp.ts";
 import { parse } from "../src/cli/parser.ts";
 import { SCHEMAS } from "../src/cli/registry.ts";
 import { findCommand } from "../src/cli/registry.ts";
@@ -37,6 +37,11 @@ async function serve(lines: string[], deps: McpDeps = okRun()): Promise<any[]> {
   await server.idle();
   await new Promise((r) => setTimeout(r, 0));
   return writes.map((w) => JSON.parse(w));
+}
+
+/** One tools/call through the server loop, the path `bowser mcp` takes. */
+async function callTool(req: object, deps: McpDeps = okRun()): Promise<any> {
+  return (await serve([JSON.stringify(req)], deps))[0];
 }
 
 function schema(name: string) {
@@ -158,7 +163,7 @@ describe("handleMcpRequest — tools/list", () => {
   });
 });
 
-describe("handleMcpRequest — tools/call", () => {
+describe("tools/call", () => {
   test("success: reconstructs argv, returns text content", async () => {
     let captured: string[] = [];
     const deps: McpDeps = {
@@ -168,7 +173,7 @@ describe("handleMcpRequest — tools/call", () => {
       },
       version: "9.9.9",
     };
-    const res: any = await handleMcpRequest(
+    const res: any = await callTool(
       { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "goto", arguments: { url: "https://e.com" } } },
       deps,
     );
@@ -184,7 +189,7 @@ describe("handleMcpRequest — tools/call", () => {
       },
       version: "9.9.9",
     };
-    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "snapshot", arguments: {} } }, deps);
+    const res: any = await callTool({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "snapshot", arguments: {} } }, deps);
     expect(res.error).toBeUndefined();
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("no open page");
@@ -192,7 +197,7 @@ describe("handleMcpRequest — tools/call", () => {
 
   test("a restart's notice is the first line of the tool text, on success and on error (#145)", async () => {
     const call = (run: McpDeps["run"]) =>
-      handleMcpRequest({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "snapshot", arguments: {} } }, { run, version: "9.9.9" }) as Promise<any>;
+      callTool({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "snapshot", arguments: {} } }, { run, version: "9.9.9" }) as Promise<any>;
     const ok = await call(async (_, base) => {
       base?.notices?.push("session 'default' restarted");
       return "page";
@@ -222,7 +227,7 @@ describe("handleMcpRequest — tools/call", () => {
       };
       const connect = async () => fakeClient({ evaluate: () => snap });
       const deps: McpDeps = { run: (argv) => run(argv, { connect }), version: "9.9.9" };
-      const res: any = await handleMcpRequest(
+      const res: any = await callTool(
         {
           jsonrpc: "2.0",
           id: 7,
@@ -258,7 +263,7 @@ describe("handleMcpRequest — tools/call", () => {
         { dialogs: [dismissed] },
       );
     const deps: McpDeps = { run: (argv) => run(argv, { connect }), version: "9.9.9" };
-    const res: any = await handleMcpRequest(
+    const res: any = await callTool(
       {
         jsonrpc: "2.0",
         id: 6,
@@ -283,7 +288,7 @@ describe("handleMcpRequest — tools/call", () => {
       },
       version: "9.9.9",
     };
-    const res = await handleMcpRequest({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nonexistent", arguments: {} } }, deps);
+    const res = await callTool({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "nonexistent", arguments: {} } }, deps);
     expect(res).toEqual({ jsonrpc: "2.0", id: 5, error: { code: -32602, message: "Unknown tool: nonexistent" } });
     expect(ran).toBe(false);
   });
@@ -298,7 +303,7 @@ describe("handleMcpRequest — tools/call", () => {
         },
         version: "9.9.9",
       };
-      const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", stdin } } }, deps);
+      const res: any = await callTool({ jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "fill", arguments: { ref: "e1", stdin } } }, deps);
       expect(res.result.isError).toBe(true);
       expect(res.result.content[0].text).toMatch(/^usage: .*--stdin/);
       expect(ran).toBe(false);
@@ -306,7 +311,7 @@ describe("handleMcpRequest — tools/call", () => {
   }
 
   test("an excluded command is not callable as a tool", async () => {
-    const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "mcp", arguments: {} } }, okRun());
+    const res: any = await callTool({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "mcp", arguments: {} } }, okRun());
     expect(res.error).toEqual({ code: -32602, message: "Unknown tool: mcp" });
   });
 });
@@ -341,7 +346,7 @@ describe("handleMcpRequest — errors", () => {
   });
 
   test("malformed JSON line → -32700 with id null", async () => {
-    const res: any = await handleMcpLine("{not json", okRun());
+    const [res]: any[] = await serve(["{not json"]);
     expect(res.error.code).toBe(-32700);
     expect(res.id).toBeNull();
   });
@@ -408,7 +413,7 @@ describe("MCP positionals are data, never flags", () => {
             }),
           version: "9.9.9",
         };
-        const res: any = await handleMcpRequest(
+        const res: any = await callTool(
           {
             jsonrpc: "2.0",
             id: 9,
@@ -589,7 +594,7 @@ describe("MCP fill and type never echo the entered text", () => {
           evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined),
         });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
-        const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } }, deps);
+        const res: any = await callTool({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } }, deps);
         expect(res.result.isError).toBeFalsy();
         expect(c.calls).toContainEqual(["type", [SECRET]]);
         expect(JSON.stringify(res)).not.toContain(SECRET);
@@ -626,7 +631,7 @@ describe("MCP fill and type errors never carry the entered text", () => {
         },
       });
       const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
-      const res: any = await handleMcpRequest({ jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: tool, arguments: args } }, deps);
+      const res: any = await callTool({ jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: tool, arguments: args } }, deps);
       expect(res.result.isError).toBe(true);
       return res.result.content[0].text as string;
     } finally {
@@ -864,7 +869,7 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
         await saveState({ name: "el", url: "https://x", title: "X", updatedAt: Date.now(), refs: REFS });
         const c = fakeClient({ evaluate: () => "sel" });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
-        const res: any = await handleMcpRequest(
+        const res: any = await callTool(
           {
             jsonrpc: "2.0",
             id: 13,
