@@ -58,6 +58,11 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     goForward: async () => {
       calls.push(["goForward", []]);
     },
+    reload: async () => {
+      calls.push(["reload", []]);
+    },
+    screenshot: async () => new Blob(),
+    close: () => {},
     /** A navigation lands: url changes, loading ends, onNavigated fires. */
     land(url) {
       v.url = url;
@@ -846,20 +851,6 @@ describe("wrapView navigation watch", () => {
     expect(b.url).toBe("https://x/previous");
   });
 
-  test("reload falls back to location.reload() when the runtime lacks it", async () => {
-    const clock = manualClock();
-    const v = fakeView({
-      evaluate: async (expr) => {
-        v.calls.push(["evaluate", [expr]]);
-        if (expr === "location.reload()") clock.setTimeout(() => v.land("https://x/"), 10);
-        return undefined;
-      },
-    });
-    const b = onClock(v, fast, clock);
-    await clock.settledAt(b.reload());
-    expect(own(v.calls)).toEqual([["evaluate", ["location.reload()"]]]);
-  });
-
   // #116: on WebKit a reload shows no sign before it lands: view.loading
   // stays false, the page sees no navigate event, and the server may take
   // longer than the grace window to answer.
@@ -1614,11 +1605,6 @@ describe("wrapView interrupt", () => {
     expect(await interrupted).toBe(false);
   });
 
-  test("without a native reload it does nothing", async () => {
-    const v = fakeView();
-    expect(await wrapView(v, fast).interrupt()).toBe(false);
-    expect(v.calls).toEqual([]);
-  });
 });
 
 describe("wrapView watchNavigation", () => {

@@ -11,7 +11,6 @@ import {
   NO_OP,
   READ_TITLE,
   READ_URL,
-  RELOAD,
   hoverScript,
   keyCommandScript,
   keyWatchScript,
@@ -38,8 +37,7 @@ declare module "bun" {
   }
 }
 
-/** The slice of Bun.WebView that Browser uses. Optional members are the ones
- *  a Bun build may lack; wrapView probes them with typeof. */
+/** The slice of Bun.WebView that Browser uses. */
 export interface ViewLike {
   readonly url: string;
   readonly title: string;
@@ -49,9 +47,9 @@ export interface ViewLike {
   type(text: string): Promise<void>;
   press(key: string, options?: { modifiers: KeyModifier[] }): Promise<void>;
   resize(width: number, height: number): Promise<void>;
-  screenshot?(): Promise<Blob | string>;
-  reload?(): Promise<void>;
-  close?(): void;
+  screenshot(): Promise<Blob>;
+  reload(): Promise<void>;
+  close(): void;
   /** True while a navigation is in flight. */
   readonly loading: boolean;
   onNavigated: ((url: string, title: string) => void) | null;
@@ -604,10 +602,9 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
           return ok;
         }
       }
-      if (typeof view.reload !== "function") return false;
       let timer: unknown;
       const reloadAttempt = Promise.resolve()
-        .then(() => view.reload!())
+        .then(() => view.reload())
         .then(
           () => "ok" as const,
           () => "failed" as const,
@@ -715,9 +712,7 @@ export function wrapView(
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
       // takes no full-page option. Element-bounded screenshots are not supported.
-      const data = view.screenshot && (await guard(view.screenshot()));
-      if (!data) throw new Error("screenshot: not supported by this Bun.WebView");
-      const bytes = await pngBytesFrom(data);
+      const bytes = new Uint8Array(await (await guard(view.screenshot())).arrayBuffer());
       if (!isLikelyPng(bytes)) {
         throw new Error("screenshot: WebView returned an empty/invalid image");
       }
@@ -734,10 +729,7 @@ export function wrapView(
     reload: () =>
       guard(
         nav.act(
-          async () => {
-            if (typeof view.reload === "function") await view.reload();
-            else await evaluate(RELOAD);
-          },
+          () => view.reload(),
           view.url !== "" ? "navigates" : "acts",
         ),
       ),
@@ -757,7 +749,7 @@ export function wrapView(
       }
       // Bun.WebView implements Symbol.asyncDispose; calling close() is the
       // explicit form.
-      view.close?.();
+      view.close();
       stall.close();
     },
     // Measured on WebKit (Bun 1.4.2): a native reload() frees an evaluate
@@ -770,7 +762,7 @@ export function wrapView(
     // daemon's serializer holds every other queued op until the stuck one
     // settles and this has landed. That is why it uses the native reload()
     // and never wrapView's evaluate(): an evaluate would queue behind the
-    // stuck one and never run, and so would RELOAD's fallback. The one
+    // stuck one and never run. The one
     // exception is a view where nothing has committed, where reload() does
     // nothing: it asks the view directly, which WebKit refuses at once
     // while another evaluate is pending (#48).
@@ -800,12 +792,4 @@ export function isLikelyPng(bytes: Uint8Array): boolean {
     if (bytes[i] !== PNG_SIGNATURE[i]) return false;
   }
   return true;
-}
-
-/** Decode whatever Bun.WebView.screenshot() returns into raw PNG bytes.
- *  Current Bun returns a Blob (type image/png); we also accept a base64 string
- *  defensively in case the API shape changes. */
-export async function pngBytesFrom(data: Blob | string): Promise<Uint8Array> {
-  if (typeof data === "string") return new Uint8Array(Buffer.from(data, "base64"));
-  return new Uint8Array(await data.arrayBuffer());
 }
