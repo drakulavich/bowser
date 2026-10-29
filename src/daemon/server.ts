@@ -354,23 +354,17 @@ const handlers: Handlers = {
   },
   uncheck: (browser, selector) => browser.setChecked(selector, false),
   screenshot: async (browser, path, scale) => {
-    // When the CLI passes an absolute path, the daemon writes the PNG itself
-    // so the ~140 KB base64 never crosses the socket. With no path, return
-    // base64 — reserved for a future --stdout / programmatic caller.
+    // The daemon writes the PNG itself so the ~140 KB base64 never crosses the socket.
     const fontsLoading = (await browser.evaluate(AWAIT_FONTS)) === true;
     let dpr: number | undefined;
     if (scale !== undefined) {
       dpr = ((await browser.evaluate(READ_VIEWPORT)) as [number, number, number])[2];
       if (scale > dpr) return { dpr };
     }
-    const b64 = await browser.screenshot();
-    if (path) {
-      let png: Uint8Array = Buffer.from(b64, "base64");
-      if (dpr !== undefined && scale !== dpr) png = await scalePng(png, scale! / dpr);
-      await Bun.write(path, png);
-      return fontsLoading ? { path, fontsLoading } : { path };
-    }
-    return b64;
+    let png: Uint8Array = Buffer.from(await browser.screenshot(), "base64");
+    if (dpr !== undefined && scale !== dpr) png = await scalePng(png, scale! / dpr);
+    await Bun.write(path, png);
+    return fontsLoading ? { path, fontsLoading } : { path };
   },
   resize: (browser, width, height) => browser.resize(width, height),
   back: (browser) => browser.back(),
