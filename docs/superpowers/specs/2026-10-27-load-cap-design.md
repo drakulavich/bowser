@@ -58,8 +58,8 @@ and waiting for that landing keeps both out.
 
 `navigationWatch.navigate` (`src/browser.ts`) runs a watcher next to `go()`:
 
-1. Before `go()`, read `performance.timeOrigin` of the current document (`ask`, bounded by 1 s: a new view's
-   first evaluate took past the 100 ms `graceMs` in CI run 40415723808, and the cap never started). If
+1. Before `go()`, read `performance.timeOrigin` of the current document (`ask`, bounded by 3 s: a new view's
+   first evaluate waits for WebKit's web process, past 100 ms in CI run 40415723808 and past 1 s in run 40834466493). If
    that read gives no number, there is no baseline to compare with, and the watcher does not run: the
    navigation waits for `load` as today. If the command's budget ran out during the read, `navigate` fails
    without calling `go()`.
