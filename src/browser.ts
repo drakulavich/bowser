@@ -5,6 +5,7 @@ import {
   CANCEL_PENDING_NAVIGATION,
   KEY_CODES,
   LEAVE_INITIAL_DOCUMENT,
+  LANDED_PAGE,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
@@ -519,6 +520,22 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     }
     return false;
   };
+  /** Whether navigate() landed on its own page (ET-13): WebKit answers it
+   *  with whichever navigation ends first, and a script on the page left can
+   *  replace it. Only a page that script sent has `leaving` as referrer. A
+   *  page that cannot answer in time counts as ours. */
+  const ownLanding = async (url: string, leaving: string, load: LoadWatch): Promise<boolean> => {
+    const at = landed;
+    for (let waited = false; ; waited = true) {
+      const read = await ask(LANDED_PAGE, timing.graceMs);
+      if (load.over || !Array.isArray(read)) return true;
+      const [href, referrer] = read;
+      if (typeof referrer !== "string" || !referrer || sameUrl(href, url) || !sameUrl(referrer, leaving)) return true;
+      // The landing can name our URL while the old page is still there; ours lands next.
+      if (waited || !sameUrl(view.url, url)) return false;
+      await settle(at, () => !load.over);
+    }
+  };
   let loadWatch: LoadWatch | undefined;
   let loadLeft = false;
   /** Stop the load a capped navigate left running, and wait for its -999 to
@@ -599,16 +616,22 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       if (actionCancelled) throw new Error("request timed out before the navigation was sent");
       const load: LoadWatch = { over: false };
       loadWatch = load;
+      const replacedBy = () =>
+        new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
       const loaded = (async () => {
+        const leaving = view.url;
         try {
-          return await go();
+          await go();
         } catch (err) {
-          if (!cancelled(err)) throw err;
+          if (!interrupted(err)) throw err;
+          while (landed - before < 2 && !load.over) await sleep(10);
+          if (load.over) return;
+          if (arrived === arrivedBefore) {
+            if (failure && !interrupted(failure)) throw failure;
+            throw replacedBy();
+          }
         }
-        while (landed - before < 2 && !load.over) await sleep(10);
-        if (load.over || arrived !== arrivedBefore) return;
-        if (failure && !cancelled(failure)) throw failure;
-        throw new Error(`navigate: the navigation to ${url} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`);
+        if (!(await ownLanding(url, leaving, load))) throw replacedBy();
       })();
       const racers = [loaded];
       if (typeof origin === "number")
@@ -854,6 +877,31 @@ export function wrapView(
 /** WebKit's failure for a navigation it cancelled. */
 function cancelled(err: unknown): boolean {
   return err instanceof Error && err.message.includes("NSURLErrorDomain error -999");
+}
+
+/** cancelled, or WebKit's other answer when a page script's navigation replaces navigate()'s (ET-13, Bun 1.4.4). */
+function interrupted(err: unknown): boolean {
+  return cancelled(err) || (err instanceof Error && err.message === "Frame load interrupted");
+}
+
+/** The same page: origin, path without a trailing slash, and query, with equivalent escapes decoded; the fragment is ignored. */
+function sameUrl(a: unknown, b: string): boolean {
+  if (typeof a !== "string") return false;
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    const decoded = (s: string) => {
+      try {
+        return decodeURI(s);
+      } catch {
+        return s;
+      }
+    };
+    const path = (u: URL) => decoded(u.pathname).replace(/\/$/, "");
+    return x.origin === y.origin && path(x) === path(y) && decoded(x.search) === decoded(y.search);
+  } catch {
+    return a === b;
+  }
 }
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];

@@ -10,6 +10,7 @@ import {
   CANCEL_PENDING_NAVIGATION,
   keyCommandScript,
   keyWatchScript,
+  LANDED_PAGE,
   LEAVE_INITIAL_DOCUMENT,
   LOAD_STATE,
   MUTE_MEDIA,
@@ -1120,6 +1121,106 @@ describe("navigate over a navigation still loading", () => {
   });
 });
 
+// ET-13, measured on WebKit (Bun 1.4.4): navigate() answers whichever
+// navigation ends first, so a page that navigates itself by script can
+// stand in for the one asked for, with or without a failure first.
+describe("navigate while the page navigates itself (ET-13)", () => {
+  const FORM = "https://x/form";
+  const BOUNCED = "https://x/jsbounce?n=5";
+  const LEFT = "navigate: the navigation to https://x/form was cancelled by another navigation; run 'bowser snapshot' to see where the page is";
+  type Page = { href: string; referrer: string };
+  /** A page on the bouncing script page; `go` plays WebKit's answer to navigate(). */
+  function bouncing(go: (v: Fake, page: Page) => Promise<void>) {
+    const page: Page = { href: "https://x/jsbounce?n=4", referrer: "https://x/jsbounce?n=3" };
+    const v = fakeView({
+      navigate: () => go(v, page),
+      evaluate: async (expr) => (expr === LANDED_PAGE ? [page.href, page.referrer] : undefined),
+    });
+    v.url = page.href;
+    return v;
+  }
+  const landOn = (v: Fake, page: Page, href: string, referrer: string) => {
+    page.href = href;
+    page.referrer = referrer;
+    v.land(href);
+  };
+  const outcome = async (v: Fake, clock: ReturnType<typeof manualClock>, url = FORM) => {
+    const p = onClock(v, fast, clock).navigate(url);
+    const at = await clock.settledAt(p);
+    const error = await p.then(
+      () => undefined,
+      (e: Error) => e.message,
+    );
+    return { at, error };
+  };
+
+  test("the page's own navigation landing in place of the one asked for fails it", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, BOUNCED, "https://x/jsbounce?n=4"));
+    expect(await outcome(v, clock)).toEqual({ at: 0, error: LEFT });
+  });
+
+  test("the one asked for cancelled, then the page's own landing, fails it", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      v.onNavigationFailed?.(new Error(CANCELLED));
+      clock.setTimeout(() => landOn(v, page, BOUNCED, "https://x/jsbounce?n=4"), 5);
+      throw new Error(CANCELLED);
+    });
+    expect((await outcome(v, clock)).error).toBe(LEFT);
+  });
+
+  test("WebKit's 'Frame load interrupted' for the same, fails it with bowser's message", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      v.onNavigationFailed?.(new Error("Frame load interrupted"));
+      clock.setTimeout(() => landOn(v, page, BOUNCED, "https://x/jsbounce?n=4"), 5);
+      throw new Error("Frame load interrupted");
+    });
+    expect((await outcome(v, clock)).error).toBe(LEFT);
+  });
+
+  test("a server redirect from a fresh view lands elsewhere with no referrer, and succeeds", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, FORM, ""));
+    v.url = "";
+    expect(await outcome(v, clock, "https://x/r302")).toEqual({ at: 0, error: undefined });
+  });
+
+  test("a landing on the requested URL with its escapes decoded is the one asked for", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, "https://x/~user", "https://x/jsbounce?n=4"));
+    expect((await outcome(v, clock, "https://x/%7Euser")).error).toBeUndefined();
+  });
+
+  test("the page asked for, sent on twice by its own scripts before the read, succeeds", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, "https://x/jsbounce?n=2", "https://x/jsbounce?n=1"));
+    expect((await outcome(v, clock, "https://x/jsbounce")).error).toBeUndefined();
+  });
+
+  test("a landing that names the URL asked for before its page is there waits for the next landing", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      page.href = BOUNCED;
+      page.referrer = "https://x/jsbounce?n=4";
+      v.land(FORM);
+      clock.setTimeout(() => landOn(v, page, FORM, ""), 50);
+    });
+    const p = onClock(v, fast, clock).navigate(FORM);
+    expect(await clock.fulfilledAt(p)).toBe(50);
+  });
+
+  test("a pushState right after the landing does not wait", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      landOn(v, page, FORM, "");
+      page.href = "https://x/form/step-2";
+    });
+    expect(await outcome(v, clock)).toEqual({ at: 0, error: undefined });
+  });
+});
+
 describe("a navigation a previous command left pending", () => {
   const slow = { graceMs: 20, settleMs: 60 };
   /** A view whose `#send` starts a page navigation to `to` that nothing
@@ -1634,10 +1735,11 @@ describe("wrapView watchNavigation", () => {
     await b.navigate("https://x/1");
     v.land("https://x/1");
     expect(navigated).toBe(1);
-    // navigate's own baseline read for the load cap (ET-52), nothing after the landing.
+    // navigate's own reads: the load cap's baseline (ET-52) and the page it landed on (ET-13); nothing after the landing.
     expect(v.calls).toEqual([
       ["evaluate", [TIME_ORIGIN]],
       ["navigate", ["https://x/1"]],
+      ["evaluate", [LANDED_PAGE]],
     ]);
   });
 

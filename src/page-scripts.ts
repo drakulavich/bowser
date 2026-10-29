@@ -791,6 +791,7 @@ export const MUTE_MEDIA = String.raw`(() => {
 /** A new document has a new timeOrigin, even at the same URL (ET-52). */
 export const TIME_ORIGIN = "performance.timeOrigin";
 export const LOAD_STATE = "[performance.timeOrigin, document.readyState]";
+export const LANDED_PAGE = "[location.href, document.referrer]";
 export const STOP_LOADING = "window.stop()";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
