@@ -143,7 +143,9 @@ const BARE_EDITOR_HTML = `<!doctype html>
 /** Editors whose text sits right in the editable element (#242 review). */
 const TEXT_EDITORS_HTML = `<!doctype html>
 <html><head><title>Text editors</title></head>
-<body><div contenteditable="true" aria-label="Note">hello</div><p contenteditable="true">para text</p></body></html>`;
+<body><div contenteditable="true" aria-label="Note">hello</div><p contenteditable="true">para text</p>
+<div contenteditable="true" aria-label="Mention">Hello <span contenteditable="false">@Ada</span></div>
+<section contenteditable="true"><p>in section</p></section></body></html>`;
 
 runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
@@ -333,11 +335,13 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     expect(await refNamed("Body")).toBe(ref);
   }, 60_000);
 
-  test("a contenteditable textbox, and a contenteditable <p>, print the text right inside them", async () => {
+  test("a contenteditable textbox, and a contenteditable <p>, print the text right inside them, and an unlabeled <section> root is a textbox", async () => {
     await cmdGoto(ctx, `${base}/text-editors.html`);
     const snap = tree(await cmdSnapshot(ctx));
     expect(snap).toMatch(/- textbox "Note" \[ref=e\d+\]: hello\n/);
     expect(snap).toMatch(/- paragraph \[ref=e\d+\]: para text/);
+    expect(snap).toMatch(/- textbox "Mention" \[ref=e\d+\]: Hello @Ada\n/);
+    expect(snap).toMatch(/- textbox \[ref=e\d+\]:\n {4}- paragraph \[ref=e\d+\]: in section/);
   }, 60_000);
 
   // One page, several rules; the golden line that breaks names the rule:
