@@ -466,7 +466,7 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
-  test("#235: a state.json the hint cannot read still fails the command, with the plain hint", async () => {
+  test("#235, #245: a state.json whose profile is not a string still fails the command, with the plain hint", async () => {
     const session = "235-unknown-op-bad";
     const d = await fakeDaemon(session, (req) => (req.op === "waitFor" ? { ok: false, error: "unknown op: waitFor" } : daemonOf(pkg.version)(req)));
     try {
