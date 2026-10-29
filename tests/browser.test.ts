@@ -11,6 +11,7 @@ import {
   keyCommandScript,
   keyWatchScript,
   LANDED_PAGE,
+  ENTRY_KEY,
   LEAVE_INITIAL_DOCUMENT,
   DOC_ID,
   LOAD_STATE,
@@ -1128,20 +1129,22 @@ describe("navigate while the page navigates itself (ET-13)", () => {
   const FORM = "https://x/form";
   const BOUNCED = "https://x/jsbounce?n=5";
   const LEFT = "navigate: the navigation to https://x/form was cancelled by another navigation; run 'bowser snapshot' to see where the page is";
-  type Page = { href: string; referrer: string };
+  /** `key` is the history entry's: a location.replace keeps it, a navigate() pushes a new one (measured, Bun 1.4.4). */
+  type Page = { href: string; referrer: string; key: string };
   /** A page on the bouncing script page; `go` plays WebKit's answer to navigate(). */
   function bouncing(go: (v: Fake, page: Page) => Promise<void>) {
-    const page: Page = { href: "https://x/jsbounce?n=4", referrer: "https://x/jsbounce?n=3" };
+    const page: Page = { href: "https://x/jsbounce?n=4", referrer: "https://x/jsbounce?n=3", key: "left" };
     const v = fakeView({
       navigate: () => go(v, page),
-      evaluate: async (expr) => (expr === LANDED_PAGE ? [page.href, page.referrer] : undefined),
+      evaluate: async (expr) => (expr === LANDED_PAGE ? [page.href, page.referrer, page.key] : expr === ENTRY_KEY ? page.key : undefined),
     });
     v.url = page.href;
     return v;
   }
-  const landOn = (v: Fake, page: Page, href: string, referrer: string) => {
+  const landOn = (v: Fake, page: Page, href: string, referrer: string, key = page.key) => {
     page.href = href;
     page.referrer = referrer;
+    page.key = key;
     v.land(href);
   };
   const outcome = async (v: Fake, clock: ReturnType<typeof manualClock>, url = FORM) => {
@@ -1195,7 +1198,25 @@ describe("navigate while the page navigates itself (ET-13)", () => {
 
   test("the page asked for, sent on twice by its own scripts before the read, succeeds", async () => {
     const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, "https://x/jsbounce?n=2", "https://x/jsbounce?n=1", "ours"));
+    expect((await outcome(v, clock, "https://x/jsbounce")).error).toBeUndefined();
+  });
+
+  // CI run 40867818123: goto /late from /jsbounce reported "navigated to …/jsbounce?n=2".
+  test("the page's own navigation, moved on again before the read, still fails it", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      landOn(v, page, "https://x/jsbounce?n=1", "https://x/jsbounce");
+      landOn(v, page, "https://x/jsbounce?n=2", "https://x/jsbounce?n=1");
+    });
+    v.url = "https://x/jsbounce";
+    expect(await outcome(v, clock)).toEqual({ at: 0, error: LEFT });
+  });
+
+  test("a goto to the page already shown keeps its history entry, and moved on by its script, succeeds", async () => {
+    const clock = manualClock();
     const v = bouncing(async (v, page) => landOn(v, page, "https://x/jsbounce?n=2", "https://x/jsbounce?n=1"));
+    v.url = "https://x/jsbounce";
     expect((await outcome(v, clock, "https://x/jsbounce")).error).toBeUndefined();
   });
 
@@ -1735,9 +1756,10 @@ describe("wrapView watchNavigation", () => {
     await b.navigate("https://x/1");
     v.land("https://x/1");
     expect(navigated).toBe(1);
-    // navigate's own reads: the load cap's baseline (ET-52) and the page it landed on (ET-13); nothing after the landing.
+    // navigate's own reads: the load cap's baseline (ET-52), the history entry left and the page it landed on (ET-13); nothing after the landing.
     expect(v.calls).toEqual([
       ["evaluate", [DOC_ID]],
+      ["evaluate", [ENTRY_KEY]],
       ["navigate", ["https://x/1"]],
       ["evaluate", [LANDED_PAGE]],
     ]);
@@ -1905,7 +1927,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
   /** The calls past the first `skip`, without the watch's own reads. */
   const after = (v: Fake, skip: number) =>
     withoutMute(v.calls.slice(skip)).filter(
-      ([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === DOC_ID)),
+      ([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === DOC_ID || a[0] === ENTRY_KEY)),
     );
 
   test(
