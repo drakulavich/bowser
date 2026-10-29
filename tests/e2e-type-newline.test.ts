@@ -38,6 +38,17 @@ const EDITOR_HTML = `<!doctype html>
   render();
 </script></body></html>`;
 
+/** An editor whose Enter handler moves focus to the input next to it. */
+const FOCUS_MOVE_HTML = `<!doctype html>
+<html><head><title>Focus move</title></head>
+<body><div id="ed" contenteditable="true" role="textbox" aria-label="Mover"></div>
+<label>Next <input id="next"></label>
+<script>
+  document.getElementById("ed").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); document.getElementById("next").focus(); }
+  });
+</script></body></html>`;
+
 const FORM_HTML = `<!doctype html>
 <html><head><title>Form</title></head>
 <body><form onsubmit="event.preventDefault(); window.submits = (window.submits || 0) + 1">
@@ -58,7 +69,7 @@ runOrSkip("e2e: type with a newline", () => {
     server = Bun.serve({
       port: 0,
       fetch: (req) =>
-        new Response(new URL(req.url).pathname === "/form.html" ? FORM_HTML : EDITOR_HTML, {
+        new Response({ "/form.html": FORM_HTML, "/focus-move.html": FOCUS_MOVE_HTML }[new URL(req.url).pathname] ?? EDITOR_HTML, {
           headers: { "content-type": "text/html; charset=utf-8" },
         }),
     });
@@ -87,6 +98,22 @@ runOrSkip("e2e: type with a newline", () => {
     await cmdClick(ctx, await refNamed("Editor"));
     expect(await cmdType(ctx, "first\nsecond")).toContain("typed 12 characters");
     expect(await cmdEval(ctx, "JSON.stringify(window.paras)")).toBe('["startfirst","second"]');
+  }, 60_000);
+
+  test("a CRLF counts as one newline", async () => {
+    await cmdGoto(ctx, `${base}/editor.html`);
+    await cmdSnapshot(ctx);
+    await cmdClick(ctx, await refNamed("Editor"));
+    await cmdType(ctx, "first\r\nsecond");
+    expect(await cmdEval(ctx, "JSON.stringify(window.paras)")).toBe('["startfirst","second"]');
+  }, 60_000);
+
+  test("type stops when Enter moves focus out of the editor", async () => {
+    await cmdGoto(ctx, `${base}/focus-move.html`);
+    await cmdSnapshot(ctx);
+    await cmdClick(ctx, await refNamed("Mover"));
+    await expect(cmdType(ctx, "first\nsecond")).rejects.toThrow("type: focus left the editor after line 1 of 2; the rest was not typed");
+    expect(await cmdEval(ctx, "JSON.stringify([document.getElementById('ed').textContent, document.getElementById('next').value])")).toBe('["first",""]');
   }, 60_000);
 
   test("an <input> in a form gets a space and the form is not submitted", async () => {

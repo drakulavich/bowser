@@ -334,6 +334,11 @@ const RAW_KEYS: Record<string, string> = {
   ArrowLeft: "\uF702",
   ArrowRight: "\uF703",
 };
+/** Remembers the focused element and answers whether it is contenteditable;
+ *  TYPE_TARGET_FOCUSED answers whether it still has focus. */
+const TYPE_TARGET_MARK = `(() => { const el = document.activeElement; window[Symbol.for('bowser.typeTarget')] = el; return el?.isContentEditable === true; })()`;
+const TYPE_TARGET_FOCUSED = `document.activeElement === window[Symbol.for('bowser.typeTarget')]`;
+
 function pressKey(key: string, modifiers: KeyModifier[]): string {
   return key === "Tab" || modifiers.length === 0 ? (RAW_KEYS[key] ?? key) : key;
 }
@@ -793,10 +798,16 @@ export function wrapView(
       guard(
         nav.act(async () => {
           // Lexical keeps a typed "\n" as text in one paragraph (#243); an <input> in a form submits on Enter.
-          if (!text.includes("\n") || (await evaluate("document.activeElement?.isContentEditable === true")) !== true) return view.type(text);
+          if (!text.includes("\n") || (await evaluate(TYPE_TARGET_MARK)) !== true) return view.type(text);
           await evaluate(KEY_CODES);
-          for (const [i, line] of text.split("\n").entries()) {
-            if (i > 0) await view.press(RAW_KEYS.Enter!);
+          const lines = text.replaceAll("\r\n", "\n").split("\n");
+          for (const [i, line] of lines.entries()) {
+            if (i > 0) {
+              await view.press(RAW_KEYS.Enter!);
+              if ((await evaluate(TYPE_TARGET_FOCUSED)) !== true) {
+                throw new Error(`type: focus left the editor after line ${i} of ${lines.length}; the rest was not typed`);
+              }
+            }
             if (line) await view.type(line);
           }
         }),
