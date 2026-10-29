@@ -74,7 +74,7 @@ export async function cmdOpen(ctx: CommandContext, typed?: string, opts: OpenOpt
   // The directory is created only when a new daemon is spawned for it
   // (spawnDaemon), so a refused open (below) leaves nothing behind.
   return withPageClient(
-    ctx,
+    url ? { ...ctx, goingTo: { url, ...(profile && { profile }) } } : ctx,
     async (c) => {
       const before = await c.request("state");
       // The store is fixed when the daemon starts. A daemon that was already
@@ -113,7 +113,7 @@ export async function cmdGoto(ctx: CommandContext, typed: string): Promise<strin
   if (!typed) throw new UserError("usage: bowser goto <url>");
   const url = normalizeUrl(typed);
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
-  return withPageClient(ctx, async (c) => {
+  return withPageClient({ ...ctx, goingTo: { url } }, async (c) => {
     // Before navigating: a save that fails after it reports a navigation that happened (ET-60).
     if (existsSync(statePath(ctx.session))) await access(statePath(ctx.session), constants.W_OK);
     await c.request("navigate", [url]);

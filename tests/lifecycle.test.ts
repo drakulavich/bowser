@@ -1166,6 +1166,39 @@ describe("#152: the restart keeps the session's page and budget", () => {
     expect(budgets(r.calls)).toEqual([0]);
   });
 
+  for (const command of ["open", "goto"]) {
+    test(`ET-37: ${command} <url> as the first command loads only that URL`, async () => {
+      const session = `et37-${command}`;
+      const next = "https://example.com/next";
+      await saveState({ name: session, url: start, title: "", refs: [], updatedAt: 0, profile: null });
+      const up = await upgrade(session, "0.6.1", { url: next, oldUrl: start });
+      try {
+        const notices: string[] = [];
+        await run([command, next, "-s", session], { connect: up.connect, notices });
+        expect(notices).toEqual([
+          `session '${session}' restarted for bowser ${pkg.version} (was 0.6.1): page at ${start} not reloaded (the command navigates to ${next}); refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
+        ]);
+        expect(up.next()?.ops.filter((op) => op === "navigate")).toEqual(["navigate"]);
+      } finally {
+        up.stop();
+      }
+    });
+  }
+
+  test("ET-37: open <url> with a profile the session lacks reloads the old page before it is refused", async () => {
+    const session = "et37-profile";
+    await saveState({ name: session, url: start, title: "", refs: [], updatedAt: 0, profile: null });
+    const up = await upgrade(session, "0.6.1", { url: start });
+    try {
+      const notices: string[] = [];
+      const err = await run(["open", "https://example.com/next", "--persistent", "-s", session], { connect: up.connect, notices }).catch((e: Error) => e);
+      expect(String(err)).toContain("is already open with a different profile");
+      expect(notices).toEqual([reloaded(session, start)]);
+    } finally {
+      up.stop();
+    }
+  });
+
   test("ET-35: a lock held by a live bowser process still counts", async () => {
     const session = "et35-bowser";
     await ensureSessionDir(session);
