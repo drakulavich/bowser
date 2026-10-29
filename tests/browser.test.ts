@@ -1863,16 +1863,16 @@ describe("navigate caps its wait for load (ET-52)", () => {
     CAP_TEST_MS,
   );
 
-  // CI run 40415723808: a new view's first evaluate took past graceMs.
+  // CI runs 40415723808 and 40834466493: a new view's first evaluate took past graceMs, then past 1 s.
   test(
-    "a baseline read that takes 300 ms still starts the watcher",
+    "a baseline read that takes 1.5 s still starts the watcher",
     async () => {
       const clock = manualClock();
       const { v } = hangingLoad(clock, {
         read: (expr) =>
           expr === TIME_ORIGIN
             ? new Promise((r) => {
-                clock.setTimeout(() => r(1), 300);
+                clock.setTimeout(() => r(1), 1500);
               })
             : undefined,
       });

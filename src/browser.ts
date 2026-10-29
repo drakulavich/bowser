@@ -295,8 +295,9 @@ const NAV_TIMING: NavTiming = { graceMs: 100, settleMs: 10_000 };
 /** How long navigate() waits for `load` once the new document is parsed (ET-52). */
 const LOAD_CAP_MS = 5000;
 const LOAD_POLL_MS = 100;
-/** A new view's first evaluate can take a few hundred ms (CI run 40415723808). */
 const LOAD_READ_MS = 1000;
+/** A new view's first evaluate waits for WebKit's web process: past 1 s in CI run 40834466493. */
+const BASELINE_READ_MS = 3000;
 interface LoadWatch {
   over: boolean;
   stopped: boolean;
@@ -578,7 +579,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     async navigate(url: string, go: () => Promise<void>): Promise<void> {
       const before = landed;
       const arrivedBefore = arrived;
-      const origin = await ask(TIME_ORIGIN, LOAD_READ_MS);
+      const origin = await ask(TIME_ORIGIN, BASELINE_READ_MS);
       // The baseline read can outlast the budget: the command has been told it failed.
       if (actionCancelled) throw new Error("request timed out before the navigation was sent");
       const load: LoadWatch = { over: false, stopped: false };
