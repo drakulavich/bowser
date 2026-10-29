@@ -34,8 +34,9 @@ export async function claimRestartLock(session: string, claim = claimSession): P
     } catch (e) {
       // ENAMETOOLONG: a name no daemon could have claimed under this HOME (F35).
       // EINVAL: macOS's write or link while `close` removes the directory (#232).
+      // EACCES: an unwritable session directory, which `close` still stops the daemon of (ET-60).
       const code = (e as { code?: string }).code;
-      if (code === "ENOENT" || code === "EINVAL" || code === "ENAMETOOLONG") return false;
+      if (code === "ENOENT" || code === "EINVAL" || code === "ENAMETOOLONG" || code === "EACCES") return false;
       throw e;
     }
     // claimSession leaves a corrupt lock for `close`, which removes the directory.

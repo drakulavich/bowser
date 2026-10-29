@@ -8,7 +8,7 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,7 +17,7 @@ import type { CommandContext } from "../src/commands/context.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { connectOrSpawn, pidPath, socketPath } from "../src/daemon/client.ts";
-import { ensureSessionDir, profileDir, sessionDir } from "../src/state.ts";
+import { ensureSessionDir, profileDir, sessionDir, statePath } from "../src/state.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -99,6 +99,18 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
 
     await cmdClose({ session: s, json: true });
     expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
+  }, 60_000);
+  test("ET-60: goto into a session whose state cannot be saved fails before navigating", async () => {
+    const s = session("ro-state");
+    const ctx: CommandContext = { session: s, json: false };
+    await cmdOpen(ctx, `${url}first`);
+    await chmod(statePath(s), 0o444);
+    try {
+      await expect(cmdGoto(ctx, `${url}second`)).rejects.toThrow(`EACCES: permission denied, access '${statePath(s)}'`);
+      expect(await cmdEval(ctx, "location.pathname")).toBe("/first");
+    } finally {
+      await chmod(statePath(s), 0o644);
+    }
   }, 60_000);
   test("F28: after kill -9, a persistent session refuses every command but open and close", async () => {
     const s = session("crash28");

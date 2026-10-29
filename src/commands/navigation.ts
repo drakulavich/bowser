@@ -1,7 +1,7 @@
 // Navigation and session lifecycle: open, goto, history, close, list.
 
-import { existsSync } from "node:fs";
-import { readFile, readdir, rm, rmdir, unlink } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import { access, readFile, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
@@ -114,6 +114,8 @@ export async function cmdGoto(ctx: CommandContext, typed: string): Promise<strin
   const url = normalizeUrl(typed);
   const prev = (await loadState(ctx.session)) ?? emptyState(ctx.session);
   return withPageClient(ctx, async (c) => {
+    // Before navigating: a save that fails after it reports a navigation that happened (ET-60).
+    if (existsSync(statePath(ctx.session))) await access(statePath(ctx.session), constants.W_OK);
     await c.request("navigate", [url]);
     const state = await c.request("state");
     assertNavigated(url, state.url);
@@ -294,20 +296,27 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
   // The directory outlives nothing now: keeping it is what let closed sessions
   // accumulate, and after close there is no state left in it worth reading.
   const dir = sessionDir(session);
-  if (locked) {
-    // The lock goes last, so a restart waiting on it finds no daemon to restart.
-    const entries = await readdir(dir).catch((e: { code?: string }) => {
-      if (e.code === "ENOENT") return [] as string[];
-      throw e;
-    });
-    await Promise.all(entries.filter((e) => e !== LOCK).map((e) => rm(join(dir, e), { recursive: true, force: true })));
-    releaseRestartLock(session);
-    await rmdir(dir).catch((e: { code?: string }) => {
-      // A restart claimed the lock in between: it spawns nothing.
-      if (e.code !== "ENOENT" && e.code !== "ENOTEMPTY") throw e;
-    });
-  } else {
-    await rm(dir, { recursive: true, force: true });
+  try {
+    if (locked) {
+      // The lock goes last, so a restart waiting on it finds no daemon to restart.
+      const entries = await readdir(dir).catch((e: { code?: string }) => {
+        if (e.code === "ENOENT") return [] as string[];
+        throw e;
+      });
+      await Promise.all(entries.filter((e) => e !== LOCK).map((e) => rm(join(dir, e), { recursive: true, force: true })));
+      releaseRestartLock(session);
+      await rmdir(dir).catch((e: { code?: string }) => {
+        // A restart claimed the lock in between: it spawns nothing.
+        if (e.code !== "ENOENT" && e.code !== "ENOTEMPTY") throw e;
+      });
+    } else {
+      await rm(dir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `close: session '${session}' is stopped, but ${dir} could not be removed: ${reason}; make it writable, then run 'bowser close -s ${session}' again`,
+    );
   }
 
   if (!open) return { open, text: reply(ctx, { ok: true, session, ended, open }, `session '${session}' is not open`) };
