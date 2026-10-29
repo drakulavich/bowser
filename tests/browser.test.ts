@@ -1170,6 +1170,12 @@ describe("navigate while the page navigates itself (ET-13)", () => {
     expect(await outcome(v, clock, "https://x/r302")).toEqual({ at: 0, error: undefined });
   });
 
+  test("a landing on the requested URL with its escapes decoded is the one asked for", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, "https://x/~user", "https://x/jsbounce?n=4"));
+    expect((await outcome(v, clock, "https://x/%7Euser")).error).toBeUndefined();
+  });
+
   test("the page asked for, sent on twice by its own scripts before the read, succeeds", async () => {
     const clock = manualClock();
     const v = bouncing(async (v, page) => landOn(v, page, "https://x/jsbounce?n=2", "https://x/jsbounce?n=1"));

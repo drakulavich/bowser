@@ -878,14 +878,21 @@ function interrupted(err: unknown): boolean {
   return cancelled(err) || (err instanceof Error && err.message === "Frame load interrupted");
 }
 
-/** The same page: origin, path without a trailing slash, and query; the fragment is ignored. */
+/** The same page: origin, path without a trailing slash, and query, with equivalent escapes decoded; the fragment is ignored. */
 function sameUrl(a: unknown, b: string): boolean {
   if (typeof a !== "string") return false;
   try {
     const x = new URL(a);
     const y = new URL(b);
-    const path = (u: URL) => u.pathname.replace(/\/$/, "");
-    return x.origin === y.origin && path(x) === path(y) && x.search === y.search;
+    const decoded = (s: string) => {
+      try {
+        return decodeURI(s);
+      } catch {
+        return s;
+      }
+    };
+    const path = (u: URL) => decoded(u.pathname).replace(/\/$/, "");
+    return x.origin === y.origin && path(x) === path(y) && decoded(x.search) === decoded(y.search);
   } catch {
     return a === b;
   }
