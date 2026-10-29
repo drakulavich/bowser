@@ -36,10 +36,6 @@ starts with `/`, `./` or `../` (the text matches `/\]\(\s*<?\.{0,2}\//`), `markd
 - Cost on bun.com: 26,616 characters converted against 21,190 in the site's Markdown (+26%).
 - A Markdown with only absolute links is returned as before, `source: "page"`.
 
-The first design rewrote the targets in place. Three review rounds each found a new CommonMark edge case (code
-spans across lines, escapes, list items, block quotes), and two of the fixes corrupted literal code; this design
-removes the parsing (2026-10-28, the user's call).
-
 ### ET-51: the empty-page line under `--filename`
 
 `--filename` on a page with no text still writes the file, and answers on two lines:
@@ -55,13 +51,10 @@ form of the line (`markdown: ref 'e5' has no text (…)`), as without `--filenam
 
 ### ET-55: a checkbox in a list item prints its state
 
-A checkbox `input` inside an `li` prints `[x] ` when checked and `[ ] ` when not, where it stands in the item,
-even when the checkbox itself is hidden, as long as the `li` is visible: GitHub draws a read-only task with its checkbox at `display: none`
-(checked on #140 on 2026-10-28), and custom-drawn checkboxes hide the native `input` the same way. A hidden
-`li` still drops the whole item. Every other `input` is still skipped. GitHub serves two markups for the same
-task list (seen on #140 on 2026-10-28): in one the task text is a block after the checkbox, so the item reads
-`- [ ]` with the text on the next line; the state is there either way. When the checkbox comes first in the item, as on GitHub, `- [ ] S2-2: …` is the GFM
-task-list form and a renderer shows it as a task.
+A checkbox `input` inside a visible `li` prints `[x] ` when checked and `[ ] ` when not, where it stands in the
+item, even when the checkbox itself is hidden: GitHub draws a read-only task with its checkbox at `display: none`
+(#140, 2026-10-28). A hidden `li` still drops the whole item, and every other `input` is still skipped. With the
+checkbox first, as on GitHub, `- [ ] S2-2: …` is the GFM task-list form.
 
 ## Cost
 
