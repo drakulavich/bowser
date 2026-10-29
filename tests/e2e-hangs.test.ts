@@ -24,6 +24,7 @@ import { cmdClick, cmdFill } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
+import { daemonLogPath } from "../src/daemon/client.ts"; // TEMPORARY
 import { loadState } from "../src/state.ts";
 import { waitFor } from "./helpers/daemons.ts";
 
@@ -331,6 +332,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     sessions.push(ctx.session);
 
     const open = await timed(() => cmdOpen(ctx, `${base}/image`));
+    console.log("hangimage", JSON.stringify(open), await Bun.file(daemonLogPath(ctx.session)).text().catch(String)); // TEMPORARY
     expect(open).toEqual({ ms: expect.any(Number) as unknown as number });
     expect(open.ms).toBeLessThan(8000);
     const goto = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/image`));
@@ -356,6 +358,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
       const ctx: CommandContext = { session: `et52diag${i}`, json: false };
       const open = await timed(() => cmdOpen(ctx, `${base}/image`));
       results.push({ session: ctx.session, ...open });
+      console.log(ctx.session, JSON.stringify(open), await Bun.file(daemonLogPath(ctx.session)).text().catch(String));
       await cmdClose(ctx).catch(() => {});
     }
     console.log(JSON.stringify(results, null, 1));

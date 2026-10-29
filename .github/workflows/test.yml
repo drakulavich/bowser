@@ -42,6 +42,7 @@ jobs:
       id-token: write # GitHub OIDC for Flakiness.io
     env:
       BOWSER_E2E: "1"
+      BOWSER_DAEMON_DEBUG: "1" # TEMPORARY (ET-52 flake diagnosis)
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

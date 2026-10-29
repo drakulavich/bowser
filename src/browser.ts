@@ -507,12 +507,14 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       load.read = evaluate(LOAD_STATE).catch(() => undefined);
       const read = await load.read;
       diag.settled = clock.now();
+      diag.slowest = Math.max(diag.slowest ?? 0, diag.settled - diag.sent);
       diag.last = read;
       if (load.over) return false;
       if (Array.isArray(read) && read[0] !== origin && read[1] !== "loading") {
         if (read[0] !== doc) {
           doc = read[0] as number;
           since = clock.now();
+          diag.seen = since;
         } else if (clock.now() - since >= LOAD_CAP_MS) return true;
       }
       await sleep(timing.loadPollMs ?? LOAD_POLL_MS);
@@ -520,11 +522,21 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     return false;
   };
   let loadWatch: LoadWatch | undefined;
-  const diag: { start: number; baselineMs?: number; origin?: unknown; reads: number; sent?: number; settled?: number; last?: unknown } = { start: 0, reads: 0 };
+  const diag: {
+    start: number;
+    baselineMs?: number;
+    origin?: unknown;
+    reads: number;
+    sent?: number;
+    settled?: number;
+    last?: unknown;
+    seen?: number;
+    slowest?: number;
+  } = { start: 0, reads: 0 };
   const loadNote = (): string => {
     const at = (t?: number) => (t === undefined ? "never" : `${t - diag.start} ms`);
     const base = diag.baselineMs === undefined ? "pending" : `${JSON.stringify(diag.origin) ?? "no answer"} after ${diag.baselineMs} ms`;
-    return `load cap: baseline ${base}; ${diag.reads} cap reads, last sent ${at(diag.sent)}, settled ${at(diag.settled)} with ${JSON.stringify(diag.last)}; loading ${view.loading}`;
+    return `load cap: baseline ${base}; ${diag.reads} cap reads, last sent ${at(diag.sent)}, settled ${at(diag.settled)} with ${JSON.stringify(diag.last)}; slowest read ${diag.slowest} ms; new document seen ${at(diag.seen)}; loading ${view.loading}`;
   };
   let loadLeft = false;
   /** Stop the load a capped navigate left running, and wait for its -999 to
@@ -600,7 +612,17 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       await stopLoadLeft();
       const before = landed;
       const arrivedBefore = arrived;
-      Object.assign(diag, { start: clock.now(), baselineMs: undefined, origin: undefined, reads: 0, sent: undefined, settled: undefined, last: undefined });
+      Object.assign(diag, {
+        start: clock.now(),
+        baselineMs: undefined,
+        origin: undefined,
+        reads: 0,
+        sent: undefined,
+        settled: undefined,
+        last: undefined,
+        seen: undefined,
+        slowest: undefined,
+      });
       const origin = await ask(TIME_ORIGIN, BASELINE_READ_MS);
       diag.baselineMs = clock.now() - diag.start;
       diag.origin = origin;
@@ -631,6 +653,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       try {
         await Promise.race(racers);
       } finally {
+        if (process.env.BOWSER_DAEMON_DEBUG === "1") console.error(`ET52DIAG ${url} ${loadNote()}; ended ${clock.now() - diag.start} ms`);
         load.over = true;
         loaded.catch(() => {});
       }
