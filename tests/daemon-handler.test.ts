@@ -24,8 +24,6 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     };
   const b: Browser & { calls: typeof calls } = {
     calls,
-    url: "https://x/",
-    title: "X",
     realUrl: rec("realUrl", "https://x/"),
     realTitle: rec("realTitle", "X"),
     navigate: rec("navigate", undefined),

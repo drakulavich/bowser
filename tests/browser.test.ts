@@ -283,7 +283,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
     expect(await clock.fulfilledAt(b.navigate("data:text/html,long"))).toBe(200);
-    expect(b.url).toBe("data:text/html,long");
+    expect(v.url).toBe("data:text/html,long");
   });
 
   test("its failure still reaches the caller", async () => {
@@ -333,7 +333,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const clock = manualClock();
     const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, lazy(fakeKicker(host)), clock);
     expect(await clock.fulfilledAt(b.click("a"))).toBeLessThan(5000);
-    expect(b.url).toBe("https://x/next");
+    expect(v.url).toBe("https://x/next");
   });
 
   test("a kick whose own reply stalls does not stop the kicking", async () => {
@@ -481,7 +481,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     await clock.fulfilledAt(b.press("Enter"));
-    expect(b.url).toBe("https://x/submitted");
+    expect(v.url).toBe("https://x/submitted");
   });
 
   test("a bare named key goes as its macOS character, which WebKit takes as a key event (F11, #168)", async () => {
@@ -552,7 +552,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     await clock.fulfilledAt(b.press("Tab"));
-    expect(b.url).toBe("https://x/next");
+    expect(v.url).toBe("https://x/next");
   });
 
   test("a failed navigation ends the wait without failing the action", async () => {
@@ -567,7 +567,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.click("#l"))).toBe(20);
-    expect(b.url).toBe("https://x/");
+    expect(v.url).toBe("https://x/");
   });
 
   test("an action after a given-up navigation pays the grace window, not settleMs", async () => {
@@ -592,7 +592,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#l"));
-    expect(b.url).toBe("https://x/two");
+    expect(v.url).toBe("https://x/two");
   });
 
   test("click that navigates nowhere returns after the grace window", async () => {
@@ -600,7 +600,7 @@ describe("wrapView navigation watch", () => {
     const clock = manualClock();
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs);
-    expect(b.url).toBe("https://x/");
+    expect(v.url).toBe("https://x/");
   });
 
   test("a navigation that starts inside the grace window is awaited past it", async () => {
@@ -613,7 +613,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#l"));
-    expect(b.url).toBe("https://x/slow");
+    expect(v.url).toBe("https://x/slow");
   });
 
   test("a navigation that never lands is given up after settleMs", async () => {
@@ -640,7 +640,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#slow"));
-    expect(b.url).toBe("https://x/slow");
+    expect(v.url).toBe("https://x/slow");
   });
 
   test("the page's signal is armed before the action, so an earlier navigation does not count", async () => {
@@ -677,7 +677,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#twice"));
-    expect(b.url).toBe("https://x/second");
+    expect(v.url).toBe("https://x/second");
   });
 
   test("a count read during the wait that a later failure overtakes is read again (#106)", async () => {
@@ -712,7 +712,7 @@ describe("wrapView navigation watch", () => {
     };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#thrice"));
-    expect(b.url).toBe("https://x/third");
+    expect(v.url).toBe("https://x/third");
   });
 
   test("a reread that never answers still leaves the wait at settleMs", async () => {
@@ -797,7 +797,7 @@ describe("wrapView navigation watch", () => {
     });
     const b = wrapView(v, fast);
     await b.click("#btn");
-    expect(b.url).toBe("https://x/");
+    expect(v.url).toBe("https://x/");
   });
 
   test("back and forward call goBack/goForward, with no page fallback", async () => {
@@ -848,7 +848,7 @@ describe("wrapView navigation watch", () => {
     const b = onClock(v, fast, clock);
     v.onNavigationFailed?.(new Error("Could not connect to the server."));
     await clock.fulfilledAt(b.back());
-    expect(b.url).toBe("https://x/previous");
+    expect(v.url).toBe("https://x/previous");
   });
 
   // #116: on WebKit a reload shows no sign before it lands: view.loading
@@ -892,7 +892,7 @@ describe("wrapView navigation watch", () => {
     });
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.reload());
-    expect(b.url).toBe("https://x/elsewhere");
+    expect(v.url).toBe("https://x/elsewhere");
   });
 
   test("reload fails at once when its own failure arrives before reload resolves", async () => {
@@ -968,7 +968,7 @@ describe("wrapView navigation watch", () => {
     });
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.reload())).toBe(30 + 40);
-    expect(b.url).toBe("https://x/elsewhere");
+    expect(v.url).toBe("https://x/elsewhere");
   });
 
   test("reload prefers the native call and waits for its navigation to land", async () => {
@@ -985,7 +985,7 @@ describe("wrapView navigation watch", () => {
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.reload());
     expect(own(v.calls)).toEqual([["reload", []]]);
-    expect(b.url).toBe("https://x/re");
+    expect(v.url).toBe("https://x/re");
   });
 
   test("phase is awaiting-navigation while act waits for a landing", async () => {
@@ -1002,7 +1002,7 @@ describe("wrapView navigation watch", () => {
     expect([during, b.phase]).toEqual(["acting", "awaiting-navigation"]);
     v.land("https://x/next");
     await clicked;
-    expect([b.url, b.phase]).toEqual(["https://x/next", "idle"]);
+    expect([v.url, b.phase]).toEqual(["https://x/next", "idle"]);
   });
 
   test("phase is delivered while the watch waits for a navigation that never begins", async () => {
@@ -1065,12 +1065,9 @@ describe("navigate over a navigation still loading", () => {
   }
 
   test("waits for its own landing instead of failing with the cancelled one's -999", async () => {
-    const b = wrapView(
-      cancelling((v, url) => v.land(url)),
-      fast,
-    );
-    await b.navigate("https://x/next");
-    expect(b.url).toBe("https://x/next");
+    const v = cancelling((v, url) => v.land(url));
+    await wrapView(v, fast).navigate("https://x/next");
+    expect(v.url).toBe("https://x/next");
   });
 
   test("its own failure is reported", async () => {

@@ -92,8 +92,6 @@ export async function resolveTitle(viewTitle: string, evalTitle: () => Promise<u
 export type ActPhase = "idle" | "acting" | "delivered" | "awaiting-navigation";
 
 export interface Browser {
-  url: string;
-  title: string;
   realUrl(): Promise<string>;
   realTitle(): Promise<string>;
   navigate(url: string): Promise<void>;
@@ -666,12 +664,6 @@ export function wrapView(
   const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
 
   return {
-    get url() {
-      return view.url;
-    },
-    get title() {
-      return view.title;
-    },
     get phase() {
       return nav.phase;
     },
