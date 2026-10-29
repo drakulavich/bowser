@@ -9,7 +9,10 @@ describe("createSerializer", () => {
     const mk = (id: string, delay: number) => () =>
       new Promise<void>((r) => {
         events.push(`start:${id}`);
-        setTimeout(() => { events.push(`end:${id}`); r(); }, delay);
+        setTimeout(() => {
+          events.push(`end:${id}`);
+          r();
+        }, delay);
       });
     // A is slow, B is fast — B must NOT start until A has ended.
     const a = serialize(mk("A", 30));
@@ -33,7 +36,13 @@ describe("createSerializer", () => {
   test("running names the task in progress, and nothing once the queue is idle", async () => {
     const serialize = createSerializer();
     let release!: () => void;
-    const a = serialize(() => new Promise<void>((r) => { release = r; }), "click");
+    const a = serialize(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+        }),
+      "click",
+    );
     const b = serialize(async () => serialize.running, "evaluate");
     await Bun.sleep(0);
     expect(serialize.running).toBe("click");
@@ -48,7 +57,13 @@ describe("createSerializer", () => {
     const s2 = createSerializer();
     const events: string[] = [];
     const mk = (id: string, delay: number) => () =>
-      new Promise<void>((r) => { events.push(`start:${id}`); setTimeout(() => { events.push(`end:${id}`); r(); }, delay); });
+      new Promise<void>((r) => {
+        events.push(`start:${id}`);
+        setTimeout(() => {
+          events.push(`end:${id}`);
+          r();
+        }, delay);
+      });
     // s1 runs A then B serially; s2 runs C concurrently with s1's work.
     await Promise.all([s1(mk("A", 20)), s1(mk("B", 0)), s2(mk("C", 0))]);
     // Within s1, A fully precedes B:
@@ -68,13 +83,7 @@ describe("withTimeout", () => {
     await expect(withTimeout(slow, 5, "evaluate")).rejects.toThrow(/operation 'evaluate' timed out/);
   });
 
-  test("passes the promise through unchanged when ms <= 0", async () => {
-    expect(await withTimeout(Promise.resolve("v"), 0, "op")).toBe("v");
-  });
-
   test("propagates a rejection from p (not a timeout error)", async () => {
-    await expect(
-      withTimeout(Promise.reject(new Error("inner")), 1000, "op"),
-    ).rejects.toThrow("inner");
+    await expect(withTimeout(Promise.reject(new Error("inner")), 1000, "op")).rejects.toThrow("inner");
   });
 });

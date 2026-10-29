@@ -25,7 +25,8 @@ const html = (body: string) => new Response(body, { headers: { "content-type": "
 
 const TALL = `<!doctype html><title>tall</title><div style="height: 3000px">Top</div><article><p>Far below</p></article>`;
 const HIDDEN = `<!doctype html><title>hidden</title><p><code>shown<span hidden>secret</span></code></p><pre>a<span style="display: none">secret</span>b</pre><table><tr hidden><td>secret</td></tr></table><p>after</p>`;
-const EDGES = "<!doctype html><title>edges</title><main><h2>Heading ref</h2><p><strong>bold </strong>text and <em> it</em>alic</p><table><tr><th>A</th><th>B</th></tr><tr><td>a<br>b</td><td>c</td></tr></table><p><code>a`b</code></p><pre>before\n```\nafter</pre></main>";
+const EDGES =
+  "<!doctype html><title>edges</title><main><h2>Heading ref</h2><p><strong>bold </strong>text and <em> it</em>alic</p><table><tr><th>A</th><th>B</th></tr><tr><td>a<br>b</td><td>c</td></tr></table><p><code>a`b</code></p><pre>before\n```\nafter</pre></main>";
 const FIDELITY = `<!doctype html><title>Fidelity</title><main>
 <p><del>$99</del> <s>old</s> <strike>gone</strike> $49</p>
 <table><caption>Prices</caption><tr><th>A</th></tr><tr><td>1</td></tr></table>
@@ -74,6 +75,11 @@ const LISTS = `<!doctype html><title>lists</title><main>
 <ol reversed><li>a</li><li hidden>gone</li><li>b</li></ol>
 <ol><li value="10">ten</li><li>eleven</li></ol>
 </main>`;
+// #154 ET-50: the page's own Markdown, served from another directory than the page.
+const GUIDE = "# Guide\n\nSee [the server](/x) and [the spec](https://e.com/q).";
+// #154 ET-55 and ET-51.
+const TASKS = `<!doctype html><title>tasks</title><main><ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> open</li><li><input type="checkbox" checked hidden> hid</li><li><input type="checkbox" style="display: none"> styled</li><li style="visibility: hidden"><input type="checkbox" checked> gone</li></ul><p><input type="checkbox" checked> outside</p></main>`;
+const EMPTY_REGION = `<!doctype html><title>region</title><main><p>Text</p><button aria-label="Empty"></button></main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
 runOrSkip("e2e: markdown", () => {
@@ -93,6 +99,7 @@ runOrSkip("e2e: markdown", () => {
       async fetch(req) {
         const path = new URL(req.url).pathname;
         if (path === "/fixture.html") return html(await readFile(join(FIXTURES, "markdown.html"), "utf8"));
+        if (path === "/watch") return html(await readFile(join(FIXTURES, "youtube-watch.html"), "utf8"));
         if (path === "/no-main.html") {
           const page = await readFile(join(FIXTURES, "markdown.html"), "utf8");
           return html(page.replace("<main>", "<div>").replace("</main>", "</div>"));
@@ -104,17 +111,31 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/alt-missing.html") return html(ALT("/missing.md"));
         if (path === "/fidelity.html") return html(FIDELITY);
         if (path === "/review.html") return html(REVIEW);
-        const fidelity = { "/spans.html": SPANS, "/data.html": DATA, "/glued.html": GLUED, "/langs.html": LANGS, "/lists.html": LISTS }[path];
+        const fidelity = {
+          "/spans.html": SPANS,
+          "/data.html": DATA,
+          "/glued.html": GLUED,
+          "/langs.html": LANGS,
+          "/lists.html": LISTS,
+        }[path];
         if (fidelity) return html(fidelity);
         if (path === "/blank.html") return html("<!doctype html><title>Just a moment...</title><main></main>");
         if (path === "/alt-slow.html") return html(ALT("/slow.md"));
-        if (path === "/slow.md") { await Bun.sleep(20_000); return new Response("# Late"); }
+        if (path === "/slow.md") {
+          await Bun.sleep(20_000);
+          return new Response("# Late");
+        }
         if (path === "/alt-signin.html") return html(ALT("/private.md"));
         if (path === "/private.md") return Response.redirect("/signin.html", 302);
         if (path === "/signin.html") return html("<!doctype html><title>Sign in</title><form>Sign in</form>");
         if (path === "/alt-shell.html") return html(ALT("/shell.md"));
         if (path === "/shell.md") return html("<!doctype html><div id=root>Loading</div>");
-        if (path === "/alert.html") return html("<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>");
+        if (path === "/alert.html")
+          return html("<!doctype html><title>alert</title><main><p>Alert page</p></main><script>setTimeout(() => alert('hello'), 300)</script>");
+        if (path === "/docs/page.html") return html(ALT("/md/guide.md"));
+        if (path === "/md/guide.md") return new Response(GUIDE, { headers: { "content-type": "text/markdown" } });
+        if (path === "/tasks.html") return html(TASKS);
+        if (path === "/empty-region.html") return html(EMPTY_REGION);
         if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
         return new Response("not found", { status: 404 });
       },
@@ -123,7 +144,9 @@ runOrSkip("e2e: markdown", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -137,21 +160,23 @@ runOrSkip("e2e: markdown", () => {
 
   test("converts <main>: blocks, inline marks, tables, and nothing hidden, interactive or outside <main>", async () => {
     await cmdOpen(ctx, `${base}/fixture.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "# Title",
-      `Plain **bold** and *it* with \`x = 1\`, a [link](${base}/docs) and a jump.`,
-      "- One\n- Two\n  - Inner",
-      "1. First\n2. Second",
-      "| Name | Qty |\n| --- | --- |\n| Apple | 2 |",
-      "Layout cell",
-      "```\nline 1\n  line 2\n```",
-      "> Quoted",
-      "---",
-      `![Logo](${base}/a.png)`,
-      "Email",
-      "## Article",
-      "Body text.",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [
+        "# Title",
+        `Plain **bold** and *it* with \`x = 1\`, a [link](${base}/docs) and a jump.`,
+        "- One\n- Two\n  - Inner",
+        "1. First\n2. Second",
+        "| Name | Qty |\n| --- | --- |\n| Apple | 2 |",
+        "Layout cell",
+        "```\nline 1\n  line 2\n```",
+        "> Quoted",
+        "---",
+        `![Logo](${base}/a.png)`,
+        "Email",
+        "## Article",
+        "Body text.",
+      ].join("\n\n"),
+    );
   }, 60_000);
 
   test("hidden text inside code, pre and a table stays out, and an all-hidden table converts to nothing", async () => {
@@ -161,13 +186,9 @@ runOrSkip("e2e: markdown", () => {
 
   test("emphasis keeps the spaces at its edges, a <br> in a cell keeps the row, and code fences outgrow the backticks inside", async () => {
     await cmdGoto(ctx, `${base}/edges.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "## Heading ref",
-      "**bold** text and *it*alic",
-      "| A | B |\n| --- | --- |\n| a b | c |",
-      "``a`b``",
-      "````\nbefore\n```\nafter\n````",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      ["## Heading ref", "**bold** text and *it*alic", "| A | B |\n| --- | --- |\n| a b | c |", "``a`b``", "````\nbefore\n```\nafter\n````"].join("\n\n"),
+    );
   }, 60_000);
 
   test("a ref to a heading keeps the heading's own Markdown", async () => {
@@ -178,82 +199,76 @@ runOrSkip("e2e: markdown", () => {
 
   test("strikethrough, captions, visibility, details, escaping, sub/sup, code language, images, empty tables, pre-wrapped text, key-value rows", async () => {
     await cmdGoto(ctx, `${base}/fidelity.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "~~$99~~ ~~old~~ ~~gone~~ $49",
-      "Prices",
-      "| A |\n| --- |\n| 1 |",
-      "shown child",
-      "More",
-      "Open",
-      "open body",
-      "\\# not a heading",
-      "1\\. not a list",
-      "\\- dash and \\<b>tag",
-      "H<sub>2</sub>O x<sup>2</sup>",
-      "```python3\nprint(1)\n```",
-      "```js\nlet a\n```",
-      `![A \\[b\\]](${base}/a.png) ![D]()`,
-      "line one\nline two",
-      "Developer: Apple",
-      "Engine: WebKit",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [
+        "~~$99~~ ~~old~~ ~~gone~~ $49",
+        "Prices",
+        "| A |\n| --- |\n| 1 |",
+        "shown child",
+        "More",
+        "Open",
+        "open body",
+        "\\# not a heading",
+        "1\\. not a list",
+        "\\- dash and \\<b>tag",
+        "H<sub>2</sub>O x<sup>2</sup>",
+        "```python3\nprint(1)\n```",
+        "```js\nlet a\n```",
+        `![A \\[b\\]](${base}/a.png) ![D]()`,
+        "line one\nline two",
+        "Developer: Apple",
+        "Engine: WebKit",
+      ].join("\n\n"),
+    );
   }, 60_000);
 
   test("a closed details in a key cell, hidden images and rules, a list as a row's value, and parentheses in URLs", async () => {
     await cmdGoto(ctx, `${base}/review.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "Key more: v",
-      "List:",
-      "- A\n- B",
-      "Lines: one two",
-      `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`,
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      ["Key more: v", "List:", "- A\n- B", "Lines: one two", `![pic](${base}/image%29a.png) [link](${base}/x%29y%28z.html)`].join("\n\n"),
+    );
   }, 60_000);
 
   test("ET-45: a rowspan or colspan cell covers every row and column it spans", async () => {
     await cmdGoto(ctx, `${base}/spans.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      "| Rank | Building | Country | Height | Height |",
-      "| --- | --- | --- | --- | --- |",
-      "| 1 | Shanghai Tower | China | 632 m | 2,073 ft |",
-      "| 2 | Ping An | China | 599 m | 1,965 ft |",
-      "",
-      // Overlapping spans, an HTML table model error: the earlier cell keeps its slot.
-      "| a | b | c |  |",
-      "| --- | --- | --- | --- |",
-      "| a | d | c | e |",
-      "",
-      "| f | g |",
-      "| --- | --- |",
-      "| f | h |",
-      "",
-      // A rowspan stops at the end of its row group, and a hidden row counts toward it.
-      "| K | V |",
-      "| --- | --- |",
-      "| 1 | 2 |",
-      "",
-      "| p | q |",
-      "| --- | --- |",
-      "| s | t |",
-    ].join("\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [
+        "| Rank | Building | Country | Height | Height |",
+        "| --- | --- | --- | --- | --- |",
+        "| 1 | Shanghai Tower | China | 632 m | 2,073 ft |",
+        "| 2 | Ping An | China | 599 m | 1,965 ft |",
+        "",
+        // Overlapping spans, an HTML table model error: the earlier cell keeps its slot.
+        "| a | b | c |  |",
+        "| --- | --- | --- | --- |",
+        "| a | d | c | e |",
+        "",
+        "| f | g |",
+        "| --- | --- |",
+        "| f | h |",
+        "",
+        // A rowspan stops at the end of its row group, and a hidden row counts toward it.
+        "| K | V |",
+        "| --- | --- |",
+        "| 1 | 2 |",
+        "",
+        "| p | q |",
+        "| --- | --- |",
+        "| s | t |",
+      ].join("\n"),
+    );
   }, 60_000);
 
   test("ET-46: a header row of th cells keeps a table with a block in a cell a table, and a block that is not printed does not count", async () => {
     await cmdGoto(ctx, `${base}/data.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      `| Name | Image |\n| --- | --- |\n| Burj | ![pic](${base}/b.png) |`,
-      "| a | b |\n| --- | --- |",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe([`| Name | Image |\n| --- | --- |\n| Burj | ![pic](${base}/b.png) |`, "| a | b |\n| --- | --- |"].join("\n\n"));
   }, 60_000);
 
   test("ET-47, ET-48: block content inside an inline wrapper is separated, and a block link keeps its URL", async () => {
     await cmdGoto(ctx, `${base}/glued.html`);
-    expect(await cmdMarkdown(ctx)).toBe([
-      `[Bloodlines What is it?](${base}/g)`,
-      "1. If x, then\n   1. Let y.\n2. Return y.",
-      `[Issues (3.6k)](${base}/issues)`,
-      "**Warning**",
-    ].join("\n\n"));
+    expect(await cmdMarkdown(ctx)).toBe(
+      [`[Bloodlines What is it?](${base}/g)`, "1. If x, then\n   1. Let y.\n2. Return y.", `[Issues (3.6k)](${base}/issues)`, "**Warning**"].join("\n\n"),
+    );
   }, 60_000);
 
   test("ET-49: GitHub's highlight-source- and MediaWiki's mw-highlight-lang- classes name the fence's language", async () => {
@@ -275,19 +290,28 @@ runOrSkip("e2e: markdown", () => {
       expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
       expect(performance.now() - t0).toBeLessThan(10_000);
     } finally {
-      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = orig;
     }
   }, 60_000);
 
   test("--json carries the page's URL and title", async () => {
     await cmdGoto(ctx, `${base}/fixture.html`);
-    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ url: `${base}/fixture.html`, title: "Markdown fixture" });
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({
+      url: `${base}/fixture.html`,
+      title: "Markdown fixture",
+    });
   }, 60_000);
 
   test("an empty result says so, with the page's title and URL", async () => {
     await cmdGoto(ctx, `${base}/blank.html`);
     expect(await cmdMarkdown(ctx)).toBe(`markdown: the page has no text ("Just a moment...", ${base}/blank.html)`);
-    expect(JSON.parse(await cmdMarkdown(json))).toEqual({ markdown: "", source: "converted", url: `${base}/blank.html`, title: "Just a moment..." });
+    expect(JSON.parse(await cmdMarkdown(json))).toEqual({
+      markdown: "",
+      source: "converted",
+      url: `${base}/blank.html`,
+      title: "Just a moment...",
+    });
   }, 60_000);
 
   test("without <main>, the whole body is converted", async () => {
@@ -309,7 +333,45 @@ runOrSkip("e2e: markdown", () => {
     const file = join(tmp, "page.md");
     expect(await cmdMarkdown(ctx, undefined, { filename: file })).toBe(`wrote ${file}`);
     expect(await readFile(file, "utf8")).toBe(`${await cmdMarkdown(ctx)}\n`);
-    expect(JSON.parse(await cmdMarkdown(json, undefined, { filename: file }))).toEqual({ ok: true, filename: file, source: "converted" });
+    expect(JSON.parse(await cmdMarkdown(json, undefined, { filename: file }))).toEqual({
+      ok: true,
+      filename: file,
+      source: "converted",
+      url: `${base}/fixture.html`,
+      title: "Markdown fixture",
+    });
+  }, 60_000);
+
+  test("--filename on a page with no text says so, and the file holds only a newline (#154)", async () => {
+    await cmdGoto(ctx, "about:blank");
+    const file = join(tmp, "empty.md");
+    expect(await cmdMarkdown(ctx, undefined, { filename: file })).toBe(`markdown: the page has no text ("", about:blank)\nwrote ${file}`);
+    expect(await readFile(file, "utf8")).toBe("\n");
+    expect(JSON.parse(await cmdMarkdown(json, undefined, { filename: file }))).toEqual({
+      ok: true,
+      filename: file,
+      source: "converted",
+      url: "about:blank",
+      title: "",
+    });
+  }, 60_000);
+
+  test("--filename on a ref with no text names the ref (#154)", async () => {
+    await cmdGoto(ctx, `${base}/empty-region.html`);
+    await cmdSnapshot(ctx);
+    const ref = await refOfRole("button");
+    const out = await cmdMarkdown(ctx, ref, { filename: join(tmp, "region.md") });
+    expect(out.startsWith(`markdown: ref '${ref}' has no text (`)).toBe(true);
+  }, 60_000);
+
+  test("the page's own Markdown with a relative link gives way to the DOM conversion (#154)", async () => {
+    await cmdGoto(ctx, `${base}/docs/page.html`);
+    expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
+  }, 60_000);
+
+  test("a checkbox in a list item prints its state (#154)", async () => {
+    await cmdGoto(ctx, `${base}/tasks.html`);
+    expect(await cmdMarkdown(ctx)).toBe("- [x] done\n- [ ] open\n- [x] hid\n- [ ] styled\n\noutside");
   }, 60_000);
 
   test("a rel=alternate Markdown link is used as is", async () => {
@@ -331,7 +393,8 @@ runOrSkip("e2e: markdown", () => {
       expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
       expect(performance.now() - t0).toBeLessThan(4000);
     } finally {
-      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = orig;
     }
   }, 60_000);
 
@@ -344,7 +407,8 @@ runOrSkip("e2e: markdown", () => {
       expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ markdown: "Rendered", source: "converted" });
       expect(performance.now() - t0).toBeLessThan(8000);
     } finally {
-      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS; else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = orig;
     }
   }, 60_000);
 
@@ -359,7 +423,9 @@ runOrSkip("e2e: markdown", () => {
     await cmdGoto(ctx, `${base}/alert.html`);
     await Bun.sleep(600);
     expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({
-      markdown: "Alert page", source: "converted", dialogs: [{ type: "alert", message: "hello", state: "dismissed" }],
+      markdown: "Alert page",
+      source: "converted",
+      dialogs: [{ type: "alert", message: "hello", state: "dismissed" }],
     });
     await cmdGoto(ctx, `${base}/alert.html`);
     await Bun.sleep(600);
@@ -386,6 +452,93 @@ runOrSkip("e2e: markdown", () => {
     await cmdGoto(ctx, `${base}/fixture.html`);
     await expect(cmdMarkdown(ctx, ref)).rejects.toThrow(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
   }, 60_000);
+  describe("a YouTube video gives its transcript (#223)", () => {
+    const watch = (kase?: string) => `${base}/watch?v=abc123def45${kase ? `&case=${kase}` : ""}`;
+    const withBudget = async <T>(ms: string, run: () => Promise<T>): Promise<T> => {
+      const orig = process.env.BOWSER_OP_TIMEOUT_MS;
+      process.env.BOWSER_OP_TIMEOUT_MS = ms;
+      try {
+        return await run();
+      } finally {
+        if (orig === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+        else process.env.BOWSER_OP_TIMEOUT_MS = orig;
+      }
+    };
+    const clicks = async () => JSON.parse(await cmdEval(ctx, "JSON.stringify(window.clicks)"));
+
+    test("the transcript, in 30-second paragraphs with one-line segments", async () => {
+      await cmdGoto(ctx, watch());
+      expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({
+        source: "transcript",
+        markdown: "# Fixture video\nhttps://youtu.be/abc123def45 · English (auto-generated)\n\n[0:01] Hello there # boom\n\n[0:31] a - b",
+      });
+      expect(await clicks()).toEqual({ expand: 1, transcript: 1 });
+    }, 60_000);
+
+    test("no caption tracks: the page converted, at once", async () => {
+      await cmdGoto(ctx, watch("notracks"));
+      const t0 = performance.now();
+      expect(JSON.parse(await cmdMarkdown(json))).toMatchObject({ source: "converted" });
+      expect(performance.now() - t0).toBeLessThan(1000);
+    }, 60_000);
+
+    test("captions that never load: exit 2 within the budget's half", async () => {
+      await cmdGoto(ctx, watch("never"));
+      await withBudget("2000", async () => {
+        await expect(cmdMarkdown(json)).rejects.toThrow(`markdown: the transcript of ${watch("never")} did not load within 1000ms`);
+      });
+    }, 60_000);
+
+    test("budget 0: the wait still ends, at 5000ms", async () => {
+      await cmdGoto(ctx, watch("never"));
+      const t0 = performance.now();
+      await withBudget("0", async () => {
+        await expect(cmdMarkdown(json)).rejects.toThrow("did not load within 5000ms");
+      });
+      expect(performance.now() - t0).toBeLessThan(6000);
+    }, 60_000);
+
+    test("the previous video's segments under a hidden panel are not read", async () => {
+      await cmdGoto(ctx, watch("stale"));
+      const out = JSON.parse(await cmdMarkdown(json));
+      expect(out.source).toBe("transcript");
+      expect(out.markdown).toContain("[0:01] Hello there");
+      expect(out.markdown).not.toContain("PREVIOUS VIDEO");
+    }, 60_000);
+
+    test("old segments that never leave: exit 2, and their text is nowhere", async () => {
+      await cmdGoto(ctx, watch("stale-forever"));
+      const err = await withBudget("2000", () => cmdMarkdown(json).catch((e: Error) => e));
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe(`markdown: the transcript of ${watch("stale-forever")} did not load within 1000ms`);
+    }, 60_000);
+
+    test("an expanded panel is read as is, without clicking", async () => {
+      await cmdGoto(ctx, watch("expanded"));
+      expect(JSON.parse(await cmdMarkdown(json)).markdown).toBe(
+        "# Fixture video\nhttps://youtu.be/abc123def45 · English (auto-generated)\n\n[0:05] Already open",
+      );
+      expect(await clicks()).toEqual({ expand: 0, transcript: 0 });
+    }, 60_000);
+
+    test("a description already open is not clicked again", async () => {
+      await cmdGoto(ctx, watch("desc-open"));
+      expect(JSON.parse(await cmdMarkdown(json)).source).toBe("transcript");
+      expect(await clicks()).toEqual({ expand: 0, transcript: 1 });
+    }, 60_000);
+
+    test("a timestamp lower than the paragraph start opens a new paragraph", async () => {
+      await cmdGoto(ctx, watch("rewind"));
+      expect(JSON.parse(await cmdMarkdown(json)).markdown).toBe(
+        "# Fixture video\nhttps://youtu.be/abc123def45 · English (auto-generated)\n\n[0:01] one\n\n[0:40] two\n\n[0:10] three",
+      );
+    }, 60_000);
+
+    test("a player that boots after load is waited for", async () => {
+      await cmdGoto(ctx, watch("late-player"));
+      expect(JSON.parse(await cmdMarkdown(json)).source).toBe("transcript");
+    }, 60_000);
+  });
 });
 
 runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
@@ -400,7 +553,9 @@ runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
   });
@@ -410,5 +565,41 @@ runOrSkipNet("e2e: markdown on a claude.ai artifact", () => {
     const out = JSON.parse(await cmdMarkdown(ctx));
     expect(out.source).toBe("page");
     expect(out.markdown.startsWith("# Aqara W400")).toBe(true);
+  }, 60_000);
+
+  test("bun.com's relative links give way to the DOM conversion, with the site's real addresses (#154)", async () => {
+    await cmdOpen(ctx, "https://bun.com/docs/runtime/http/server");
+    const out = JSON.parse(await cmdMarkdown(ctx));
+    expect(out.source).toBe("converted");
+    expect(out.markdown.match(/\]\((?![a-z][a-z0-9+.-]*:|#)/gi)).toBeNull();
+    expect(out.markdown).toContain("(https://bun.com/docs/bundler)");
+  }, 60_000);
+
+  test("a GitHub task list keeps its state (#154)", async () => {
+    await cmdOpen(ctx, "https://github.com/drakulavich/bowser/issues/140");
+    // GitHub serves two task-list markups; in one the task text is a block after the checkbox.
+    expect(JSON.parse(await cmdMarkdown(ctx)).markdown).toMatch(/\[ \]\s+S2-2/);
+  }, 60_000);
+
+  test("a YouTube video gives its transcript (#223)", async () => {
+    await cmdOpen(ctx, "https://www.youtube.com/watch?v=4UtrRVtUN_g");
+    const out = JSON.parse(await cmdMarkdown(ctx));
+    expect(out.source).toBe("transcript");
+    const lines = out.markdown.split("\n");
+    expect(lines.slice(0, 2)).toEqual([
+      "# How to Build an AI Code Review Agent - Daksh Gupta, Greptile",
+      "https://youtu.be/4UtrRVtUN_g · English (auto-generated)",
+    ]);
+    const paras = lines.filter((l: string) => /^\[\d+:\d\d\] /.test(l));
+    expect(paras.length).toBeGreaterThanOrEqual(30);
+    const starts = paras.map((l: string) =>
+      l
+        .slice(1, l.indexOf("]"))
+        .split(":")
+        .reduce((a: number, v: string) => a * 60 + Number(v), 0),
+    );
+    expect(starts).toEqual([...starts].sort((a: number, b: number) => a - b));
+    expect(new Set(starts).size).toBe(starts.length);
+    expect(Math.max(...paras.map((l: string) => l.length))).toBeLessThan(3000);
   }, 60_000);
 });

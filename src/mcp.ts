@@ -176,9 +176,7 @@ function toolResult(id: unknown, text: string, isError?: boolean) {
 /** A tools/call split in two: `reply` when it is answered without running
  *  anything (an unknown tool's -32602, an argument the tool refuses), otherwise the argv to
  *  run and the session it runs in. */
-type PreparedCall =
-  | { reply: object }
-  | { argv: string[]; session: string | null };
+type PreparedCall = { reply: object } | { argv: string[]; session: string | null };
 
 function prepareToolCall(id: unknown, params: unknown): PreparedCall {
   const p = (params ?? {}) as { name?: string; arguments?: unknown };
@@ -220,12 +218,6 @@ async function runToolCall(id: unknown, argv: string[], deps: McpDeps): Promise<
   }
 }
 
-async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
-  const prepared = prepareToolCall(id, params);
-  if ("reply" in prepared) return prepared.reply;
-  return (await runToolCall(id, prepared.argv, deps)).res;
-}
-
 /** Process one parsed JSON-RPC message. Returns the response object, or null for
  *  notifications (no id) and the client's responses, which get no reply per JSON-RPC. */
 export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<object | null> {
@@ -255,24 +247,11 @@ export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<obj
     }
     case "tools/list":
       return jsonRpcResult(r.id, { tools: buildTools() });
-    case "tools/call":
-      return handleToolCall(r.id, r.params, deps);
     case "ping":
       return jsonRpcResult(r.id, {});
     default:
       return jsonRpcError(r.id, -32601, `Method not found: ${r.method}`);
   }
-}
-
-/** Parse one stdin line and dispatch. Malformed JSON → -32700. */
-export async function handleMcpLine(line: string, deps: McpDeps): Promise<object | null> {
-  let req: unknown;
-  try {
-    req = JSON.parse(line);
-  } catch {
-    return jsonRpcError(null, -32700, "Parse error");
-  }
-  return handleMcpRequest(req, deps);
 }
 
 export interface McpServer {
@@ -323,7 +302,10 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
 
   function schedule(id: unknown, params: unknown): void {
     const prepared = prepareToolCall(id, params);
-    if ("reply" in prepared) { track(send(prepared.reply)); return; }
+    if ("reply" in prepared) {
+      track(send(prepared.reply));
+      return;
+    }
     const { argv, session } = prepared;
     const token = { cancelled: false };
     inFlight.set(id, token);
@@ -351,7 +333,10 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     try {
       req = JSON.parse(line);
     } catch {
-      { track(send(jsonRpcError(null, -32700, "Parse error"))); return; }
+      {
+        track(send(jsonRpcError(null, -32700, "Parse error")));
+        return;
+      }
     }
     const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
     const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
@@ -363,9 +348,11 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
       return;
     }
     // Everything else never touches a daemon: answer it now.
-    track(handleMcpRequest(req, deps).then(async (res) => {
-      if (res !== null) await send(res);
-    }));
+    track(
+      handleMcpRequest(req, deps).then(async (res) => {
+        if (res !== null) await send(res);
+      }),
+    );
   }
 
   async function idle(): Promise<void> {
@@ -480,7 +467,9 @@ export async function serveLines(
   let handover: Handover | undefined;
   for await (const line of input) {
     let req: { id?: unknown; method?: unknown } | undefined;
-    try { req = JSON.parse(line); } catch {}
+    try {
+      req = JSON.parse(line);
+    } catch {}
     if (handover) {
       // A call it cancels may still be running here.
       if (req?.method === "notifications/cancelled") server.accept(line);
@@ -540,7 +529,9 @@ function startHandover(
 
   const refuse = (line: string): Promise<void> | undefined => {
     let req: { id?: unknown; method?: unknown } | undefined;
-    try { req = JSON.parse(line); } catch {}
+    try {
+      req = JSON.parse(line);
+    } catch {}
     if (!req || req.id === undefined || req.id === null) return;
     const text = `bowser mcp could not hand over to the installed bowser ${installed}: ${failed}; restart the MCP server`;
     const res = req.method === "tools/call" ? toolResult(req.id, text, true) : jsonRpcError(req.id, -32603, text);
@@ -550,7 +541,11 @@ function startHandover(
   const ready = (async () => {
     // The old server writes nothing after this: the child is the only writer.
     await server.idle();
-    const stdin = new ReadableStream<Uint8Array>({ start: (c) => { input = c; } });
+    const stdin = new ReadableStream<Uint8Array>({
+      start: (c) => {
+        input = c;
+      },
+    });
     child = Bun.spawn(command, { stdin, stdout: "pipe", stderr: "inherit", env: process.env, cwd: process.cwd() });
     const out = lines(child.stdout)[Symbol.asyncIterator]();
     if (init) {
@@ -599,7 +594,9 @@ function startHandover(
       await order;
       if (!child) return 0;
       // Throws once the child has exited: Bun has cancelled its stdin.
-      try { input.close(); } catch {}
+      try {
+        input.close();
+      } catch {}
       return exited;
     },
   };

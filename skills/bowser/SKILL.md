@@ -105,4 +105,4 @@ bowser -s=app close
 - Every flag and edge case of each command: [references/commands.md](references/commands.md)
 - Error messages, timeouts (`BOWSER_OP_TIMEOUT_MS`), upgrades: [references/troubleshooting.md](references/troubleshooting.md)
 
-Install: `npm install -g @drakulavich/bowser-cli` (requires Bun ≥ 1.4.3 on PATH, macOS).
+Install: `npm install -g @drakulavich/bowser-cli` (requires Bun ≥ 1.4.4 on PATH, macOS).

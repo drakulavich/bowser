@@ -57,16 +57,19 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
     process.env.HOME = tmp;
     server = Bun.serve({
       port: 0,
-      fetch: (req) => new Response(`<title>claim</title><p>${new URL(req.url).pathname}</p>`, {
-        headers: { "content-type": "text/html; charset=utf-8" },
-      }),
+      fetch: (req) =>
+        new Response(`<title>claim</title><p>${new URL(req.url).pathname}</p>`, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
     });
     url = server.url.toString();
   });
 
   afterAll(async () => {
     for (const s of sessions) {
-      try { await cmdClose({ session: s, json: true }); } catch {}
+      try {
+        await cmdClose({ session: s, json: true });
+      } catch {}
       // Only the daemons of this file's own sessions, never a broad pattern.
       await killDaemons(s);
     }
@@ -77,10 +80,13 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
 
   test("F29: five concurrent opens on a new session leave one daemon, and none after close", async () => {
     const s = session("race5");
-    const procs = [1, 2, 3, 4, 5].map((i) => Bun.spawn(
-      [process.execPath, CLI, `-s=${s}`, "open", `${url}?i=${i}`],
-      { env: { ...process.env }, stdout: "pipe", stderr: "pipe" },
-    ));
+    const procs = [1, 2, 3, 4, 5].map((i) =>
+      Bun.spawn([process.execPath, CLI, `-s=${s}`, "open", `${url}?i=${i}`], {
+        env: { ...process.env },
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
     const codes = await Promise.all(procs.map((p) => p.exited));
     // Let a losing daemon that is still starting finish its exit, and a
     // second winner (the bug) finish its start, before counting.
@@ -100,17 +106,17 @@ runOrSkip("e2e: sessions (F28, F29)", () => {
     await cmdOpen(ctx, url, { persistent: true });
     await cmdEval(ctx, "(localStorage.setItem('pre', '1'), 1)");
     // WebKit commits localStorage ~500 ms after a write; a kill before that loses it (#87).
-    expect(
-      await waitFor(() => storedOnDisk(profileDir(s), "pre")),
-      `localStorage key 'pre' never reached ${profileDir(s)} on disk`,
-    ).toBe(true);
+    expect(await waitFor(() => storedOnDisk(profileDir(s), "pre")), `localStorage key 'pre' never reached ${profileDir(s)} on disk`).toBe(true);
     const pid = Number((await Bun.file(pidPath(s)).text()).trim());
     process.kill(pid, "SIGKILL");
     expect(await waitFor(async () => (await daemonPids(s)).length === 0)).toBe(true);
 
     // The next command fails, a user error, and starts no browser.
     for (const attempt of [() => cmdGoto(ctx, `${url}two`), () => cmdEval(ctx, "localStorage.getItem('pre')")]) {
-      const err = await attempt().then(() => undefined, (e: unknown) => e);
+      const err = await attempt().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect((err as Error)?.message).toBe(`session '${s}' is not open (its browser exited); run 'bowser open --persistent'`);
       expect(reportFailure(err).code).toBe(1);
     }
@@ -167,21 +173,24 @@ runOrSkip("e2e: daemon session claim (F29)", () => {
   };
   const startDaemonProc = (session: string) => {
     const p = Bun.spawn([process.execPath, MAIN, session], {
-      env: { ...process.env }, stdin: "ignore", stdout: "ignore", stderr: "ignore",
+      env: { ...process.env },
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
     });
     spawned.push(p);
     return p;
   };
-  const exitedWithin = (p: ReturnType<typeof Bun.spawn>, ms: number) =>
-    Promise.race([p.exited, Bun.sleep(ms).then(() => "running" as const)]);
+  const exitedWithin = (p: ReturnType<typeof Bun.spawn>, ms: number) => Promise.race([p.exited, Bun.sleep(ms).then(() => "running" as const)]);
 
   test("a daemon starting on a session a live daemon of ours holds exits, leaving its socket and pidfile", async () => {
     const session = await fresh("held");
     // Stands in for the running daemon: `ps` shows it exactly as it shows ours.
-    const holder = Bun.spawn(
-      [process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session],
-      { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
-    );
+    const holder = Bun.spawn([process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session], {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    });
     spawned.push(holder);
     await waitFor(async () => (await daemonPids(session)).includes(holder.pid));
     await Bun.write(pidPath(session), String(holder.pid));

@@ -35,13 +35,18 @@ runOrSkip("e2e: wait-for (#114)", () => {
     tmp = await mkdtemp(join(tmpdir(), "bowser-waitfor-"));
     process.env.HOME = tmp;
     delete process.env.BOWSER_OP_TIMEOUT_MS;
-    server = Bun.serve({ port: 0, fetch: () => new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }) });
+    server = Bun.serve({
+      port: 0,
+      fetch: () => new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }),
+    });
     base = server.url.toString().replace(/\/$/, "");
     await cmdOpen(ctx, `${base}/`);
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     if (origTimeout === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
@@ -63,7 +68,10 @@ runOrSkip("e2e: wait-for (#114)", () => {
     process.env.BOWSER_OP_TIMEOUT_MS = "1500";
     try {
       const t0 = performance.now();
-      const err = await cmdWaitFor(ctx, { text: "Never" }).then(() => undefined, (e: unknown) => e);
+      const err = await cmdWaitFor(ctx, { text: "Never" }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       const m = (err as Error | undefined)?.message.match(/^wait-for: no text "Never" after (\d+)ms; the page is at (.*)$/);
       expect(m?.[2]).toBe(at);
       expect(Number(m?.[1])).toBeGreaterThanOrEqual(1400);

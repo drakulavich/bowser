@@ -36,7 +36,12 @@ export function isolation(init: Init, tool: Tool, userSkills: string[]): string 
 }
 
 type Block = {
-  type: string; name?: string; id?: string; tool_use_id?: string; is_error?: boolean; content?: string | { text?: string }[];
+  type: string;
+  name?: string;
+  id?: string;
+  tool_use_id?: string;
+  is_error?: boolean;
+  content?: string | { text?: string }[];
 };
 type Message = { type: string; message?: { content?: Block[] | string } };
 
@@ -44,7 +49,13 @@ const blocks = (m: Message): Block[] => (Array.isArray(m.message?.content) ? m.m
 
 /** True when a Skill call failed: the run then measured the tool without its skill. */
 export function skillFailed(stream: Message[]): boolean {
-  const calls = new Set(stream.flatMap((m) => blocks(m).filter((b) => b.type === "tool_use" && b.name === "Skill").map((b) => b.id)));
+  const calls = new Set(
+    stream.flatMap((m) =>
+      blocks(m)
+        .filter((b) => b.type === "tool_use" && b.name === "Skill")
+        .map((b) => b.id),
+    ),
+  );
   return stream.some((m) => blocks(m).some((b) => b.type === "tool_result" && b.is_error && calls.has(b.tool_use_id)));
 }
 

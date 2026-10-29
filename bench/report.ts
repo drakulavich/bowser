@@ -5,15 +5,32 @@ import { TOOLS } from "./check.ts";
 import { TASKS } from "./tasks.ts";
 
 type Row = {
-  task: string; tool: string; rep: number; ts: string; toolVersion: string; model: string; claudeVersion: string;
-  pass: boolean; failReason?: string;
-  inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number; outputTokens: number;
-  costUsd: number; durationMs: number; numTurns: number; bashCalls: number; toolOutputBytes: number;
+  task: string;
+  tool: string;
+  rep: number;
+  ts: string;
+  toolVersion: string;
+  model: string;
+  claudeVersion: string;
+  pass: boolean;
+  failReason?: string;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  durationMs: number;
+  numTurns: number;
+  bashCalls: number;
+  toolOutputBytes: number;
 };
 
 const [input, out = resolve(import.meta.dir, "../docs/benchmark.md")] = process.argv.slice(2);
 if (!input) throw new Error("usage: bun bench/report.ts <results.jsonl> [out.md]");
-const rows: Row[] = (await Bun.file(input).text()).trim().split("\n").map((l) => JSON.parse(l));
+const rows: Row[] = (await Bun.file(input).text())
+  .trim()
+  .split("\n")
+  .map((l) => JSON.parse(l));
 
 const tokens = (r: Row) => r.inputTokens + r.cacheReadTokens + r.cacheCreationTokens + r.outputTokens;
 const median = (xs: number[]) => {
@@ -71,7 +88,12 @@ for (const task of TASKS.map((t) => t.id).filter((id) => rows.some((r) => r.task
   lines.push(`| ${task} | ${cells.join(" | ")} |`);
 }
 lines.push(
-  `| **sum of medians** | ${tools.map((t) => { const s = totals[t]; return `${s.pass}/${s.runs} | ${k(s.tokens)} | ${k(s.bytes)} B | ${sec(s.ms)} | ${usd(s.cost)}`; }).join(" | ")} |`,
+  `| **sum of medians** | ${tools
+    .map((t) => {
+      const s = totals[t];
+      return `${s.pass}/${s.runs} | ${k(s.tokens)} | ${k(s.bytes)} B | ${sec(s.ms)} | ${usd(s.cost)}`;
+    })
+    .join(" | ")} |`,
   "",
   "⚠ marks a task that did not pass every run; its medians cover the passing runs.",
   "",

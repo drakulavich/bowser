@@ -44,34 +44,36 @@ export interface PageState {
 interface DaemonOps {
   /** Answers the daemon's bowser version (package.json). Every daemon
    *  through 0.7 answered "pong"; the client refuses both kinds (F2). */
-  ping:             { args: [];                                          result: string;               urgent: true };
-  shutdown:         { args: [];                                          result: void;                 urgent: true };
-  state:            { args: [];                                          result: PageState };
+  ping: { args: []; result: string; urgent: true };
+  shutdown: { args: []; result: void; urgent: true };
+  state: { args: []; result: PageState };
   /** Set the one-shot answer for the next dialog on this page. */
-  "dialog-answer":  { args: [accept: boolean, text?: string];            result: void };
-  navigate:         { args: [url: string];                               result: void };
-  evaluate:         { args: [expr: string];                              result: unknown };
+  "dialog-answer": { args: [accept: boolean, text?: string]; result: void };
+  navigate: { args: [url: string]; result: void };
+  evaluate: { args: [expr: string]; result: unknown };
   /** `evaluate` of a ref's resolve script, after any pending navigation. */
-  resolve:          { args: [expr: string];                              result: unknown };
-  click:            { args: [selector: string, timeoutMs?: number];      result: void };
-  type:             { args: [text: string];                              result: void };
-  press:            { args: [key: string, modifiers?: KeyModifier[]];    result: void };
-  hover:            { args: [selector: string];                          result: void };
-  select:           { args: [selector: string, value: string];           result: boolean };
-  check:            { args: [selector: string];                          result: void };
+  resolve: { args: [expr: string]; result: unknown };
+  click: { args: [selector: string, timeoutMs?: number]; result: void };
+  type: { args: [text: string]; result: void };
+  press: { args: [key: string, modifiers?: KeyModifier[]]; result: void };
+  hover: { args: [selector: string]; result: void };
+  select: { args: [selector: string, value: string]; result: boolean };
+  check: { args: [selector: string]; result: void };
   /** false: the element is a checked radio, left checked (F20). */
-  uncheck:          { args: [selector: string];                          result: boolean };
-  /** With a path the daemon writes the PNG and returns `{ path }`; without
-   *  one it returns base64 (reserved for a future --stdout). A `scale` above
+  uncheck: { args: [selector: string]; result: boolean };
+  /** The daemon writes the PNG to `path` and returns `{ path }`. A `scale` above
    *  the window's pixel ratio writes nothing and returns `{ dpr }` (#191).
    *  `fontsLoading` says the 5 s wait for web fonts ran out (#194). */
-  screenshot:       { args: [path?: string, scale?: number];             result: { path: string; fontsLoading?: true } | { dpr: number } | string };
-  resize:           { args: [width: number, height: number];             result: void };
-  back:             { args: [];                                          result: void };
-  forward:          { args: [];                                          result: void };
-  reload:           { args: [];                                          result: void };
+  screenshot: {
+    args: [path: string, scale?: number];
+    result: { path: string; fontsLoading?: true } | { dpr: number };
+  };
+  resize: { args: [width: number, height: number]; result: void };
+  back: { args: []; result: void };
+  forward: { args: []; result: void };
+  reload: { args: []; result: void };
   /** Poll until the URL or the page text contains `value`, up to the request's deadline (#114). */
-  waitFor:          { args: [kind: "url" | "text", value: string];       result: { met: boolean; url: string; title: string } };
+  waitFor: { args: [kind: "url" | "text", value: string]; result: { met: boolean; url: string; title: string } };
 }
 
 export type Op = keyof DaemonOps;
@@ -90,8 +92,7 @@ export const IS_URGENT: ReadonlySet<Op> = new Set<Op>(Object.keys(URGENT_OPS) as
 
 /** `args` may be omitted whenever the empty tuple satisfies the op: `request("state")`,
  *  `request("screenshot")`; an op with a required argument must pass it. */
-export type RequestParams<O extends Op> =
-  [] extends ArgsOf<O> ? [op: O, args?: ArgsOf<O>] : [op: O, args: ArgsOf<O>];
+export type RequestParams<O extends Op> = [] extends ArgsOf<O> ? [op: O, args?: ArgsOf<O>] : [op: O, args: ArgsOf<O>];
 
 /** One request on the wire. `args` is untyped here on purpose: it is what
  *  JSON.parse produced, and server.ts casts it exactly once at dispatch. */
@@ -99,8 +100,6 @@ export interface DaemonRequest {
   id: number;
   op: Op;
   args?: unknown[];
-  /** Reserved for tab support. Ignored by the server today; never set by the client. */
-  page?: string;
   /** The sender prints dialog reports: the reply hands over the queued ones.
    *  Without it they stay queued for a command that prints them. */
   report?: true;

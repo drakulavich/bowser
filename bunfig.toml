@@ -1,3 +1,6 @@
 [test]
 # Keeps every test off the real ~/.bowser; see the file.
 preload = ["./tests/helpers/preload-home.ts"]
+
+[fmt]
+printWidth = 160

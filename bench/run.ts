@@ -56,8 +56,7 @@ async function toolVersion(tool: Tool): Promise<string> {
   return `${version}+${await sh(["git", "rev-parse", "--short", "HEAD"], ROOT)}`;
 }
 
-const close = (tool: Tool, session: string): string[] =>
-  tool === "bowser" ? ["bowser", "close", session] : ["playwright-cli", `-s=${session}`, "close"];
+const close = (tool: Tool, session: string): string[] => (tool === "bowser" ? ["bowser", "close", session] : ["playwright-cli", `-s=${session}`, "close"]);
 const list: Record<Tool, string[]> = { bowser: ["bowser", "list"], "playwright-cli": ["playwright-cli", "list"] };
 
 const userSkills = [join(homedir(), ".claude/skills"), join(homedir(), ".agents/skills")].flatMap((d) => {
@@ -81,9 +80,25 @@ async function runOne({ task, tool, rep }: Run, skill: string, version: string):
   const started = Date.now();
   const p = Bun.spawn(
     [
-      "claude", "-p", prompt(task, session), "--model", MODEL, "--output-format", "stream-json", "--verbose",
-      "--setting-sources", "project", "--strict-mcp-config", "--tools", "Bash,Skill",
-      "--allowedTools", `Bash(${tool}:*)`, "Skill", "--max-turns", String(MAX_TURNS), "--no-session-persistence",
+      "claude",
+      "-p",
+      prompt(task, session),
+      "--model",
+      MODEL,
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--setting-sources",
+      "project",
+      "--strict-mcp-config",
+      "--tools",
+      "Bash,Skill",
+      "--allowedTools",
+      `Bash(${tool}:*)`,
+      "Skill",
+      "--max-turns",
+      String(MAX_TURNS),
+      "--no-session-persistence",
     ],
     { cwd, stdout: "pipe", stderr: "pipe" },
   );
@@ -127,12 +142,22 @@ async function runOne({ task, tool, rep }: Run, skill: string, version: string):
         : { pass: false, failReason: "no result message" };
   const u = result?.usage ?? {};
   const row = {
-    task: task.id, tool, rep, ts: new Date(started).toISOString(),
-    toolVersion: version, model: init?.model ?? null, claudeVersion: init?.claude_code_version ?? null,
-    answer: null, failReason: null, ...verdict,
-    inputTokens: u.input_tokens ?? null, cacheReadTokens: u.cache_read_input_tokens ?? null,
-    cacheCreationTokens: u.cache_creation_input_tokens ?? null, outputTokens: u.output_tokens ?? null,
-    costUsd: result?.total_cost_usd ?? null, durationMs: result?.duration_ms ?? Date.now() - started,
+    task: task.id,
+    tool,
+    rep,
+    ts: new Date(started).toISOString(),
+    toolVersion: version,
+    model: init?.model ?? null,
+    claudeVersion: init?.claude_code_version ?? null,
+    answer: null,
+    failReason: null,
+    ...verdict,
+    inputTokens: u.input_tokens ?? null,
+    cacheReadTokens: u.cache_read_input_tokens ?? null,
+    cacheCreationTokens: u.cache_creation_input_tokens ?? null,
+    outputTokens: u.output_tokens ?? null,
+    costUsd: result?.total_cost_usd ?? null,
+    durationMs: result?.duration_ms ?? Date.now() - started,
     numTurns: result?.num_turns ?? null,
     ...streamCounts(stream),
   };

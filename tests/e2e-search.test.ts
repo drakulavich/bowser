@@ -19,8 +19,7 @@ import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { connectOrSpawn } from "../src/daemon/client.ts";
 import { loadState } from "../src/state.ts";
 
-const E2E =
-  process.env.BOWSER_E2E === "1" && process.env.BOWSER_E2E_NET === "1";
+const E2E = process.env.BOWSER_E2E === "1" && process.env.BOWSER_E2E_NET === "1";
 const runOrSkip = E2E ? describe : describe.skip;
 
 runOrSkip("e2e: search GitHub for OpenClaw", () => {
@@ -47,10 +46,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
     //    aria-label "Search or jump to…" or a visible "Search" trigger.
     //    We'll navigate directly to the search URL to avoid flakiness with
     //    the modal-based header search, but still demonstrate the fill flow.
-    await cmdOpen(
-      { session, json: true },
-      "https://github.com/search?q=OpenClaw&type=repositories",
-    );
+    await cmdOpen({ session, json: true }, "https://github.com/search?q=OpenClaw&type=repositories");
 
     // Give the result page a moment to render.
     await Bun.sleep(2000);
@@ -61,10 +57,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
 
     // Look for any link whose name or selector points at openclaw/openclaw.
     // Role-based matching first.
-    let target = state!.refs.find(
-      (r) =>
-        r.role === "link" && /openclaw\s*\/\s*openclaw/i.test(r.name),
-    );
+    let target = state!.refs.find((r) => r.role === "link" && /openclaw\s*\/\s*openclaw/i.test(r.name));
 
     // Fallback: pull the DOM directly and match href.
     if (!target) {
@@ -102,9 +95,7 @@ runOrSkip("e2e: search GitHub for OpenClaw", () => {
     await cmdSnapshot({ session, json: false });
     const state = await loadState(session);
 
-    const searchBox = state!.refs.find(
-      (r) => r.role === "textbox" && /search/i.test(r.name),
-    );
+    const searchBox = state!.refs.find((r) => r.role === "textbox" && /search/i.test(r.name));
 
     if (!searchBox) {
       console.warn(

@@ -47,7 +47,9 @@ export async function claimRestartLock(session: string, claim = claimSession): P
 export function releaseRestartLock(session: string): void {
   const lock = lockPath(session);
   if (readTrimmed(lock) === String(process.pid)) {
-    try { unlinkSync(lock); } catch {}
+    try {
+      unlinkSync(lock);
+    } catch {}
   }
 }
 
@@ -69,7 +71,9 @@ export function readNotice(session: string): string {
 }
 
 export function removeNotice(session: string): void {
-  try { unlinkSync(msgPath(session)); } catch {}
+  try {
+    unlinkSync(msgPath(session));
+  } catch {}
 }
 
 function corrupt(lock: string): boolean {

@@ -18,6 +18,7 @@
 - **"no open page"**: call `bowser open <url>` first.
 - **Click times out**: element not actionable (animating, or covered only after the ref was resolved). Re-snapshot.
 - **"session '<name>' is not open (its browser exited)"**: the session's browser crashed or was killed; its page and refs are gone. Run `bowser open <url>` (add `--persistent` again for a persistent session) to start it anew, or `bowser close` to clear it. Only `open` and `close` work on such a session.
+- **"the page dropped the call before it answered"** (exit 2): either `eval` or `run-code` returned a promise nothing resolves and the page dropped it, or the page navigated or reloaded while the command ran (a recovery reload does this to a `fill`, for one). Return a value, or a promise that resolves; otherwise run `bowser snapshot` to see where the page is. If the page keeps a promise that never settles, the command times out instead.
 - **"the page crashed (its web process exited)"**: the page's web process died twice, and WebKit no longer reloads it (exit 2). Run `bowser reload`, or `bowser goto <url>`, then snapshot again. The first crash is not reported: WebKit reloads the page, which looks like the page reloading itself, so page state is gone and old refs fail with `not found in the current page snapshot`.
 
 ## Timeouts
@@ -32,7 +33,7 @@
 
 ## Install and upgrades
 
-The package runs with the `bun` on your `PATH`. npm does not enforce the Bun version, so on an older Bun a command that would start a session fails with the error "bowser requires Bun >=1.4.3 (found <version>)". Release binaries are no longer built: if you used one, run `bowser close --all` with it, delete it, then `npm i -g @drakulavich/bowser-cli`.
+The package runs with the `bun` on your `PATH`. npm does not enforce the Bun version, so on an older Bun a command that would start a session fails with the error "bowser requires Bun >=1.4.4 (found <version>)". Release binaries are no longer built: if you used one, run `bowser close --all` with it, delete it, then `npm i -g @drakulavich/bowser-cli`.
 
 After an upgrade, the first command restarts the session and prints "session '<name>' restarted for bowser <w> (was <v>): …; refs cleared, run 'bowser snapshot'" first (on stderr, or first in the MCP tool text). Take a new snapshot before using refs. Without `--persistent` or `--profile` the line adds "cookies and storage were lost": log in again. The restart has its own budget, so that first command can take up to twice the budget. "is being restarted by pid N …; retry in a moment" means another command is restarting it: retry.
 

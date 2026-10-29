@@ -9,12 +9,13 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "bun test --randomize",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "biome ci && knip --include files,exports,types",
+    "typecheck": "bun check --no-script",
+    "lint": "bun fmt --check && biome ci && knip --include files,exports,types",
+    "fmt": "bun fmt",
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "engines": {
-    "bun": ">=1.4.3"
+    "bun": ">=1.4.4"
   },
   "os": [
     "darwin"
@@ -51,7 +52,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.6.3",
     "@types/bun": "latest",
     "knip": "^6.38.0",
     "typescript": "7.0.2"

@@ -34,18 +34,6 @@ export interface Parsed {
 
 const GLOBAL_NAMES = new Set(["session", "json", "help", "version"]);
 
-/** Whether argv asks for help: a `-h`/`--help` the parser reads as the flag,
- *  not as a string flag's value (`snapshot --filename -h` names a file) or
- *  a word after `--`. An unknown flag beside it cannot hide it: `mcp --bogus
- *  --help` must print help, not start the server. */
-export function helpRequested(schemas: Schemas, argv: string[]): boolean {
-  try {
-    return parse(schemas, argv).help;
-  } catch {
-    return false;
-  }
-}
-
 /** An unknown flag or command throws, unless the same argv asks for help or the version:
  *  then nothing runs, so the first such error is dropped. An unknown flag
  *  consumes no value, so `close --bogus -h` is help. */
@@ -76,12 +64,6 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
       continue;
     }
 
-    if (!optionsDone && (a === "-h" || a === "--help")) {
-      out.help = true;
-      i++;
-      continue;
-    }
-
     if (!optionsDone && a.startsWith("--")) {
       const eq = a.indexOf("=");
       const name = eq >= 0 ? a.slice(2, eq) : a.slice(2);
@@ -91,10 +73,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
         i++;
         continue;
       }
-      const value =
-        spec.kind === "boolean"
-          ? (eq >= 0 ? a.slice(eq + 1) === "true" : true)
-          : (eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? ""));
+      const value = spec.kind === "boolean" ? (eq >= 0 ? a.slice(eq + 1) === "true" : true) : eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? "");
       assignFlag(out, spec, value);
       i++;
       continue;
@@ -109,10 +88,7 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
         i++;
         continue;
       }
-      const value =
-        spec.kind === "boolean"
-          ? (eq >= 0 ? a.slice(eq + 1) === "true" : true)
-          : (eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? ""));
+      const value = spec.kind === "boolean" ? (eq >= 0 ? a.slice(eq + 1) === "true" : true) : eq >= 0 ? a.slice(eq + 1) : (argv[++i] ?? "");
       assignFlag(out, spec, value);
       i++;
       continue;
@@ -150,14 +126,8 @@ function assignFlag(out: Parsed, spec: FlagSpec, value: string | boolean): void 
   out.flags[spec.name] = value;
 }
 
-/** Read a string flag. A `Command`'s `run` receives flags as
- *  `Record<string, string | boolean>`, because one bag holds both kinds; this
- *  narrows one back to what its `FlagSpec` declared. Prefer it to `as string |
- *  undefined`: the cast also silently accepts a boolean, so declaring a flag
- *  `kind: "boolean"` and then reading it as a string would compile and hand
- *  the command `true`. Lives here rather than beside `Command` because
- *  registry.ts imports the command modules, so importing a value back from it
- *  would be a cycle. */
+/** Read a string flag. Prefer it to `as string | undefined`, which also
+ *  accepts a boolean flag's `true` and hands it to the command. */
 export function str(flags: Record<string, string | boolean>, name: string): string | undefined {
   const v = flags[name];
   return typeof v === "string" ? v : undefined;

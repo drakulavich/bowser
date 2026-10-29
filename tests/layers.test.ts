@@ -1,8 +1,7 @@
-// Import-rule test. Cheap stand-in for a dependency linter: reads every
-// src/**/*.ts and checks the layering rules from the maintainability spec
-// (docs/superpowers/specs/2026-09-05-maintainability-refactor-design.md,
-// Section 1). Only rules that hold today are listed; each refactor PR adds
-// the rules its layout makes true.
+// Layering rules biome's noRestrictedImports (biome.json) cannot express:
+// who may call what, and the one leaf biome lets import state.ts for types.
+// From the maintainability spec
+// (docs/superpowers/specs/2026-09-05-maintainability-refactor-design.md, Section 1).
 
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -50,21 +49,8 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
-    name: "page-scripts.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
-    violates: (file, text) =>
-      ["src/page-scripts.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
-      valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
-  },
-  {
-    name: "commands/* talk to the daemon only through client.ts and protocol.ts (never browser.ts or daemon/server.ts)",
-    violates: (file, text) =>
-      file.startsWith("src/commands/") &&
-      valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
-  },
-  {
-    name: "daemon/client.ts does not import browser.ts",
-    violates: (file, text) =>
-      file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
+    name: "snapshot.ts has no value imports from src",
+    violates: (file, text) => file === "src/snapshot.ts" && valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
     name: "only src/page-scripts.ts builds a script string for the page",
@@ -106,8 +92,7 @@ const RULES: Rule[] = [
     // Bun's socket.write() accepts what the buffer takes (about 8 KB on a
     // macOS Unix socket) and silently drops the rest; screenshot hung for 30 s
     // on it (#9). socketWriteAll() queues the remainder for `drain`.
-    violates: (file, text) =>
-      file !== "src/socket-write.ts" && /(?<!\bBun|\bprocess\.std(?:out|err))\.write\s*\(/.test(text),
+    violates: (file, text) => file !== "src/socket-write.ts" && /(?<!\bBun|\bprocess\.std(?:out|err))\.write\s*\(/.test(text),
   },
   {
     name: "a file that opens a Bun socket wires a drain handler",
@@ -123,9 +108,7 @@ const RULES: Rule[] = [
     // Any assignment outside browser.ts breaks it, and so does a count other
     // than one inside it (a deleted watch too).
     violates: (file, text) =>
-      [/\bonNavigated\s*=(?!=)/g, /\bonNavigationFailed\s*=(?!=)/g].some(
-        (re) => (text.match(re)?.length ?? 0) !== (file === "src/browser.ts" ? 1 : 0),
-      ),
+      [/\bonNavigated\s*=(?!=)/g, /\bonNavigationFailed\s*=(?!=)/g].some((re) => (text.match(re)?.length ?? 0) !== (file === "src/browser.ts" ? 1 : 0)),
   },
   {
     name: "a user error's message goes out as a UserError, never a plain Error",
@@ -134,8 +117,7 @@ const RULES: Rule[] = [
     // with a user-error message would quietly exit 2. This sees literals
     // only; a message built elsewhere and passed in is held by
     // tests/exit-codes.test.ts, site by site.
-    violates: (_file, text) =>
-      /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(text),
+    violates: (_file, text) => /\bError\(\s*[`'"](?:usage:|unknown |expected a ref|ref '|no open page|bowser requires|session '|run-code runs)/.test(text),
   },
 ];
 

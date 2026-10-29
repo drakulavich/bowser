@@ -46,7 +46,11 @@ describe("an error from the page is a runtime error (exit 2), whatever its text"
   // took the page's text for a user error.
   for (const text of ["usage: from the page", "ref 'e1' not found anywhere", "no open page here", "bowser requires a break"]) {
     test(`eval failing with ${JSON.stringify(text)}`, async () => {
-      const r = await failure(["eval", "boom()"], { evaluate: () => { throw new Error(text); } });
+      const r = await failure(["eval", "boom()"], {
+        evaluate: () => {
+          throw new Error(text);
+        },
+      });
       expect(r).toEqual({ stderr: `bowser: ${text}`, code: 2 });
     });
   }
@@ -55,7 +59,10 @@ describe("an error from the page is a runtime error (exit 2), whatever its text"
 /** A saved snapshot with one ref of each kind the commands check. */
 async function seed(session: string): Promise<void> {
   await saveState({
-    name: session, url: "https://x/", title: "X", updatedAt: Date.now(),
+    name: session,
+    url: "https://x/",
+    title: "X",
+    updatedAt: Date.now(),
     refs: [
       { id: "e1", role: "button", name: "Go", tag: "button" },
       { id: "e2", role: "textbox", name: "Email", tag: "input" },
@@ -70,7 +77,9 @@ async function seed(session: string): Promise<void> {
 function resolvesThen(other: unknown) {
   return (expr: string): unknown =>
     expr === resolveRefScript({ id: "e2", role: "textbox", name: "Email" }, { hit: true }) ||
-    expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true }) ? "input" : other;
+    expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true })
+      ? "input"
+      : other;
 }
 
 interface Case {
@@ -90,43 +99,99 @@ const USER_ERRORS: Case[] = [
   { argv: ["snapshot", "-Z"], stderr: "unknown flag: -Z" },
   { argv: ["eval", "1", "2"], stderr: "usage: too many arguments for 'eval': expected 1, received 2" },
   { argv: ["mcp"], stderr: "usage: run 'bowser mcp' as a top-level subcommand" },
-  { argv: ["--session=../x", "open"], stderr: `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got "../x"` },
+  {
+    argv: ["--session=../x", "open"],
+    stderr: `usage: session name may use only letters, digits, '.', '_' and '-', and must not start with '.' or '-', got "../x"`,
+  },
   { argv: ["--session=nopage", "click", "e1"], stderr: "no open page. Run 'bowser open <url>' first." },
   { argv: ["click", "@e1"], stderr: "expected a ref like 'e1', got '@e1'. Run 'bowser snapshot' first." },
-  { argv: ["click", "e9"], stderr: "ref 'e9' not found in last snapshot of session 'codes'. Run 'bowser snapshot' to refresh." },
-  { argv: ["click", "e1"], handlers: { evaluate: () => null }, stderr: "ref 'e1' not found in the current page snapshot. Try capturing new snapshot." },
+  {
+    argv: ["click", "e9"],
+    stderr: "ref 'e9' not found in last snapshot of session 'codes'. Run 'bowser snapshot' to refresh.",
+  },
+  {
+    argv: ["click", "e1"],
+    handlers: { evaluate: () => null },
+    stderr: "ref 'e1' not found in the current page snapshot. Try capturing new snapshot.",
+  },
   { argv: ["click", "e1"], handlers: { evaluate: () => ({ disabled: true }) }, stderr: "ref 'e1' is disabled" },
-  { argv: ["click", "e1"], handlers: { resolve: () => ({ gone: true }) }, stderr: "ref 'e1' is from a page that is no longer loaded; take a new snapshot" },
-  { argv: ["click", "e1"], handlers: { resolve: () => ({ covered: { role: "generic", name: "", tag: "div" } }) }, stderr: `ref 'e1' (button "Go") is covered by generic <div> at its click point; take a new snapshot or close what covers it` },
+  {
+    argv: ["click", "e1"],
+    handlers: { resolve: () => ({ gone: true }) },
+    stderr: "ref 'e1' is from a page that is no longer loaded; take a new snapshot",
+  },
+  {
+    argv: ["click", "e1"],
+    handlers: { resolve: () => ({ covered: { role: "generic", name: "", tag: "div" } }) },
+    stderr: `ref 'e1' (button "Go") is covered by generic <div> at its click point; take a new snapshot or close what covers it`,
+  },
   { argv: ["check", "e1"], stderr: "ref 'e1' is not a checkbox or radio button (button)" },
   { argv: ["select", "e1", "a"], stderr: "ref 'e1' is not a <select> element (button)" },
   { argv: ["fill", "e1", "a"], stderr: "ref 'e1' is not an <input>, <textarea> or contenteditable element (button)" },
   { argv: ["fill", "e2"], stderr: "usage: bowser fill <ref> <text> or bowser fill <ref> --stdin" },
-  { argv: ["fill", "e2", "a", "--stdin"], stderr: "usage: bowser fill <ref> <text> or bowser fill <ref> --stdin (not both)" },
-  { argv: ["fill", "e2", "a"], handlers: { evaluate: resolvesThen({ outcome: "disabled" }) }, stderr: "ref 'e2' is not an editable element (disabled)" },
-  { argv: ["fill", "e2", "a"], handlers: { evaluate: resolvesThen({ outcome: "readonly" }) }, stderr: "ref 'e2' is not an editable element (readonly)" },
-  { argv: ["fill", "e2", "a"], handlers: { evaluate: resolvesThen({ outcome: "nan" }) }, stderr: "ref 'e2' needs a number (input[type=number])" },
-  { argv: ["fill", "e2", "a"], handlers: { evaluate: resolvesThen({ outcome: "rejected", type: "date" }) }, stderr: "ref 'e2' did not accept the value for input[type=date]" },
-  { argv: ["select", "e3", "z"], handlers: { evaluate: () => "select", select: () => false }, stderr: `ref 'e3' has no option "z"` },
-  { argv: ["uncheck", "e4"], handlers: { evaluate: resolvesThen(undefined), uncheck: () => false }, stderr: "ref 'e4' is a radio button; select another option in its group to uncheck it" },
+  {
+    argv: ["fill", "e2", "a", "--stdin"],
+    stderr: "usage: bowser fill <ref> <text> or bowser fill <ref> --stdin (not both)",
+  },
+  {
+    argv: ["fill", "e2", "a"],
+    handlers: { evaluate: resolvesThen({ outcome: "disabled" }) },
+    stderr: "ref 'e2' is not an editable element (disabled)",
+  },
+  {
+    argv: ["fill", "e2", "a"],
+    handlers: { evaluate: resolvesThen({ outcome: "readonly" }) },
+    stderr: "ref 'e2' is not an editable element (readonly)",
+  },
+  {
+    argv: ["fill", "e2", "a"],
+    handlers: { evaluate: resolvesThen({ outcome: "nan" }) },
+    stderr: "ref 'e2' needs a number (input[type=number])",
+  },
+  {
+    argv: ["fill", "e2", "a"],
+    handlers: { evaluate: resolvesThen({ outcome: "rejected", type: "date" }) },
+    stderr: "ref 'e2' did not accept the value for input[type=date]",
+  },
+  {
+    argv: ["select", "e3", "z"],
+    handlers: { evaluate: () => "select", select: () => false },
+    stderr: `ref 'e3' has no option "z"`,
+  },
+  {
+    argv: ["uncheck", "e4"],
+    handlers: { evaluate: resolvesThen(undefined), uncheck: () => false },
+    stderr: "ref 'e4' is a radio button; select another option in its group to uncheck it",
+  },
   { argv: ["press", ""], stderr: "usage: bowser press <key>" },
   { argv: ["resize", "0", "10"], stderr: "usage: bowser resize <width> <height> (each 1 to 16384)" },
   // F22: Bun.WebView refuses a side over 16384.
   { argv: ["resize", "16385", "100"], stderr: "usage: bowser resize <width> <height> (each 1 to 16384)" },
   { argv: ["eval", ""], stderr: "usage: bowser eval <expression>" },
   { argv: ["run-code", ""], stderr: "usage: bowser run-code <code>" },
-  { argv: ["run-code", "async page => 1"], handlers: { evaluate: () => ({ fn: true }) }, stderr: "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return" },
+  {
+    argv: ["run-code", "async page => 1"],
+    handlers: { evaluate: () => ({ fn: true }) },
+    stderr: "run-code runs JavaScript in the page and has no Playwright 'page'; write statements and use return",
+  },
   { argv: ["snapshot", "--depth=-1"], stderr: "usage: --depth=N requires a non-negative integer (got '-1')" },
   { argv: ["open", "--profile="], stderr: "usage: --profile needs a directory, e.g. --profile=./profile" },
   { argv: ["snapshot", "--filename="], stderr: "usage: --filename needs a file name" },
   { argv: ["markdown", "--filename="], stderr: "usage: --filename needs a file name" },
   { argv: ["screenshot", "--filename="], stderr: "usage: --filename needs a file name" },
-  { argv: ["open", "--profile=/p1"], handlers: { state: () => ({ url: "", title: "", profile: "/p2" }) }, stderr: "usage: session 'codes' is already open with a different profile; run 'bowser close' first" },
+  {
+    argv: ["open", "--profile=/p1"],
+    handlers: { state: () => ({ url: "", title: "", profile: "/p2" }) },
+    stderr: "usage: session 'codes' is already open with a different profile; run 'bowser close' first",
+  },
   { argv: ["goto", ""], stderr: "usage: bowser goto <url>" },
   { argv: ["state-save", ""], stderr: "usage: bowser state-save <file>" },
   { argv: ["state-load", ""], stderr: "usage: bowser state-load <file>" },
   // F5: every problem with the file is the user's.
-  { argv: ["state-load", "/nonexistent/bowser-state.json"], stderr: "state-load: file not found: /nonexistent/bowser-state.json" },
+  {
+    argv: ["state-load", "/nonexistent/bowser-state.json"],
+    stderr: "state-load: file not found: /nonexistent/bowser-state.json",
+  },
   { argv: ["localstorage-get", ""], stderr: "usage: bowser localstorage-get <key>" },
   { argv: ["sessionstorage-set", ""], stderr: "usage: bowser sessionstorage-set <key> <value>" },
   { argv: ["sessionstorage-delete", ""], stderr: "usage: bowser sessionstorage-delete <key>" },
@@ -138,13 +203,36 @@ const USER_ERRORS: Case[] = [
 // Runtime errors: the page, the daemon or the file system failed, not the
 // command line. Exit 2.
 const RUNTIME_ERRORS: Case[] = [
-  { argv: ["eval", "x"], handlers: { evaluate: () => { throw new Error("usage: from the page"); } }, stderr: "usage: from the page" },
-  { argv: ["click", "e1"], handlers: { evaluate: () => "button", click: () => { throw new Error("ref 'e1' not found by the daemon"); } }, stderr: "ref 'e1' not found by the daemon" },
-  { argv: ["open", "https://x/"], handlers: { state: () => ({ url: "about:blank", title: "" }) }, stderr: "navigate: page did not load https://x/ (ended on about:blank)" },
+  {
+    argv: ["eval", "x"],
+    handlers: {
+      evaluate: () => {
+        throw new Error("usage: from the page");
+      },
+    },
+    stderr: "usage: from the page",
+  },
+  {
+    argv: ["click", "e1"],
+    handlers: {
+      evaluate: () => "button",
+      click: () => {
+        throw new Error("ref 'e1' not found by the daemon");
+      },
+    },
+    stderr: "ref 'e1' not found by the daemon",
+  },
+  {
+    argv: ["open", "https://x/"],
+    handlers: { state: () => ({ url: "about:blank", title: "" }) },
+    stderr: "navigate: page did not load https://x/ (ended on about:blank)",
+  },
 ];
 
 describe("exit codes by throw site, through run()", () => {
-  beforeAll(async () => { await seed("codes"); });
+  beforeAll(async () => {
+    await seed("codes");
+  });
 
   for (const { argv, handlers, stderr } of USER_ERRORS) {
     test(`user error, exit 1: ${JSON.stringify(argv)}`, async () => {
@@ -187,7 +275,12 @@ describe("user errors raised outside a command's run", () => {
   test("open with a session name too long for this HOME", async () => {
     const name = "y".repeat(maxSessionNameLength() + 1);
     let connects = 0;
-    const err = await run([`--session=${name}`, "open"], { connect: async () => { connects++; return fakeClient({}); } }).catch((e) => e);
+    const err = await run([`--session=${name}`, "open"], {
+      connect: async () => {
+        connects++;
+        return fakeClient({});
+      },
+    }).catch((e) => e);
     expect(await code(Promise.reject(err))).toEqual({
       stderr: `bowser: usage: session name is too long for this HOME: at most ${maxSessionNameLength()} characters under ${sessionsRoot()}, got ${name.length}`,
       code: 1,

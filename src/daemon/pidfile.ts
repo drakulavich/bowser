@@ -150,7 +150,9 @@ function tryClaim(pidFile: string): boolean {
     if ((e as { code?: string }).code !== "EEXIST") throw e;
     return false;
   } finally {
-    try { unlinkSync(mine); } catch {}
+    try {
+      unlinkSync(mine);
+    } catch {}
   }
 }
 
@@ -182,6 +184,8 @@ async function removeStale(pidFile: string, stale: string, pause: (step: ClaimSt
   } catch {
     return false; // already gone
   } finally {
-    try { rmdirSync(lock); } catch {}
+    try {
+      rmdirSync(lock);
+    } catch {}
   }
 }

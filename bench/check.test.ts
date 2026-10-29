@@ -23,11 +23,17 @@ describe("judge", () => {
   });
 
   test("fails when there is no ANSWER line", () => {
-    expect(judge(task, ok("The cheapest is Soumission at £50.10."))).toEqual({ pass: false, failReason: "no ANSWER line" });
+    expect(judge(task, ok("The cheapest is Soumission at £50.10."))).toEqual({
+      pass: false,
+      failReason: "no ANSWER line",
+    });
   });
 
   test("fails a run that hit max turns", () => {
-    expect(judge(task, { type: "result", subtype: "error_max_turns" })).toEqual({ pass: false, failReason: "error_max_turns" });
+    expect(judge(task, { type: "result", subtype: "error_max_turns" })).toEqual({
+      pass: false,
+      failReason: "error_max_turns",
+    });
   });
 });
 
@@ -45,9 +51,7 @@ describe("isolation", () => {
   });
 
   test("fails on an MCP server", () => {
-    expect(isolation({ ...init, mcp_servers: [{ name: "playwright" }] }, "bowser", userSkills)).toBe(
-      "MCP server playwright",
-    );
+    expect(isolation({ ...init, mcp_servers: [{ name: "playwright" }] }, "bowser", userSkills)).toBe("MCP server playwright");
   });
 
   test("fails on one of the user's skills", () => {
@@ -78,19 +82,38 @@ describe("isolation", () => {
 
 test("streamCounts counts Bash calls and the bytes their results returned", () => {
   const stream = [
-    { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", id: "a" }, { type: "text", text: "x" }] } },
+    {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", name: "Bash", id: "a" },
+          { type: "text", text: "x" },
+        ],
+      },
+    },
     { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "a", content: "héllo" }] } },
     { type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", id: "b" }] } },
-    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "b", content: [{ type: "text", text: "skill body" }] }] } },
+    {
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "b", content: [{ type: "text", text: "skill body" }] }],
+      },
+    },
     { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", id: "c" }] } },
-    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "c", content: [{ type: "text", text: "abc" }] }] } },
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "c", content: [{ type: "text", text: "abc" }] }] },
+    },
   ];
   expect(streamCounts(stream)).toEqual({ bashCalls: 2, toolOutputBytes: 9 });
 });
 
 test("skillFailed spots a Skill call that came back as an error", () => {
   const call = { type: "assistant", message: { content: [{ type: "tool_use", name: "Skill", id: "s" }] } };
-  const result = (is_error: boolean) => ({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "s", is_error, content: "x" }] } });
+  const result = (is_error: boolean) => ({
+    type: "user",
+    message: { content: [{ type: "tool_result", tool_use_id: "s", is_error, content: "x" }] },
+  });
   expect(skillFailed([call, result(true)])).toBe(true);
   expect(skillFailed([call, result(false)])).toBe(false);
 });

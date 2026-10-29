@@ -80,12 +80,16 @@ run("e2e: dialogs", () => {
       fetch: (req) => {
         const u = new URL(req.url);
         const pages: Record<string, string> = {
-          "?keys=1": KEYS_PAGE, "?other=1": OTHER_PAGE, "?form=1": FORM_PAGE, "?own=1": OWN_PAGE,
-          "?frame=1": FRAME_PAGE("/?inner=1"), "?inner=1": INNER_PAGE,
+          "?keys=1": KEYS_PAGE,
+          "?other=1": OTHER_PAGE,
+          "?form=1": FORM_PAGE,
+          "?own=1": OWN_PAGE,
+          "?frame=1": FRAME_PAGE("/?inner=1"),
+          "?inner=1": INNER_PAGE,
           // localhost and 127.0.0.1 are different origins.
           "?xframe=1": FRAME_PAGE(`http://127.0.0.1:${u.port}/?inner=1`),
         };
-        const body = u.pathname === "/two" ? OTHER_PAGE : pages[u.search] ?? PAGE;
+        const body = u.pathname === "/two" ? OTHER_PAGE : (pages[u.search] ?? PAGE);
         return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
       },
     });
@@ -93,7 +97,9 @@ run("e2e: dialogs", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });

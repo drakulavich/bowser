@@ -3,19 +3,28 @@ export function manualClock() {
   let now = 0;
   let seq = 0;
   const timers = new Map<number, { at: number; fn: () => void }>();
-  // setImmediate runs after every queued promise callback.
-  const drain = () => new Promise<void>((r) => setImmediate(r));
+  // A real 0 ms timer, not setImmediate: under some test orders Bun left an immediate waiting in kevent for up to 30 s (#222).
+  const drain = () => new Promise<void>((r) => setTimeout(r, 0));
   return {
     now: () => now,
     setTimeout(fn: () => void, ms: number) {
       timers.set(++seq, { at: now + Math.max(0, ms), fn });
       return seq;
     },
-    clearTimeout(timer: unknown) { timers.delete(timer as number); },
+    clearTimeout(timer: unknown) {
+      timers.delete(timer as number);
+    },
     /** Fire timers in order until `p` settles; answers the clock time it settled at. */
     async settledAt(p: Promise<unknown>, capMs = 60_000): Promise<number> {
       let at: number | undefined;
-      p.then(() => { at = now; }, () => { at = now; });
+      p.then(
+        () => {
+          at = now;
+        },
+        () => {
+          at = now;
+        },
+      );
       for (;;) {
         await drain();
         if (at !== undefined) return at;

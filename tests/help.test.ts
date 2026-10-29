@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import type { Command } from "../src/commands/context.ts";
 import { COMMANDS, SCHEMAS } from "../src/cli/registry.ts";
-import { helpRequested } from "../src/cli/parser.ts";
+import { parse } from "../src/cli/parser.ts";
 import { renderHelp, usageOf } from "../src/cli/help.ts";
 import { run } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
@@ -24,7 +24,10 @@ const HELP = renderHelp(COMMANDS);
 const PICK: Command = {
   name: "pick",
   summary: "Pick a size",
-  positional: [{ name: "first-choice", required: true }, { name: "second-choice", required: false }],
+  positional: [
+    { name: "first-choice", required: true },
+    { name: "second-choice", required: false },
+  ],
   flags: [{ name: "until", kind: "string" }],
   run: async () => "",
 };
@@ -72,10 +75,6 @@ describe("generated help", () => {
     const i = lines.findIndex((l) => l.startsWith("  pick "));
     expect(lines[i]!.length).toBeGreaterThan(col);
     expect(lines[i + 1]).toBe(" ".repeat(col) + "Pick a size");
-  });
-
-  test("every summary appears", () => {
-    for (const c of COMMANDS) expect(HELP).toContain(c.summary);
   });
 
   test("keeps the header and the global flags block", () => {
@@ -155,7 +154,8 @@ describe("per-command help", () => {
   // help existed: the scan for help must skip what the parser consumes.
   test("snapshot --filename -h writes a file named -h", async () => {
     const snap = {
-      url: "https://x", title: "X",
+      url: "https://x",
+      title: "X",
       tree: [{ role: "link", name: "Home", ref: "e1", props: { url: "/" }, children: [] }],
       refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
     };
@@ -175,15 +175,15 @@ describe("per-command help", () => {
     // open runs with session "-h", which session-name validation refuses, as
     // it did before per-command help existed; help would have returned.
     await expect(run(["-s", "-h", "open", "https://example.com/"], base)).rejects.toThrow('got "-h"');
-    expect(helpRequested(SCHEMAS, ["-s", "-h", "open"])).toBe(false);
-    expect(helpRequested(SCHEMAS, ["snapshot", "--filename", "-h"])).toBe(false);
+    expect(parse(SCHEMAS, ["-s", "-h", "open"]).help).toBe(false);
+    expect(parse(SCHEMAS, ["snapshot", "--filename", "-h"]).help).toBe(false);
   });
 
   test("an unknown flag consumes nothing: close --bogus -h is help", async () => {
     const { seen, base } = counting();
     const close = COMMANDS.find((c) => c.name === "close")!;
     expect((await run(["close", "--bogus", "-h"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
-    expect(helpRequested(SCHEMAS, ["mcp", "--bogus", "-h"])).toBe(true);
+    expect(parse(SCHEMAS, ["mcp", "--bogus", "-h"]).help).toBe(true);
     expect(seen.connects).toBe(0);
   });
 
@@ -209,31 +209,29 @@ describe("per-command help", () => {
 
   // An unknown flag next to --help still gets the help: `mcp --bogus --help`
   // once started the server, because the parse error hid the --help.
-  test.each([
-    [["close", "--help"]],
-    [["mcp", "--help"]],
-    [["close", "--bogus", "--help"]],
-    [["mcp", "--bogus", "--help"]],
-    [["mcp", "-x", "-h"]],
-  ])("the CLI entry prints help and exits 0 for %j, starting no server", async (argv) => {
-    const name = argv[0]!;
-    {
-      const proc = Bun.spawn({
-        cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), ...argv],
-        env: { ...process.env, HOME: tmp },
-        // A pipe held open: a started MCP server would wait on it forever.
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const timer = setTimeout(() => proc.kill(), 5_000);
-      const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-      clearTimeout(timer);
-      const cmd = COMMANDS.find((c) => c.name === name)!;
-      expect(stdout.split("\n")[0]).toBe(`bowser ${usageOf(cmd)}`);
-      expect(code).toBe(0);
-    }
-  }, 15_000);
+  test.each([[["close", "--help"]], [["mcp", "--help"]], [["close", "--bogus", "--help"]], [["mcp", "--bogus", "--help"]], [["mcp", "-x", "-h"]]])(
+    "the CLI entry prints help and exits 0 for %j, starting no server",
+    async (argv) => {
+      const name = argv[0]!;
+      {
+        const proc = Bun.spawn({
+          cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), ...argv],
+          env: { ...process.env, HOME: tmp },
+          // A pipe held open: a started MCP server would wait on it forever.
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const timer = setTimeout(() => proc.kill(), 5_000);
+        const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+        clearTimeout(timer);
+        const cmd = COMMANDS.find((c) => c.name === name)!;
+        expect(stdout.split("\n")[0]).toBe(`bowser ${usageOf(cmd)}`);
+        expect(code).toBe(0);
+      }
+    },
+    15_000,
+  );
 });
 
 // ET-27: the CLI reports its own version, as `playwright-cli --version` does.

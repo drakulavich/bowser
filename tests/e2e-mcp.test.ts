@@ -30,10 +30,7 @@ runOrSkip("e2e: bowser mcp answers ping while a call runs", () => {
       while (!seen.some((s) => s.id === id)) {
         const left = deadline - Date.now();
         if (left <= 0) throw new Error(`no response for id ${id} within ${ms} ms`);
-        const next = await Promise.race([
-          reader.read(),
-          Bun.sleep(left).then(() => ({ done: true as const, value: undefined })),
-        ]);
+        const next = await Promise.race([reader.read(), Bun.sleep(left).then(() => ({ done: true as const, value: undefined }))]);
         if (next.done) throw new Error(`stdout closed before id ${id}`);
         buf += decoder.decode(next.value, { stream: true });
         let idx: number;
@@ -49,8 +46,7 @@ runOrSkip("e2e: bowser mcp answers ping while a call runs", () => {
       proc.stdin.write(JSON.stringify(msg) + "\n");
       proc.stdin.flush();
     };
-    const call = (id: number, name: string, args: object) =>
-      send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+    const call = (id: number, name: string, args: object) => send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
 
     try {
       const page = "data:text/html;charset=utf-8," + encodeURIComponent("<title>MCP</title><p>hi</p>");

@@ -47,7 +47,9 @@ runOrSkip("e2e: non-ASCII text over the daemon socket (#75)", () => {
   }, 30_000);
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     else delete process.env.HOME;

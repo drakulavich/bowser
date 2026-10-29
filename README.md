@@ -30,9 +30,9 @@ bun install
 bun link                     # exposes `bowser` on $PATH
 ```
 
-Bun ≥ 1.4.3 must be on your `PATH`: the npm package runs `src/cli.ts` with the `bun` it finds there.
+Bun ≥ 1.4.4 must be on your `PATH`: the npm package runs `src/cli.ts` with the `bun` it finds there.
 npm does not enforce that, so on an older Bun a command that would start a session fails with the
-error "bowser requires Bun >=1.4.3 (found <version>)" (exit 1).
+error "bowser requires Bun >=1.4.4 (found <version>)" (exit 1).
 
 bowser is distributed only through npm and from source; releases no longer attach binaries. If you
 used a release binary, run `bowser close --all` with it, delete it, then
@@ -144,7 +144,7 @@ bowser click e8
 - ["prompt" dialog with message "Your name?"]: accepted
 ```
 
-The command that caused the dialog reports it under `### Modal state`. With `--json` it reports it as `"dialogs": [...]`. If the command fails, the report follows its error on stderr and the exit code is unchanged. `dismissed (run dialog-accept before the action to accept it)` means no answer was set. An answer covers one dialog and is dropped when the page navigates.
+The command that caused the dialog reports it under `### Modal state`. With `--json` it reports it as `"dialogs": [...]`. A report lists the first 20 dialogs and then `- and N more dialogs` (`"dialogsOmitted": N` with `--json`), so a page timer that opens a dialog every 100 ms does not flood the next command. If the command fails, the report follows its error on stderr and the exit code is unchanged. `dismissed (run dialog-accept before the action to accept it)` means no answer was set. An answer covers one dialog and is dropped when the page navigates.
 
 **Differences from `playwright-cli`:**
 
@@ -210,7 +210,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 | `open [url] [--persistent] [--profile=dir]` | Start session; navigate if URL given. `--persistent` keeps cookies, `localStorage` and IndexedDB in `~/.bowser/profiles/<session>/` across `close` and restarts; `--profile=dir` keeps them in `dir` instead (implies `--persistent`). See [Persistent profiles](#persistent-profiles). |
 | `goto <url>` | Navigate within current session. For `open` and `goto` alike, a URL without a scheme gets one, as in `playwright-cli`: `http://` for `localhost`, `127.0.0.1` and `[::1]` (`localhost:3000/x` → `http://localhost:3000/x`), `https://` for any other host (`example.com` → `https://example.com`). A URL with a scheme (`http:`, `file:`, `about:`, `data:`, …) is used as typed. Unlike `playwright-cli`, `127.0.0.1` gets `http://`, not `https://`. Both wait for the page's `load` event. When the page has been parsed but `load` has not come 5 s later (an image, font or script that never finishes), they stop the loads still running and answer with the page as it is; what had not loaded stays missing. |
 | `snapshot [--filename=f] [--depth=N]` | Full aria tree in `playwright-cli`'s format, with `eN` refs; `--depth=N` limits the levels printed (`0` or unset is unlimited) |
-| `markdown [ref] [--filename=f]` | The page as Markdown, for reading. When the page offers its own Markdown (a claude.ai artifact's source, or `<link rel="alternate" type="text/markdown">`), that text; otherwise `<main>` (or the body without one) converted: headings, paragraphs, lists, tables, links, code, emphasis, image `alt`, with hidden content and form controls left out. With a ref, only that element is converted, without scrolling the page. `--json` gives `{"markdown":"…","source":"page"|"converted","url":"…","title":"…"}`; an empty result prints `markdown: the page has no text ("<title>", <url>)`; `--filename` writes the Markdown to `f` and answers with its absolute path |
+| `markdown [ref] [--filename=f]` | The page as Markdown, for reading. When the page offers its own Markdown (a claude.ai artifact's source, or `<link rel="alternate" type="text/markdown">`), that text, unless an alternate's links start with `/`, `./` or `../`, which gives the conversion below instead; otherwise `<main>` (or the body without one) converted: headings, paragraphs, lists, tables, links, code, emphasis, image `alt`, a checkbox in a list item as `[x] ` or `[ ] `, with hidden content and other form controls left out. On a YouTube video with captions (`/watch?v=`, `/shorts/`, `youtu.be`), the transcript instead: the title, `https://youtu.be/<id> · <language>`, then one paragraph per 30 seconds starting `[m:ss]`; it opens the description and the transcript panel to read it, and exits 2 with `markdown: the transcript of <url> did not load within <n>ms` when the panel gives nothing in time. With a ref, only that element is converted, without scrolling the page. `--json` gives `{"markdown":"…","source":"page"|"converted"|"transcript","url":"…","title":"…"}`; an empty result prints `markdown: the page has no text ("<title>", <url>)`; `--filename` writes the Markdown to `f` and answers with its absolute path, after the no-text line when the page has none; its `--json` adds `url` and `title` |
 | `click <ref>` | Click an element. A disabled element (the snapshot's `[disabled]`: a disabled control or `<fieldset>`, or `aria-disabled="true"` on it or an ancestor) fails at once with `ref 'eN' is disabled`, exit 1, and is not clicked; `playwright-cli` waits out its timeout |
 | `fill <ref> <text>` / `fill <ref> --stdin` | Focus, clear, type. `--stdin` reads the text from piped input and drops one trailing newline, so a secret never appears in the process arguments: `op read op://vault/site/password \| bowser fill e4 --stdin`. The text is never echoed, with or without `--stdin`: `filled e4 (textbox "Password")`, and `--json` answers `{"ok":true,"ref":"e4","element":{"role":"textbox","name":"Password"}}`. `--stdin` is not offered over MCP. A disabled (a disabled `<fieldset>` included) or `readonly` field fails with `ref 'eN' is not an editable element (disabled)` or `(readonly)`, exit 1, value untouched; `playwright-cli` waits out its timeout. A `date`, `time`, `datetime-local`, `month`, `week` or `color` input gets the value set directly, as `playwright-cli` does (`fill e9 2024-01-02`); one it does not keep fails with `ref 'eN' did not accept the value for input[type=<type>]`. On `type=number`, text that is not a number fails with `ref 'eN' needs a number (input[type=number])`. Both exit 1 and leave the value as it was; no error repeats the text. |
 | `type <text>` | Type into focused element. The text is never echoed: it prints `typed N characters` (`typed 1 character` for one), counting code points, and `--json` answers `{"ok":true,"length":N}`. For `fill` and `type` alike, a browser error that quotes the text is replaced by `<command>: the browser's error message was withheld because it contained the entered text`; a dialog message the page shows is page content and is printed as is |
@@ -307,16 +307,16 @@ bowser's scripts run in the page's own JavaScript world, and WebKit returns thei
 
 ```bash
 bun run check                                  # typecheck, lint, then unit tests
-bun run typecheck                              # tsc
-bun run lint                                   # Biome (import cycles, layer rules) and Knip (unused files, exports)
+bun run typecheck                              # bun check
+bun run lint                                   # bun fmt --check, Biome (import cycles, layer rules) and Knip (unused files, exports)
 bun test                                       # unit + command tests with a fake daemon
 BOWSER_E2E=1 bun test                          # + end-to-end on WebKit
 BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub search)
 ```
 
 **End-to-end examples included:**
-- `tests/e2e.test.ts` — open/snapshot/click on a `data:` URL (no network)
-- `tests/e2e-todo.test.ts` — a local todo app served by `Bun.serve`: add three todos, toggle one, clear completed. Proves the daemon keeps state across commands.
+- `tests/e2e.test.ts` — screenshots and >8 KB snapshots and URLs on `data:` pages (no network)
+- `tests/e2e-snapshot.test.ts` — a local todo app served by `Bun.serve`: fill, click Add and check, each tree compared to `playwright-cli`'s golden.
 - `tests/e2e-webkit.test.ts` — every command driven on WebKit, with page state read back via `eval` after each one.
 - `tests/e2e-compat.test.ts` — diffs bowser against `playwright-cli` on the todo flow, asserting bowser's refs are a subset of playwright-cli's tree; skips without playwright-cli's WebKit installed.
 - `tests/e2e-search.test.ts` — live web: search GitHub for OpenClaw, find the repo link, type into the search box and press Enter.

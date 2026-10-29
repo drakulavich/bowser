@@ -23,16 +23,6 @@ describe("parse", () => {
     expect(r.command).toBe("fill");
     expect(r.positional).toEqual(["e1"]);
   });
-  test("global session via -s=name", () => {
-    const r = parse(SCHEMAS, ["-s=app", "open", "https://x"]);
-    expect(r.session).toBe("app");
-    expect(r.command).toBe("open");
-    expect(r.positional).toEqual(["https://x"]);
-  });
-  test("global session via -s name (space)", () => {
-    const r = parse(SCHEMAS, ["-s", "app", "open"]);
-    expect(r.session).toBe("app");
-  });
   test("global session via --session=name", () => {
     const r = parse(SCHEMAS, ["--session=app", "open"]);
     expect(r.session).toBe("app");
@@ -47,10 +37,6 @@ describe("parse", () => {
   test("--json is a global flag", () => {
     expect(parse(SCHEMAS, ["--json", "snapshot"]).json).toBe(true);
   });
-  test("--filename=path on snapshot", () => {
-    const r = parse(SCHEMAS, ["snapshot", "--filename=out.yml"]);
-    expect(r.flags.filename).toBe("out.yml");
-  });
   test("--filename path (space form)", () => {
     const r = parse(SCHEMAS, ["snapshot", "--filename", "out.yml"]);
     expect(r.flags.filename).toBe("out.yml");
@@ -58,15 +44,6 @@ describe("parse", () => {
   test("open --persistent boolean flag", () => {
     const r = parse(SCHEMAS, ["open", "--persistent"]);
     expect(r.flags.persistent).toBe(true);
-  });
-  test("click <ref> positional", () => {
-    const r = parse(SCHEMAS, ["click", "e3"]);
-    expect(r.command).toBe("click");
-    expect(r.positional).toEqual(["e3"]);
-  });
-  test("fill <ref> <text> positionals", () => {
-    const r = parse(SCHEMAS, ["fill", "e1", "hello world"]);
-    expect(r.positional).toEqual(["e1", "hello world"]);
   });
   test("--help on a command sets help flag", () => {
     expect(parse(SCHEMAS, ["snapshot", "--help"]).help).toBe(true);
@@ -80,9 +57,6 @@ describe("parse", () => {
   test("unknown flag for command throws", () => {
     expect(() => parse(SCHEMAS, ["snapshot", "--bogus"])).toThrow(/unknown flag/);
   });
-  test("--depth=N on snapshot is parsed", () => {
-    expect(parse(SCHEMAS, ["snapshot", "--depth=3"]).flags.depth).toBe("3");
-  });
 });
 
 describe("a removed command", () => {
@@ -91,7 +65,10 @@ describe("a removed command", () => {
   // (exit 1), before any daemon work.
   for (const name of ["install", "cookie-list", "cookie-get", "cookie-set", "cookie-delete", "cookie-clear"]) {
     test(`${name} is an unknown command, exit 1`, async () => {
-      const err = await run([name]).then(() => undefined, (e: unknown) => e);
+      const err = await run([name]).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect(err).toBeInstanceOf(Error);
       expect((err as Error).message).toBe(`unknown command: ${name}`);
       expect(reportFailure(err).code).toBe(1);

@@ -1,0 +1,91 @@
+# `markdown`: no relative links from a page's own Markdown, empty pages under `--filename`, task-list state (#154)
+
+**Issue:** #154 (ET-50, ET-51, ET-55; the decision is in the
+[2026-10-28 comment](https://github.com/drakulavich/bowser/issues/154#issuecomment-6467636582)).
+**Status:** draft for review.
+
+## Problem
+
+Three things `markdown` does today make Sora believe something false about a page. Each was rechecked on
+2026-10-28 with bowser at main 3d7c776:
+
+- **ET-50.** The page's own Markdown (`source: "page"`) keeps the site's relative links, and the text form
+  prints no base URL. `https://bun.com/docs/runtime/http/server` gives `](/bundler)`, `](/bundler/fullstack)` and
+  `](./tls)`; Sora has to work out the absolute URL itself. (code.claude.com, the campaign's other site, has
+  since moved to absolute links: 65 of its 80.)
+- **ET-51.** On a page with no text, `markdown --filename=f` writes a 1-byte file and answers `wrote /abs/f`;
+  `--json` answers `{"ok":true,"filename":"…","source":"converted"}`, the same reply as for any saved page.
+  Without `--filename` the same page gives `markdown: the page has no text ("", about:blank)` (#138).
+  `--filename` is the path the README gives for big pages, so this is the reply Sora sees on most long reads.
+- **ET-55.** Checkbox `input`s are skipped, so a done and an open task read the same. Issue #140's body has
+  `- [ ] S2-2`, `- [ ] S2-3`, `- [ ] S2-4`; `markdown` on its GitHub page prints `- S2-2: …` with no state.
+
+## Change
+
+### ET-50: a site's Markdown with relative links gives way to the DOM conversion
+
+When the `rel="alternate"` Markdown in `markdownScript` (`src/page-scripts.ts`) holds a link or image target that
+starts with `/`, `./` or `../` (the text matches `/\]\(\s*<?\.{0,2}\//`), `markdown` answers with the DOM conversion
+(`source: "converted"`) instead. The site's Markdown is never rewritten.
+
+- The conversion reads the rendered page, where every link is already absolute and code is `<code>`, so nothing
+  in it has to tell code from links. On bun.com's server page it gives 0 relative links of 99, and the site's
+  real address `https://bun.com/docs/bundler` where the site's Markdown had `/bundler` (404 even made absolute).
+- The check is coarse on purpose: a relative-looking link inside a code block also selects the conversion, which
+  is still a correct reading of the page.
+- Cost on bun.com: 26,616 characters converted against 21,190 in the site's Markdown (+26%).
+- A Markdown with only absolute links is returned as before, `source: "page"`.
+
+### ET-51: the empty-page line under `--filename`
+
+`--filename` on a page with no text still writes the file, and answers on two lines:
+
+```
+markdown: the page has no text ("", about:blank)
+wrote /abs/empty.md
+```
+
+`--json` with `--filename` always carries `url` and `title`:
+`{"ok":true,"filename":"/abs/f","source":"converted","url":"…","title":"…"}`. A ref with no text gives the ref
+form of the line (`markdown: ref 'e5' has no text (…)`), as without `--filename`.
+
+### ET-55: a checkbox in a list item prints its state
+
+A checkbox `input` inside a visible `li` prints `[x] ` when checked and `[ ] ` when not, where it stands in the
+item, even when the checkbox itself is hidden: GitHub draws a read-only task with its checkbox at `display: none`
+(#140, 2026-10-28). A hidden `li` still drops the whole item, and every other `input` is still skipped. With the
+checkbox first, as on GitHub, `- [ ] S2-2: …` is the GFM task-list form.
+
+## Cost
+
+No stored data changes; one regular-expression test over the alternate Markdown, no new reads or waits.
+
+## Not in scope
+
+- Bare relative targets (`[t](x)`, `![i](img.png)`) and reference-style definitions (`[t]: /x`) do not select the
+  conversion: none on the two sites checked.
+- A claude.ai artifact's Markdown: its content comes from an API URL that is not a document base.
+- Custom-drawn checkboxes with no `input` at all.
+
+## Definition of Done
+
+- `tests/e2e-markdown.test.ts`, on fixture pages served by the test's server:
+  - an alternate link to `/md/guide.md` from the page `/docs/page.html`, whose Markdown holds `[the server](/x)`:
+    `markdown --json` answers `source: "converted"` with the page's own text (`Rendered`); the existing
+    `/alt.html` case (absolute links only) still answers `source: "page"`;
+  - `about:blank` with `--filename`: the file holds exactly one newline, the text reply is the two lines above,
+    and `--json` has `url: "about:blank"` and `title: ""`; on a page with text, its `url` and `title`;
+  - a ref to an empty element with `--filename`: the text reply starts `markdown: ref 'eN' has no text (`;
+  - a list with a checked and an unchecked checkbox, a checked one with `hidden`, an unchecked one at
+    `display: none`, and a checkbox outside any `li`: `- [x] done`, `- [ ] open`, `- [x] hid`, `- [ ] styled`, and the
+    outside one prints no state.
+- The existing `--filename` test (`tests/e2e-markdown.test.ts`, "--filename writes the Markdown…") changes its
+  expected `--json` object to the new fields.
+- `BOWSER_E2E=1 BOWSER_E2E_NET=1`: on `https://bun.com/docs/runtime/http/server`, `markdown --json` has
+  `source: "converted"`, no relative link, and `(https://bun.com/docs/bundler)`; today it has `source: "page"` with
+  `](/bundler)`, `](/bundler/fullstack)`, `](./tls)`. On `https://github.com/drakulavich/bowser/issues/140`, the output matches `/\[ \]\s+S2-2/`; today it holds
+  `- S2-2: a table`.
+- The README row for `markdown` says that a site's Markdown with relative links gives way to the conversion;
+  `skills/bowser/references/commands.md` likewise. `docs-drift` passes.
+- `bun run check` and `BOWSER_E2E=1 bun test` pass (CI e2e).
+- Each new test goes red under one mutation of the line it names, quoted in the PR.

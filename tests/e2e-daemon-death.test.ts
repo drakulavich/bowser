@@ -24,7 +24,9 @@ runOrSkip("e2e: the daemon dies under a command", () => {
   // Resolved when the page fetches /inflight, i.e. once the eval is running
   // inside the daemon. Killing earlier would let the command respawn a daemon.
   let markInflight: () => void = () => {};
-  const inflight = new Promise<void>((r) => { markInflight = r; });
+  const inflight = new Promise<void>((r) => {
+    markInflight = r;
+  });
 
   const ctx: CommandContext = { session: "daemon-death", json: false };
 
@@ -44,7 +46,9 @@ runOrSkip("e2e: the daemon dies under a command", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop();
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -53,14 +57,15 @@ runOrSkip("e2e: the daemon dies under a command", () => {
   test("a command in flight fails when its daemon is killed", async () => {
     await cmdOpen(ctx, url);
 
-    const evaluating = cmdEval(
-      ctx,
-      "fetch('/inflight').then(() => new Promise(r => setTimeout(() => r(1), 30000)))",
-    );
+    const evaluating = cmdEval(ctx, "fetch('/inflight').then(() => new Promise(r => setTimeout(() => r(1), 30000)))");
     // Settle-only view of the command, so an early rejection is never unhandled.
     const outcome = evaluating.then(
       (value) => ({ ok: true as const, value }),
-      (err: unknown) => ({ ok: false as const, message: err instanceof Error ? err.message : String(err), code: reportFailure(err).code }),
+      (err: unknown) => ({
+        ok: false as const,
+        message: err instanceof Error ? err.message : String(err),
+        code: reportFailure(err).code,
+      }),
     );
 
     await inflight;
@@ -69,7 +74,9 @@ runOrSkip("e2e: the daemon dies under a command", () => {
     process.kill(pid, "SIGKILL");
 
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const bound = new Promise<"timed out">((r) => { timer = setTimeout(() => r("timed out"), 5000); });
+    const bound = new Promise<"timed out">((r) => {
+      timer = setTimeout(() => r("timed out"), 5000);
+    });
     const settled = await Promise.race([outcome, bound]);
     clearTimeout(timer);
 

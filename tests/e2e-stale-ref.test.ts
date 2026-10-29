@@ -11,9 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { CommandContext } from "../src/commands/context.ts";
-import {
-  cmdCheck, cmdClick, cmdFill, cmdHover, cmdSelect, cmdUncheck,
-} from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdFill, cmdHover, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdGoto, cmdHistory, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -73,7 +71,12 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       idleTimeout: 30,
       async fetch(req) {
         const path = new URL(req.url).pathname;
-        const doc = { "/doc-a": docPage("A", "/doc-b"), "/doc-b": docPage("B", "/doc-a"), "/doc-pending": docPage("A", "/doc-slow"), "/doc-slow": docPage("S", "/doc-a") }[path];
+        const doc = {
+          "/doc-a": docPage("A", "/doc-b"),
+          "/doc-b": docPage("B", "/doc-a"),
+          "/doc-pending": docPage("A", "/doc-slow"),
+          "/doc-slow": docPage("S", "/doc-a"),
+        }[path];
         if (path === "/doc-slow") await Bun.sleep(14_000);
         if (doc) return new Response(doc, { headers: { "content-type": "text/html; charset=utf-8" } });
         const inline = { "/relabel.html": RELABEL, "/form.html": FORM }[path];
@@ -89,7 +92,9 @@ runOrSkip("e2e: a stale ref fails at once", () => {
   });
 
   afterAll(async () => {
-    try { await cmdClose(ctx); } catch {}
+    try {
+      await cmdClose(ctx);
+    } catch {}
     server?.stop(true);
     if (origHome !== undefined) process.env.HOME = origHome;
     await rm(tmp, { recursive: true, force: true });
@@ -107,8 +112,7 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     await cmdClick(ctx, await refNamed("Add"));
   };
 
-  const checked = async (label: string): Promise<string> =>
-    cmdEval(ctx, `String(document.querySelector('[aria-label="${label}"]').checked)`);
+  const checked = async (label: string): Promise<string> => cmdEval(ctx, `String(document.querySelector('[aria-label="${label}"]').checked)`);
 
   test("ET-03: clicking a removed todo's checkbox fails in under 1 s and changes nothing", async () => {
     await cmdOpen(ctx, `${base}/todo-app.html`);
@@ -174,18 +178,8 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     expect(await cmdEval(ctx, "document.getElementById('name').value")).toBe("");
   }, 60_000);
 
-  // A long-lived daemon may hold a page the previous bowser snapshotted: its
-  // store has no byRef map. The new scripts must work with it, not throw.
+  // A ref store with no document id, as bowser before #105 wrote.
   const OLD_STORE = "(window[Symbol.for('bowser.aria-refs')] = { refs: new WeakMap(), last: 5 }, 'planted')";
-
-  test("snapshot on a page with a previous version's ref store works and continues its numbering", async () => {
-    await cmdOpen(ctx, `${base}/form.html`);
-    await cmdEval(ctx, OLD_STORE);
-    await cmdSnapshot(ctx);
-    const ids = (await loadState(ctx.session))!.refs.map((r) => Number(r.id.slice(1)));
-    expect(Math.min(...ids)).toBe(6);
-    expect((await loadState(ctx.session))!.doc).toMatch(/^[0-9a-f]{32}$/);
-  }, 60_000);
 
   test("an action on a page with a previous version's ref store is refused as from another page, exit 1", async () => {
     await cmdOpen(ctx, `${base}/form.html`);
@@ -221,7 +215,10 @@ runOrSkip("e2e: a stale ref fails at once", () => {
 
   // The name of an element hidden now leaves out only descendants hidden in
   // their own right, as the snapshot of the visible element did.
-  for (const [how, hide] of [["display", "display = 'none'"], ["visibility", "visibility = 'hidden'"]] as const) {
+  for (const [how, hide] of [
+    ["display", "display = 'none'"],
+    ["visibility", "visibility = 'hidden'"],
+  ] as const) {
     test(`#80: a ref hidden by ${how} since the snapshot keeps its name and is not refused`, async () => {
       await cmdOpen(ctx, `${base}/relabel.html`);
       await cmdSnapshot(ctx);

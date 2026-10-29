@@ -429,15 +429,11 @@ const ROLE_NAME = String.raw`
 // between snapshots of one document while the element's role and name are
 // unchanged, and a new document starts at e1. The store's random `doc` id
 // is saved with the refs, so they resolve in no other document (#105), even
-// one that numbers its own refs the same. Each ref is saved with its
-// CSS_PATH; an action resolves the ref through the reverse map first
-// (resolveRefScript) and uses a path computed at that moment.
+// one that numbers its own refs the same. An action resolves the ref through
+// the reverse map (resolveRefScript) and uses a path computed at that moment.
 export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const KEY = Symbol.for('bowser.aria-refs');
-  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
-  // A store from a previous bowser version has no byRef or doc.
-  if (!store.byRef) store.byRef = new Map();
-  if (!store.doc) store.doc = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0, doc: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') });
   // Forget refs whose element is gone, so byRef does not grow with every re-render.
   for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
 
@@ -489,8 +485,6 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     store.byRef.set(r.ref, new WeakRef(el));
     n.ref = r.ref;
     const saved = { id: r.ref, role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
-    if (tagOf(el) === 'A' && el.getAttribute('href')) saved.href = el.getAttribute('href');
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && valueOf(el)) saved.value = String(valueOf(el)).slice(0, 120);
     if (el.isContentEditable) saved.editable = true;
     refs.push(saved);
   }
@@ -742,7 +736,6 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 // the page, which is what the layer rule claims.
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
-export const RELOAD = "location.reload()";
 /** The viewport in CSS pixels and the pixel ratio: what a failed
  *  screenshot checks against WebKit's capture limit (#69). */
 export const READ_VIEWPORT = "[innerWidth, innerHeight, devicePixelRatio]";
@@ -970,18 +963,14 @@ export function storageClearScript(area: StorageArea): string {
   return storageScript(area, `${area}.clear();`);
 }
 
-export function storageRestoreScript(
-  area: StorageArea,
-  entries: Array<{ name: string; value: string }>,
-): string {
-  return storageScript(
-    area,
-    entries.map((e) => `${area}.setItem(${JSON.stringify(e.name)}, ${JSON.stringify(e.value)});`).join(" "),
-  );
+export function storageRestoreScript(area: StorageArea, entries: Array<{ name: string; value: string }>): string {
+  return storageScript(area, entries.map((e) => `${area}.setItem(${JSON.stringify(e.name)}, ${JSON.stringify(e.value)});`).join(" "));
 }
 
 const TO_MARKDOWN = String.raw`
   const BT = String.fromCharCode(96);
+  // GitHub hides a read-only task checkbox with display: none; its state is still the task's (#154).
+  const task = (el) => { const li = el.tagName === 'INPUT' && el.type === 'checkbox' && el.closest('li'); return !!li && getComputedStyle(li).visibility === 'visible'; };
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS', 'IFRAME', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
   const BLOCK = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FIGURE', 'FIGCAPTION', 'FORM', 'FIELDSET', 'DETAILS', 'SUMMARY', 'ADDRESS', 'DL', 'DT', 'DD', 'LI', 'BODY', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'TABLE', 'BLOCKQUOTE', 'HR']);
   const skipped = (el) => {
@@ -1001,6 +990,7 @@ const TO_MARKDOWN = String.raw`
   const mark = (m, s) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); return core ? lead + m + core + m + trail : lead + trail; };
   const inline = (n) => {
     if (n.nodeType === 3) return text(n);
+    if (n.nodeType === 1 && task(n)) return n.checked ? '[x] ' : '[ ] ';
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
     // A block-level child is a word of its own, as the snapshot's name reads it (ET-47).
@@ -1074,6 +1064,7 @@ const TO_MARKDOWN = String.raw`
   };
   const blocks = (n, out) => {
     if (n.nodeType === 3) { out.push({ inline: text(n) }); return; }
+    if (n.nodeType === 1 && task(n)) { out.push({ inline: inline(n) }); return; }
     if (n.nodeType !== 1 || skipped(n)) return;
     const t = n.tagName;
     const h = /^H([1-6])$/.exec(t);
@@ -1132,9 +1123,73 @@ const TO_MARKDOWN = String.raw`
     return paras.join('\n\n');
   };`;
 
+// Every wait shares one deadline: an unbounded one hung the session at budget 0 (ET-61).
+const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
+    const u = new URL(location.href);
+    if (u.pathname === '/watch') return u.searchParams.get('v');
+    const s = /^\/shorts\/([^/]+)/.exec(u.pathname);
+    return s ? s[1] : null;
+  })();
+  if (video) {
+    const deadline = performance.now() + ${ms};
+    const until = async (f) => {
+      for (;;) {
+        const v = f();
+        if (v || performance.now() >= deadline) return v;
+        await new Promise((r) => setTimeout(r, Math.min(250, deadline - performance.now())));
+      }
+    };
+    const player = await until(() => {
+      const p = document.querySelector('#movie_player');
+      const r = p && typeof p.getPlayerResponse === 'function' ? p.getPlayerResponse() : null;
+      return r && r.videoDetails && r.videoDetails.videoId === video ? r : null;
+    });
+    const tracks = (player && player.captions && player.captions.playerCaptionsTracklistRenderer && player.captions.playerCaptionsTracklistRenderer.captionTracks) || [];
+    if (tracks.length) {
+      const segments = () => [...document.querySelectorAll('ytd-transcript-segment-renderer')];
+      // YouTube keeps a hidden twin panel with the same segments: read only the expanded one.
+      const shown = () => {
+        const s = [...document.querySelectorAll('ytd-engagement-panel-section-list-renderer[target-id=engagement-panel-searchable-transcript][visibility=ENGAGEMENT_PANEL_VISIBILITY_EXPANDED] ytd-transcript-segment-renderer')];
+        return s.length ? s : null;
+      };
+      let got = shown();
+      // Segments under a hidden panel are the previous video's (an in-page navigation leaves them a moment).
+      if (!got && (await until(() => !segments().length))) {
+        const button = () => {
+          const b = document.querySelector('ytd-video-description-transcript-section-renderer button');
+          return b && b.offsetParent ? b : null;
+        };
+        if (!button()) document.querySelector('ytd-watch-metadata #expand')?.click();
+        const b = await until(button);
+        if (b) {
+          b.click();
+          got = await until(shown);
+        }
+      }
+      if (!got) return { markdown: '', source: 'transcript', failed: true };
+      const seconds = (t) => t.split(':').reduce((a, v) => a * 60 + Number(v), 0);
+      const paras = [];
+      for (const s of got) {
+        const ts = (s.querySelector('.segment-timestamp')?.textContent || '').trim();
+        const text = (s.querySelector('.segment-text')?.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        const last = paras[paras.length - 1];
+        const gap = last ? seconds(ts) - last.at : -1;
+        if (gap >= 0 && gap < 30) last.text += ' ' + text;
+        else paras.push({ ts, at: seconds(ts), text });
+      }
+      const label = (document.querySelector('ytd-transcript-footer-renderer yt-dropdown-menu')?.textContent || '').trim().split('\n')[0].trim();
+      const head = '# ' + document.title.replace(/ - YouTube$/, '') + '\nhttps://youtu.be/' + video + (label ? ' · ' + label : '');
+      return { markdown: head + '\n\n' + paras.map((p) => '[' + p.ts + '] ' + p.text).join('\n\n'), source: 'transcript' };
+    }
+  }`;
+
 export function markdownScript(selector?: string, fetchMs?: number): string {
-  const own = selector === undefined ? String.raw`
+  const own =
+    selector === undefined
+      ? String.raw`
   const signal = ${fetchMs ? `AbortSignal.timeout(${fetchMs})` : "undefined"};
+  ${YOUTUBE_TRANSCRIPT(fetchMs ?? 5000)}
   const artifact = location.hostname === 'claude.ai' && /^\/public\/artifacts\/([0-9a-f-]+)\/?$/.exec(location.pathname);
   if (artifact) {
     try {
@@ -1147,12 +1202,16 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
   if (link) {
     try {
       const r = await fetch(link.href, { signal });
-      if (r.ok && !/html/i.test(r.headers.get('content-type') || '')) return { markdown: (await r.text()).trimEnd(), source: 'page' };
+      // Relative links in the site's Markdown: the DOM conversion has them absolute, so it answers instead (#154).
+      const text = r.ok && !/html/i.test(r.headers.get('content-type') || '') ? (await r.text()).trimEnd() : null;
+      if (text !== null && !/\]\(\s*<?\.{0,2}\//.test(text)) return { markdown: text, source: 'page' };
     } catch {}
-  }` : "";
-  const nodes = selector === undefined
-    ? `(document.querySelector('main, [role=main]') || document.body).childNodes`
-    : `[document.querySelector(${JSON.stringify(selector)})]`;
+  }`
+      : "";
+  const nodes =
+    selector === undefined
+      ? `(document.querySelector('main, [role=main]') || document.body).childNodes`
+      : `[document.querySelector(${JSON.stringify(selector)})]`;
   return String.raw`(async () => {
   const result = await (async () => {${own}
   ${TO_MARKDOWN}
@@ -1165,7 +1224,12 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
 // Compiles `body` without running it: whether the code parses that way.
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (body: string) => unknown;
 function parses(body: string): boolean {
-  try { new AsyncFunction(body); return true; } catch { return false; }
+  try {
+    new AsyncFunction(body);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** `run-code`'s script (spec F18). Code that parses as one expression is
@@ -1197,21 +1261,31 @@ export function runCodeScript(code: string): string {
  *  an element still covered at its centre after the scroll answers
  *  { covered: { role, name, tag } } for what covers it: the native click
  *  would wait out the budget for it, or press what the page put there (#112). */
-export function resolveRefScript(ref: { id: string; role: string; name: string }, opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {}): string {
+export function resolveRefScript(
+  ref: { id: string; role: string; name: string },
+  opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {},
+): string {
   // With `enabled`, a disabled element (DISABLED, the snapshot's rule)
   // answers { disabled: true } instead, before any scroll: click, check and
   // uncheck refuse it at no extra round trip.
-  const enabled = opts.enabled ? String.raw`
-  if (isDisabled(el, role)) return { disabled: true };` : "";
+  const enabled = opts.enabled
+    ? String.raw`
+  if (isDisabled(el, role)) return { disabled: true };`
+    : "";
   // Bun's selector click waits on this same test (kActionabilityJS in its
   // WebViewHost.cpp): a stricter one would refuse what it clicks.
-  const covered = opts.hit ? String.raw`
+  const covered = opts.hit
+    ? String.raw`
   const area = el.getBoundingClientRect();
   const top = document.elementFromPoint(area.left + area.width / 2, area.top + area.height / 2);
   if (top && top !== el && !el.contains(top)) {
     return { covered: { role: ariaRole(top) || 'generic', name: nameOf(top), tag: tagOf(top).toLowerCase() } };
-  }` : "";
-  const scroll = opts.scroll === false ? "" : String.raw`
+  }`
+    : "";
+  const scroll =
+    opts.scroll === false
+      ? ""
+      : String.raw`
   const r = el.getBoundingClientRect();
   const outside = r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth;
   // In view but under something else, like a fixed header: the point a

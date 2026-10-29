@@ -6,7 +6,18 @@ import { createSerializer } from "../src/serialize.ts";
 import type { Op } from "../src/daemon/protocol.ts";
 import { waitFor } from "./helpers/daemons.ts";
 import { manualClock } from "./helpers/manual-clock.ts";
-import { CANCEL_PENDING_NAVIGATION, keyCommandScript, keyWatchScript, LEAVE_INITIAL_DOCUMENT, LOAD_STATE, NAV_ARM, NAV_COUNT, NAV_DESTINATION, STOP_LOADING, TIME_ORIGIN } from "../src/page-scripts.ts";
+import {
+  CANCEL_PENDING_NAVIGATION,
+  keyCommandScript,
+  keyWatchScript,
+  LEAVE_INITIAL_DOCUMENT,
+  LOAD_STATE,
+  NAV_ARM,
+  NAV_COUNT,
+  NAV_DESTINATION,
+  STOP_LOADING,
+  TIME_ORIGIN,
+} from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
 
@@ -24,16 +35,43 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     loading: false,
     onNavigated: null,
     onNavigationFailed: null,
-    navigate: async (url) => { calls.push(["navigate", [url]]); v.url = url; },
-    evaluate: async (expr) => { calls.push(["evaluate", [expr]]); return undefined; },
-    click: async (s) => { calls.push(["click", [s]]); },
-    type: async (t) => { calls.push(["type", [t]]); },
-    press: async (k, o) => { calls.push(["press", o ? [k, o] : [k]]); },
-    resize: async (w, h) => { calls.push(["resize", [w, h]]); },
-    goBack: async () => { calls.push(["goBack", []]); },
-    goForward: async () => { calls.push(["goForward", []]); },
+    navigate: async (url) => {
+      calls.push(["navigate", [url]]);
+      v.url = url;
+    },
+    evaluate: async (expr) => {
+      calls.push(["evaluate", [expr]]);
+      return undefined;
+    },
+    click: async (s) => {
+      calls.push(["click", [s]]);
+    },
+    type: async (t) => {
+      calls.push(["type", [t]]);
+    },
+    press: async (k, o) => {
+      calls.push(["press", o ? [k, o] : [k]]);
+    },
+    resize: async (w, h) => {
+      calls.push(["resize", [w, h]]);
+    },
+    goBack: async () => {
+      calls.push(["goBack", []]);
+    },
+    goForward: async () => {
+      calls.push(["goForward", []]);
+    },
+    reload: async () => {
+      calls.push(["reload", []]);
+    },
+    screenshot: async () => new Blob(),
+    close: () => {},
     /** A navigation lands: url changes, loading ends, onNavigated fires. */
-    land(url) { v.url = url; v.loading = false; v.onNavigated?.(url, ""); },
+    land(url) {
+      v.url = url;
+      v.loading = false;
+      v.onNavigated?.(url, "");
+    },
     ...over,
   };
   return v;
@@ -43,7 +81,9 @@ describe("wrapView click", () => {
   test("passes its timeout to the view's selector click (#112)", async () => {
     const v = fakeView();
     const seen: unknown[] = [];
-    v.click = async (s, o) => { seen.push([s, o]); };
+    v.click = async (s, o) => {
+      seen.push([s, o]);
+    };
     await wrapView(v).click("#a", 1234);
     expect(seen).toEqual([["#a", { timeout: 1234 }]]);
   });
@@ -51,12 +91,16 @@ describe("wrapView click", () => {
   test("a timed-out navigation-arming read never sends the click", async () => {
     let releaseArm!: () => void;
     let armStarted!: () => void;
-    const started = new Promise<void>((r) => { armStarted = r; });
+    const started = new Promise<void>((r) => {
+      armStarted = r;
+    });
     const v = fakeView({
       evaluate: async (expr) => {
         if (expr === NAV_ARM) {
           armStarted();
-          await new Promise<void>((r) => { releaseArm = r; });
+          await new Promise<void>((r) => {
+            releaseArm = r;
+          });
         }
         return undefined;
       },
@@ -64,13 +108,18 @@ describe("wrapView click", () => {
     const b = wrapView(v, fast);
     const replies: unknown[] = [];
     const handler = createHandler(b);
-    dispatch({ id: 1, op: "click", args: ["#go"] }, {
-      handle: handler,
-      serialize: createSerializer(),
-      timeoutMs: 30,
-      cancelAction: handler.cancelAction,
-      reply: (reply) => { replies.push(reply); },
-    });
+    dispatch(
+      { id: 1, op: "click", args: ["#go"] },
+      {
+        handle: handler,
+        serialize: createSerializer(),
+        timeoutMs: 30,
+        cancelAction: handler.cancelAction,
+        reply: (reply) => {
+          replies.push(reply);
+        },
+      },
+    );
 
     await started;
     await waitFor(() => replies.length >= 1, 3000);
@@ -82,16 +131,36 @@ describe("wrapView click", () => {
   });
 
   test("Bun's actionability timeout answers as bowser's own timeout of the acting phase (#122)", async () => {
-    const v = fakeView({ click: async (s) => { throw new Error(`timeout waiting for '${s}' to be actionable`); } });
+    const v = fakeView({
+      click: async (s) => {
+        throw new Error(`timeout waiting for '${s}' to be actionable`);
+      },
+    });
     const handler = createHandler(wrapView(v, fast));
     const replies: unknown[] = [];
-    const lane = { handle: handler, serialize: createSerializer(), timeoutMs: 5000, reply: (r: unknown) => { replies.push(r); } };
+    const lane = {
+      handle: handler,
+      serialize: createSerializer(),
+      timeoutMs: 5000,
+      reply: (r: unknown) => {
+        replies.push(r);
+      },
+    };
     dispatch({ id: 1, op: "click", args: ["main > button:nth-child(2)"], cmd: "click" }, lane);
     dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
     await waitFor(() => replies.length === 2);
     expect(replies).toEqual([
-      { id: 1, ok: false, error: "'click' timed out after 5000ms; the click may have been delivered, check the page before retrying" },
-      { id: 2, ok: false, error: "'fill' timed out after 5000ms (in its 'click' step); the click may have been delivered but the fill did not finish, check the page before retrying" },
+      {
+        id: 1,
+        ok: false,
+        error: "'click' timed out after 5000ms; the click may have been delivered, check the page before retrying",
+      },
+      {
+        id: 2,
+        ok: false,
+        error:
+          "'fill' timed out after 5000ms (in its 'click' step); the click may have been delivered but the fill did not finish, check the page before retrying",
+      },
     ]);
   });
 });
@@ -99,9 +168,14 @@ describe("wrapView click", () => {
 describe("wrapView close", () => {
   test("with a persistent profile, close leaves the page first so its storage is written", async () => {
     const v = fakeView();
-    v.close = () => { v.calls.push(["close", []]); };
+    v.close = () => {
+      v.calls.push(["close", []]);
+    };
     await wrapView(v, undefined, "/p", 0).close();
-    expect(v.calls).toEqual([["navigate", ["about:blank"]], ["close", []]]);
+    expect(v.calls).toEqual([
+      ["navigate", ["about:blank"]],
+      ["close", []],
+    ]);
   });
 
   // #61: WebKit commits localStorage 500 ms after a write, and Bun kills the
@@ -110,15 +184,23 @@ describe("wrapView close", () => {
   test("with a persistent profile, close waits out the storage commit window after leaving the page", async () => {
     let left = 0;
     let closed = 0;
-    const v = fakeView({ navigate: async () => { left = Date.now(); } });
-    v.close = () => { closed = Date.now(); };
+    const v = fakeView({
+      navigate: async () => {
+        left = Date.now();
+      },
+    });
+    v.close = () => {
+      closed = Date.now();
+    };
     await wrapView(v, undefined, "/p", 150).close();
     expect(closed - left).toBeGreaterThanOrEqual(150);
   });
 
   test("an ephemeral view just closes", async () => {
     const v = fakeView();
-    v.close = () => { v.calls.push(["close", []]); };
+    v.close = () => {
+      v.calls.push(["close", []]);
+    };
     await wrapView(v).close();
     expect(v.calls).toEqual([["close", []]]);
   });
@@ -134,9 +216,16 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     return {
       messages: 0,
       /** A message reaches the host: it writes out what it held. */
-      message() { this.messages++; const h = held; held = []; for (const f of h) f(); },
+      message() {
+        this.messages++;
+        const h = held;
+        held = [];
+        for (const f of h) f();
+      },
       /** The host holds this reply until the next message. */
-      stall(done: () => void) { held.push(done); },
+      stall(done: () => void) {
+        held.push(done);
+      },
     };
   }
   type Host = ReturnType<typeof fakeHost>;
@@ -147,34 +236,68 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     let closed = false;
     const k = {
       calls,
-      get closed() { return closed; },
-      evaluate: (expr: string) => new Promise<unknown>((r) => {
-        calls.push("evaluate"); host.message();
-        if (stuck.evaluate) host.stall(() => r(expr)); else r(expr);
-      }),
-      resize: (w: number, h: number) => new Promise<void>((r) => { calls.push(`resize ${w}x${h}`); host.message(); r(); }),
-      close: () => { closed = true; },
+      get closed() {
+        return closed;
+      },
+      evaluate: (expr: string) =>
+        new Promise<unknown>((r) => {
+          calls.push("evaluate");
+          host.message();
+          if (stuck.evaluate) host.stall(() => r(expr));
+          else r(expr);
+        }),
+      resize: (w: number, h: number) =>
+        new Promise<void>((r) => {
+          calls.push(`resize ${w}x${h}`);
+          host.message();
+          r();
+        }),
+      close: () => {
+        closed = true;
+      },
     };
     return k;
   }
   /** How wrapView gets the kicker: opened on demand, counted. */
   function lazy(k: ReturnType<typeof fakeKicker>, afterMs = 150) {
-    const stalls = { opens: 0, afterMs, open: () => { stalls.opens++; return k; } };
+    const stalls = {
+      opens: 0,
+      afterMs,
+      open: () => {
+        stalls.opens++;
+        return k;
+      },
+    };
     return stalls;
   }
 
   test("a navigate whose reply stalls settles", async () => {
     const host = fakeHost();
-    const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
+    const v = fakeView({
+      navigate: (url) =>
+        new Promise<void>((r) => {
+          host.message();
+          host.stall(() => {
+            v.land(url);
+            r();
+          });
+        }),
+    });
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
     expect(await clock.fulfilledAt(b.navigate("data:text/html,long"))).toBe(200);
-    expect(b.url).toBe("data:text/html,long");
+    expect(v.url).toBe("data:text/html,long");
   });
 
   test("its failure still reaches the caller", async () => {
     const host = fakeHost();
-    const v = fakeView({ navigate: () => new Promise<void>((_, no) => { host.message(); host.stall(() => no(new Error("nav failed"))); }) });
+    const v = fakeView({
+      navigate: () =>
+        new Promise<void>((_, no) => {
+          host.message();
+          host.stall(() => no(new Error("nav failed")));
+        }),
+    });
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
     const nav = b.navigate("data:text/html,long");
@@ -186,7 +309,13 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
   // is the long URL again (1 in 600 gotos under load).
   test("an evaluate whose reply stalls settles, with its result", async () => {
     const host = fakeHost();
-    const v = fakeView({ evaluate: (expr) => new Promise((r) => { host.message(); host.stall(() => r(`long ${expr}`)); }) });
+    const v = fakeView({
+      evaluate: (expr) =>
+        new Promise((r) => {
+          host.message();
+          host.stall(() => r(`long ${expr}`));
+        }),
+    });
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, lazy(fakeKicker(host)), clock);
     expect(await clock.fulfilledAt(b.realUrl())).toBe(200);
@@ -197,18 +326,28 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
 
   test("a navigation an action started lands although its event stalls", async () => {
     const host = fakeHost();
-    const v = fakeView({ click: async () => { host.message(); v.loading = true; host.stall(() => v.land("https://x/next")); } });
+    const v = fakeView({
+      click: async () => {
+        host.message();
+        v.loading = true;
+        host.stall(() => v.land("https://x/next"));
+      },
+    });
     const clock = manualClock();
     const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, lazy(fakeKicker(host)), clock);
     expect(await clock.fulfilledAt(b.click("a"))).toBeLessThan(5000);
-    expect(b.url).toBe("https://x/next");
+    expect(v.url).toBe("https://x/next");
   });
 
   test("a kick whose own reply stalls does not stop the kicking", async () => {
     // The reply needs two more messages: each one flushes part of it.
     const host = fakeHost();
     const v = fakeView({
-      navigate: () => new Promise<void>((r) => { host.message(); host.stall(() => host.stall(r)); }),
+      navigate: () =>
+        new Promise<void>((r) => {
+          host.message();
+          host.stall(() => host.stall(r));
+        }),
     });
     const k = fakeKicker(host, { evaluate: true });
     const clock = manualClock();
@@ -221,12 +360,28 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const host = fakeHost();
     const k = fakeKicker(host);
     const clock = manualClock();
-    const b = wrapView(fakeView({ navigate: () => new Promise<void>((r) => { clock.setTimeout(r, 400); }) }), fast, undefined, 0, lazy(k), clock);
+    const b = wrapView(
+      fakeView({
+        navigate: () =>
+          new Promise<void>((r) => {
+            clock.setTimeout(r, 400);
+          }),
+      }),
+      fast,
+      undefined,
+      0,
+      lazy(k),
+      clock,
+    );
     await clock.fulfilledAt(b.navigate("https://slow/"));
     const kicks = k.calls.length;
     expect(kicks).toBeGreaterThan(0);
     // Negative check: no kick once nothing is pending.
-    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 250); }));
+    await clock.settledAt(
+      new Promise<void>((r) => {
+        clock.setTimeout(r, 250);
+      }),
+    );
     expect(k.calls.length).toBe(kicks);
     await b.close();
     expect(k.closed).toBe(true);
@@ -238,14 +393,25 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const host = fakeHost();
     const stalls = lazy(fakeKicker(host));
     const clock = manualClock();
-    const v = fakeView({ navigate: async (url) => { await new Promise<void>((r) => { clock.setTimeout(r, 50); }); v.land(url); } });
+    const v = fakeView({
+      navigate: async (url) => {
+        await new Promise<void>((r) => {
+          clock.setTimeout(r, 50);
+        });
+        v.land(url);
+      },
+    });
     const b = wrapView(v, fast, undefined, 0, stalls, clock);
     await clock.fulfilledAt(b.navigate("https://x/a"));
     await clock.fulfilledAt(b.evaluate("1"));
     await clock.fulfilledAt(b.click("a"));
     await clock.settledAt(b.screenshot().catch(() => {}));
     // Negative check: no kicker opens after afterMs has passed.
-    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 300); }));
+    await clock.settledAt(
+      new Promise<void>((r) => {
+        clock.setTimeout(r, 300);
+      }),
+    );
     await b.close();
     expect(stalls.opens).toBe(0);
     expect(b.kickerOpened).toBe(false);
@@ -255,7 +421,16 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const host = fakeHost();
     const k = fakeKicker(host);
     const stalls = lazy(k, 300);
-    const v = fakeView({ navigate: (url) => new Promise<void>((r) => { host.message(); host.stall(() => { v.land(url); r(); }); }) });
+    const v = fakeView({
+      navigate: (url) =>
+        new Promise<void>((r) => {
+          host.message();
+          host.stall(() => {
+            v.land(url);
+            r();
+          });
+        }),
+    });
     const clock = manualClock();
     const b = wrapView(v, fast, undefined, 0, stalls, clock);
     // Settling at 300, not at the first kick (100), is the check that no kicker opens before afterMs.
@@ -286,7 +461,10 @@ function pageNavView(over: Partial<ViewLike> = {}) {
   const v = fakeView({
     evaluate: async (expr) => {
       v.calls.push(["evaluate", [expr]]);
-      if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+      if (expr === NAV_ARM) {
+        page.navs = 0;
+        return undefined;
+      }
       if (expr === NAV_COUNT) return page.navs;
       if (expr === NAV_DESTINATION) return page.to;
       return undefined;
@@ -300,10 +478,13 @@ describe("wrapView navigation watch", () => {
   test("press goes through the watch like click", async () => {
     const clock = manualClock();
     const v = fakeView();
-    v.press = async (k) => { v.calls.push(["press", [k]]); clock.setTimeout(() => v.land("https://x/submitted"), 10); };
+    v.press = async (k) => {
+      v.calls.push(["press", [k]]);
+      clock.setTimeout(() => v.land("https://x/submitted"), 10);
+    };
     const b = onClock(v, fast, clock);
     await clock.fulfilledAt(b.press("Enter"));
-    expect(b.url).toBe("https://x/submitted");
+    expect(v.url).toBe("https://x/submitted");
   });
 
   test("a bare named key goes as its macOS character, which WebKit takes as a key event (F11, #168)", async () => {
@@ -312,7 +493,11 @@ describe("wrapView navigation watch", () => {
     const b = onClock(v, fast, clock);
     for (const key of ["Tab", "Enter", "ArrowDown", "Escape", "t"]) await clock.fulfilledAt(b.press(key));
     expect(v.calls.filter(([op]) => op === "press")).toEqual([
-      ["press", ["\t"]], ["press", ["\r"]], ["press", ["\uF701"]], ["press", ["Escape"]], ["press", ["t"]],
+      ["press", ["\t"]],
+      ["press", ["\r"]],
+      ["press", ["\uF701"]],
+      ["press", ["Escape"]],
+      ["press", ["t"]],
     ]);
   });
 
@@ -364,38 +549,53 @@ describe("wrapView navigation watch", () => {
   test("press Tab still goes through the watch", async () => {
     const v = fakeView();
     const clock = manualClock();
-    v.press = async (k) => { v.calls.push(["press", [k]]); clock.setTimeout(() => v.land("https://x/next"), 10); };
+    v.press = async (k) => {
+      v.calls.push(["press", [k]]);
+      clock.setTimeout(() => v.land("https://x/next"), 10);
+    };
     const b = onClock(v, fast, clock);
     await clock.fulfilledAt(b.press("Tab"));
-    expect(b.url).toBe("https://x/next");
+    expect(v.url).toBe("https://x/next");
   });
 
   test("a failed navigation ends the wait without failing the action", async () => {
     const v = fakeView();
     const clock = manualClock();
-    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; clock.setTimeout(() => { v.onNavigationFailed?.(new Error("-999")); }, 20); };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      v.loading = true;
+      clock.setTimeout(() => {
+        v.onNavigationFailed?.(new Error("-999"));
+      }, 20);
+    };
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.click("#l"))).toBe(20);
-    expect(b.url).toBe("https://x/");
+    expect(v.url).toBe("https://x/");
   });
 
   test("an action after a given-up navigation pays the grace window, not settleMs", async () => {
     const v = fakeView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      v.loading = true;
+    };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 300 }, clock);
     const gaveUp = await clock.settledAt(b.click("#stuck"));
     expect(v.loading).toBe(true);
-    expect(await clock.settledAt(b.click("#next")) - gaveUp).toBe(20);
+    expect((await clock.settledAt(b.click("#next"))) - gaveUp).toBe(20);
   });
 
   test("click returns after a navigation that lands inside the grace window", async () => {
     const v = fakeView();
     const clock = manualClock();
-    v.click = async (s) => { v.calls.push(["click", [s]]); clock.setTimeout(() => v.land("https://x/two"), 10); };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      clock.setTimeout(() => v.land("https://x/two"), 10);
+    };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#l"));
-    expect(b.url).toBe("https://x/two");
+    expect(v.url).toBe("https://x/two");
   });
 
   test("click that navigates nowhere returns after the grace window", async () => {
@@ -403,21 +603,28 @@ describe("wrapView navigation watch", () => {
     const clock = manualClock();
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs);
-    expect(b.url).toBe("https://x/");
+    expect(v.url).toBe("https://x/");
   });
 
   test("a navigation that starts inside the grace window is awaited past it", async () => {
     const v = fakeView();
     const clock = manualClock();
-    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; clock.setTimeout(() => v.land("https://x/slow"), 120); };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      v.loading = true;
+      clock.setTimeout(() => v.land("https://x/slow"), 120);
+    };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#l"));
-    expect(b.url).toBe("https://x/slow");
+    expect(v.url).toBe("https://x/slow");
   });
 
   test("a navigation that never lands is given up after settleMs", async () => {
     const v = fakeView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); v.loading = true; };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      v.loading = true;
+    };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
     expect(await clock.settledAt(b.click("#l"))).toBe(60);
@@ -429,10 +636,14 @@ describe("wrapView navigation watch", () => {
     // provisional navigation; only the page's navigate event does.
     const { v, page } = pageNavView();
     const clock = manualClock();
-    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; clock.setTimeout(() => v.land("https://x/slow"), 150); };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      page.navs++;
+      clock.setTimeout(() => v.land("https://x/slow"), 150);
+    };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#slow"));
-    expect(b.url).toBe("https://x/slow");
+    expect(v.url).toBe("https://x/slow");
   });
 
   test("the page's signal is armed before the action, so an earlier navigation does not count", async () => {
@@ -441,12 +652,15 @@ describe("wrapView navigation watch", () => {
     const clock = manualClock();
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs);
-    expect(v.calls.map(([n, a]) => n === "evaluate" ? String(a[0]) : n)).toEqual([NAV_ARM, "click", NAV_COUNT]);
+    expect(v.calls.map(([n, a]) => (n === "evaluate" ? String(a[0]) : n))).toEqual([NAV_ARM, "click", NAV_COUNT]);
   });
 
   test("a page-started navigation that never lands is given up after settleMs", async () => {
     const { v, page } = pageNavView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      page.navs++;
+    };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
     expect(await clock.settledAt(b.click("#never"))).toBe(20 + 60);
@@ -458,12 +672,15 @@ describe("wrapView navigation watch", () => {
     v.click = async (s) => {
       v.calls.push(["click", [s]]);
       page.navs++;
-      clock.setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 80);
+      clock.setTimeout(() => {
+        page.navs++;
+        v.onNavigationFailed?.(new Error("-999"));
+      }, 80);
       clock.setTimeout(() => v.land("https://x/second"), 160);
     };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#twice"));
-    expect(b.url).toBe("https://x/second");
+    expect(v.url).toBe("https://x/second");
   });
 
   test("a count read during the wait that a later failure overtakes is read again (#106)", async () => {
@@ -471,22 +688,34 @@ describe("wrapView navigation watch", () => {
     let reads = 0;
     const { v, page } = pageNavView({
       evaluate: async (expr) => {
-        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_ARM) {
+          page.navs = 0;
+          return undefined;
+        }
         if (expr !== NAV_COUNT) return undefined;
         const n = page.navs;
-        if (++reads === 2) await new Promise<void>((r) => { clock.setTimeout(r, 40); });
+        if (++reads === 2)
+          await new Promise<void>((r) => {
+            clock.setTimeout(r, 40);
+          });
         return n;
       },
     });
     v.click = async () => {
       page.navs++;
-      clock.setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 80);
-      clock.setTimeout(() => { page.navs++; v.onNavigationFailed?.(new Error("-999")); }, 100);
+      clock.setTimeout(() => {
+        page.navs++;
+        v.onNavigationFailed?.(new Error("-999"));
+      }, 80);
+      clock.setTimeout(() => {
+        page.navs++;
+        v.onNavigationFailed?.(new Error("-999"));
+      }, 100);
       clock.setTimeout(() => v.land("https://x/third"), 200);
     };
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.click("#thrice"));
-    expect(b.url).toBe("https://x/third");
+    expect(v.url).toBe("https://x/third");
   });
 
   test("a reread that never answers still leaves the wait at settleMs", async () => {
@@ -495,13 +724,19 @@ describe("wrapView navigation watch", () => {
     let reads = 0;
     const { v, page } = pageNavView({
       evaluate: async (expr) => {
-        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_ARM) {
+          page.navs = 0;
+          return undefined;
+        }
         if (expr === NAV_COUNT && ++reads > 1) return new Promise(() => {});
         return page.navs;
       },
     });
     const clock = manualClock();
-    v.click = async () => { page.navs++; clock.setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 40); };
+    v.click = async () => {
+      page.navs++;
+      clock.setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 40);
+    };
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
     const at = await clock.settledAt(b.click("#x"));
     expect(reads).toBe(2);
@@ -522,7 +757,12 @@ describe("wrapView navigation watch", () => {
         log.push(`start ${expr === NAV_COUNT ? "count" : expr === NAV_ARM ? "arm" : expr}`);
         pending = true;
         try {
-          if (expr === NAV_COUNT) { await new Promise<void>((r) => { clock.setTimeout(r, 1000); }); return 0; }
+          if (expr === NAV_COUNT) {
+            await new Promise<void>((r) => {
+              clock.setTimeout(r, 1000);
+            });
+            return 0;
+          }
           return expr === "1" ? 1 : undefined;
         } finally {
           pending = false;
@@ -543,16 +783,24 @@ describe("wrapView navigation watch", () => {
     // A 204 answer: the page's navigate event, then only a failure.
     const { v, page } = pageNavView();
     const clock = manualClock();
-    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; clock.setTimeout(() => v.onNavigationFailed?.(new Error("interrupted")), 60); };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      page.navs++;
+      clock.setTimeout(() => v.onNavigationFailed?.(new Error("interrupted")), 60);
+    };
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.click("#nocontent"))).toBe(60);
   });
 
   test("a page that cannot answer the read costs the grace window, not a failure", async () => {
-    const v = fakeView({ evaluate: async () => { throw new Error("no longer reachable"); } });
+    const v = fakeView({
+      evaluate: async () => {
+        throw new Error("no longer reachable");
+      },
+    });
     const b = wrapView(v, fast);
     await b.click("#btn");
-    expect(b.url).toBe("https://x/");
+    expect(v.url).toBe("https://x/");
   });
 
   test("back and forward call goBack/goForward, with no page fallback", async () => {
@@ -560,13 +808,18 @@ describe("wrapView navigation watch", () => {
     const b = wrapView(v, fast);
     await b.back();
     await b.forward();
-    expect(own(v.calls)).toEqual([["goBack", []], ["goForward", []]]);
+    expect(own(v.calls)).toEqual([
+      ["goBack", []],
+      ["goForward", []],
+    ]);
   });
 
   // #127: past the back-forward cache WebKit reports the load's failure after goBack() resolves.
   test("back and forward fail with the failure of the page they go to", async () => {
     const clock = manualClock();
-    const failing = async () => { clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 5); };
+    const failing = async () => {
+      clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 5);
+    };
     const v = fakeView({ goBack: failing, goForward: failing });
     const b = onClock(v, fast, clock);
     const back = b.back();
@@ -580,29 +833,25 @@ describe("wrapView navigation watch", () => {
 
   test("back over a cancelled -999 still returns", async () => {
     const clock = manualClock();
-    const v = fakeView({ goBack: async () => { clock.setTimeout(() => v.onNavigationFailed?.(new Error(CANCELLED)), 5); } });
+    const v = fakeView({
+      goBack: async () => {
+        clock.setTimeout(() => v.onNavigationFailed?.(new Error(CANCELLED)), 5);
+      },
+    });
     await clock.fulfilledAt(onClock(v, fast, clock).back());
   });
 
   test("back that lands returns, though the navigation before it failed", async () => {
     const clock = manualClock();
-    const v = fakeView({ goBack: async () => { clock.setTimeout(() => v.land("https://x/previous"), 5); } });
+    const v = fakeView({
+      goBack: async () => {
+        clock.setTimeout(() => v.land("https://x/previous"), 5);
+      },
+    });
     const b = onClock(v, fast, clock);
     v.onNavigationFailed?.(new Error("Could not connect to the server."));
     await clock.fulfilledAt(b.back());
-    expect(b.url).toBe("https://x/previous");
-  });
-
-  test("reload falls back to location.reload() when the runtime lacks it", async () => {
-    const clock = manualClock();
-    const v = fakeView({ evaluate: async (expr) => {
-      v.calls.push(["evaluate", [expr]]);
-      if (expr === "location.reload()") clock.setTimeout(() => v.land("https://x/"), 10);
-      return undefined;
-    } });
-    const b = onClock(v, fast, clock);
-    await clock.settledAt(b.reload());
-    expect(own(v.calls)).toEqual([["evaluate", ["location.reload()"]]]);
+    expect(v.url).toBe("https://x/previous");
   });
 
   // #116: on WebKit a reload shows no sign before it lands: view.loading
@@ -611,7 +860,14 @@ describe("wrapView navigation watch", () => {
   test("reload waits for its landing past the grace and settle windows, as navigate does", async () => {
     let during = "";
     const clock = manualClock();
-    const v = fakeView({ reload: async () => { clock.setTimeout(() => { during = b.phase; v.land("https://x/"); }, fast.settleMs + 100); } });
+    const v = fakeView({
+      reload: async () => {
+        clock.setTimeout(() => {
+          during = b.phase;
+          v.land("https://x/");
+        }, fast.settleMs + 100);
+      },
+    });
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.reload())).toBe(fast.settleMs + 100);
     expect(during).toBe("awaiting-navigation");
@@ -628,17 +884,26 @@ describe("wrapView navigation watch", () => {
 
   test("a reload that a page script cancels waits for the script's navigation", async () => {
     const clock = manualClock();
-    const { v, page } = pageNavView({ reload: async () => {
-      clock.setTimeout(() => { page.navs = 1; v.onNavigationFailed?.(new Error(CANCELLED)); }, 30);
-      clock.setTimeout(() => v.land("https://x/elsewhere"), 120);
-    } });
+    const { v, page } = pageNavView({
+      reload: async () => {
+        clock.setTimeout(() => {
+          page.navs = 1;
+          v.onNavigationFailed?.(new Error(CANCELLED));
+        }, 30);
+        clock.setTimeout(() => v.land("https://x/elsewhere"), 120);
+      },
+    });
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.reload());
-    expect(b.url).toBe("https://x/elsewhere");
+    expect(v.url).toBe("https://x/elsewhere");
   });
 
   test("reload fails at once when its own failure arrives before reload resolves", async () => {
-    const v = fakeView({ reload: async () => { v.onNavigationFailed?.(new Error("Could not connect to the server.")); } });
+    const v = fakeView({
+      reload: async () => {
+        v.onNavigationFailed?.(new Error("Could not connect to the server."));
+      },
+    });
     const clock = manualClock();
     const b = onClock(v, fast, clock);
     const reloaded = b.reload();
@@ -649,9 +914,11 @@ describe("wrapView navigation watch", () => {
   // #123: WebKit reports the reload's own failure 1-5 ms after reload() resolves.
   test("reload fails with its own failure when it arrives after reload resolves", async () => {
     const clock = manualClock();
-    const v = fakeView({ reload: async () => {
-      clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 3);
-    } });
+    const v = fakeView({
+      reload: async () => {
+        clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 3);
+      },
+    });
     const b = onClock(v, fast, clock);
     const reloaded = b.reload();
     await clock.settledAt(reloaded);
@@ -661,10 +928,15 @@ describe("wrapView navigation watch", () => {
 
   test("reload whose script replacement fails after the cancelled -999 fails with that failure", async () => {
     const clock = manualClock();
-    const { v, page } = pageNavView({ reload: async () => {
-      clock.setTimeout(() => { page.navs = 1; v.onNavigationFailed?.(new Error(CANCELLED)); }, 3);
-      clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 60);
-    } });
+    const { v, page } = pageNavView({
+      reload: async () => {
+        clock.setTimeout(() => {
+          page.navs = 1;
+          v.onNavigationFailed?.(new Error(CANCELLED));
+        }, 3);
+        clock.setTimeout(() => v.onNavigationFailed?.(new Error("Could not connect to the server.")), 60);
+      },
+    });
     const b = onClock(v, fast, clock);
     const reloaded = b.reload();
     await clock.settledAt(reloaded);
@@ -673,9 +945,11 @@ describe("wrapView navigation watch", () => {
 
   test("reload over a cancelled -999 with nothing after it still returns", async () => {
     const clock = manualClock();
-    const v = fakeView({ reload: async () => {
-      clock.setTimeout(() => v.onNavigationFailed?.(new Error(CANCELLED)), 3);
-    } });
+    const v = fakeView({
+      reload: async () => {
+        clock.setTimeout(() => v.onNavigationFailed?.(new Error(CANCELLED)), 3);
+      },
+    });
     const reloaded = onClock(v, fast, clock).reload();
     await clock.settledAt(reloaded);
     await reloaded;
@@ -683,54 +957,76 @@ describe("wrapView navigation watch", () => {
 
   test("reload waits when the cancelled navigation fails before reload resolves", async () => {
     const clock = manualClock();
-    const { v, page } = pageNavView({ reload: async () => {
-      clock.setTimeout(() => { page.navs = 1; v.onNavigationFailed?.(new Error(CANCELLED)); }, 10);
-      await new Promise<void>((r) => { clock.setTimeout(r, 30); });
-      clock.setTimeout(() => v.land("https://x/elsewhere"), 40);
-    } });
+    const { v, page } = pageNavView({
+      reload: async () => {
+        clock.setTimeout(() => {
+          page.navs = 1;
+          v.onNavigationFailed?.(new Error(CANCELLED));
+        }, 10);
+        await new Promise<void>((r) => {
+          clock.setTimeout(r, 30);
+        });
+        clock.setTimeout(() => v.land("https://x/elsewhere"), 40);
+      },
+    });
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.reload())).toBe(30 + 40);
-    expect(b.url).toBe("https://x/elsewhere");
+    expect(v.url).toBe("https://x/elsewhere");
   });
 
   test("reload prefers the native call and waits for its navigation to land", async () => {
     // Native reload() resolves before the reload commits (measured), so the
     // fake resolves at once with loading=true and lands 60 ms later.
     const clock = manualClock();
-    const v = fakeView({ reload: async () => {
-      v.calls.push(["reload", []]); v.loading = true;
-      clock.setTimeout(() => v.land("https://x/re"), 60);
-    } });
+    const v = fakeView({
+      reload: async () => {
+        v.calls.push(["reload", []]);
+        v.loading = true;
+        clock.setTimeout(() => v.land("https://x/re"), 60);
+      },
+    });
     const b = onClock(v, fast, clock);
     await clock.settledAt(b.reload());
     expect(own(v.calls)).toEqual([["reload", []]]);
-    expect(b.url).toBe("https://x/re");
+    expect(v.url).toBe("https://x/re");
   });
 
   test("phase is awaiting-navigation while act waits for a landing", async () => {
     const v = fakeView();
     let during = "";
     const b = wrapView(v, { graceMs: fast.graceMs, settleMs: 5000 });
-    v.click = async () => { during = b.phase; v.loading = true; };
+    v.click = async () => {
+      during = b.phase;
+      v.loading = true;
+    };
     expect(b.phase).toBe("idle");
     const clicked = b.click("#go");
     await waitFor(() => b.phase === "awaiting-navigation", 3000);
     expect([during, b.phase]).toEqual(["acting", "awaiting-navigation"]);
     v.land("https://x/next");
     await clicked;
-    expect([b.url, b.phase]).toEqual(["https://x/next", "idle"]);
+    expect([v.url, b.phase]).toEqual(["https://x/next", "idle"]);
   });
 
   test("phase is delivered while the watch waits for a navigation that never begins", async () => {
     let atRead = "";
-    const v = fakeView({ evaluate: async (expr) => { if (expr === NAV_COUNT) atRead = b.phase; return 0; } });
+    const v = fakeView({
+      evaluate: async (expr) => {
+        if (expr === NAV_COUNT) atRead = b.phase;
+        return 0;
+      },
+    });
     const b = wrapView(v, fast);
     await b.click("#go");
     expect([atRead, b.phase]).toEqual(["delivered", "idle"]);
   });
 
   test("phase turns awaiting-navigation when the page reports a navigation it started", async () => {
-    const { v, page } = pageNavView({ click: async () => { page.navs = 1; } });
+    const { v, page } = pageNavView({
+      click: async () => {
+        page.navs = 1;
+      },
+    });
     const b = wrapView(v, fast);
     const clicked = b.click("#go");
     await waitFor(() => b.phase === "awaiting-navigation", 3000);
@@ -741,7 +1037,11 @@ describe("wrapView navigation watch", () => {
   });
 
   test("phase resets to idle when the action throws", async () => {
-    const v = fakeView({ click: async () => { throw new Error("no element"); } });
+    const v = fakeView({
+      click: async () => {
+        throw new Error("no element");
+      },
+    });
     const b = wrapView(v, fast);
     await expect(b.click("#missing")).rejects.toThrow("no element");
     expect(b.phase).toBe("idle");
@@ -757,33 +1057,48 @@ describe("wrapView navigation watch", () => {
 describe("navigate over a navigation still loading", () => {
   /** A view whose navigate cancels a pending navigation, then fires `then`. */
   function cancelling(then: (v: Fake, url: string) => void) {
-    const v = fakeView({ navigate: async (url) => {
-      v.onNavigationFailed?.(new Error(CANCELLED));
-      setTimeout(() => then(v, url), 30);
-      throw new Error(CANCELLED);
-    } });
+    const v = fakeView({
+      navigate: async (url) => {
+        v.onNavigationFailed?.(new Error(CANCELLED));
+        setTimeout(() => then(v, url), 30);
+        throw new Error(CANCELLED);
+      },
+    });
     return v;
   }
 
   test("waits for its own landing instead of failing with the cancelled one's -999", async () => {
-    const b = wrapView(cancelling((v, url) => v.land(url)), fast);
-    await b.navigate("https://x/next");
-    expect(b.url).toBe("https://x/next");
+    const v = cancelling((v, url) => v.land(url));
+    await wrapView(v, fast).navigate("https://x/next");
+    expect(v.url).toBe("https://x/next");
   });
 
   test("its own failure is reported", async () => {
-    const b = wrapView(cancelling((v) => v.onNavigationFailed?.(new Error("Could not connect to the server."))), fast);
+    const b = wrapView(
+      cancelling((v) => v.onNavigationFailed?.(new Error("Could not connect to the server."))),
+      fast,
+    );
     await expect(b.navigate("https://x/next")).rejects.toThrow("Could not connect to the server.");
   });
 
   test("cancelled itself, it fails with bowser's message, not WebKit's", async () => {
-    const b = wrapView(cancelling((v) => v.onNavigationFailed?.(new Error(CANCELLED))), fast);
-    const err = await b.navigate("https://x/next").then(() => undefined, (e: Error) => e);
+    const b = wrapView(
+      cancelling((v) => v.onNavigationFailed?.(new Error(CANCELLED))),
+      fast,
+    );
+    const err = await b.navigate("https://x/next").then(
+      () => undefined,
+      (e: Error) => e,
+    );
     expect(err?.message).toBe("navigate: the navigation to https://x/next was cancelled by another navigation; run 'bowser snapshot' to see where the page is");
   });
 
   test("any other failure is reported at once", async () => {
-    const v = fakeView({ navigate: async () => { throw new Error("bad URL"); } });
+    const v = fakeView({
+      navigate: async () => {
+        throw new Error("bad URL");
+      },
+    });
     await expect(wrapView(v, fast).navigate("nope")).rejects.toThrow("bad URL");
   });
 });
@@ -794,14 +1109,25 @@ describe("a navigation a previous command left pending", () => {
    *  answers; with `to` null the page cannot say where it goes. */
   function submitted(to: string | null = "https://x/never") {
     const { v, page } = pageNavView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); if (s === "#send") { page.navs++; page.to = to ?? undefined; } };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      if (s === "#send") {
+        page.navs++;
+        page.to = to ?? undefined;
+      }
+    };
     return v;
   }
   const stillLoading = (url: string) => `page is still loading ${url}; retry later, or run 'bowser close'`;
   const clicks = (v: Fake) => v.calls.filter(([n]) => n === "click").map(([, a]) => a[0]);
   /** Settles once `cond` holds, polling on `clock`; settledAt throws if it never does. */
   const until = (clock: ReturnType<typeof manualClock>, cond: () => boolean) =>
-    clock.fulfilledAt(new Promise<void>((r) => { const poll = () => cond() ? r() : clock.setTimeout(poll, 1); poll(); }));
+    clock.fulfilledAt(
+      new Promise<void>((r) => {
+        const poll = () => (cond() ? r() : clock.setTimeout(poll, 1));
+        poll();
+      }),
+    );
 
   test("is pending after act gives up on it, until a landing or a failure", async () => {
     for (const end of ["landed", "failed"] as const) {
@@ -812,14 +1138,21 @@ describe("a navigation a previous command left pending", () => {
       await clock.fulfilledAt(b.click("#send"));
       expect(b.navigationPending).toBe(true);
       if (end === "landed") v.land("https://x/never");
-      else { v.onNavigationFailed?.(new Error("Frame load interrupted")); await until(clock, () => !b.navigationPending); }
+      else {
+        v.onNavigationFailed?.(new Error("Frame load interrupted"));
+        await until(clock, () => !b.navigationPending);
+      }
       expect([end, b.navigationPending]).toEqual([end, false]);
     }
   });
 
   test("stays pending when a script replaces it after the watch ended, until the replacement lands (#98)", async () => {
     const { v, page } = pageNavView();
-    v.click = async (s) => { v.calls.push(["click", [s]]); page.navs++; page.to = "https://x/never"; };
+    v.click = async (s) => {
+      v.calls.push(["click", [s]]);
+      page.navs++;
+      page.to = "https://x/never";
+    };
     const clock = manualClock();
     const b = onClock(v, slow, clock);
     await clock.fulfilledAt(b.click("#send"));
@@ -827,7 +1160,11 @@ describe("a navigation a previous command left pending", () => {
     page.to = "https://x/never2";
     v.onNavigationFailed?.(new Error("-999"));
     // Negative check: the failure does not clear it once the page's count is read.
-    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 100); }));
+    await clock.settledAt(
+      new Promise<void>((r) => {
+        clock.setTimeout(r, 100);
+      }),
+    );
     expect(b.navigationPending).toBe(true);
     v.land("https://x/never2");
     expect(b.navigationPending).toBe(false);
@@ -837,12 +1174,19 @@ describe("a navigation a previous command left pending", () => {
     let countReads = 0;
     let startFirstFailureRead!: () => void;
     let releaseFirstFailureRead!: () => void;
-    const firstFailureReadStarted = new Promise<void>((resolve) => { startFirstFailureRead = resolve; });
-    const firstFailureReadGate = new Promise<void>((resolve) => { releaseFirstFailureRead = resolve; });
+    const firstFailureReadStarted = new Promise<void>((resolve) => {
+      startFirstFailureRead = resolve;
+    });
+    const firstFailureReadGate = new Promise<void>((resolve) => {
+      releaseFirstFailureRead = resolve;
+    });
     const { v, page } = pageNavView({
       evaluate: async (expr) => {
         v.calls.push(["evaluate", [expr]]);
-        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_ARM) {
+          page.navs = 0;
+          return undefined;
+        }
         if (expr === NAV_COUNT && ++countReads === 2) {
           startFirstFailureRead();
           await firstFailureReadGate;
@@ -852,7 +1196,9 @@ describe("a navigation a previous command left pending", () => {
         return undefined;
       },
     });
-    v.click = async () => { page.navs++; };
+    v.click = async () => {
+      page.navs++;
+    };
     const clock = manualClock();
     const b = onClock(v, slow, clock);
     await clock.fulfilledAt(b.click("#send"));
@@ -874,12 +1220,19 @@ describe("a navigation a previous command left pending", () => {
     let countReads = 0;
     let startLateRead!: () => void;
     let releaseLateRead!: () => void;
-    const lateReadStarted = new Promise<void>((resolve) => { startLateRead = resolve; });
-    const lateReadGate = new Promise<void>((resolve) => { releaseLateRead = resolve; });
+    const lateReadStarted = new Promise<void>((resolve) => {
+      startLateRead = resolve;
+    });
+    const lateReadGate = new Promise<void>((resolve) => {
+      releaseLateRead = resolve;
+    });
     const { v, page } = pageNavView({
       evaluate: async (expr) => {
         v.calls.push(["evaluate", [expr]]);
-        if (expr === NAV_ARM) { page.navs = 0; return undefined; }
+        if (expr === NAV_ARM) {
+          page.navs = 0;
+          return undefined;
+        }
         if (expr === NAV_COUNT && ++countReads === 2) {
           startLateRead();
           await lateReadGate;
@@ -888,7 +1241,9 @@ describe("a navigation a previous command left pending", () => {
         return undefined;
       },
     });
-    v.click = async () => { page.navs++; };
+    v.click = async () => {
+      page.navs++;
+    };
     const clock = manualClock();
     const b = onClock(v, slow, clock);
     await clock.fulfilledAt(b.click("#send"));
@@ -900,7 +1255,11 @@ describe("a navigation a previous command left pending", () => {
     v.onNavigationFailed?.(new Error("-999"));
     releaseLateRead();
     await until(clock, () => countReads === 3);
-    await clock.settledAt(new Promise<void>((r) => { clock.setTimeout(r, 100); }));
+    await clock.settledAt(
+      new Promise<void>((r) => {
+        clock.setTimeout(r, 100);
+      }),
+    );
 
     expect(b.navigationPending).toBe(true);
     v.land("https://x/third");
@@ -971,7 +1330,9 @@ describe("a navigation a previous command left pending", () => {
     test(`${op} does not wait for a pending navigation`, async () => {
       const v = submitted();
       const { clock, send } = onHandler(v);
-      v.reload = async () => { clock.setTimeout(() => v.land(v.url), 5); };
+      v.reload = async () => {
+        clock.setTimeout(() => v.land(v.url), 5);
+      };
       await send({ id: 1, op: "click", args: ["#send"] });
       const res = await send({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, 30);
       expect(res.error).toBeUndefined();
@@ -984,7 +1345,12 @@ describe("wrapView interrupt", () => {
     // Measured on WebKit: a pending evaluate() makes a second one throw
     // ERR_INVALID_STATE, so the interrupt must not evaluate anything.
     const clock = manualClock();
-    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); clock.setTimeout(() => v.land("https://x/"), 30); } });
+    const v = fakeView({
+      reload: async () => {
+        v.calls.push(["reload", []]);
+        clock.setTimeout(() => v.land("https://x/"), 30);
+      },
+    });
     const interrupted = onClock(v, fast, clock).interrupt();
     expect(await clock.settledAt(interrupted)).toBe(30);
     expect(await interrupted).toBe(true);
@@ -992,7 +1358,11 @@ describe("wrapView interrupt", () => {
   });
 
   test("counts a successful landing that happens before reload resolves", async () => {
-    const v = fakeView({ reload: async () => { v.land("https://x/reloaded"); } });
+    const v = fakeView({
+      reload: async () => {
+        v.land("https://x/reloaded");
+      },
+    });
     expect(await wrapView(v, fast).interrupt()).toBe(true);
   });
 
@@ -1006,17 +1376,23 @@ describe("wrapView interrupt", () => {
 
   test("interrupt waits past the cancelled navigation's failure", async () => {
     const clock = manualClock();
-    const v = fakeView({ reload: async () => {
-      v.onNavigationFailed?.(new Error("-999"));
-      clock.setTimeout(() => v.land("https://x/"), 100);
-    } });
+    const v = fakeView({
+      reload: async () => {
+        v.onNavigationFailed?.(new Error("-999"));
+        clock.setTimeout(() => v.land("https://x/"), 100);
+      },
+    });
     const interrupted = onClock(v, fast, clock).interrupt();
     expect(await clock.settledAt(interrupted)).toBe(100);
     expect(await interrupted).toBe(true);
   });
 
   test("interrupt returns false when nothing lands", async () => {
-    const v = fakeView({ reload: async () => { v.calls.push(["reload", []]); } });
+    const v = fakeView({
+      reload: async () => {
+        v.calls.push(["reload", []]);
+      },
+    });
     const clock = manualClock();
     const interrupted = onClock(v, { graceMs: 20, settleMs: 50 }, clock).interrupt();
     expect(await clock.settledAt(interrupted)).toBe(50);
@@ -1024,17 +1400,23 @@ describe("wrapView interrupt", () => {
   });
 
   test("interrupt returns false when only the failure lands", async () => {
-    const v = fakeView({ reload: async () => { v.onNavigationFailed?.(new Error("-999")); } });
+    const v = fakeView({
+      reload: async () => {
+        v.onNavigationFailed?.(new Error("-999"));
+      },
+    });
     const b = wrapView(v, { graceMs: 20, settleMs: 50 });
     expect(await b.interrupt()).toBe(false);
   });
 
   test("a second landing within settleMs frees the view too", async () => {
     const clock = manualClock();
-    const v = fakeView({ reload: async () => {
-      v.onNavigationFailed?.(new Error("-999"));
-      clock.setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 20);
-    } });
+    const v = fakeView({
+      reload: async () => {
+        v.onNavigationFailed?.(new Error("-999"));
+        clock.setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 20);
+      },
+    });
     const interrupted = onClock(v, fast, clock).interrupt();
     await clock.settledAt(interrupted);
     expect(await interrupted).toBe(true);
@@ -1046,7 +1428,10 @@ describe("wrapView interrupt", () => {
   test("a refused reload falls back to a script that cancels the pending navigation", async () => {
     const clock = manualClock();
     const v = fakeView({
-      reload: async () => { v.calls.push(["reload", []]); throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
+      reload: async () => {
+        v.calls.push(["reload", []]);
+        throw new Error("ERR_INVALID_STATE: a navigation is already pending");
+      },
       evaluate: async (expr) => {
         v.calls.push(["evaluate", [expr]]);
         v.onNavigationFailed?.(new Error("-999"));
@@ -1057,17 +1442,25 @@ describe("wrapView interrupt", () => {
     const interrupted = onClock(v, fast, clock).interrupt();
     await clock.settledAt(interrupted);
     expect(await interrupted).toBe(true);
-    expect(v.calls).toEqual([["reload", []], ["evaluate", [CANCEL_PENDING_NAVIGATION]]]);
+    expect(v.calls).toEqual([
+      ["reload", []],
+      ["evaluate", [CANCEL_PENDING_NAVIGATION]],
+    ]);
   });
 
   test("the fallback script bypasses wrapView's evaluate queue", async () => {
     let first = true;
     const clock = manualClock();
     const v = fakeView({
-      reload: async () => { throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
+      reload: async () => {
+        throw new Error("ERR_INVALID_STATE: a navigation is already pending");
+      },
       evaluate: (expr) => {
         v.calls.push(["evaluate", [expr]]);
-        if (first) { first = false; return new Promise(() => {}); }
+        if (first) {
+          first = false;
+          return new Promise(() => {});
+        }
         clock.setTimeout(() => v.land("https://x/"), 10);
         return Promise.resolve(1);
       },
@@ -1082,7 +1475,9 @@ describe("wrapView interrupt", () => {
 
   test("a fallback script that never answers ends the interrupt at settleMs", async () => {
     const v = fakeView({
-      reload: async () => { throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
+      reload: async () => {
+        throw new Error("ERR_INVALID_STATE: a navigation is already pending");
+      },
       evaluate: () => new Promise(() => {}),
     });
     const clock = manualClock();
@@ -1093,8 +1488,12 @@ describe("wrapView interrupt", () => {
 
   test("a refused reload and a refused script return false at once", async () => {
     const v = fakeView({
-      reload: async () => { throw new Error("ERR_INVALID_STATE: a navigation is already pending"); },
-      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
+      reload: async () => {
+        throw new Error("ERR_INVALID_STATE: a navigation is already pending");
+      },
+      evaluate: async () => {
+        throw new Error("Invalid state: an evaluate() is already pending");
+      },
     });
     const clock = manualClock();
     const interrupted = onClock(v, slow, clock).interrupt();
@@ -1108,8 +1507,14 @@ describe("wrapView interrupt", () => {
   // stuck navigation (-999).
   test("before anything committed, the page leaves for about:blank instead of reloading", async () => {
     const v = fakeView({
-      reload: async () => { v.calls.push(["reload", []]); },
-      evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); v.onNavigationFailed?.(new Error("-999")); return 1; },
+      reload: async () => {
+        v.calls.push(["reload", []]);
+      },
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        v.onNavigationFailed?.(new Error("-999"));
+        return 1;
+      },
     });
     v.url = "";
     const clock = manualClock();
@@ -1124,13 +1529,21 @@ describe("wrapView interrupt", () => {
   // does nothing, and navigate("about:blank") frees the stuck one (~3.2 s).
   test("before anything committed, an evaluate refused because one is pending falls back to navigating to about:blank", async () => {
     const v = fakeView({
-      reload: async () => { v.calls.push(["reload", []]); },
-      evaluate: async (expr) => { v.calls.push(["evaluate", [expr]]); throw new Error("Invalid state: an evaluate() is already pending"); },
+      reload: async () => {
+        v.calls.push(["reload", []]);
+      },
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        throw new Error("Invalid state: an evaluate() is already pending");
+      },
     });
     v.url = "";
     const clock = manualClock();
     expect(await clock.settledAt(onClock(v, slow, clock).interrupt())).toBe(0);
-    expect(v.calls).toEqual([["evaluate", [LEAVE_INITIAL_DOCUMENT]], ["navigate", ["about:blank"]]]);
+    expect(v.calls).toEqual([
+      ["evaluate", [LEAVE_INITIAL_DOCUMENT]],
+      ["navigate", ["about:blank"]],
+    ]);
   });
 
   test("a stuck initial-document evaluate and navigation are each bounded", async () => {
@@ -1148,8 +1561,13 @@ describe("wrapView interrupt", () => {
   test("the about:blank fallback is awaited until it settles", async () => {
     const clock = manualClock();
     const v = fakeView({
-      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
-      navigate: () => new Promise<void>((r) => { clock.setTimeout(r, 40); }),
+      evaluate: async () => {
+        throw new Error("Invalid state: an evaluate() is already pending");
+      },
+      navigate: () =>
+        new Promise<void>((r) => {
+          clock.setTimeout(r, 40);
+        }),
     });
     v.url = "";
     const interrupted = onClock(v, { graceMs: 20, settleMs: 300 }, clock).interrupt();
@@ -1159,7 +1577,9 @@ describe("wrapView interrupt", () => {
 
   test("an about:blank fallback that never settles ends the interrupt at settleMs", async () => {
     const v = fakeView({
-      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
+      evaluate: async () => {
+        throw new Error("Invalid state: an evaluate() is already pending");
+      },
       navigate: () => new Promise<void>(() => {}),
     });
     v.url = "";
@@ -1171,20 +1591,18 @@ describe("wrapView interrupt", () => {
 
   test("an about:blank fallback that is refused ends the interrupt", async () => {
     const v = fakeView({
-      evaluate: async () => { throw new Error("Invalid state: an evaluate() is already pending"); },
-      navigate: async () => { throw new Error("Invalid state: a navigation is already pending"); },
+      evaluate: async () => {
+        throw new Error("Invalid state: an evaluate() is already pending");
+      },
+      navigate: async () => {
+        throw new Error("Invalid state: a navigation is already pending");
+      },
     });
     v.url = "";
     const clock = manualClock();
     const interrupted = onClock(v, slow, clock).interrupt();
     expect(await clock.settledAt(interrupted)).toBe(0);
     expect(await interrupted).toBe(false);
-  });
-
-  test("without a native reload it does nothing", async () => {
-    const v = fakeView();
-    expect(await wrapView(v, fast).interrupt()).toBe(false);
-    expect(v.calls).toEqual([]);
   });
 });
 
@@ -1193,19 +1611,30 @@ describe("wrapView watchNavigation", () => {
     const v = fakeView();
     const b = wrapView(v);
     let navigated = 0;
-    b.watchNavigation(() => { navigated++; });
+    b.watchNavigation(() => {
+      navigated++;
+    });
     await b.navigate("https://x/1");
     v.land("https://x/1");
     expect(navigated).toBe(1);
     // navigate's own baseline read for the load cap (ET-52), nothing after the landing.
-    expect(v.calls).toEqual([["evaluate", [TIME_ORIGIN]], ["navigate", ["https://x/1"]]]);
+    expect(v.calls).toEqual([
+      ["evaluate", [TIME_ORIGIN]],
+      ["navigate", ["https://x/1"]],
+    ]);
   });
 
   test("an action whose navigation starts reports it before the navigation lands", async () => {
     const v = fakeView();
     const seen: string[] = [];
     const clock = manualClock();
-    v.click = async () => { v.loading = true; clock.setTimeout(() => { seen.push("landed"); v.land("https://x/2"); }, 60); };
+    v.click = async () => {
+      v.loading = true;
+      clock.setTimeout(() => {
+        seen.push("landed");
+        v.land("https://x/2");
+      }, 60);
+    };
     const b = onClock(v, { graceMs: 40, settleMs: 300 }, clock);
     b.watchNavigation(() => seen.push("navigation"));
     await clock.fulfilledAt(b.click("a"));
@@ -1269,13 +1698,29 @@ describe("every ACTS op runs inside the navigation watch", () => {
         else if (a.some((x) => String(x).includes(args[0]!))) seen.push(["act", b.phase]);
       };
       const { evaluate, click, type, press } = v;
-      v.evaluate = async (e) => { note("evaluate", [e]); return evaluate(e); };
-      v.click = async (s, o) => { note("click", [s]); return click(s, o); };
-      v.type = async (t) => { note("type", [t]); return type(t); };
-      v.press = async (k, o) => { note("press", [k]); return press(k, o); };
+      v.evaluate = async (e) => {
+        note("evaluate", [e]);
+        return evaluate(e);
+      };
+      v.click = async (s, o) => {
+        note("click", [s]);
+        return click(s, o);
+      };
+      v.type = async (t) => {
+        note("type", [t]);
+        return type(t);
+      };
+      v.press = async (k, o) => {
+        note("press", [k]);
+        return press(k, o);
+      };
       b = wrapView(v, fast);
       expect((await createHandler(b)({ id: 1, op, args })).ok).toBe(true);
-      expect(seen).toEqual([["arm", "idle"], ["act", "acting"], ["count", "delivered"]]);
+      expect(seen).toEqual([
+        ["arm", "idle"],
+        ["act", "acting"],
+        ["count", "delivered"],
+      ]);
       expect(b.phase).toBe("idle");
     });
   }
@@ -1292,22 +1737,32 @@ describe("navigate caps its wait for load (ET-52)", () => {
   /** A page that commits a new document (timeOrigin 2) 50 ms after navigate()
    *  and never fires load. stop() rejects the pending navigate with -999, as
    *  WebKit does; `afterStop` runs then, to start a page navigation of its own. */
-  function hangingLoad(clock: ReturnType<typeof manualClock>, opts: {
-    origin?: unknown;
-    state?: string;
-    loadAt?: number;
-    afterStop?: (page: { navs: number }) => void;
-    read?: (expr: string) => Promise<unknown> | undefined;
-  } = {}) {
+  function hangingLoad(
+    clock: ReturnType<typeof manualClock>,
+    opts: {
+      origin?: unknown;
+      state?: string;
+      loadAt?: number;
+      afterStop?: (page: { navs: number }) => void;
+      read?: (expr: string) => Promise<unknown> | undefined;
+    } = {},
+  ) {
     const page = { origin: 1 as number, state: "complete", navs: 0 };
     let fail: (err: Error) => void = () => {};
     const v = fakeView({
       navigate: (url) => {
         v.calls.push(["navigate", [url]]);
-        clock.setTimeout(() => { page.origin = 2; page.state = opts.state ?? "interactive"; }, 50);
+        clock.setTimeout(() => {
+          page.origin = 2;
+          page.state = opts.state ?? "interactive";
+        }, 50);
         return new Promise<void>((resolve, reject) => {
           fail = reject;
-          if (opts.loadAt !== undefined) clock.setTimeout(() => { v.land(url); resolve(); }, opts.loadAt);
+          if (opts.loadAt !== undefined)
+            clock.setTimeout(() => {
+              v.land(url);
+              resolve();
+            }, opts.loadAt);
         });
       },
       evaluate: async (expr) => {
@@ -1331,143 +1786,201 @@ describe("navigate caps its wait for load (ET-52)", () => {
   }
   const evaluated = (v: Fake, expr: string) => v.calls.filter(([n, a]) => n === "evaluate" && a[0] === expr).length;
 
-  test("stops the loads 5 s after the new document is parsed, and resolves on the stop's -999", async () => {
-    const clock = manualClock();
-    const { v } = hangingLoad(clock);
-    const b = onClock(v, capped, clock);
-    const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
-    expect(evaluated(v, STOP_LOADING)).toBe(1);
-    // Parsed at the first read after 50 ms (500), stopped one read past 5500.
-    expect(at).toBeGreaterThanOrEqual(5500);
-    expect(at).toBeLessThan(6100);
-  }, CAP_TEST_MS);
+  test(
+    "stops the loads 5 s after the new document is parsed, and resolves on the stop's -999",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+      expect(evaluated(v, STOP_LOADING)).toBe(1);
+      // Parsed at the first read after 50 ms (500), stopped one read past 5500.
+      expect(at).toBeGreaterThanOrEqual(5500);
+      expect(at).toBeLessThan(6100);
+    },
+    CAP_TEST_MS,
+  );
 
-  test("a page that loads within the cap is not stopped", async () => {
-    const clock = manualClock();
-    const { v } = hangingLoad(clock, { loadAt: 3000 });
-    const b = onClock(v, capped, clock);
-    expect(await clock.fulfilledAt(b.navigate("https://x/slow"))).toBe(3000);
-    expect(evaluated(v, STOP_LOADING)).toBe(0);
-  }, CAP_TEST_MS);
+  test(
+    "a page that loads within the cap is not stopped",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { loadAt: 3000 });
+      const b = onClock(v, capped, clock);
+      expect(await clock.fulfilledAt(b.navigate("https://x/slow"))).toBe(3000);
+      expect(evaluated(v, STOP_LOADING)).toBe(0);
+    },
+    CAP_TEST_MS,
+  );
 
-  test("a document that stays loading is not stopped, and navigate keeps waiting", async () => {
-    const clock = manualClock();
-    const { v } = hangingLoad(clock, { state: "loading" });
-    const b = onClock(v, capped, clock);
-    await expect(clock.settledAt(b.navigate("https://x/never-parsed"), 8000)).rejects.toThrow("still pending at clock");
-    expect(clock.now()).toBeGreaterThan(6000);
-    expect(evaluated(v, STOP_LOADING)).toBe(0);
-  }, CAP_TEST_MS);
+  test(
+    "a document that stays loading is not stopped, and navigate keeps waiting",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { state: "loading" });
+      const b = onClock(v, capped, clock);
+      await expect(clock.settledAt(b.navigate("https://x/never-parsed"), 8000)).rejects.toThrow("still pending at clock");
+      expect(clock.now()).toBeGreaterThan(6000);
+      expect(evaluated(v, STOP_LOADING)).toBe(0);
+    },
+    CAP_TEST_MS,
+  );
 
-  test("with no baseline timeOrigin there is no watcher: no reads, no stop", async () => {
-    const clock = manualClock();
-    const { v } = hangingLoad(clock, { origin: undefined });
-    const b = onClock(v, capped, clock);
-    await expect(clock.settledAt(b.navigate("https://x/hang"), 8000)).rejects.toThrow("still pending at clock");
-    expect([evaluated(v, LOAD_STATE), evaluated(v, STOP_LOADING)]).toEqual([0, 0]);
-  }, CAP_TEST_MS);
+  test(
+    "with no baseline timeOrigin there is no watcher: no reads, no stop",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { origin: undefined });
+      const b = onClock(v, capped, clock);
+      await expect(clock.settledAt(b.navigate("https://x/hang"), 8000)).rejects.toThrow("still pending at clock");
+      expect([evaluated(v, LOAD_STATE), evaluated(v, STOP_LOADING)]).toEqual([0, 0]);
+    },
+    CAP_TEST_MS,
+  );
 
-  test("a read that does not answer queues no second read behind it", async () => {
-    const clock = manualClock();
-    let release!: (x: unknown) => void;
-    let first = true;
-    const { v } = hangingLoad(clock, {
-      read: (expr) => {
-        if (expr !== LOAD_STATE || !first) return undefined;
-        first = false;
-        return new Promise((r) => { release = r; });
-      },
-    });
-    const b = onClock(v, capped, clock);
-    await expect(clock.settledAt(b.navigate("https://x/hang"), 3000)).rejects.toThrow("still pending at clock");
-    // Freed later: one read follows it, not the dozens a 100 ms timer would have queued.
-    release([1, "complete"]);
-    await new Promise((r) => setImmediate(r));
-    expect(evaluated(v, LOAD_STATE)).toBeLessThanOrEqual(2);
-  }, CAP_TEST_MS);
+  test(
+    "a read that does not answer queues no second read behind it",
+    async () => {
+      const clock = manualClock();
+      let release!: (x: unknown) => void;
+      let first = true;
+      const { v } = hangingLoad(clock, {
+        read: (expr) => {
+          if (expr !== LOAD_STATE || !first) return undefined;
+          first = false;
+          return new Promise((r) => {
+            release = r;
+          });
+        },
+      });
+      const b = onClock(v, capped, clock);
+      await expect(clock.settledAt(b.navigate("https://x/hang"), 3000)).rejects.toThrow("still pending at clock");
+      // Freed later: one read follows it, not the dozens a 100 ms timer would have queued.
+      release([1, "complete"]);
+      await new Promise((r) => setImmediate(r));
+      expect(evaluated(v, LOAD_STATE)).toBeLessThanOrEqual(2);
+    },
+    CAP_TEST_MS,
+  );
 
   // CI run 40415723808: a new view's first evaluate took past graceMs.
-  test("a baseline read that takes 300 ms still starts the watcher", async () => {
-    const clock = manualClock();
-    const { v } = hangingLoad(clock, {
-      read: (expr) => expr === TIME_ORIGIN ? new Promise((r) => { clock.setTimeout(() => r(1), 300); }) : undefined,
-    });
-    const b = onClock(v, capped, clock);
-    await clock.fulfilledAt(b.navigate("https://x/hang"));
-    expect(evaluated(v, STOP_LOADING)).toBe(1);
-  }, CAP_TEST_MS);
+  test(
+    "a baseline read that takes 300 ms still starts the watcher",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, {
+        read: (expr) =>
+          expr === TIME_ORIGIN
+            ? new Promise((r) => {
+                clock.setTimeout(() => r(1), 300);
+              })
+            : undefined,
+      });
+      const b = onClock(v, capped, clock);
+      await clock.fulfilledAt(b.navigate("https://x/hang"));
+      expect(evaluated(v, STOP_LOADING)).toBe(1);
+    },
+    CAP_TEST_MS,
+  );
 
   // #48 in CI run 40415723808: WebKit refuses a direct evaluate while another
   // is pending, so a recovery during a read lost LEAVE_INITIAL_DOCUMENT.
-  test("a recovery waits for the watcher's read before it leaves the initial document", async () => {
-    const clock = manualClock();
-    let pending = 0;
-    let readDone!: () => void;
-    const { v } = hangingLoad(clock, {
-      state: "loading",
-      read: (expr) => {
-        if (expr === LEAVE_INITIAL_DOCUMENT) {
-          if (pending > 0) return Promise.reject(new Error("an evaluate is already pending"));
-          return Promise.resolve(undefined);
-        }
-        if (expr !== LOAD_STATE || pending > 0) return undefined;
-        pending++;
-        return new Promise((r) => { readDone = () => { pending--; r([1, "complete"]); }; clock.setTimeout(readDone, 400); });
-      },
-    });
-    v.url = "";
-    const b = onClock(v, capped, clock);
-    void b.navigate("https://x/never");
-    await new Promise((r) => setImmediate(r));
-    await clock.settledAt(b.interrupt());
-    expect(v.calls.filter(([n, a]) => (n === "evaluate" && a[0] === LEAVE_INITIAL_DOCUMENT) || (n === "navigate" && a[0] === "about:blank"))).toEqual([
-      ["evaluate", [LEAVE_INITIAL_DOCUMENT]],
-    ]);
-  }, CAP_TEST_MS);
+  test(
+    "a recovery waits for the watcher's read before it leaves the initial document",
+    async () => {
+      const clock = manualClock();
+      let pending = 0;
+      let readDone!: () => void;
+      const { v } = hangingLoad(clock, {
+        state: "loading",
+        read: (expr) => {
+          if (expr === LEAVE_INITIAL_DOCUMENT) {
+            if (pending > 0) return Promise.reject(new Error("an evaluate is already pending"));
+            return Promise.resolve(undefined);
+          }
+          if (expr !== LOAD_STATE || pending > 0) return undefined;
+          pending++;
+          return new Promise((r) => {
+            readDone = () => {
+              pending--;
+              r([1, "complete"]);
+            };
+            clock.setTimeout(readDone, 400);
+          });
+        },
+      });
+      v.url = "";
+      const b = onClock(v, capped, clock);
+      void b.navigate("https://x/never");
+      await new Promise((r) => setImmediate(r));
+      await clock.settledAt(b.interrupt());
+      expect(v.calls.filter(([n, a]) => (n === "evaluate" && a[0] === LEAVE_INITIAL_DOCUMENT) || (n === "navigate" && a[0] === "about:blank"))).toEqual([
+        ["evaluate", [LEAVE_INITIAL_DOCUMENT]],
+      ]);
+    },
+    CAP_TEST_MS,
+  );
 
   // Greptile on #214: go() rejected with the replaced navigation's -999
   // (#116) ended the watcher, and the new page's hanging image held goto.
-  test("a goto that replaces a navigation in flight still has its load capped", async () => {
-    const clock = manualClock();
-    const { v } = hangingLoad(clock);
-    const load = v.navigate;
-    v.navigate = (url) => {
-      load(url).catch(() => {});
-      const err = new Error(CANCELLED);
-      v.onNavigationFailed?.(err);
-      return Promise.reject(err);
-    };
-    const b = onClock(v, capped, clock);
-    const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
-    expect(evaluated(v, STOP_LOADING)).toBe(1);
-    expect(at).toBeLessThan(6100);
-  }, CAP_TEST_MS);
+  test(
+    "a goto that replaces a navigation in flight still has its load capped",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      const load = v.navigate;
+      v.navigate = (url) => {
+        load(url).catch(() => {});
+        const err = new Error(CANCELLED);
+        v.onNavigationFailed?.(err);
+        return Promise.reject(err);
+      };
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+      expect(evaluated(v, STOP_LOADING)).toBe(1);
+      expect(at).toBeLessThan(6100);
+    },
+    CAP_TEST_MS,
+  );
 
   // Greptile on #214: the 1 s baseline read can outlast a short budget.
-  test("a navigation whose request timed out during the baseline read is never sent", async () => {
-    const clock = manualClock();
-    const { v } = hangingLoad(clock, {
-      read: (expr) => expr === TIME_ORIGIN ? new Promise((r) => { clock.setTimeout(() => r(1), 300); }) : undefined,
-    });
-    const b = onClock(v, capped, clock);
-    clock.setTimeout(() => b.cancelAction?.(), 200);
-    await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
-    expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
-  }, CAP_TEST_MS);
+  test(
+    "a navigation whose request timed out during the baseline read is never sent",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, {
+        read: (expr) =>
+          expr === TIME_ORIGIN
+            ? new Promise((r) => {
+                clock.setTimeout(() => r(1), 300);
+              })
+            : undefined,
+      });
+      const b = onClock(v, capped, clock);
+      clock.setTimeout(() => b.cancelAction?.(), 200);
+      await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
+      expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
+    },
+    CAP_TEST_MS,
+  );
 
-  test("after a stop, a navigation the page started keeps navigate waiting for its landing (#116)", async () => {
-    const clock = manualClock();
-    let v!: Fake;
-    ({ v } = hangingLoad(clock, {
-      afterStop: (page) => {
-        page.navs = 1;
-        clock.setTimeout(() => v.land("https://x/next"), 1000);
-      },
-    }));
-    const b = onClock(v, capped, clock);
-    const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
-    expect(evaluated(v, STOP_LOADING)).toBe(1);
-    // Not at the stop (5500), at the page's own landing a second later.
-    expect(at).toBeGreaterThanOrEqual(6500);
-  }, CAP_TEST_MS);
+  test(
+    "after a stop, a navigation the page started keeps navigate waiting for its landing (#116)",
+    async () => {
+      const clock = manualClock();
+      let v!: Fake;
+      ({ v } = hangingLoad(clock, {
+        afterStop: (page) => {
+          page.navs = 1;
+          clock.setTimeout(() => v.land("https://x/next"), 1000);
+        },
+      }));
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+      expect(evaluated(v, STOP_LOADING)).toBe(1);
+      // Not at the stop (5500), at the page's own landing a second later.
+      expect(at).toBeGreaterThanOrEqual(6500);
+    },
+    CAP_TEST_MS,
+  );
 });
