@@ -43,10 +43,12 @@ const PAGE = `<!doctype html><title>Media</title>
 const HANGING_PAGE = `<!doctype html><title>Hanging</title>
 <audio id="now" src="/tone.wav" autoplay></audio><img src="/never.png">`;
 
-/** Once the element is playing: [paused, muted]. */
+// Not !paused: it turns false before the queued play event reaches MUTE_MEDIA's listener.
+/** Once the element's playback has advanced: [paused, muted]. */
 const playing = (id: string) => `new Promise((r) => {
-  const check = () => { const e = document.getElementById(${JSON.stringify(id)}); if (e && !e.paused) r(JSON.stringify([e.paused, e.muted])); else setTimeout(check, 20); };
-  check();
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => { const e = document.getElementById(${JSON.stringify(id)}); if (e && e.currentTime > 0) r(JSON.stringify([e.paused, e.muted])); else ch.port2.postMessage(0); };
+  ch.port2.postMessage(0);
 })`;
 
 run("e2e: mute", () => {
