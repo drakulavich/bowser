@@ -1122,7 +1122,6 @@ const TO_MARKDOWN = String.raw`
 // Every wait shares one deadline: an unbounded one hung the session at budget 0 (ET-61).
 const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
     const u = new URL(location.href);
-    if (u.hostname === 'youtu.be') return u.pathname.split('/')[1] || null;
     if (u.pathname === '/watch') return u.searchParams.get('v');
     const s = /^\/shorts\/([^/]+)/.exec(u.pathname);
     return s ? s[1] : null;
