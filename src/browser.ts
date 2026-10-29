@@ -16,6 +16,8 @@ import {
   READ_TITLE,
   READ_URL,
   STOP_LOADING,
+  TYPE_TARGET_FOCUSED,
+  TYPE_TARGET_MARK,
   hoverScript,
   keyCommandScript,
   keyWatchScript,
@@ -334,11 +336,6 @@ const RAW_KEYS: Record<string, string> = {
   ArrowLeft: "\uF702",
   ArrowRight: "\uF703",
 };
-/** Remembers the focused element and answers whether it is contenteditable;
- *  TYPE_TARGET_FOCUSED answers whether it still has focus. */
-const TYPE_TARGET_MARK = `(() => { const el = document.activeElement; window[Symbol.for('bowser.typeTarget')] = el; return el?.isContentEditable === true; })()`;
-const TYPE_TARGET_FOCUSED = `document.activeElement === window[Symbol.for('bowser.typeTarget')]`;
-
 function pressKey(key: string, modifiers: KeyModifier[]): string {
   return key === "Tab" || modifiers.length === 0 ? (RAW_KEYS[key] ?? key) : key;
 }
