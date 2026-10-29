@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import type { Command } from "../src/commands/context.ts";
 import { COMMANDS, SCHEMAS } from "../src/cli/registry.ts";
-import { helpRequested } from "../src/cli/parser.ts";
+import { parse } from "../src/cli/parser.ts";
 import { renderHelp, usageOf } from "../src/cli/help.ts";
 import { run } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
@@ -179,15 +179,15 @@ describe("per-command help", () => {
     // open runs with session "-h", which session-name validation refuses, as
     // it did before per-command help existed; help would have returned.
     await expect(run(["-s", "-h", "open", "https://example.com/"], base)).rejects.toThrow('got "-h"');
-    expect(helpRequested(SCHEMAS, ["-s", "-h", "open"])).toBe(false);
-    expect(helpRequested(SCHEMAS, ["snapshot", "--filename", "-h"])).toBe(false);
+    expect(parse(SCHEMAS, ["-s", "-h", "open"]).help).toBe(false);
+    expect(parse(SCHEMAS, ["snapshot", "--filename", "-h"]).help).toBe(false);
   });
 
   test("an unknown flag consumes nothing: close --bogus -h is help", async () => {
     const { seen, base } = counting();
     const close = COMMANDS.find((c) => c.name === "close")!;
     expect((await run(["close", "--bogus", "-h"], base)).split("\n")[0]).toBe(`bowser ${usageOf(close)}`);
-    expect(helpRequested(SCHEMAS, ["mcp", "--bogus", "-h"])).toBe(true);
+    expect(parse(SCHEMAS, ["mcp", "--bogus", "-h"]).help).toBe(true);
     expect(seen.connects).toBe(0);
   });
 

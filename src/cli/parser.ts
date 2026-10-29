@@ -34,18 +34,6 @@ export interface Parsed {
 
 const GLOBAL_NAMES = new Set(["session", "json", "help", "version"]);
 
-/** Whether argv asks for help: a `-h`/`--help` the parser reads as the flag,
- *  not as a string flag's value (`snapshot --filename -h` names a file) or
- *  a word after `--`. An unknown flag beside it cannot hide it: `mcp --bogus
- *  --help` must print help, not start the server. */
-export function helpRequested(schemas: Schemas, argv: string[]): boolean {
-  try {
-    return parse(schemas, argv).help;
-  } catch {
-    return false;
-  }
-}
-
 /** An unknown flag or command throws, unless the same argv asks for help or the version:
  *  then nothing runs, so the first such error is dropped. An unknown flag
  *  consumes no value, so `close --bogus -h` is help. */
@@ -72,12 +60,6 @@ export function parse(schemas: Schemas, argv: string[]): Parsed {
 
     if (!optionsDone && a === "--") {
       optionsDone = true;
-      i++;
-      continue;
-    }
-
-    if (!optionsDone && (a === "-h" || a === "--help")) {
-      out.help = true;
       i++;
       continue;
     }
