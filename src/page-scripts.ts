@@ -179,7 +179,7 @@ const ROLE_NAME = String.raw`
         return isData(next) || isData(prev) ? 'rowheader' : 'columnheader';
       }
     }
-    return null;
+    return el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable) ? 'textbox' : null;
   }
   function implicitRole(el) {
     const role = tagRole(el);

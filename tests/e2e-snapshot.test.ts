@@ -130,6 +130,16 @@ const MODEL_EDITOR_HTML = `<!doctype html>
   render();
 </script></body></html>`;
 
+/** A rich editor root with no role, as ProseMirror and Lexical render it (#242).
+ *  Like Lexical, it replaces its <p> on every change, so a ref on the <p> goes stale. */
+const BARE_EDITOR_HTML = `<!doctype html>
+<html><head><title>Bare editor</title></head>
+<body><div id="ed" contenteditable="true" aria-label="Body"><p>old text</p></div>
+<script>
+  const ed = document.getElementById("ed");
+  ed.addEventListener("input", () => { const p = document.createElement("p"); p.textContent = ed.textContent; ed.replaceChildren(p); });
+</script></body></html>`;
+
 runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
   let tmp: string;
@@ -157,6 +167,9 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
         }
         if (new URL(req.url).pathname === "/model-editor.html") {
           return new Response(MODEL_EDITOR_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
+        if (new URL(req.url).pathname === "/bare-editor.html") {
+          return new Response(BARE_EDITOR_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
         }
         if (new URL(req.url).pathname === "/edges.html") {
           return new Response(EDGES_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -298,6 +311,18 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     expect(await cmdEval(ctx, "window.model")).toBe("hello world");
     await cmdFill(ctx, await refNamed("Model"), "");
     expect(await cmdEval(ctx, "window.model")).toBe("");
+  }, 60_000);
+
+  test("a contenteditable root with no role is a textbox whose ref survives fills that replace its <p>", async () => {
+    await cmdGoto(ctx, `${base}/bare-editor.html`);
+    const snap = tree(await cmdSnapshot(ctx));
+    const ref = await refNamed("Body");
+    expect(snap).toContain(`- textbox "Body" [ref=${ref}]:\n  - paragraph [ref=`);
+    expect(await cmdFill(ctx, ref, "first")).toStartWith(`filled ${ref} (textbox "Body")`);
+    expect(await cmdFill(ctx, ref, "second")).toStartWith(`filled ${ref} (textbox "Body")`);
+    expect(await cmdEval(ctx, "JSON.stringify(document.getElementById('ed').innerHTML)")).toContain("<p>second</p>");
+    await cmdSnapshot(ctx);
+    expect(await refNamed("Body")).toBe(ref);
   }, 60_000);
 
   // One page, several rules; the golden line that breaks names the rule:
