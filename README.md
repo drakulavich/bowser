@@ -57,7 +57,9 @@ the upgrade sets. The restart has its own budget, so that first command can take
 plus a few seconds to stop the old daemon.
 
 From 0.12.0 on, a running `bowser mcp` server hands its calls over to the installed version on the
-first tool call after the upgrade, and the restart line comes first in that call's text. Its tool list stays the
+first tool call after the upgrade, and the restart line comes first in that call's text. A command or
+tool call that waited for another one's restart prints the line too. A call that starts after the restart
+has finished and its line was printed does not get it (#261). The server's tool list stays the
 one the client got when it connected, so a new command shows up once the client restarts the
 server. A server started by 0.11 or older can't hand over: restart it once after the upgrade.
 

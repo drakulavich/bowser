@@ -6,7 +6,7 @@ import { BrowserExited, browserExited, connectOrSpawn, NoDaemon, OlderDaemon, ty
 import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, statePath, type Ref, type SessionState } from "../state.ts";
-import { otherHolder, readNotice, removeNotice } from "./restart-lock.ts";
+import { markDelivered, otherHolder, readNotice } from "./restart-lock.ts";
 import { UserError } from "../errors.ts";
 
 export interface CommandContext {
@@ -72,17 +72,17 @@ export function connector(ctx: CommandContext): (session: string, opts?: Connect
 export async function withClient<T>(ctx: CommandContext, fn: (c: DaemonConnection) => Promise<T>, opts: ConnectOptions = {}): Promise<T> {
   const connect = (o: ConnectOptions) => connector(ctx)(ctx.session, ctx.command ? { ...o, command: ctx.command } : o);
   let client: DaemonConnection;
-  let read = true;
   let restarted = false;
+  let waited = false;
   try {
     client = await connect(opts);
   } catch (err) {
     if (!(err instanceof OlderDaemon || err instanceof BrowserExited) || !ctx.restart) throw err;
-    // The notice of a restart this command only waited for is its restarter's to print.
-    read = restarted = await ctx.restart(ctx, err);
+    restarted = await ctx.restart(ctx, err);
+    waited = !restarted;
     client = await reconnect(ctx, () => connect({ ...opts, spawn: false }));
   } finally {
-    if (read) takeNotice(ctx, restarted);
+    takeNotice(ctx, restarted, waited);
   }
   try {
     return await fn(client);
@@ -104,15 +104,14 @@ async function reconnect(ctx: CommandContext, connect: () => Promise<DaemonConne
 }
 
 /** The notice a restart left in the session (ET-29), unless a restart is still running.
- *  The restarter takes its own even when a command it held off now holds the lock (#171). */
-function takeNotice(ctx: CommandContext, own: boolean): void {
+ *  The restarter takes its own even when a command it held off now holds the lock (#171).
+ *  A command that waited on the restart gets it too, and leaves it for the rest (ET-44). */
+function takeNotice(ctx: CommandContext, own: boolean, waited: boolean): void {
   if (!ctx.notices || (!own && otherHolder(ctx.session) !== null)) return;
-  const text = readNotice(ctx.session);
+  const text = readNotice(ctx.session, waited);
   if (!text || ctx.notices.includes(text)) return;
   ctx.notices.push(text);
-  ctx.acks?.push(() => {
-    if (readNotice(ctx.session) === text) removeNotice(ctx.session);
-  });
+  if (!waited) ctx.acks?.push(() => markDelivered(ctx.session, text));
 }
 
 export function emptyState(name: string): SessionState {
