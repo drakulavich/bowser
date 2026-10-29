@@ -357,6 +357,16 @@ describe("createHandler", () => {
     });
   });
 
+  // ET-07: `eval "new Promise(() => {})"` failed with WebKit's own words
+  // when the page collected the promise first (1 of 2 runs, 2026-10-27).
+  test("WebKit's message for a dropped call names both causes: a promise that never settles, or a navigation", async () => {
+    const b = fakeBrowser({ evaluate: async () => { throw new Error("Completion handler for function call is no longer reachable"); } });
+    expect(await createHandler(b)(req("evaluate", ["new Promise(() => {})"]))).toEqual({
+      id: 7, ok: false,
+      error: "the page dropped the call before it answered: the expression returned a promise that never settles, or the page navigated or reloaded while it ran; run 'bowser snapshot' to see the page",
+    });
+  });
+
   // The measured behaviour (spec F34, measured manually): a dead page fails
   // every page op until `reload`, which brings it back. The daemon reloads
   // nothing by itself, and after the reload ops answer again.
