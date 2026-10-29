@@ -2046,6 +2046,27 @@ describe("navigate caps its wait for load (ET-52)", () => {
     CAP_TEST_MS,
   );
 
+  // Greptile on #214: a watcher ended by a recovery won the race, and navigate
+  // returned with go() pending.
+  test(
+    "a recovery that ends the watcher leaves navigate pending",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { state: "loading" });
+      const b = onClock(v, capped, clock);
+      let settled = false;
+      void b.navigate("https://x/hang").then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+      await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 1000)));
+      await clock.settledAt(b.interrupt());
+      await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 3000)));
+      expect(settled).toBe(false);
+    },
+    CAP_TEST_MS,
+  );
+
   // Greptile on #214: go() rejected with the replaced navigation's -999
   // (#116) ended the watcher, and the new page's hanging image held goto.
   test(

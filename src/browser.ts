@@ -607,8 +607,10 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       const racers = [loaded];
       if (typeof origin === "number")
         racers.push(
+          // A watcher ended by interrupt() must not finish navigate: go() is still pending.
           capLoad(origin, load).then((capped) => {
-            if (capped) loadLeft = true;
+            if (!capped) return new Promise<void>(() => {});
+            loadLeft = true;
           }),
         );
       try {
