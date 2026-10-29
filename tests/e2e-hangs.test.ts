@@ -49,6 +49,9 @@ const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
 /** ET-52: parsed at once, but its image never answers, so `load` never fires. */
 const IMAGE_PAGE = `<!doctype html><title>Image</title><h1>Text is here</h1><img src="/never" alt=""><a href="/">Home</a>`;
+/** ET-13: a page whose script replaces it with the next one every 10 ms,
+ *  well inside the 200 ms /late takes to answer. */
+const bouncePage = (n: number) => `<!doctype html><title>Bounce ${n}</title><script>setTimeout(() => location.replace("/jsbounce?n=${n + 1}"), 10)</script>`;
 const SLOW_MS = 3000;
 /** openWith's retry window, from the end of its first open. That open and
  *  the last retry each take up to a budget, so a test that opens with it
@@ -135,6 +138,12 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
           return new Promise<Response>(() => {});
         }
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
+        if (path === "/late") await Bun.sleep(200);
+        if (path === "/r302") return Response.redirect(`${base}/form`, 302);
+        if (path === "/jsbounce")
+          return new Response(bouncePage(Number(new URL(req.url).searchParams.get("n") ?? 0)), {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
         const page =
           {
             "/image": IMAGE_PAGE,
@@ -143,6 +152,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
             "/shadowed": SHADOWED_PAGE,
             "/double": DOUBLE_PAGE,
             "/form": FORM_PAGE,
+            "/late": FORM_PAGE,
             "/redirect": REDIRECT_PAGE,
           }[path] ?? HOME_PAGE;
         return new Response(page, {
@@ -348,6 +358,32 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     await cmdGoto(ctx, `${base}/image`);
     expect(await cmdGoto(ctx, `${base}/`)).toContain(`${base}/`);
   }, 60_000);
+  test(
+    "ET-13: a goto during the page's own script navigation lands where asked or says it was replaced; a redirect still lands",
+    async () => {
+      const ctx = await openWith("et13-bounce", 8000);
+      expect(await cmdGoto(ctx, `${base}/r302`)).toContain(`navigated to ${base}/form`);
+      expect(await cmdEval(ctx, "location.href")).toBe(`${base}/form`);
+      const replaced = (path: string) =>
+        `navigate: the navigation to ${base}${path} was cancelled by another navigation; run 'bowser snapshot' to see where the page is`;
+      for (let i = 0; i < 10; i++) {
+        // From a page still bouncing (a replaced goto below), this goto can be replaced too; either way the page bounces.
+        const bounce = await timed(() => cmdGoto(ctx, `${base}/jsbounce`));
+        if (bounce.error !== undefined) expect(bounce.error).toBe(replaced("/jsbounce"));
+        let text = "";
+        const goto = await timed(async () => {
+          text = await cmdGoto(ctx, `${base}/late`);
+        });
+        if (goto.error === undefined) {
+          expect(text).toContain(`navigated to ${base}/late`);
+          expect(await cmdEval(ctx, "location.href")).toBe(`${base}/late`);
+        } else {
+          expect(goto.error).toBe(replaced("/late"));
+        }
+      }
+    },
+    openTimeout(8000, 60_000),
+  );
   // ET-38: a killed client's op used to keep its whole budget in the daemon,
   // and with no budget (0) it held the session for good.
   test(
