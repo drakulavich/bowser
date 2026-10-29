@@ -517,6 +517,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
           doc = read[0] as number;
           since = clock.now();
           diag.seen = since;
+          diag.docs.push(doc);
           // A capped load never reaches onNavigated, which mutes the rest (#227).
           load.read = evaluate(MUTE_MEDIA).catch(() => undefined);
           await load.read;
@@ -538,11 +539,12 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     last?: unknown;
     seen?: number;
     slowest?: number;
-  } = { start: 0, reads: 0 };
+    docs: number[];
+  } = { start: 0, reads: 0, docs: [] };
   const loadNote = (): string => {
     const at = (t?: number) => (t === undefined ? "never" : `${t - diag.start} ms`);
     const base = diag.baselineMs === undefined ? "pending" : `${JSON.stringify(diag.origin) ?? "no answer"} after ${diag.baselineMs} ms`;
-    return `load cap: baseline ${base}; ${diag.reads} cap reads, last sent ${at(diag.sent)}, settled ${at(diag.settled)} with ${JSON.stringify(diag.last)}; slowest read ${diag.slowest} ms; new document seen ${at(diag.seen)}; loading ${view.loading}`;
+    return `load cap: baseline ${base}; ${diag.reads} cap reads, last sent ${at(diag.sent)}, settled ${at(diag.settled)} with ${JSON.stringify(diag.last)}; slowest read ${diag.slowest} ms; new document seen ${at(diag.seen)}, ${diag.docs.length} times, first and last 3 origins ${JSON.stringify([diag.docs[0], ...diag.docs.slice(-3)])}; loading ${view.loading}`;
   };
   let loadLeft = false;
   /** Stop the load a capped navigate left running, and wait for its -999 to
@@ -628,6 +630,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
         last: undefined,
         seen: undefined,
         slowest: undefined,
+        docs: [],
       });
       const origin = await ask(TIME_ORIGIN, BASELINE_READ_MS);
       diag.baselineMs = clock.now() - diag.start;
