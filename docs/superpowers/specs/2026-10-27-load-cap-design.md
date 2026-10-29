@@ -80,11 +80,15 @@ dropped.
 
 ### The next command stops it
 
-`act()` (every op in `ACTS`) and `navigate()` start with one step: if a load was left running and
+`act()`, for every kind (the ops in `ACTS`, and `back`, `forward` and `reload`, which reach it as `history` and
+`navigates`), `navigate()`, and `close`'s `navigate("about:blank")` on a profile session start with one step: if a load was left running and
 `view.loading` is still true, evaluate `window.stop()` (bounded by `graceMs`) and wait for the next landing
 (bounded by `settleMs`, through the existing `settle`). Then the flag is cleared and the command goes on as
 today, reading `view.loading`, `NAV_ARM` and `landed` after the stop. If the page finished loading by itself
-in between (`view.loading` false), there is nothing to stop. Commands that only read (`snapshot`, `markdown`,
+in between (`view.loading` false), there is nothing to stop. Without the step, `go-back` would take the old
+load's -999 as its own landing (the table above), and `close` on a profile would have its `about:blank` hop
+thrown out with `ERR_INVALID_STATE`. `reload` after a capped first load still sees `view.url` `""` and is sent
+as a plain action: once the stop has run, the native reload does nothing there, as on any uncommitted page. Commands that only read (`snapshot`, `markdown`,
 `eval` outside `ACTS`, `screenshot`) do not stop it: they read the page as it is, the load still running.
 
 ```mermaid
@@ -119,7 +123,9 @@ budget shorter than DOMContentLoaded plus 5 s times out as today.
 WebKit refuses a direct `evaluate` while another is pending, and `interrupt()` evaluates
 `LEAVE_INITIAL_DOCUMENT` directly. A recovery that lands while a step 2 read is in flight then falls back to
 `navigate("about:blank")`, which is refused too while the stuck navigation is pending (#48 failed this way in
-CI run 40415723808). So `interrupt()` first ends the watcher and waits for its read to settle, up to 1 s.
+CI run 40415723808). So `interrupt()` first ends the watcher and waits for its read to settle, up to 1 s. The baseline read of step
+1 is not waited for: a recovery that lands while it is still pending (up to 3 s, only on a page that does not
+answer) takes the `navigate("about:blank")` fallback (#67), as the BBC wedge does.
 
 ### Recovery on a page whose load was left running
 
@@ -159,6 +165,9 @@ them broken); before the stop they may still arrive.
   - after that, the next `act()` evaluates `window.stop()` before `NAV_ARM`, and its click's navigation is
     waited for even though the stop's -999 lands first;
   - after that, the next `navigate()` evaluates `window.stop()` before calling `go()`;
+  - after that, `back` evaluates `window.stop()` before `goBack()`, and does not return on the stop's -999:
+    it waits for the history page's landing;
+  - after that, `close` on a profile session evaluates `window.stop()` before `navigate("about:blank")`;
   - a load that finished by itself (`view.loading` false) is not stopped by the next command;
   - a `go()` that resolves within the cap: nothing is left running, the next command evaluates no stop;
   - a document that stays `loading`: at a time past `LOAD_CAP_MS` the `navigate` promise is still pending;
@@ -169,7 +178,7 @@ them broken); before the stop they may still arrive.
   - a baseline read that outlasts the budget: `go()` is never called (the second Greptile P1);
   - a baseline read that gives no number: no read of step 2, `navigate` waits for `go()`;
   - a read that never settles: no second read is queued behind it;
-  - a baseline read that takes 300 ms still starts the watcher;
+  - a baseline read that takes 1.5 s still starts the watcher (past the old 1 s bound, CI run 40834466493);
   - a recovery during a read evaluates `LEAVE_INITIAL_DOCUMENT` after the read settles, not `navigate("about:blank")`.
 - `tests/e2e-hangs.test.ts`, "ET-52": on a page whose `<img>` never answers, `open` and then `goto` both
   answer exit 0 within 8 s with the page's title; `eval document.querySelector('h1').textContent` answers;
