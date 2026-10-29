@@ -2378,6 +2378,30 @@ describe("dialogs", () => {
     expect(out.dialogs).toEqual([{ type: "confirm", message: "sure?", state: "dismissed" }]);
   });
 
+  test("past 20 dialogs, the report and --json list the first 20 and count the rest (ET-14)", async () => {
+    await clickable();
+    const many = Array.from({ length: 23 }, (_, i) => ({ type: "alert" as const, message: `tick ${i}`, state: "dismissed" as const, unanswered: true as const }));
+    const out = await cmdClick({ ...ctx(), connect: async () => fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: many }) }, "e1");
+    const lines = out.split("\n");
+    expect(lines).toHaveLength(23);
+    expect(lines[21]).toBe(`- ["alert" dialog with message "tick 19"]: dismissed`);
+    expect(lines[22]).toBe("- and 3 more dialogs");
+    const json = JSON.parse(await cmdClick({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: many }) }, "e1"));
+    expect(json.dialogs).toHaveLength(20);
+    expect(json.dialogs[19]).toEqual({ type: "alert", message: "tick 19", state: "dismissed" });
+    expect(json.dialogsOmitted).toBe(3);
+  });
+
+  test("exactly 20 dialogs are all listed, with no count", async () => {
+    await clickable();
+    const twenty = Array.from({ length: 20 }, (_, i) => ({ type: "alert" as const, message: `tick ${i}`, state: "dismissed" as const, unanswered: true as const }));
+    const out = await cmdClick({ ...ctx(), connect: async () => fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: twenty }) }, "e1");
+    expect(out.split("\n")).toHaveLength(22);
+    expect(out).not.toContain("more dialogs");
+    const json = JSON.parse(await cmdClick({ ...ctx({ json: true }), connect: async () => fakeClient({ evaluate: resolving({ e1: "button" }) }, { dialogs: twenty }) }, "e1"));
+    expect("dialogsOmitted" in json).toBe(false);
+  });
+
   test("no dialog, no modal state and no dialogs key", async () => {
     await clickable();
     const c = fakeClient({ evaluate: resolving({ e1: "button" }) });

@@ -183,7 +183,7 @@ function dialogLine(d: DialogReport): string {
 export function replyPage(ctx: CommandContext, c: DaemonConnection, json: Record<string, unknown>, text: string): string {
   const modal = modalState(c);
   if (!modal) return reply(ctx, json, text);
-  return reply(ctx, { ...json, dialogs: dialogsJson(c) }, `${text}\n${modal}`);
+  return reply(ctx, { ...json, ...dialogsJson(c) }, `${text}\n${modal}`);
 }
 
 /** The `### Modal state` section for the dialogs `c` reported, or "". */
@@ -191,8 +191,14 @@ export function modalState(c: DaemonConnection): string {
   return modalLines(c.dialogs());
 }
 
+/** A page timer can answer hundreds of dialogs between commands (ET-14). */
+const MAX_DIALOGS = 20;
+
 function modalLines(dialogs: DialogReport[]): string {
-  return dialogs.length ? ["### Modal state", ...dialogs.map((d) => `- ${dialogLine(d)}`)].join("\n") : "";
+  if (!dialogs.length) return "";
+  const more = dialogs.length - MAX_DIALOGS;
+  const lines = dialogs.slice(0, MAX_DIALOGS).map((d) => `- ${dialogLine(d)}`);
+  return ["### Modal state", ...lines, ...(more > 0 ? [`- and ${more} more dialogs`] : [])].join("\n");
 }
 
 /** The `### Modal state` section of a failed page command: the dialogs
@@ -202,9 +208,12 @@ export function failedModalState(err: unknown): string {
   return Array.isArray(dialogs) ? modalLines(dialogs) : "";
 }
 
-/** The reported dialogs as --json gives them: without `unanswered`. */
-export function dialogsJson(c: DaemonConnection): Omit<DialogReport, "unanswered">[] {
-  return c.dialogs().map(({ unanswered: _, ...d }) => d);
+/** The reported dialogs as --json gives them, without `unanswered`; {} when there are none. */
+export function dialogsJson(c: DaemonConnection): { dialogs?: Omit<DialogReport, "unanswered">[]; dialogsOmitted?: number } {
+  const all = c.dialogs();
+  if (!all.length) return {};
+  const dialogs = all.slice(0, MAX_DIALOGS).map(({ unanswered: _, ...d }) => d);
+  return all.length > MAX_DIALOGS ? { dialogs, dialogsOmitted: all.length - MAX_DIALOGS } : { dialogs };
 }
 
 /** `withClient` for a command that prints the dialogs the daemon answered
