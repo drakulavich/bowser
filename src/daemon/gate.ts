@@ -30,10 +30,7 @@ export function createGate(idleMs: number): Gate {
 
   function grant(waiter: Waiter): void {
     active++;
-    let settled = false;
     waiter.resolve(() => {
-      if (settled) return;
-      settled = true;
       active--;
       if (active > 0) return;
       if (leaving) release();
