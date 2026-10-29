@@ -716,13 +716,7 @@ export function wrapView(
     // no navigate event (#116, measured on Bun 1.4.2). So its landing is
     // always awaited, except where nothing has committed and reload() does
     // nothing.
-    reload: () =>
-      guard(
-        nav.act(
-          () => view.reload(),
-          view.url !== "" ? "navigates" : "acts",
-        ),
-      ),
+    reload: () => guard(nav.act(() => view.reload(), view.url !== "" ? "navigates" : "acts")),
     close: async () => {
       // WebKit commits localStorage in a transaction 500 ms after a write
       // (measured ~530 ms, also with the CPU saturated), and Bun force-kills

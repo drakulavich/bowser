@@ -2019,7 +2019,6 @@ describe("sessionstorage", () => {
     const expr = c.calls[0]![1][0] as string;
     expect(expr).toContain(`sessionStorage.clear()`);
   });
-
 });
 
 describe("history (go-back/go-forward/reload)", () => {
@@ -2075,7 +2074,6 @@ describe("eval", () => {
   test("empty expression throws usage error", async () => {
     await expect(cmdEval(ctx(), "")).rejects.toThrow(/^usage: bowser eval/);
   });
-
 });
 
 describe("run-code", () => {
@@ -2111,7 +2109,6 @@ describe("run-code", () => {
   test("empty code throws usage error", async () => {
     await expect(cmdRunCode(ctx(), "")).rejects.toThrow(/^usage: bowser run-code/);
   });
-
 });
 
 describe("context helpers", () => {

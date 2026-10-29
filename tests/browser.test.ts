@@ -1601,7 +1601,6 @@ describe("wrapView interrupt", () => {
     expect(await clock.settledAt(interrupted)).toBe(0);
     expect(await interrupted).toBe(false);
   });
-
 });
 
 describe("wrapView watchNavigation", () => {

@@ -268,12 +268,7 @@ export async function closeOne(ctx: CommandContext, session: string, proc: Proce
 
 /** `open` is false for a session with no state, pid, socket or daemon: a
  *  name never opened, or a directory a refused start left (ET-28). */
-async function closeSession(
-  ctx: CommandContext,
-  session: string,
-  proc: ProcessOps,
-  claim = claimSession,
-): Promise<{ text: string; open: boolean }> {
+async function closeSession(ctx: CommandContext, session: string, proc: ProcessOps, claim = claimSession): Promise<{ text: string; open: boolean }> {
   // An upgrade restart holds the lock from its stop to its open (ET-32).
   const locked = await claimRestartLock(session, claim);
   try {

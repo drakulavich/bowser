@@ -173,10 +173,7 @@ describe("tools/call", () => {
       },
       version: "9.9.9",
     };
-    const res: any = await callTool(
-      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "goto", arguments: { url: "https://e.com" } } },
-      deps,
-    );
+    const res: any = await callTool({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "goto", arguments: { url: "https://e.com" } } }, deps);
     expect(captured).toEqual(["--json", "goto", "--", "https://e.com"]);
     expect(res.result.content).toEqual([{ type: "text", text: '{"ok":true,"url":"u"}' }]);
     expect(res.result.isError).toBeFalsy();
