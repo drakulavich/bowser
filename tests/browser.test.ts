@@ -11,9 +11,12 @@ import {
   keyCommandScript,
   keyWatchScript,
   LEAVE_INITIAL_DOCUMENT,
+  LOAD_STATE,
   NAV_ARM,
   NAV_COUNT,
   NAV_DESTINATION,
+  STOP_LOADING,
+  TIME_ORIGIN,
 } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
@@ -1604,7 +1607,7 @@ describe("wrapView interrupt", () => {
 });
 
 describe("wrapView watchNavigation", () => {
-  test("a landing reports a navigation, with no page call", async () => {
+  test("a landing reports a navigation, with no page call of its own", async () => {
     const v = fakeView();
     const b = wrapView(v);
     let navigated = 0;
@@ -1614,7 +1617,11 @@ describe("wrapView watchNavigation", () => {
     await b.navigate("https://x/1");
     v.land("https://x/1");
     expect(navigated).toBe(1);
-    expect(v.calls).toEqual([["navigate", ["https://x/1"]]]);
+    // navigate's own baseline read for the load cap (ET-52), nothing after the landing.
+    expect(v.calls).toEqual([
+      ["evaluate", [TIME_ORIGIN]],
+      ["navigate", ["https://x/1"]],
+    ]);
   });
 
   test("an action whose navigation starts reports it before the navigation lands", async () => {
@@ -1717,4 +1724,389 @@ describe("every ACTS op runs inside the navigation watch", () => {
       expect(b.phase).toBe("idle");
     });
   }
+});
+
+// ET-52: a subresource that never finishes holds `load`, and navigate() with
+// it. Once the new document is parsed, navigate waits LOAD_CAP_MS more and
+// returns with the load still running; the next command stops it first.
+describe("navigate caps its wait for load (ET-52)", () => {
+  // Few reads: each manual-clock step can take 100 ms in a busy suite (CI run 40481354188).
+  const capped = { ...fast, loadPollMs: 500 };
+  // In the full suite a manual-clock step waited up to 900 ms for the event loop (seed 1331868760).
+  const CAP_TEST_MS = 20_000;
+  /** A page that commits a new document (timeOrigin 2) 50 ms after navigate()
+   *  and never fires load. stop() ends loading at once and rejects the pending
+   *  navigate with -999 5 ms later, as WebKit does (Bun 1.4.4). */
+  function hangingLoad(
+    clock: ReturnType<typeof manualClock>,
+    opts: { origin?: unknown; state?: string; loadAt?: number; read?: (expr: string) => Promise<unknown> | undefined } = {},
+  ) {
+    const page = { origin: 1 as number, state: "complete" };
+    let fail: ((err: Error) => void) | undefined;
+    const v = fakeView({
+      navigate: (url) => {
+        v.calls.push(["navigate", [url]]);
+        v.loading = true;
+        clock.setTimeout(() => {
+          page.origin = 2;
+          page.state = opts.state ?? "interactive";
+        }, 50);
+        return new Promise<void>((resolve, reject) => {
+          fail = reject;
+          if (opts.loadAt !== undefined)
+            clock.setTimeout(() => {
+              fail = undefined;
+              v.land(url);
+              resolve();
+            }, opts.loadAt);
+        });
+      },
+      evaluate: async (expr) => {
+        v.calls.push(["evaluate", [expr]]);
+        const custom = opts.read?.(expr);
+        if (custom) return custom;
+        if (expr === TIME_ORIGIN) return "origin" in opts ? opts.origin : page.origin;
+        if (expr === LOAD_STATE) return [page.origin, page.state];
+        if (expr === STOP_LOADING && fail) {
+          const reject = fail;
+          fail = undefined;
+          v.loading = false;
+          clock.setTimeout(() => {
+            const err = new Error(CANCELLED);
+            v.onNavigationFailed?.(err);
+            reject(err);
+          }, 5);
+        }
+        return undefined;
+      },
+    });
+    return { v, page };
+  }
+  const evaluated = (v: Fake, expr: string) => v.calls.filter(([n, a]) => n === "evaluate" && a[0] === expr).length;
+  /** The calls past the first `skip`, without the watch's own reads. */
+  const after = (v: Fake, skip: number) =>
+    v.calls.slice(skip).filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === TIME_ORIGIN)));
+
+  test(
+    "answers 5 s after the new document is parsed and leaves the load running",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+      // Parsed at the first read after 50 ms (500), capped one read past 5500.
+      expect(at).toBeGreaterThanOrEqual(5500);
+      expect(at).toBeLessThan(6100);
+      expect(evaluated(v, STOP_LOADING)).toBe(0);
+      expect(v.loading).toBe(true);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "the next action stops the load first and waits for the stop's -999, then for its own navigation",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      v.click = async (s) => {
+        v.calls.push(["click", [s]]);
+        clock.setTimeout(() => v.land("https://x/next"), 30);
+      };
+      const b = onClock(v, capped, clock);
+      await clock.fulfilledAt(b.navigate("https://x/hang"));
+      const skip = v.calls.length;
+      const start = clock.now();
+      const done = await clock.fulfilledAt(b.click("#l"));
+      expect(after(v, skip)).toEqual([
+        ["evaluate", [STOP_LOADING]],
+        ["click", ["#l"]],
+      ]);
+      // The stop's -999 lands 5 ms in; the click's own landing 30 ms after the click.
+      expect(done - start).toBeGreaterThanOrEqual(35);
+      expect(v.url).toBe("https://x/next");
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "the next navigate stops the load before it sends its own",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      const b = onClock(v, capped, clock);
+      await clock.fulfilledAt(b.navigate("https://x/hang"));
+      const skip = v.calls.length;
+      void b.navigate("https://x/second").catch(() => {});
+      await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 100)));
+      expect(after(v, skip)).toEqual([
+        ["evaluate", [STOP_LOADING]],
+        ["navigate", ["https://x/second"]],
+      ]);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "back stops the load first and waits for the history page's landing, not the stop's -999",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      v.goBack = async () => {
+        v.calls.push(["goBack", []]);
+        clock.setTimeout(() => v.land("https://x/prev"), 30);
+      };
+      const b = onClock(v, capped, clock);
+      await clock.fulfilledAt(b.navigate("https://x/hang"));
+      const skip = v.calls.length;
+      const start = clock.now();
+      const done = await clock.fulfilledAt(b.back());
+      expect(after(v, skip)).toEqual([
+        ["evaluate", [STOP_LOADING]],
+        ["goBack", []],
+      ]);
+      expect(done - start).toBeGreaterThanOrEqual(35);
+      expect(v.url).toBe("https://x/prev");
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "close on a profile session stops the load before it leaves for about:blank",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      const b = wrapView(v, capped, "/tmp/profile", 0, undefined, clock);
+      await clock.fulfilledAt(b.navigate("https://x/hang"));
+      const skip = v.calls.length;
+      void b.close();
+      await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 100)));
+      expect(after(v, skip)).toEqual([
+        ["evaluate", [STOP_LOADING]],
+        ["navigate", ["about:blank"]],
+      ]);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "a load that finished by itself is not stopped by the next command",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      const b = onClock(v, capped, clock);
+      await clock.fulfilledAt(b.navigate("https://x/hang"));
+      v.loading = false;
+      await clock.settledAt(b.click("#l"));
+      expect(evaluated(v, STOP_LOADING)).toBe(0);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "a page that loads within the cap leaves nothing to stop",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { loadAt: 3000 });
+      const b = onClock(v, capped, clock);
+      expect(await clock.fulfilledAt(b.navigate("https://x/slow"))).toBe(3000);
+      // Past the watcher's last read, which ends it.
+      await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 1000)));
+      v.loading = true;
+      await clock.settledAt(b.click("#l"));
+      expect(evaluated(v, STOP_LOADING)).toBe(0);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "a document that stays loading keeps navigate waiting",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { state: "loading" });
+      const b = onClock(v, capped, clock);
+      await expect(clock.settledAt(b.navigate("https://x/never-parsed"), 8000)).rejects.toThrow("still pending at clock");
+      expect(clock.now()).toBeGreaterThan(6000);
+    },
+    CAP_TEST_MS,
+  );
+
+  // Greptile on #214: a document created after the stop passed as the page's own.
+  test(
+    "a document that navigates on restarts the 5 s, and holds navigate while it is still loading",
+    async () => {
+      const clock = manualClock();
+      const { v, page } = hangingLoad(clock);
+      clock.setTimeout(() => {
+        page.origin = 3;
+        page.state = "loading";
+      }, 3000);
+      clock.setTimeout(() => {
+        page.state = "interactive";
+      }, 7000);
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+      // Parsed at 7000, capped one read past 12000; not at 5500 for the first document.
+      expect(at).toBeGreaterThanOrEqual(12_000);
+      expect(at).toBeLessThan(12_600);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "with no baseline timeOrigin there is no watcher: no reads, navigate waits for load",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { origin: undefined });
+      const b = onClock(v, capped, clock);
+      await expect(clock.settledAt(b.navigate("https://x/hang"), 8000)).rejects.toThrow("still pending at clock");
+      expect(evaluated(v, LOAD_STATE)).toBe(0);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
+    "a read that does not answer queues no second read behind it",
+    async () => {
+      const clock = manualClock();
+      let release!: (x: unknown) => void;
+      let first = true;
+      const { v } = hangingLoad(clock, {
+        read: (expr) => {
+          if (expr !== LOAD_STATE || !first) return undefined;
+          first = false;
+          return new Promise((r) => {
+            release = r;
+          });
+        },
+      });
+      const b = onClock(v, capped, clock);
+      await expect(clock.settledAt(b.navigate("https://x/hang"), 3000)).rejects.toThrow("still pending at clock");
+      // Freed later: one read follows it, not the dozens a 100 ms timer would have queued.
+      release([1, "complete"]);
+      await new Promise((r) => setImmediate(r));
+      expect(evaluated(v, LOAD_STATE)).toBeLessThanOrEqual(2);
+    },
+    CAP_TEST_MS,
+  );
+
+  // CI runs 40415723808 and 40834466493: a new view's first evaluate took past graceMs, then past 1 s.
+  test(
+    "a baseline read that takes 1.5 s still starts the watcher",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, {
+        read: (expr) =>
+          expr === TIME_ORIGIN
+            ? new Promise((r) => {
+                clock.setTimeout(() => r(1), 1500);
+              })
+            : undefined,
+      });
+      const b = onClock(v, capped, clock);
+      expect(await clock.fulfilledAt(b.navigate("https://x/hang"), 10_000)).toBeLessThan(8000);
+    },
+    CAP_TEST_MS,
+  );
+
+  // #48 in CI run 40415723808: WebKit refuses a direct evaluate while another
+  // is pending, so a recovery during a read lost LEAVE_INITIAL_DOCUMENT.
+  test(
+    "a recovery waits for the watcher's read before it leaves the initial document",
+    async () => {
+      const clock = manualClock();
+      let pending = 0;
+      let readDone!: () => void;
+      const { v } = hangingLoad(clock, {
+        state: "loading",
+        read: (expr) => {
+          if (expr === LEAVE_INITIAL_DOCUMENT) {
+            if (pending > 0) return Promise.reject(new Error("an evaluate is already pending"));
+            return Promise.resolve(undefined);
+          }
+          if (expr !== LOAD_STATE || pending > 0) return undefined;
+          pending++;
+          return new Promise((r) => {
+            readDone = () => {
+              pending--;
+              r([1, "complete"]);
+            };
+            clock.setTimeout(readDone, 400);
+          });
+        },
+      });
+      v.url = "";
+      const b = onClock(v, capped, clock);
+      void b.navigate("https://x/never");
+      await new Promise((r) => setImmediate(r));
+      await clock.settledAt(b.interrupt());
+      expect(v.calls.filter(([n, a]) => (n === "evaluate" && a[0] === LEAVE_INITIAL_DOCUMENT) || (n === "navigate" && a[0] === "about:blank"))).toEqual([
+        ["evaluate", [LEAVE_INITIAL_DOCUMENT]],
+      ]);
+    },
+    CAP_TEST_MS,
+  );
+
+  // Greptile on #214: a watcher ended by a recovery won the race, and navigate
+  // returned with go() pending.
+  test(
+    "a recovery that ends the watcher leaves navigate pending",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, { state: "loading" });
+      const b = onClock(v, capped, clock);
+      let settled = false;
+      void b.navigate("https://x/hang").then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+      await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 1000)));
+      await clock.settledAt(b.interrupt());
+      await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 3000)));
+      expect(settled).toBe(false);
+    },
+    CAP_TEST_MS,
+  );
+
+  // Greptile on #214: go() rejected with the replaced navigation's -999
+  // (#116) ended the watcher, and the new page's hanging image held goto.
+  test(
+    "a goto that replaces a navigation in flight still has its load capped",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock);
+      const load = v.navigate;
+      v.navigate = (url) => {
+        load(url).catch(() => {});
+        const err = new Error(CANCELLED);
+        v.onNavigationFailed?.(err);
+        return Promise.reject(err);
+      };
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"), 10_000);
+      expect(at).toBeGreaterThanOrEqual(5500);
+      expect(at).toBeLessThan(6100);
+    },
+    CAP_TEST_MS,
+  );
+
+  // Greptile on #214: the baseline read can outlast a short budget.
+  test(
+    "a navigation whose request timed out during the baseline read is never sent",
+    async () => {
+      const clock = manualClock();
+      const { v } = hangingLoad(clock, {
+        read: (expr) =>
+          expr === TIME_ORIGIN
+            ? new Promise((r) => {
+                clock.setTimeout(() => r(1), 300);
+              })
+            : undefined,
+      });
+      const b = onClock(v, capped, clock);
+      clock.setTimeout(() => b.cancelAction?.(), 200);
+      await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
+      expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
+    },
+    CAP_TEST_MS,
+  );
 });

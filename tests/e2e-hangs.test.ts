@@ -47,6 +47,8 @@ const DOUBLE_PAGE = `<!doctype html><title>Double</title>
 /** ET-10 (#78): Send posts to a server that never answers. */
 const FORM_PAGE = `<!doctype html><title>Form</title>
 <form action="/never" method="post"><input name="a" aria-label="First"><input name="b" aria-label="Second"><button>Send</button></form>`;
+/** ET-52: parsed at once, but its image never answers, so `load` never fires. */
+const IMAGE_PAGE = `<!doctype html><title>Image</title><h1>Text is here</h1><img src="/never" alt=""><a href="/">Home</a>`;
 const SLOW_MS = 3000;
 /** openWith's retry window, from the end of its first open. That open and
  *  the last retry each take up to a budget, so a test that opens with it
@@ -135,6 +137,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
         if (path === "/slow" || path === "/slow2") await Bun.sleep(SLOW_MS);
         const page =
           {
+            "/image": IMAGE_PAGE,
             "/slow": SLOW_PAGE,
             "/slow2": SLOW_TWO_PAGE,
             "/shadowed": SHADOWED_PAGE,
@@ -322,6 +325,29 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     openTimeout(1000, 30_000),
   );
 
+  test("ET-52: open and goto of a page whose image never loads answer within the 5 s cap, and the session goes on", async () => {
+    process.env.BOWSER_OP_TIMEOUT_MS = "20000";
+    const ctx: CommandContext = { session: "hangimage", json: false };
+    sessions.push(ctx.session);
+
+    const open = await timed(() => cmdOpen(ctx, `${base}/image`));
+    expect(open).toEqual({ ms: expect.any(Number) as unknown as number });
+    expect(open.ms).toBeLessThan(8000);
+    const goto = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/image`));
+    expect(goto.error).toBeUndefined();
+    expect(goto.ms).toBeLessThan(8000);
+
+    expect(await cmdEval(ctx, "document.title + ' / ' + document.querySelector('h1').textContent")).toBe("Image / Text is here");
+    expect(await cmdEval(ctx, "location.href")).toBe(`${base}/image`);
+    // The load left running is stopped first: a click on a link lands, and so does a goto.
+    await cmdSnapshot(ctx);
+    const home = (await loadState(ctx.session))!.refs.find((r) => r.name === "Home")!.id;
+    const click = await timed(() => cmdClick(ctx, home));
+    expect(click.error).toBeUndefined();
+    expect(await cmdEval(ctx, "location.href")).toBe(`${base}/`);
+    await cmdGoto(ctx, `${base}/image`);
+    expect(await cmdGoto(ctx, `${base}/`)).toContain(`${base}/`);
+  }, 60_000);
   // ET-38: a killed client's op used to keep its whole budget in the daemon,
   // and with no budget (0) it held the session for good.
   test(
