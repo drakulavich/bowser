@@ -789,7 +789,18 @@ export function wrapView(
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
     click: (selector, timeoutMs) => guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
-    type: (text) => guard(nav.act(() => view.type(text))),
+    type: (text) =>
+      guard(
+        nav.act(async () => {
+          // Lexical keeps a typed "\n" as text in one paragraph (#243); an <input> in a form submits on Enter.
+          if (!text.includes("\n") || (await evaluate("document.activeElement?.isContentEditable === true")) !== true) return view.type(text);
+          await evaluate(KEY_CODES);
+          for (const [i, line] of text.split("\n").entries()) {
+            if (i > 0) await view.press(RAW_KEYS.Enter!);
+            if (line) await view.type(line);
+          }
+        }),
+      ),
     press: (key, modifiers = []) =>
       guard(
         nav.act(async () => {
