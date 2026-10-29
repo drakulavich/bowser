@@ -74,6 +74,8 @@ export interface Lane {
    *  resolves when the attempt is over, true when it freed the view. */
   recover?: () => Promise<boolean>;
   phase?: () => ActPhase;
+  /** DIAGNOSTIC (ET-52 flake): appended to a timed-out navigate. */
+  loadNote?: () => string | undefined;
   /** The session's stuck mark: one object shared by every request's lane. */
   mark?: StuckMark;
   /** The session's gate and this request's connection: with both, a queued
@@ -187,7 +189,8 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
   const ms = req.budgetMs !== undefined && (lane.timeoutMs <= 0 || req.budgetMs < lane.timeoutMs) ? req.budgetMs : lane.timeoutMs;
   const deadline = ms > 0 ? Date.now() + ms - REPLY_MARGIN_MS : undefined;
   const expire = (): void => {
-    const timedOut = timeoutMessage(req, budget, running ? lane.phase?.() : undefined);
+    const note = req.op === "navigate" ? lane.loadNote?.() : undefined;
+    const timedOut = timeoutMessage(req, budget, running ? lane.phase?.() : undefined) + (note ? ` [${note}]` : "");
     if (atGate) {
       answer({ id: req.id, ok: false, error: `${timedOut} (waiting for another client's command on this session)` });
       return;
@@ -692,6 +695,7 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
               cancelAction: handle.cancelAction,
               recover: () => browser.interrupt(),
               phase: () => browser.phase,
+              loadNote: () => browser.loadNote?.(),
               reply: (res) => {
                 socketWriteAll(socket as unknown as WritableSocket, JSON.stringify(res) + "\n");
               },

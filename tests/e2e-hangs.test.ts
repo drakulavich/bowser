@@ -348,6 +348,19 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     await cmdGoto(ctx, `${base}/image`);
     expect(await cmdGoto(ctx, `${base}/`)).toContain(`${base}/`);
   }, 60_000);
+  // TEMPORARY (ET-52 flake diagnosis): revert before merge.
+  test("ET-52 diag: six fresh sessions opened straight onto the image page each answer within the cap", async () => {
+    process.env.BOWSER_OP_TIMEOUT_MS = "20000";
+    const results: { session: string; ms: number; error?: string }[] = [];
+    for (let i = 1; i <= 6; i++) {
+      const ctx: CommandContext = { session: `et52diag${i}`, json: false };
+      const open = await timed(() => cmdOpen(ctx, `${base}/image`));
+      results.push({ session: ctx.session, ...open });
+      await cmdClose(ctx).catch(() => {});
+    }
+    console.log(JSON.stringify(results, null, 1));
+    expect(results.filter((r) => r.error !== undefined || r.ms >= 8000)).toEqual([]);
+  }, 180_000);
   // ET-38: a killed client's op used to keep its whole budget in the daemon,
   // and with no budget (0) it held the session for good.
   test(

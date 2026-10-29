@@ -139,6 +139,8 @@ export interface Browser {
   /** Where the page's last navigation goes; the view's url when the page
    *  cannot say. */
   navigationDestination(maxWaitMs?: number): Promise<string>;
+  /** DIAGNOSTIC (ET-52 flake): what the last navigate's baseline and cap reads did. */
+  loadNote?(): string;
 }
 
 /** Open a WebKit Bun.WebView. Bun throws off macOS; the CLI refuses to
@@ -500,8 +502,12 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     let doc: number | undefined;
     let since = 0;
     while (!load.over) {
+      diag.sent = clock.now();
+      diag.reads++;
       load.read = evaluate(LOAD_STATE).catch(() => undefined);
       const read = await load.read;
+      diag.settled = clock.now();
+      diag.last = read;
       if (load.over) return false;
       if (Array.isArray(read) && read[0] !== origin && read[1] !== "loading") {
         if (read[0] !== doc) {
@@ -514,6 +520,12 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     return false;
   };
   let loadWatch: LoadWatch | undefined;
+  const diag: { start: number; baselineMs?: number; origin?: unknown; reads: number; sent?: number; settled?: number; last?: unknown } = { start: 0, reads: 0 };
+  const loadNote = (): string => {
+    const at = (t?: number) => (t === undefined ? "never" : `${t - diag.start} ms`);
+    const base = diag.baselineMs === undefined ? "pending" : `${JSON.stringify(diag.origin) ?? "no answer"} after ${diag.baselineMs} ms`;
+    return `load cap: baseline ${base}; ${diag.reads} cap reads, last sent ${at(diag.sent)}, settled ${at(diag.settled)} with ${JSON.stringify(diag.last)}; loading ${view.loading}`;
+  };
   let loadLeft = false;
   /** Stop the load a capped navigate left running, and wait for its -999 to
    *  land: otherwise it lands inside the next command's own wait (ET-52). */
@@ -588,7 +600,10 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       await stopLoadLeft();
       const before = landed;
       const arrivedBefore = arrived;
+      Object.assign(diag, { start: clock.now(), baselineMs: undefined, origin: undefined, reads: 0, sent: undefined, settled: undefined, last: undefined });
       const origin = await ask(TIME_ORIGIN, BASELINE_READ_MS);
+      diag.baselineMs = clock.now() - diag.start;
+      diag.origin = origin;
       // The baseline read can outlast the budget: the command has been told it failed.
       if (actionCancelled) throw new Error("request timed out before the navigation was sent");
       const load: LoadWatch = { over: false };
@@ -621,6 +636,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       }
     },
     stopLoadLeft,
+    loadNote,
     /** Reload the committed page, or leave the initial document, to free a
      *  stuck call; see Browser.interrupt. */
     async interrupt(): Promise<boolean> {
@@ -755,6 +771,7 @@ export function wrapView(
       return nav.pending;
     },
     navigationDestination: (maxWaitMs) => nav.destination(maxWaitMs),
+    loadNote: () => nav.loadNote(),
     realUrl: () => resolveUrl(view.url, () => evaluate(READ_URL)),
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),

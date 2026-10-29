@@ -50,7 +50,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: E2E on WebKit
         # e2e-compat skips here: the runner has no playwright-cli.
-        run: bun test tests/e2e --reporter=junit --reporter-outfile=e2e.xml
+        run: bun test tests/e2e-hangs.test.ts -t ET-52 --reporter=junit --reporter-outfile=e2e.xml # TEMPORARY (ET-52 flake diagnosis): revert before merge
       - name: Upload to Flakiness.io
         if: always()
         continue-on-error: true
