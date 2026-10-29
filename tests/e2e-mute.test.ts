@@ -40,6 +40,10 @@ const PAGE = `<!doctype html><title>Media</title>
 <audio id="now" src="/tone.wav" autoplay></audio>
 <script>setTimeout(() => { const a = document.createElement('audio'); a.id = 'late'; a.src = '/tone.wav'; a.autoplay = true; document.body.append(a) }, 500)</script>`;
 
+// An image that never finishes holds load: open answers on the 5 s cap (ET-52).
+const HANGING_PAGE = `<!doctype html><title>Hanging</title>
+<audio id="now" src="/tone.wav" autoplay></audio><img src="/never.png">`;
+
 /** Once the element is playing: [paused, muted]. */
 const playing = (id: string) => `new Promise((r) => {
   const check = () => { const e = document.getElementById(${JSON.stringify(id)}); if (e && !e.paused) r(JSON.stringify([e.paused, e.muted])); else setTimeout(check, 20); };
@@ -60,10 +64,12 @@ run("e2e: mute", () => {
     const tone = wav();
     server = Bun.serve({
       port: 0,
-      fetch: (req) =>
-        new URL(req.url).pathname === "/tone.wav"
-          ? new Response(tone, { headers: { "content-type": "audio/wav" } })
-          : new Response(PAGE, { headers: { "content-type": "text/html; charset=utf-8" } }),
+      fetch: (req) => {
+        const path = new URL(req.url).pathname;
+        if (path === "/tone.wav") return new Response(tone, { headers: { "content-type": "audio/wav" } });
+        if (path === "/never.png") return new Response(new ReadableStream({ pull: () => new Promise(() => {}) }), { headers: { "content-type": "image/png" } });
+        return new Response(path === "/hanging" ? HANGING_PAGE : PAGE, { headers: { "content-type": "text/html; charset=utf-8" } });
+      },
     });
     url = `http://localhost:${server.port}/`;
   });
@@ -81,5 +87,10 @@ run("e2e: mute", () => {
     await cmdOpen(ctx, url);
     expect(await cmdEval(ctx, playing("now"))).toBe("[false,true]");
     expect(await cmdEval(ctx, playing("late"))).toBe("[false,true]");
+  }, 60_000);
+
+  test("autoplaying media plays muted after an open that the load cap ends", async () => {
+    await cmdOpen(ctx, `${url}hanging`);
+    expect(await cmdEval(ctx, playing("now"))).toBe("[false,true]");
   }, 60_000);
 });

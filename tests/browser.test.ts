@@ -1823,6 +1823,27 @@ describe("navigate caps its wait for load (ET-52)", () => {
   );
 
   test(
+    "mutes the new document once it is parsed, before answering, though it never lands (#227)",
+    async () => {
+      const clock = manualClock();
+      const muted: number[] = [];
+      const { v } = hangingLoad(clock, {
+        read: (expr) => {
+          if (expr === MUTE_MEDIA) muted.push(clock.now());
+          return undefined;
+        },
+      });
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+      // Parsed at the first read after 50 ms (500).
+      expect(muted).toHaveLength(1);
+      expect(muted[0]).toBeGreaterThanOrEqual(500);
+      expect(muted[0]).toBeLessThan(at);
+    },
+    CAP_TEST_MS,
+  );
+
+  test(
     "the next action stops the load first and waits for the stop's -999, then for its own navigation",
     async () => {
       const clock = manualClock();

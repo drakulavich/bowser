@@ -509,6 +509,10 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
         if (read[0] !== doc) {
           doc = read[0] as number;
           since = clock.now();
+          // A capped load never reaches onNavigated, which mutes the rest (#227).
+          load.read = evaluate(MUTE_MEDIA).catch(() => undefined);
+          await load.read;
+          if (load.over) return false;
         } else if (clock.now() - since >= LOAD_CAP_MS) return true;
       }
       await sleep(timing.loadPollMs ?? LOAD_POLL_MS);
