@@ -1773,6 +1773,24 @@ describe("screenshot", () => {
     expect([...written.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   });
 
+  test("a --filename with another extension, or none, is a usage error before any request (#197)", async () => {
+    for (const name of ["shot.webp", "shot"]) {
+      const c = fakeClient({ screenshot: () => PNG_B64 });
+      const err = await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: join(tmp, name) }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(UserError);
+      expect((err as Error).message).toBe(`screenshot: --filename must end in .png, .jpg or .jpeg, got '${join(tmp, name)}'`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(c.calls).toEqual([]);
+    }
+  });
+
+  test("--filename=x.jpg reports the size of the JPEG written (#197)", async () => {
+    const file = join(tmp, "shot.jpg");
+    const jpeg = await new Bun.Image(Buffer.from(PNG_B64, "base64")).resize(5, 3, { fit: "fill" }).jpeg().bytes();
+    const c = fakeClient({ screenshot: () => Buffer.from(jpeg).toString("base64") });
+    expect(await cmdScreenshot({ ...ctx(), connect: async () => c }, { filename: file })).toBe(`wrote ${file} (5×3)`);
+  });
+
   test("no --filename writes a default screenshot-<session>.png in the cwd", async () => {
     const origCwd = process.cwd();
     process.chdir(tmp);

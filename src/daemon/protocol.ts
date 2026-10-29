@@ -61,7 +61,7 @@ interface DaemonOps {
   check: { args: [selector: string]; result: void };
   /** false: the element is a checked radio, left checked (F20). */
   uncheck: { args: [selector: string]; result: boolean };
-  /** The daemon writes the PNG to `path` and returns `{ path }`. A `scale` above
+  /** The daemon writes the image to `path` and returns `{ path }`. A `scale` above
    *  the window's pixel ratio writes nothing and returns `{ dpr }` (#191).
    *  `fontsLoading` says the 5 s wait for web fonts ran out (#194). */
   screenshot: {
@@ -133,6 +133,15 @@ export interface DaemonConnection {
   /** This command prints dialog reports: ask the daemon for them. */
   reportDialogs(): void;
   close(): void;
+}
+
+/** The image format a screenshot path asks for by its extension, in any case;
+ *  undefined for any other extension or none (#197). */
+export function screenshotFormat(path: string): "png" | "jpeg" | undefined {
+  const ext = /\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase();
+  if (ext === "png") return "png";
+  if (ext === "jpg" || ext === "jpeg") return "jpeg";
+  return undefined;
 }
 
 /** Width and height from a PNG's IHDR, big-endian at bytes 16 and 20. */

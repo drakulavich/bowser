@@ -3,7 +3,7 @@
 import { resolve } from "node:path";
 import { str } from "../cli/parser.ts";
 import { markdownScript, READ_VIEWPORT, SNAPSHOT_SCRIPT } from "../page-scripts.ts";
-import { pngSize, type DaemonConnection } from "../daemon/protocol.ts";
+import { screenshotFormat, type DaemonConnection } from "../daemon/protocol.ts";
 import { renderPage, renderTree, type SnapshotResult } from "../snapshot.ts";
 import { loadState, saveState } from "../state.ts";
 import { dialogsJson, liveSelector, loadRef, modalState, reply, replyPage, withClient, withPageClient, type CommandContext, type Command } from "./context.ts";
@@ -149,6 +149,9 @@ function parseScale(raw: string): number {
 export async function cmdScreenshot(ctx: CommandContext, opts: { filename?: string; scale?: string } = {}): Promise<string> {
   checkFilename(opts.filename);
   const scale = opts.scale === undefined ? undefined : parseScale(opts.scale);
+  if (opts.filename !== undefined && screenshotFormat(opts.filename) === undefined) {
+    throw new UserError(`screenshot: --filename must end in .png, .jpg or .jpeg, got '${opts.filename}'`);
+  }
   // The viewport only, as playwright-cli without --full-page. The default name auto-increments so repeated screenshots
   // don't clobber each other; an explicit --filename writes exactly there.
   const filename = opts.filename ?? (await nextAvailablePath(`screenshot-${ctx.session}.png`, (p) => Bun.file(p).exists()));
@@ -166,7 +169,7 @@ export async function cmdScreenshot(ctx: CommandContext, opts: { filename?: stri
     if ("dpr" in res) {
       throw new UserError(`screenshot: --scale=${scale} needs a display at pixel ratio ${scale} or more; this one is ${res.dpr}`);
     }
-    const [width, height] = pngSize(new Uint8Array(await Bun.file(abs).slice(0, 24).arrayBuffer()));
+    const { width, height } = await Bun.file(abs).image().metadata();
     // The absolute path, for the same reason as snapshot --filename.
     const fontsLoading = res.fontsLoading === true;
     return reply(
@@ -201,7 +204,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "screenshot",
-    summary: "Save a PNG screenshot of the viewport",
+    summary: "Save a PNG or JPEG screenshot of the viewport",
     positional: [],
     flags: [
       { name: "filename", kind: "string" },

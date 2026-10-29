@@ -23,6 +23,7 @@ import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-writ
 import {
   IS_URGENT,
   pngSize,
+  screenshotFormat,
   type ArgsOf,
   type DaemonRequest,
   type DaemonResponse,
@@ -363,6 +364,7 @@ const handlers: Handlers = {
     }
     let png: Uint8Array = Buffer.from(await browser.screenshot(), "base64");
     if (dpr !== undefined && scale !== dpr) png = await scalePng(png, scale! / dpr);
+    if (screenshotFormat(path) === "jpeg") png = await new Bun.Image(png).jpeg().bytes();
     await Bun.write(path, png);
     return fontsLoading ? { path, fontsLoading } : { path };
   },

@@ -1,6 +1,23 @@
 // Unit tests for the screenshot file name and capture height.
 import { describe, expect, test } from "bun:test";
 import { maxCaptureHeight, nextAvailablePath } from "../src/commands/snapshot.ts";
+import { screenshotFormat } from "../src/daemon/protocol.ts";
+
+describe("screenshotFormat (#197)", () => {
+  test(".png is PNG; .jpg and .jpeg are JPEG, in any case", () => {
+    expect(["shot.png", "a/b.PNG", "x.jpg", "x.JPG", "x.jpeg", "x.Jpeg"].map(screenshotFormat)).toEqual(["png", "png", "jpeg", "jpeg", "jpeg", "jpeg"]);
+  });
+  test("any other extension, or none, has no format", () => {
+    expect(["x.webp", "x.gif", "x.png.txt", "shot", "a.png/shot", "x."].map(screenshotFormat)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+});
 
 describe("nextAvailablePath", () => {
   test("returns the base name when it doesn't exist", async () => {
