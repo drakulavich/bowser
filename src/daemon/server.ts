@@ -136,6 +136,9 @@ const WAIT_POLL_MS = 100;
 const CLOSED_MS = 5000;
 /** How often a daemon checks that its pidfile still names it (ET-58). */
 const CLAIM_CHECK_MS = 1000;
+/** How long an orphaned daemon's browser close may take before it exits
+ *  anyway: a persistent close's about:blank and 1 s commit wait, with margin. */
+const ORPHAN_EXIT_MS = 5000;
 
 export function dispatch(req: DaemonRequest, lane: Lane): void {
   if (IS_URGENT.has(req.op)) {
@@ -731,6 +734,8 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
     }
     if (holder === String(process.pid)) return;
     clearInterval(keepalive);
+    // close() waits on a navigate that a page stuck in a loop never finishes.
+    setTimeout(() => process.exit(0), ORPHAN_EXIT_MS);
     browser
       .close()
       .catch(() => {})
