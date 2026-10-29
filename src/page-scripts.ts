@@ -793,7 +793,9 @@ export const MUTE_MEDIA = String.raw`(() => {
 /** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
 export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
 export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
-export const LANDED_PAGE = "[location.href, document.referrer]";
+/** The history entry's key: a location.replace keeps it, a navigate() pushes a new one (ET-13, measured on Bun 1.4.4). */
+export const ENTRY_KEY = "globalThis.navigation?.currentEntry?.key";
+export const LANDED_PAGE = `[location.href, document.referrer, ${ENTRY_KEY}]`;
 export const STOP_LOADING = "window.stop()";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
