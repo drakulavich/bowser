@@ -21,8 +21,7 @@ All notable changes to this project are documented here. This project follows
   it out, so an agent that checked `list` before `open` saw a free name. (ET-64, #155)
 - **`open <url>` or `goto <url>` as the first command after an upgrade loads only that URL.** The
   restart used to reload the old page first, so it loaded twice and its load-time side effects ran
-  again. The restart line now says "page at <old url> not reloaded (the command navigates to
-  <url>)". An `open` whose profile the session does not have still reloads the old page before it
+  again. The restart line now says "page at <old url> not reloaded". An `open` whose profile the session does not have still reloads the old page before it
   is refused. (ET-37, #152)
 
 ## [0.12.0] — 2026-10-21

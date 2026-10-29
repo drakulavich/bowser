@@ -1176,7 +1176,7 @@ describe("#152: the restart keeps the session's page and budget", () => {
         const notices: string[] = [];
         await run([command, next, "-s", session], { connect: up.connect, notices });
         expect(notices).toEqual([
-          `session '${session}' restarted for bowser ${pkg.version} (was 0.6.1): page at ${start} not reloaded (the command navigates to ${next}); refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
+          `session '${session}' restarted for bowser ${pkg.version} (was 0.6.1): page at ${start} not reloaded; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
         ]);
         expect(up.next()?.ops.filter((op) => op === "navigate")).toEqual(["navigate"]);
       } finally {

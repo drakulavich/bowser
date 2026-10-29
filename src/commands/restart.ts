@@ -42,8 +42,8 @@ export async function restartSession(ctx: CommandContext, err: OlderDaemon | Bro
     const url = old?.url ?? saved?.url ?? "";
     const profile = await recordedProfile(session);
     const page = url && url !== "about:blank" ? url : undefined;
-    const to = ctx.goingTo && (ctx.goingTo.profile === undefined || ctx.goingTo.profile === profile) ? ctx.goingTo.url : undefined;
-    const skipped = page && to ? `page at ${page} not reloaded (the command navigates to ${to})` : undefined;
+    const navigates = ctx.navigates && (ctx.navigates.profile === undefined || ctx.navigates.profile === profile);
+    const skipped = page && navigates ? `page at ${page} not reloaded` : undefined;
     const reloadAt = skipped ? undefined : page;
     const lost = profile === null ? "; cookies and storage were lost (no --persistent)" : "";
     const notice = (reload: string) =>

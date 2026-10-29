@@ -20,9 +20,9 @@ export interface CommandContext {
    *  tests inject a fake. `bowser mcp` never reaches it: the flag is not in
    *  its schema and toArgv puts every client value after `--`. */
   readStdin?: () => Promise<string>;
-  /** Where this command navigates, and the profile it requires: a restart it
+  /** Set when this command navigates, with the profile it requires: a restart it
    *  triggers skips reloading the old page, unless that profile is refused (ET-37). */
-  goingTo?: { url: string; profile?: string };
+  navigates?: { profile?: string };
   notices?: string[];
   /** One per notice: the surface calls it once the notice is out. */
   acks?: (() => void)[];
