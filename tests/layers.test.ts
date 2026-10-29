@@ -1,8 +1,7 @@
-// Import-rule test. Cheap stand-in for a dependency linter: reads every
-// src/**/*.ts and checks the layering rules from the maintainability spec
-// (docs/superpowers/specs/2026-09-05-maintainability-refactor-design.md,
-// Section 1). Only rules that hold today are listed; each refactor PR adds
-// the rules its layout makes true.
+// Layering rules biome's noRestrictedImports (biome.json) cannot express:
+// who may call what, and the one leaf biome lets import state.ts for types.
+// From the maintainability spec
+// (docs/superpowers/specs/2026-09-05-maintainability-refactor-design.md, Section 1).
 
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -50,18 +49,8 @@ const RULES: Rule[] = [
     violates: (file, text) => file !== "src/daemon/server.ts" && file !== "src/browser.ts" && /\bopenBrowser\s*\(/.test(text),
   },
   {
-    name: "page-scripts.ts, snapshot.ts, serialize.ts, socket-write.ts and daemon/protocol.ts have no value imports from src",
-    violates: (file, text) =>
-      ["src/page-scripts.ts", "src/snapshot.ts", "src/serialize.ts", "src/socket-write.ts", "src/daemon/protocol.ts"].includes(file) &&
-      valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
-  },
-  {
-    name: "commands/* talk to the daemon only through client.ts and protocol.ts (never browser.ts or daemon/server.ts)",
-    violates: (file, text) => file.startsWith("src/commands/") && valueImports(text).some((s) => s.endsWith("browser.ts") || s.endsWith("daemon/server.ts")),
-  },
-  {
-    name: "daemon/client.ts does not import browser.ts",
-    violates: (file, text) => file === "src/daemon/client.ts" && valueImports(text).some((s) => s.endsWith("browser.ts")),
+    name: "snapshot.ts has no value imports from src",
+    violates: (file, text) => file === "src/snapshot.ts" && valueImports(text).some((s) => s.startsWith("./") || s.startsWith("../")),
   },
   {
     name: "only src/page-scripts.ts builds a script string for the page",
