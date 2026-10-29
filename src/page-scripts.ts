@@ -790,7 +790,8 @@ export const MUTE_MEDIA = String.raw`(() => {
 })()`;
 /** An id the first read stores on the document, so a new document has a new one, even at the same URL (ET-52).
  *  Not performance.timeOrigin: one document's moved by 1 ms between reads in CI run 40854804772. */
-export const DOC_ID = "document[Symbol.for('bowser.doc')] ??= Math.random()";
+/** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
+export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
 export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
 export const LANDED_PAGE = "[location.href, document.referrer]";
 export const STOP_LOADING = "window.stop()";

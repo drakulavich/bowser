@@ -384,6 +384,19 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     },
     openTimeout(8000, 60_000),
   );
+  // #248 review: the cap stores its document id on the page's document, which a page can make non-extensible.
+  test(
+    "ET-52: a goto from a page that made its document non-extensible still answers within the cap",
+    async () => {
+      const ctx = await openWith("hangsealed", 20_000);
+      expect(await cmdEval(ctx, "Object.preventExtensions(document), Object.isExtensible(document)")).toBe("false");
+      const goto = await timed(() => cmdGoto({ ...ctx, command: "goto" }, `${base}/image`));
+      expect(goto.error).toBeUndefined();
+      expect(goto.ms).toBeLessThan(8000);
+      expect(await cmdEval(ctx, "document.title")).toBe("Image");
+    },
+    openTimeout(20_000, 30_000),
+  );
   // ET-38: a killed client's op used to keep its whole budget in the daemon,
   // and with no budget (0) it held the session for good.
   test(

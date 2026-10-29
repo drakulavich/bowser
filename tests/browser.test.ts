@@ -1945,6 +1945,26 @@ describe("navigate caps its wait for load (ET-52)", () => {
     CAP_TEST_MS,
   );
 
+  // #248 review: the id is stored on the page's own document, which the page can make non-extensible.
+  for (const sealed of ["old", "new"] as const)
+    test(
+      `with the ${sealed} document made non-extensible by the page, the new one is still capped 5 s after it is parsed`,
+      async () => {
+        const clock = manualClock();
+        const docs = { 1: { readyState: "complete" } as object, 2: { readyState: "interactive" } as object };
+        Object.preventExtensions(docs[sealed === "old" ? 1 : 2]);
+        const { v, page } = hangingLoad(clock, {
+          read: (expr) =>
+            expr === DOC_ID || expr === LOAD_STATE ? Promise.resolve(new Function("document", `return (${expr})`)(docs[page.origin as 1 | 2])) : undefined,
+        });
+        const b = onClock(v, capped, clock);
+        const at = await clock.fulfilledAt(b.navigate("https://x/hang"), 8000);
+        expect(at).toBeGreaterThanOrEqual(5500);
+        expect(at).toBeLessThan(6100);
+      },
+      CAP_TEST_MS,
+    );
+
   test(
     "mutes the new document once it is parsed, before answering, though it never lands (#227)",
     async () => {

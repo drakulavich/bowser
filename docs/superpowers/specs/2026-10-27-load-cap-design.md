@@ -65,12 +65,19 @@ the 5 s again; a fresh `open` then ran to its 20 s budget. A diagnostic build lo
 new document seen 5131 ms, 3 times, first and last 3 origins [1793268461382,1793268461382,1793268461383.0002,1793268461382]
 ```
 
-The watcher now reads `document[Symbol.for('bowser.doc')] ??= Math.random()` (`DOC_ID`): the first read
+The watcher now reads an id it stores under `document[Symbol.for('bowser.doc')]` (`DOC_ID`): the first read
 stores the id on the document and every later read of that document returns it. The store is on `document`, not
 `window`: WebKit may keep the initial `about:blank` window for a first same-origin document, but every
 navigation gets a new `Document`. Measured on a bare `Bun.WebView` (Bun 1.4.4): a fresh view's `about:blank`
 took an id on both `window` and `document`; after the first `navigate()` to a local page, and after a same-URL
 `navigate()`, both read `undefined` until the next read stored a new one.
+
+A page can make its `document` non-extensible. There the store fails (silently: the read is not strict code),
+and the plain `??=` answered a new random number on every read, so a sealed new document never stayed the
+same long enough to be capped. `DOC_ID` reads the property back and answers `"sealed"` when it holds no id,
+also when the store throws. A sealed old document then still gives a baseline, and a new document reads as
+new. If both the old and the new document are sealed, they read the same, the watcher sees no new document,
+and `navigate` waits for `load` as it did before the cap.
 
 ### The cap
 
