@@ -43,7 +43,7 @@ To read a page rather than act on it, `bowser markdown` costs a fraction of a sn
 | `bowser localstorage-list` / `localstorage-get <key>` / `localstorage-set <key> <value>` / `localstorage-delete <key>` / `localstorage-clear` | localStorage |
 | `bowser sessionstorage-list` / `sessionstorage-get <key>` / `sessionstorage-set <key> <value>` / `sessionstorage-delete <key>` / `sessionstorage-clear` | sessionStorage |
 | `bowser state-save <file>` / `state-load <file>` | localStorage to and from a Playwright `storageState` file |
-| `bowser list` | Sessions whose browser is running |
+| `bowser list` | Sessions whose browser is running; one that does not answer is marked `(not answering; run 'bowser close -s <name>')`. `--json`: `[{"name","answering"}]` |
 | `bowser close [name]` / `close --all` | End a session, or all of them |
 | `bowser mcp` | Serve every command as an MCP tool over stdio |
 

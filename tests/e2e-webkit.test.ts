@@ -294,7 +294,7 @@ runOrSkip("e2e: WebKit agent loop", () => {
   test("list shows the session; close --all ends it", async () => {
     const own: CommandContext = { session: "wk-close", json: true };
     await cmdOpen(own, base);
-    expect(JSON.parse(await cmdList(own)) as string[]).toContain("wk-close");
+    expect(JSON.parse(await cmdList(own))).toContainEqual({ name: "wk-close", answering: true });
     const out = JSON.parse(await cmdClose(own, { all: true })) as { ok: boolean; closed: string[] };
     expect(out.ok).toBe(true);
     expect(out.closed).toContain("wk-close");

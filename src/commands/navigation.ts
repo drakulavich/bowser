@@ -4,7 +4,7 @@ import { constants, existsSync } from "node:fs";
 import { access, readFile, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { str } from "../cli/parser.ts";
-import { DaemonNotAnswering, pidPath, socketPath } from "../daemon/client.ts";
+import { DaemonNotAnswering, liveDaemonPid, pidPath, socketPath } from "../daemon/client.ts";
 import { claimSession, isAlive, isOurDaemon } from "../daemon/pidfile.ts";
 import { ensureSessionDir, isValidSessionName, loadState, profileDir, saveState, sessionDir, sessionsRoot, statePath, type SessionState } from "../state.ts";
 import { claimRestartLock, LOCK, releaseRestartLock } from "./restart-lock.ts";
@@ -388,13 +388,18 @@ async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> 
  *  and a pid alone is not either, since an orphan holds no socket. The
  *  connector's own `ping` is the probe: it is bounded, and on the urgent lane,
  *  so a busy daemon still answers and reads as live, which is correct. A second
- *  probe raced against a sleep kept `list` alive for the sleep (F32). */
-async function isLive(ctx: CommandContext, session: string): Promise<boolean> {
+ *  probe raced against a sleep kept `list` alive for the sleep (F32).
+ *  False for a live daemon of ours that does not answer (ET-64), undefined for no daemon. */
+async function isLive(ctx: CommandContext, session: string): Promise<boolean | undefined> {
   try {
     (await connector(ctx)(session, { spawn: false, anyVersion: true })).close();
     return true;
   } catch {
-    return false;
+    try {
+      return (await liveDaemonPid(session)) === null ? undefined : false;
+    } catch {
+      return undefined;
+    }
   }
 }
 
@@ -404,8 +409,9 @@ export async function cmdList(ctx: CommandContext): Promise<string> {
   // Concurrently: one dead session waits out a connect, and serially that cost
   // would multiply by however many directories have accumulated.
   const live = await Promise.all(names.map((n) => isLive(ctx, n)));
-  const usable = names.filter((_, i) => live[i]);
-  return ctx.json ? JSON.stringify(usable) : usable.join("\n");
+  const rows = names.flatMap((name, i) => (live[i] === undefined ? [] : [{ name, answering: live[i] }]));
+  if (ctx.json) return JSON.stringify(rows);
+  return rows.map((r) => (r.answering ? r.name : `${r.name} (not answering; run 'bowser close -s ${r.name}')`)).join("\n");
 }
 
 export const COMMANDS: Command[] = [
@@ -470,7 +476,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "list",
-    summary: "List sessions whose daemon is running",
+    summary: "List sessions whose daemon is running, marking one that does not answer",
     positional: [],
     flags: [],
     run: (ctx) => cmdList(ctx),

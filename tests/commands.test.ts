@@ -30,7 +30,7 @@ import {
   cmdSessionStorageSet,
 } from "../src/commands/web-storage.ts";
 import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
-import { killDaemons } from "./helpers/daemons.ts";
+import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 import { longHome } from "./helpers/long-home.ts";
 import { fakeClient } from "./helpers/fake-client.ts";
 import { lineSocket } from "./helpers/fake-daemon.ts";
@@ -998,7 +998,43 @@ describe("list", () => {
   test("--json carries the same filtered set", async () => {
     await seedSessions();
     const out = await cmdList({ ...ctx(), json: true, connect: only(["live-a"]) });
-    expect(JSON.parse(out)).toEqual(["live-a"]);
+    expect(JSON.parse(out)).toEqual([{ name: "live-a", answering: true }]);
+  });
+
+  // ET-64: a live daemon of ours that does not answer is listed, marked, with close as the way out.
+  describe("a live daemon that does not answer", () => {
+    const mute = "et64-mute";
+    let holder: ReturnType<typeof Bun.spawn> | undefined;
+    beforeEach(async () => {
+      await seedSessions();
+      await ensureSessionDir(mute);
+      holder = Bun.spawn([process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", mute], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      await waitFor(async () => (await daemonPids(mute)).includes(holder!.pid));
+      await Bun.write(pidPath(mute), String(holder.pid));
+    });
+    afterEach(async () => {
+      holder?.kill();
+      await holder?.exited;
+      await rm(sessionDir(mute), { recursive: true, force: true });
+    });
+
+    test("text marks it", async () => {
+      const out = await cmdList({ ...ctx(), connect: only(["live-a"]) });
+      expect(out.split("\n").filter(Boolean).sort()).toEqual([`${mute} (not answering; run 'bowser close -s ${mute}')`, "live-a"]);
+    });
+
+    test("--json gives it answering: false", async () => {
+      const out = await cmdList({ ...ctx(), json: true, connect: only(["live-a"]) });
+      const rows = (JSON.parse(out) as { name: string; answering: boolean }[]).sort((a, b) => a.name.localeCompare(b.name));
+      expect(rows).toEqual([
+        { name: mute, answering: false },
+        { name: "live-a", answering: true },
+      ]);
+    });
   });
 });
 
