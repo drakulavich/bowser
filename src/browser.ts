@@ -793,21 +793,25 @@ export function wrapView(
     click: (selector, timeoutMs) => guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
     type: (text) =>
       guard(
-        nav.act(async () => {
-          // Lexical keeps a typed "\n" as text in one paragraph (#243); an <input> in a form submits on Enter.
-          if (!text.includes("\n") || (await evaluate(TYPE_TARGET_MARK)) !== true) return view.type(text);
-          await evaluate(KEY_CODES);
-          const lines = text.replaceAll("\r\n", "\n").split("\n");
-          for (const [i, line] of lines.entries()) {
-            if (i > 0) {
-              await view.press(RAW_KEYS.Enter!);
-              if ((await evaluate(TYPE_TARGET_FOCUSED)) !== true) {
-                throw new Error(`type: focus left the editor after line ${i} of ${lines.length}; the rest was not typed`);
+        nav
+          .act(async (): Promise<string | undefined> => {
+            // Lexical keeps a typed "\n" as text in one paragraph (#243); an <input> in a form submits on Enter.
+            if (!text.includes("\n") || (await evaluate(TYPE_TARGET_MARK)) !== true) return void (await view.type(text));
+            await evaluate(KEY_CODES);
+            const lines = text.replaceAll("\r\n", "\n").split("\n");
+            for (const [i, line] of lines.entries()) {
+              if (i > 0) {
+                await view.press(RAW_KEYS.Enter!);
+                // Returned, not thrown, so act still waits for a navigation the Enter started.
+                if ((await evaluate(TYPE_TARGET_FOCUSED)) !== true)
+                  return `type: focus left the editor after line ${i} of ${lines.length}; the rest was not typed`;
               }
+              if (line) await view.type(line);
             }
-            if (line) await view.type(line);
-          }
-        }),
+          })
+          .then((focusLeft) => {
+            if (focusLeft) throw new Error(focusLeft);
+          }),
       ),
     press: (key, modifiers = []) =>
       guard(

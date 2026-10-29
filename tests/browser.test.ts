@@ -19,6 +19,8 @@ import {
   NAV_COUNT,
   NAV_DESTINATION,
   STOP_LOADING,
+  TYPE_TARGET_FOCUSED,
+  TYPE_TARGET_MARK,
 } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
@@ -503,6 +505,23 @@ describe("wrapView navigation watch", () => {
     const b = onClock(v, fast, clock);
     await clock.fulfilledAt(b.press("Enter"));
     expect(v.url).toBe("https://x/submitted");
+  });
+
+  test("type that stops on lost focus still waits for the navigation its Enter started (#243)", async () => {
+    const clock = manualClock();
+    const v = fakeView({ evaluate: async (expr) => (expr === TYPE_TARGET_MARK ? true : expr === TYPE_TARGET_FOCUSED ? false : undefined) });
+    v.press = async (k) => {
+      v.calls.push(["press", [k]]);
+      v.loading = true;
+      clock.setTimeout(() => v.land("https://x/sent"), 120);
+    };
+    const b = onClock(v, fast, clock);
+    const typed = b.type("first\nsecond");
+    await clock.settledAt(typed);
+    expect(await typed.catch((e: Error) => [e.message, v.url])).toEqual([
+      "type: focus left the editor after line 1 of 2; the rest was not typed",
+      "https://x/sent",
+    ]);
   });
 
   test("a bare named key goes as its macOS character, which WebKit takes as a key event (F11, #168)", async () => {
