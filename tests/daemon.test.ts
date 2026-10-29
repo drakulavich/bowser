@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { ensureSessionDir, profileDir, saveState } from "../src/state.ts";
+import { ensureSessionDir, profileDir, saveState, sessionDir } from "../src/state.ts";
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
@@ -293,6 +293,16 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
       await crashed(session, { profile: dir });
       const quoted = `'${dir.replaceAll("'", "'\\''")}'`;
       expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open --profile=${quoted}'`);
+    });
+
+    test("#245: a profile that is not a string counts as none", async () => {
+      const session = "245-profile-exited";
+      await crashed(session);
+      await Bun.write(
+        join(sessionDir(session), "state.json"),
+        JSON.stringify({ name: session, url: "http://x/", title: "", refs: [], updatedAt: 0, profile: {} }),
+      );
+      expect(await refusal(session)).toBe(`session '${session}' is not open (its browser exited); run 'bowser open'`);
     });
 
     test("no profile: plain open, even with a profile directory left on disk", async () => {
