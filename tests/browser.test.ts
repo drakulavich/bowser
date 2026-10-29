@@ -1228,6 +1228,20 @@ describe("navigate while the page navigates itself (ET-13)", () => {
     expect(await outcome(v, clock)).toEqual({ at: 0, error: LEFT });
   });
 
+  // CI run 40881043905: the read failed with no landing during it, view.url already on a bounce page.
+  test("a landing read that fails on a page other than the one asked for is read once more, and fails it", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, BOUNCED, "https://x/jsbounce?n=4"));
+    const answer = v.evaluate;
+    let failed = false;
+    v.evaluate = async (expr) => {
+      if (expr !== LANDED_PAGE || failed) return answer(expr);
+      failed = true;
+      throw new Error("the page is navigating");
+    };
+    expect(await outcome(v, clock)).toEqual({ at: 0, error: LEFT });
+  });
+
   test("a goto to the page already shown keeps its history entry, and moved on by its script, succeeds", async () => {
     const clock = manualClock();
     const v = bouncing(async (v, page) => landOn(v, page, "https://x/jsbounce?n=2", "https://x/jsbounce?n=1"));

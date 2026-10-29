@@ -531,8 +531,8 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     for (let waited = false; ; waited = true) {
       const seen = landed;
       let read = await ask(LANDED_PAGE, timing.graceMs);
-      // A page that navigates during the read fails it; the page it landed on can answer (ET-13 in CI).
-      if (!Array.isArray(read) && !load.over && landed !== seen) read = await ask(LANDED_PAGE, timing.graceMs);
+      // A page still navigating fails the read, before or after it lands (ET-13 in CI); a redirect only costs a second read.
+      if (!Array.isArray(read) && !load.over && (landed !== seen || !sameUrl(view.url, url))) read = await ask(LANDED_PAGE, timing.graceMs);
       if (load.over || !Array.isArray(read)) return true;
       const [href, referrer, key] = read;
       if (typeof referrer !== "string" || !referrer || sameUrl(href, url)) return true;
