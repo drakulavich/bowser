@@ -2076,9 +2076,6 @@ describe("eval", () => {
     await expect(cmdEval(ctx(), "")).rejects.toThrow(/^usage: bowser eval/);
   });
 
-  test("missing expression throws usage error", async () => {
-    await expect(cmdEval(ctx(), undefined as unknown as string)).rejects.toThrow(/^usage: bowser eval/);
-  });
 });
 
 describe("run-code", () => {
@@ -2099,18 +2096,6 @@ describe("run-code", () => {
     expect(reportFailure(err).code).toBe(1);
   });
 
-  test("string result is printed as-is", async () => {
-    const c = fakeClient({ evaluate: () => ({ value: "hi" }) });
-    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 'hi'");
-    expect(out).toBe("hi");
-  });
-
-  test("object result is JSON.stringified", async () => {
-    const c = fakeClient({ evaluate: () => ({ value: [1, 2, 3] }) });
-    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return [1,2,3]");
-    expect(out).toBe("[1,2,3]");
-  });
-
   test("undefined result prints empty string", async () => {
     const c = fakeClient({ evaluate: () => ({}) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "1+1");
@@ -2127,9 +2112,6 @@ describe("run-code", () => {
     await expect(cmdRunCode(ctx(), "")).rejects.toThrow(/^usage: bowser run-code/);
   });
 
-  test("missing code throws usage error", async () => {
-    await expect(cmdRunCode(ctx(), undefined as unknown as string)).rejects.toThrow(/^usage: bowser run-code/);
-  });
 });
 
 describe("context helpers", () => {

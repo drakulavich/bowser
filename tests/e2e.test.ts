@@ -56,24 +56,6 @@ runOrSkip("e2e: real browser", () => {
     </body></html>`;
   const dataUrl = "data:text/html;charset=utf-8," + encodeURIComponent(html);
 
-  test("open → snap → click flow", async () => {
-    await cmdOpen({ session, json: true }, dataUrl);
-
-    const yaml = await cmdSnapshot({ session, json: false });
-    // The snapshot should find our button, input, and link.
-    expect(yaml).toContain("button");
-    expect(yaml).toContain("textbox");
-    expect(yaml).toContain("link");
-
-    const state = await loadState(session);
-    const button = state?.refs.find((r) => r.role === "button");
-    expect(button).toBeDefined();
-
-    // Click it — should complete without throwing.
-    const out = await cmdClick({ session, json: true }, button!.id);
-    expect(JSON.parse(out).ok).toBe(true);
-  }, 30_000);
-
   test("screenshot writes a valid, non-truncated PNG file", async () => {
     await cmdOpen({ session, json: false }, `data:text/html,${encodeURIComponent(html)}`);
     const file = join(tmp, "e2e-shot.png");

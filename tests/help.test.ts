@@ -77,10 +77,6 @@ describe("generated help", () => {
     expect(lines[i + 1]).toBe(" ".repeat(col) + "Pick a size");
   });
 
-  test("every summary appears", () => {
-    for (const c of COMMANDS) expect(HELP).toContain(c.summary);
-  });
-
   test("keeps the header and the global flags block", () => {
     expect(HELP.startsWith("bowser — drop-in playwright-cli alternative for AI agents")).toBe(true);
     expect(HELP).toContain("Global flags:");

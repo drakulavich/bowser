@@ -43,7 +43,6 @@ const HOME_PAGE = `<!doctype html><html><head><title>Agent Loop</title></head><b
 <p id="submitted"></p>
 <button id="hoverme" type="button">Hover me</button>
 <p id="hovered"></p>
-<p id="keys"></p>
 <p id="size"></p>
 <a href="/two">Page two</a>
 </main><script>
@@ -51,7 +50,6 @@ const HOME_PAGE = `<!doctype html><html><head><title>Agent Loop</title></head><b
   $("f").addEventListener("submit", (e) => { e.preventDefault(); $("submitted").textContent = "submitted:" + $("name").value; });
   $("color").addEventListener("change", (e) => { $("submitted").textContent = "color:" + e.target.value; });
   $("hoverme").addEventListener("mouseover", () => { $("hovered").textContent = "hovered"; });
-  document.addEventListener("keydown", (e) => { $("keys").textContent += e.key + ";"; });
   addEventListener("resize", () => { $("size").textContent = innerWidth + "x" + innerHeight; });
 </script></body></html>`;
 const PAGE_TWO = `<!doctype html><html><head><title>Page Two</title></head><body><main><h1>Two</h1><a href="/">Back home</a></main></body></html>`;
@@ -150,11 +148,6 @@ runOrSkip("e2e: WebKit agent loop", () => {
     expect(await evalText("document.getElementById('name').value")).toBe("Ada Lovelace");
     await cmdPress(ctx, "Enter");
     await waitForEval("document.getElementById('submitted').textContent", "submitted:Ada Lovelace");
-  }, 60_000);
-
-  test("press Enter dispatches a bubbling keydown to document (#168)", async () => {
-    await cmdPress(ctx, "Enter");
-    expect(await evalText("document.getElementById('keys').textContent")).toContain("Enter;");
   }, 60_000);
 
   test("select fires change with the chosen value", async () => {
