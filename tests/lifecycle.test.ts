@@ -451,6 +451,21 @@ describe("F2: a daemon from another bowser version", () => {
       d.stop();
     }
   });
+
+  test("#235: a state.json the hint cannot read still fails the command, with the plain hint", async () => {
+    const session = "235-unknown-op-bad";
+    const d = await fakeDaemon(session, (req) => (req.op === "waitFor" ? { ok: false, error: "unknown op: waitFor" } : daemonOf(pkg.version)(req)));
+    await Bun.write(join(sessionDir(session), "state.json"), JSON.stringify({ name: session, profile: { dir: "a b" } }));
+    try {
+      const failure = await run(["wait-for", "--text=x", "-s", session]).then((out) => ({ stderr: `no failure: ${out}`, code: 0 }), reportFailure);
+      expect(failure).toEqual({
+        stderr: `bowser: session '235-unknown-op-bad' was started by an older bowser build that does not know 'wait-for'; run 'bowser close -s 235-unknown-op-bad', then open it again`,
+        code: 1,
+      });
+    } finally {
+      d.stop();
+    }
+  }, 2000);
 });
 
 describe("F3: close of a silent daemon with no pidfile", () => {

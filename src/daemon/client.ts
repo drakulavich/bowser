@@ -238,7 +238,9 @@ async function otherVersion(session: string, answer: unknown, opts: ConnectOptio
  *  an older build of it, an unreleased checkout or link (#235). A user error (exit 1). */
 async function olderBuild(session: string, command: string | undefined): Promise<UserError> {
   const what = command ? `'${command}'` : "this command";
-  return new UserError(`session '${session}' was started by an older bowser build that does not know ${what}; ${await reopenHint(session)}`);
+  // The request is already out of `pending`: a failed hint must not leave it unsettled.
+  const hint = await reopenHint(session).catch(() => `run 'bowser close -s ${session}', then open it again`);
+  return new UserError(`session '${session}' was started by an older bowser build that does not know ${what}; ${hint}`);
 }
 
 async function reopenHint(session: string): Promise<string> {
