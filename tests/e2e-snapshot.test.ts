@@ -111,6 +111,25 @@ const EDITABLE_HTML = `<!doctype html>
 <html><head><title>Editable</title></head>
 <body><div id="notes" contenteditable="true" role="textbox" aria-label="Notes" style="min-height:2em">old text</div></body></html>`;
 
+/** An editor that keeps its own model, as Lexical does: it takes only the
+ *  browser's own (trusted) input events and re-renders from the model after
+ *  any other DOM change, so a script that empties the DOM is undone. */
+const MODEL_EDITOR_HTML = `<!doctype html>
+<html><head><title>Model editor</title></head>
+<body><div id="ed" contenteditable="true" role="textbox" aria-label="Model"></div>
+<script>
+  const ed = document.getElementById("ed");
+  window.model = "old text";
+  const observer = new MutationObserver(() => render());
+  function render() {
+    observer.disconnect();
+    if (ed.innerHTML !== "<p>" + window.model + "</p>") ed.innerHTML = "<p>" + window.model + "</p>";
+    observer.observe(ed, { childList: true, characterData: true, subtree: true });
+  }
+  ed.addEventListener("input", (e) => { if (e.isTrusted) window.model = ed.textContent; });
+  render();
+</script></body></html>`;
+
 runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
   let tmp: string;
@@ -135,6 +154,9 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
       fetch(req) {
         if (new URL(req.url).pathname === "/editable.html") {
           return new Response(EDITABLE_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
+        if (new URL(req.url).pathname === "/model-editor.html") {
+          return new Response(MODEL_EDITOR_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
         }
         if (new URL(req.url).pathname === "/edges.html") {
           return new Response(EDGES_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -267,6 +289,15 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     await cmdSnapshot(ctx);
     await cmdFill(ctx, await refNamed("Notes"), "hello editable");
     expect(await cmdEval(ctx, "JSON.stringify(document.getElementById('notes').textContent)")).toContain('"hello editable"');
+  }, 60_000);
+
+  test("fill replaces, and an empty fill clears, an editor that re-renders from its own model", async () => {
+    await cmdGoto(ctx, `${base}/model-editor.html`);
+    await cmdSnapshot(ctx);
+    await cmdFill(ctx, await refNamed("Model"), "hello world");
+    expect(await cmdEval(ctx, "window.model")).toBe("hello world");
+    await cmdFill(ctx, await refNamed("Model"), "");
+    expect(await cmdEval(ctx, "window.model")).toBe("");
   }, 60_000);
 
   // One page, several rules; the golden line that breaks names the rule:

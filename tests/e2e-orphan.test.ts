@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
+import { cmdEval } from "../src/commands/scripting.ts";
 import { pidPath, socketPath } from "../src/daemon/client.ts";
 import { sessionDir } from "../src/state.ts";
 
@@ -65,5 +66,33 @@ runOrSkip("e2e: an unreachable daemon does not survive close", () => {
     for (let i = 0; i < 40 && alive(pid); i++) await Bun.sleep(50);
     expect(alive(pid)).toBe(false);
     expect(existsSync(sessionDir(session))).toBe(false);
+  }, 120_000);
+
+  test("a daemon whose session dir is deleted exits (ET-58)", async () => {
+    const gone = "orphan-dir";
+    await cmdOpen({ session: gone, json: true });
+    const pid = Number((await readFile(pidPath(gone), "utf8")).trim());
+    expect(alive(pid)).toBe(true);
+    try {
+      await rm(sessionDir(gone), { recursive: true, force: true });
+      for (let i = 0; i < 100 && alive(pid); i++) await Bun.sleep(50);
+      expect(alive(pid)).toBe(false);
+    } finally {
+      if (alive(pid)) process.kill(pid, "SIGKILL");
+    }
+  }, 120_000);
+
+  test("a persistent daemon whose page is stuck exits when its session dir is deleted (ET-58)", async () => {
+    const stuck = "orphan-stuck";
+    await cmdOpen({ session: stuck, json: true }, "about:blank", { persistent: true });
+    const pid = Number((await readFile(pidPath(stuck), "utf8")).trim());
+    try {
+      await cmdEval({ session: stuck, json: true }, "setTimeout(() => { while (true) {} }, 100)");
+      await rm(sessionDir(stuck), { recursive: true, force: true });
+      for (let i = 0; i < 200 && alive(pid); i++) await Bun.sleep(50);
+      expect(alive(pid)).toBe(false);
+    } finally {
+      if (alive(pid)) process.kill(pid, "SIGKILL");
+    }
   }, 120_000);
 });

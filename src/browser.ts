@@ -6,6 +6,7 @@ import {
   KEY_CODES,
   LEAVE_INITIAL_DOCUMENT,
   LOAD_STATE,
+  MUTE_MEDIA,
   NAV_ARM,
   NAV_COUNT,
   NAV_DESTINATION,
@@ -383,6 +384,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   view.onNavigated = () => {
     landed++;
     arrived++;
+    evaluate(MUTE_MEDIA).catch(() => {});
     onNavigation();
   };
   view.onNavigationFailed = (error) => {
@@ -515,6 +517,10 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
           doc = read[0] as number;
           since = clock.now();
           diag.seen = since;
+          // A capped load never reaches onNavigated, which mutes the rest (#227).
+          load.read = evaluate(MUTE_MEDIA).catch(() => undefined);
+          await load.read;
+          if (load.over) return false;
         } else if (clock.now() - since >= LOAD_CAP_MS) return true;
       }
       await sleep(timing.loadPollMs ?? LOAD_POLL_MS);
