@@ -2734,6 +2734,14 @@ describe("fill and type errors never carry the entered text", () => {
       expect(reportFailure(err)).toEqual({ stderr: "bowser: failed: boom", code: 2 });
     });
   }
+
+  test("an error quoting one line of a multi-line text is withheld, for fill and type", async () => {
+    const text = "first-secret\nsecond-secret";
+    const fill = await cmdFill({ ...ctx(), connect: async () => failing("failed: second-secret") }, "e2", text).catch((e: unknown) => e);
+    expect(reportFailure(fill)).toEqual({ stderr: `bowser: ${withheld("fill")}`, code: 2 });
+    const type = await cmdType({ ...ctx(), connect: async () => failing("failed: first-secret") }, text).catch((e: unknown) => e);
+    expect(reportFailure(type)).toEqual({ stderr: `bowser: ${withheld("type")}`, code: 2 });
+  });
 });
 
 describe("an empty --filename (#193)", () => {

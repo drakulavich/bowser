@@ -50,7 +50,8 @@ function withoutFinalNewline(s: string): string {
 }
 
 /** Runs `fn`, the request that is given the entered text, and if it throws
- *  an error whose message contains `text` (the browser may quote its input),
+ *  an error whose message contains `text` or one of its lines (the browser may
+ *  quote its input, and `type` sends a contenteditable one line at a time),
  *  replaces the message so the text never reaches stderr or an MCP result.
  *  The same error object is rethrown, so its class stays, and
  *  `withPageClient` still hangs the dialogs on it. Its stack is reset
@@ -62,7 +63,7 @@ async function withholdingText<T>(command: string, text: string, fn: () => Promi
     return await fn();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (!text || !message.includes(text)) throw err;
+    if (!text.split(/\r?\n/).some((line) => line !== "" && message.includes(line))) throw err;
     const withheld = `${command}: the browser's error message was withheld because it contained the entered text`;
     if (!(err instanceof Error)) throw new Error(withheld);
     err.message = withheld;

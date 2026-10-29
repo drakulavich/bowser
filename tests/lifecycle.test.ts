@@ -6,7 +6,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -185,6 +185,20 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
+  test("#245: a state.json whose profile is not a string gives the plain reopen hint", async () => {
+    const session = "245-profile-newer";
+    const d = await fakeDaemon(session, daemonOf("99.0.0"));
+    try {
+      await Bun.write(join(sessionDir(session), "state.json"), JSON.stringify({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: {} }));
+      expect(await failure(["snapshot", "-s", session])).toEqual({
+        stderr: `bowser: session '${session}' is running bowser 99.0.0 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
+        code: 1,
+      });
+    } finally {
+      d.stop();
+    }
+  });
+
   test("a restart that finds a newer daemon once it holds the lock refuses it and stops nothing", async () => {
     const session = "ver-newer-after-lock";
     const d = await fakeDaemon(session, daemonOf("99.0.0"));
@@ -216,6 +230,29 @@ describe("F2: a daemon from another bowser version", () => {
       expect(await run(["eval", "1", "-s", session])).toBe("1");
     } finally {
       (await next).stop();
+    }
+  });
+
+  test("in an unwritable session directory, close leaves a daemon whose restart holds the lock (ET-60, Codex #332)", async () => {
+    const session = "ver-ro-restart";
+    const d = await fakeDaemon(session, daemonOf(pkg.version));
+    const lock = join(sessionDir(session), LOCK);
+    await Bun.write(lock, String(holder.pid));
+    await chmod(sessionDir(session), 0o555);
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "300";
+    try {
+      expect(await failure(["close", "-s", session])).toEqual({
+        stderr: `bowser: session '${session}' is being restarted by pid ${holder.pid} (${lock}); retry in a moment`,
+        code: 1,
+      });
+      expect(d.ops).not.toContain("shutdown");
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+      await chmod(sessionDir(session), 0o755);
+      await unlink(lock);
+      d.stop();
     }
   });
 
@@ -437,6 +474,35 @@ describe("F2: a daemon from another bowser version", () => {
       d.stop();
     }
   });
+
+  test("#235: a daemon of this version from an older build names the command and the fix", async () => {
+    const session = "235-unknown-op-ver";
+    const d = await fakeDaemon(session, (req) => (req.op === "waitFor" ? { ok: false, error: "unknown op: waitFor" } : daemonOf(pkg.version)(req)));
+    try {
+      const failure = await run(["wait-for", "--text=x", "-s", session]).then((out) => ({ stderr: `no failure: ${out}`, code: 0 }), reportFailure);
+      expect(failure).toEqual({
+        stderr: `bowser: session '235-unknown-op-ver' was started by an older bowser build that does not know 'wait-for'; run 'bowser close -s 235-unknown-op-ver', then open it again`,
+        code: 1,
+      });
+    } finally {
+      d.stop();
+    }
+  });
+
+  test("#235, #245: a state.json whose profile is not a string still fails the command, with the plain hint", async () => {
+    const session = "235-unknown-op-bad";
+    const d = await fakeDaemon(session, (req) => (req.op === "waitFor" ? { ok: false, error: "unknown op: waitFor" } : daemonOf(pkg.version)(req)));
+    try {
+      await Bun.write(join(sessionDir(session), "state.json"), JSON.stringify({ name: session, profile: { dir: "a b" } }));
+      const failure = await run(["wait-for", "--text=x", "-s", session]).then((out) => ({ stderr: `no failure: ${out}`, code: 0 }), reportFailure);
+      expect(failure).toEqual({
+        stderr: `bowser: session '235-unknown-op-bad' was started by an older bowser build that does not know 'wait-for'; run 'bowser close -s 235-unknown-op-bad', then open it again`,
+        code: 1,
+      });
+    } finally {
+      d.stop();
+    }
+  }, 2000);
 });
 
 describe("F3: close of a silent daemon with no pidfile", () => {

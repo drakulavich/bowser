@@ -182,7 +182,8 @@ const ROLE_NAME = String.raw`
     return null;
   }
   function implicitRole(el) {
-    const role = tagRole(el);
+    const role = tagRole(el) ||
+      (el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable) ? 'textbox' : null);
     if (!role) return null;
     // A list item or table part under role=none/presentation inherits it.
     for (let a = el; a; a = a.parentElement) {
@@ -491,6 +492,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
 
   // ---- the walk ----
   const cursorOf = new Map();   // node -> computed cursor, for the cursor pass
+  const editableBoxes = new Set();
   function toNode(el) {
     if (tagOf(el) === 'IFRAME') {
       const n = { role: 'iframe', name: '', children: [] };
@@ -506,6 +508,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     // An inline generic holding only text is not a node: its text flows into the parent.
     if (role === 'generic' && b.inline && el.childNodes.length === 1 && el.firstChild.nodeType === 3) return null;
     const n = { role, name: nameOf(el), children: [] };
+    if (role === 'textbox' && el.isContentEditable) editableBoxes.add(n);
     if (b.visible && styleOf(el).pointerEvents !== 'none') assignRef(n, el);
     addState(n, el);
     cursorOf.set(n, b.cursor);
@@ -516,7 +519,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   }
   function visit(parent, node, parentVisible) {
     if (node.nodeType === 3) {
-      if (parentVisible && node.nodeValue && parent.role !== 'textbox') parent.children.push(node.nodeValue);
+      if (parentVisible && node.nodeValue && (parent.role !== 'textbox' || editableBoxes.has(parent))) parent.children.push(node.nodeValue);
       return;
     }
     if (node.nodeType !== 1 || hiddenSubtree(node)) return;
@@ -793,9 +796,17 @@ export const MUTE_MEDIA = String.raw`(() => {
 /** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
 export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
 export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
-export const LANDED_PAGE = "[location.href, document.referrer]";
+/** The history entry's key: a location.replace keeps it, a navigate() pushes a new one (ET-13, measured on Bun 1.4.4). */
+export const ENTRY_KEY = "globalThis.navigation?.currentEntry?.key";
+export const LANDED_PAGE = `[location.href, document.referrer, ${ENTRY_KEY}]`;
 export const STOP_LOADING = "window.stop()";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
+
+/** `type` with a newline (#243): remembers the focused element and answers
+ *  whether it is contenteditable; TYPE_TARGET_FOCUSED answers whether it still
+ *  has focus. */
+export const TYPE_TARGET_MARK = `(() => { const el = document.activeElement; window[Symbol.for('bowser.typeTarget')] = el; return el?.isContentEditable === true; })()`;
+export const TYPE_TARGET_FOCUSED = `document.activeElement === window[Symbol.for('bowser.typeTarget')]`;
 
 /** wait-for's check (#114); the value goes in as JSON, never spliced as text. */
 export function waitForScript(kind: "url" | "text", value: string): string {

@@ -113,7 +113,9 @@ export async function loadState(name: string): Promise<SessionState | null> {
   const file = Bun.file(path);
   if (!(await file.exists())) return null;
   try {
-    return (await file.json()) as SessionState;
+    const state = (await file.json()) as SessionState;
+    if (state.profile !== undefined && state.profile !== null && typeof state.profile !== "string") delete state.profile;
+    return state;
   } catch {
     return null;
   }

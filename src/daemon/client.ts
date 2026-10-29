@@ -71,6 +71,7 @@ export class DaemonClient implements DaemonConnection {
           if (res.dialogs) self.reported.push(...res.dialogs);
           self.pending.delete(res.id);
           if (res.ok) entry.resolve(res.result);
+          else if (res.error?.startsWith("unknown op: ")) void olderBuild(self.session, self.command).then(entry.reject);
           else entry.reject(new Error(res.error ?? "daemon error"));
         }
       } catch {
@@ -229,11 +230,22 @@ async function otherVersion(session: string, answer: unknown, opts: ConnectOptio
   }
   const semver = typeof answer === "string" && /^\d+\.\d+\.\d+/.test(answer);
   const v = semver ? answer : "an older version";
-  const cmd = await openCommand(session);
-  const open = cmd === "bowser open" ? "open it again" : `open it again with '${cmd}'`;
-  const message = `session '${session}' is running bowser ${v} (this is ${pkg.version}); run 'bowser close -s ${session}', then ${open}`;
+  const message = `session '${session}' is running bowser ${v} (this is ${pkg.version}); ${await reopenHint(session)}`;
   const older = answer === "pong" || (semver && Bun.semver.order(answer, pkg.version) < 0);
   return older && installed === pkg.version ? new OlderDaemon(message, v) : new UserError(message);
+}
+
+/** Why a daemon of this same version does not know an op: it was started by
+ *  an older build of it, an unreleased checkout or link (#235). A user error (exit 1). */
+async function olderBuild(session: string, command: string | undefined): Promise<UserError> {
+  const what = command ? `'${command}'` : "this command";
+  return new UserError(`session '${session}' was started by an older bowser build that does not know ${what}; ${await reopenHint(session)}`);
+}
+
+async function reopenHint(session: string): Promise<string> {
+  const cmd = await openCommand(session);
+  const open = cmd === "bowser open" ? "open it again" : `open it again with '${cmd}'`;
+  return `run 'bowser close -s ${session}', then ${open}`;
 }
 
 /** undefined where package.json is not on disk (a compiled binary). */

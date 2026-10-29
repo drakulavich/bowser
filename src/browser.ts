@@ -6,6 +6,7 @@ import {
   KEY_CODES,
   LEAVE_INITIAL_DOCUMENT,
   LANDED_PAGE,
+  ENTRY_KEY,
   DOC_ID,
   LOAD_STATE,
   MUTE_MEDIA,
@@ -16,6 +17,8 @@ import {
   READ_TITLE,
   READ_URL,
   STOP_LOADING,
+  TYPE_TARGET_FOCUSED,
+  TYPE_TARGET_MARK,
   hoverScript,
   keyCommandScript,
   keyWatchScript,
@@ -522,15 +525,22 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   };
   /** Whether navigate() landed on its own page (ET-13): WebKit answers it
    *  with whichever navigation ends first, and a script on the page left can
-   *  replace it. Only a page that script sent has `leaving` as referrer. A
-   *  page that cannot answer in time counts as ours. */
-  const ownLanding = async (url: string, leaving: string, load: LoadWatch): Promise<boolean> => {
+   *  replace it. Only a page that script sent has `leaving` as referrer, and
+   *  only a replacement keeps `leftKey`, the history entry of the page left,
+   *  however often it moves on. A page that cannot answer in time counts as ours. */
+  const ownLanding = async (url: string, leaving: string, leftKey: unknown, load: LoadWatch): Promise<boolean> => {
     const at = landed;
     for (let waited = false; ; waited = true) {
-      const read = await ask(LANDED_PAGE, timing.graceMs);
+      const seen = landed;
+      let read = await ask(LANDED_PAGE, timing.graceMs);
+      // A page still navigating fails the read, before or after it lands (ET-13 in CI); a redirect only costs a second read.
+      if (!Array.isArray(read) && !load.over && (landed !== seen || !sameUrl(view.url, url))) read = await ask(LANDED_PAGE, timing.graceMs);
       if (load.over || !Array.isArray(read)) return true;
-      const [href, referrer] = read;
-      if (typeof referrer !== "string" || !referrer || sameUrl(href, url) || !sameUrl(referrer, leaving)) return true;
+      const [href, referrer, key] = read;
+      if (typeof referrer !== "string" || !referrer || sameUrl(href, url)) return true;
+      // A navigate() to the URL already shown replaces the entry too (measured, Bun 1.4.4).
+      const kept = typeof key === "string" && key === leftKey && !sameUrl(leaving, url);
+      if (!sameUrl(referrer, leaving) && !kept) return true;
       // The landing can name our URL while the old page is still there; ours lands next.
       if (waited || !sameUrl(view.url, url)) return false;
       await settle(at, () => !load.over);
@@ -612,6 +622,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       const before = landed;
       const arrivedBefore = arrived;
       const origin = await ask(DOC_ID, BASELINE_READ_MS);
+      const leftKey = await ask(ENTRY_KEY, timing.graceMs);
       // The baseline read can outlast the budget: the command has been told it failed.
       if (actionCancelled) throw new Error("request timed out before the navigation was sent");
       const load: LoadWatch = { over: false };
@@ -631,7 +642,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
             throw replacedBy();
           }
         }
-        if (!(await ownLanding(url, leaving, load))) throw replacedBy();
+        if (!(await ownLanding(url, leaving, leftKey, load))) throw replacedBy();
       })();
       const racers = [loaded];
       if (origin !== undefined)
@@ -789,7 +800,28 @@ export function wrapView(
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
     click: (selector, timeoutMs) => guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
-    type: (text) => guard(nav.act(() => view.type(text))),
+    type: (text) =>
+      guard(
+        nav
+          .act(async (): Promise<string | undefined> => {
+            // Lexical keeps a typed "\n" as text in one paragraph (#243); an <input> in a form submits on Enter.
+            if (!text.includes("\n") || (await evaluate(TYPE_TARGET_MARK)) !== true) return void (await view.type(text));
+            await evaluate(KEY_CODES);
+            const lines = text.replaceAll("\r\n", "\n").split("\n");
+            for (const [i, line] of lines.entries()) {
+              if (i > 0) {
+                await view.press(RAW_KEYS.Enter!);
+                // Returned, not thrown, so act still waits for a navigation the Enter started.
+                if ((await evaluate(TYPE_TARGET_FOCUSED)) !== true)
+                  return `type: focus left the editor after line ${i} of ${lines.length}; the rest was not typed`;
+              }
+              if (line) await view.type(line);
+            }
+          })
+          .then((focusLeft) => {
+            if (focusLeft) throw new Error(focusLeft);
+          }),
+      ),
     press: (key, modifiers = []) =>
       guard(
         nav.act(async () => {
