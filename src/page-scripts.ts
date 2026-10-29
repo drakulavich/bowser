@@ -182,7 +182,8 @@ const ROLE_NAME = String.raw`
     return null;
   }
   function implicitRole(el) {
-    const role = tagRole(el);
+    const role = tagRole(el) ||
+      (el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable) ? 'textbox' : null);
     if (!role) return null;
     // A list item or table part under role=none/presentation inherits it.
     for (let a = el; a; a = a.parentElement) {
@@ -491,6 +492,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
 
   // ---- the walk ----
   const cursorOf = new Map();   // node -> computed cursor, for the cursor pass
+  const editableBoxes = new Set();
   function toNode(el) {
     if (tagOf(el) === 'IFRAME') {
       const n = { role: 'iframe', name: '', children: [] };
@@ -506,6 +508,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     // An inline generic holding only text is not a node: its text flows into the parent.
     if (role === 'generic' && b.inline && el.childNodes.length === 1 && el.firstChild.nodeType === 3) return null;
     const n = { role, name: nameOf(el), children: [] };
+    if (role === 'textbox' && el.isContentEditable) editableBoxes.add(n);
     if (b.visible && styleOf(el).pointerEvents !== 'none') assignRef(n, el);
     addState(n, el);
     cursorOf.set(n, b.cursor);
@@ -516,7 +519,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   }
   function visit(parent, node, parentVisible) {
     if (node.nodeType === 3) {
-      if (parentVisible && node.nodeValue && parent.role !== 'textbox') parent.children.push(node.nodeValue);
+      if (parentVisible && node.nodeValue && (parent.role !== 'textbox' || editableBoxes.has(parent))) parent.children.push(node.nodeValue);
       return;
     }
     if (node.nodeType !== 1 || hiddenSubtree(node)) return;

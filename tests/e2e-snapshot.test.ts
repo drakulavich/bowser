@@ -130,6 +130,23 @@ const MODEL_EDITOR_HTML = `<!doctype html>
   render();
 </script></body></html>`;
 
+/** A rich editor root with no role, as ProseMirror and Lexical render it (#242).
+ *  Like Lexical, it replaces its <p> on every change, so a ref on the <p> goes stale. */
+const BARE_EDITOR_HTML = `<!doctype html>
+<html><head><title>Bare editor</title></head>
+<body><div id="ed" contenteditable="true" aria-label="Body"><p>old text</p></div>
+<script>
+  const ed = document.getElementById("ed");
+  ed.addEventListener("input", () => { const p = document.createElement("p"); p.textContent = ed.textContent; ed.replaceChildren(p); });
+</script></body></html>`;
+
+/** Editors whose text sits right in the editable element (#242 review). */
+const TEXT_EDITORS_HTML = `<!doctype html>
+<html><head><title>Text editors</title></head>
+<body><div contenteditable="true" aria-label="Note">hello</div><p contenteditable="true">para text</p>
+<div contenteditable="true" aria-label="Mention">Hello <span contenteditable="false">@Ada</span></div>
+<section contenteditable="true"><p>in section</p></section></body></html>`;
+
 runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
   const ctx: CommandContext = { session: "snapgold", json: false };
   let tmp: string;
@@ -157,6 +174,12 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
         }
         if (new URL(req.url).pathname === "/model-editor.html") {
           return new Response(MODEL_EDITOR_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
+        if (new URL(req.url).pathname === "/bare-editor.html") {
+          return new Response(BARE_EDITOR_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
+        if (new URL(req.url).pathname === "/text-editors.html") {
+          return new Response(TEXT_EDITORS_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
         }
         if (new URL(req.url).pathname === "/edges.html") {
           return new Response(EDGES_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
@@ -298,6 +321,27 @@ runOrSkip("e2e: snapshot matches playwright-cli's goldens ", () => {
     expect(await cmdEval(ctx, "window.model")).toBe("hello world");
     await cmdFill(ctx, await refNamed("Model"), "");
     expect(await cmdEval(ctx, "window.model")).toBe("");
+  }, 60_000);
+
+  test("a contenteditable root with no role is a textbox whose ref survives fills that replace its <p>", async () => {
+    await cmdGoto(ctx, `${base}/bare-editor.html`);
+    const snap = tree(await cmdSnapshot(ctx));
+    const ref = await refNamed("Body");
+    expect(snap).toContain(`- textbox "Body" [ref=${ref}]:\n  - paragraph [ref=`);
+    expect(await cmdFill(ctx, ref, "first")).toStartWith(`filled ${ref} (textbox "Body")`);
+    expect(await cmdFill(ctx, ref, "second")).toStartWith(`filled ${ref} (textbox "Body")`);
+    expect(await cmdEval(ctx, "JSON.stringify(document.getElementById('ed').innerHTML)")).toContain("<p>second</p>");
+    await cmdSnapshot(ctx);
+    expect(await refNamed("Body")).toBe(ref);
+  }, 60_000);
+
+  test("a contenteditable textbox, and a contenteditable <p>, print the text right inside them, and an unlabeled <section> root is a textbox", async () => {
+    await cmdGoto(ctx, `${base}/text-editors.html`);
+    const snap = tree(await cmdSnapshot(ctx));
+    expect(snap).toMatch(/- textbox "Note" \[ref=e\d+\]: hello\n/);
+    expect(snap).toMatch(/- paragraph \[ref=e\d+\]: para text/);
+    expect(snap).toMatch(/- textbox "Mention" \[ref=e\d+\]: Hello @Ada\n/);
+    expect(snap).toMatch(/- textbox \[ref=e\d+\]:\n {4}- paragraph \[ref=e\d+\]: in section/);
   }, 60_000);
 
   // One page, several rules; the golden line that breaks names the rule:
