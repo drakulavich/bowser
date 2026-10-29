@@ -788,9 +788,10 @@ export const MUTE_MEDIA = String.raw`(() => {
   document.addEventListener('play', (e) => { if (e.target instanceof HTMLMediaElement) e.target.muted = true; }, true);
   document.addEventListener('volumechange', (e) => { if (e.target instanceof HTMLMediaElement && !e.target.muted) e.target.muted = true; }, true);
 })()`;
-/** A new document has a new timeOrigin, even at the same URL (ET-52). */
-export const TIME_ORIGIN = "performance.timeOrigin";
-export const LOAD_STATE = "[performance.timeOrigin, document.readyState]";
+/** An id the first read stores on the document, so a new document has a new one, even at the same URL (ET-52).
+ *  Not performance.timeOrigin: one document's moved by 1 ms between reads in CI run 40854804772. */
+export const DOC_ID = "document[Symbol.for('bowser.doc')] ??= Math.random()";
+export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
 export const LANDED_PAGE = "[location.href, document.referrer]";
 export const STOP_LOADING = "window.stop()";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";

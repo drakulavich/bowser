@@ -1,6 +1,7 @@
 # open and goto stop waiting for `load` 5 s after the page is parsed (ET-52, #155)
 
-Revised 2026-10-29: the stop moved from the cap to the next command (see "Revision" below).
+Revised 2026-10-29: the stop moved from the cap to the next command, and documents are told apart by an id the
+watcher stores on each one instead of `performance.timeOrigin` (see the two "Revision" sections below).
 
 ## Problem
 
@@ -54,21 +55,38 @@ So the load cannot simply be left alone (the next `goto` would throw), and a lat
 (`go-back` above, a link `click`) would get its -999 in the middle of that action's own wait. Stopping first
 and waiting for that landing keeps both out.
 
+### Revision 2026-10-29: a document id instead of `timeOrigin`
+
+The first version told documents apart by `performance.timeOrigin`. On some CI runners one document's
+`timeOrigin` moved by about 1 ms between reads, so the watcher took each move for a new document and started
+the 5 s again; a fresh `open` then ran to its 20 s budget. A diagnostic build logged it in CI run 40854804772:
+
+```
+new document seen 5131 ms, 3 times, first and last 3 origins [1793268461382,1793268461382,1793268461383.0002,1793268461382]
+```
+
+The watcher now reads `document[Symbol.for('bowser.doc')] ??= Math.random()` (`DOC_ID`): the first read
+stores the id on the document and every later read of that document returns it. The store is on `document`, not
+`window`: WebKit may keep the initial `about:blank` window for a first same-origin document, but every
+navigation gets a new `Document`. Measured on a bare `Bun.WebView` (Bun 1.4.4): a fresh view's `about:blank`
+took an id on both `window` and `document`; after the first `navigate()` to a local page, and after a same-URL
+`navigate()`, both read `undefined` until the next read stored a new one.
+
 ### The cap
 
 `navigationWatch.navigate` (`src/browser.ts`) runs a watcher next to `go()`:
 
-1. Before `go()`, read `performance.timeOrigin` of the current document (`ask`, bounded by 3 s: a new view's
+1. Before `go()`, read the current document's id (`DOC_ID`, above) (`ask`, bounded by 3 s: a new view's
    first evaluate waits for WebKit's web process, past 100 ms in CI run 40415723808 and past 1 s in run 40834466493). If
-   that read gives no number, there is no baseline to compare with, and the watcher does not run: the
+   that read gives no id, there is no baseline to compare with, and the watcher does not run: the
    navigation waits for `load` as today. If the command's budget ran out during the read, `navigate` fails
    without calling `go()`.
-2. Read `[performance.timeOrigin, document.readyState]`, one read at a time: the next read starts 100 ms
+2. Read `[DOC_ID, document.readyState]`, one read at a time: the next read starts 100 ms
    after the previous one settled, never while one is still in `wrapView`'s evaluate queue. A new document is
-   one whose `timeOrigin` differs from step 1, so the same URL (a `goto` to the page already open) and a
+   one whose id differs from step 1, so the same URL (a `goto` to the page already open) and a
    redirect both count.
 3. Once a new document reports anything but `loading`, wait `LOAD_CAP_MS` (5000) more. If a later read shows
-   yet another `timeOrigin` (a document that navigated on), the 5 s start again from it, and a document that
+   yet another id (a document that navigated on), the 5 s start again from it, and a document that
    is still `loading` does not count.
 4. At the cap, `navigate` returns as if the page had loaded and marks the view as having a load left running.
    The command answers with the page's URL and title, read through `evaluate` as today.
@@ -99,9 +117,9 @@ sequenceDiagram
   participant P as new document
   C->>V: navigate(url)
   loop every 100 ms
-    C->>P: [timeOrigin, readyState]
+    C->>P: [document id, readyState]
   end
-  P-->>C: new timeOrigin, "interactive"
+  P-->>C: new id, "interactive"
   Note over C: 5 s later: return, load left running
   N->>P: window.stop()
   V-->>N: old navigate rejects -999 (nobody waits)
@@ -161,8 +179,10 @@ them broken); before the stop they may still arrive.
 ## Definition of Done
 
 - `tests/browser.test.ts`, with a fake view and a manual clock:
-  - `navigate` whose `go()` never settles, whose page reports a new `timeOrigin` and `interactive`, resolves
+  - `navigate` whose `go()` never settles, whose page reports a new document id and `interactive`, resolves
     5 s later without evaluating `window.stop()`;
+  - a page whose `performance.timeOrigin` moves between reads of one document is still capped 5 s after it
+    is parsed (CI run 40854804772);
   - after that, the next `act()` evaluates `window.stop()` before `NAV_ARM`, and its click's navigation is
     waited for even though the stop's -999 lands first;
   - after that, the next `navigate()` evaluates `window.stop()` before calling `go()`;

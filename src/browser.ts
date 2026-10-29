@@ -6,6 +6,7 @@ import {
   KEY_CODES,
   LEAVE_INITIAL_DOCUMENT,
   LANDED_PAGE,
+  DOC_ID,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
@@ -15,7 +16,6 @@ import {
   READ_TITLE,
   READ_URL,
   STOP_LOADING,
-  TIME_ORIGIN,
   hoverScript,
   keyCommandScript,
   keyWatchScript,
@@ -611,7 +611,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
       await stopLoadLeft();
       const before = landed;
       const arrivedBefore = arrived;
-      const origin = await ask(TIME_ORIGIN, BASELINE_READ_MS);
+      const origin = await ask(DOC_ID, BASELINE_READ_MS);
       // The baseline read can outlast the budget: the command has been told it failed.
       if (actionCancelled) throw new Error("request timed out before the navigation was sent");
       const load: LoadWatch = { over: false };
