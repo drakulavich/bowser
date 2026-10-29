@@ -720,8 +720,6 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
   });
 
   // Keep the process alive. Bun.WebView doesn't hold the loop open on its own.
-  const keepalive = setInterval(() => {}, 60_000);
-  // Clean up if the event loop does settle.
-  process.on("beforeExit", () => clearInterval(keepalive));
+  setInterval(() => {}, 60_000);
   return true;
 }
