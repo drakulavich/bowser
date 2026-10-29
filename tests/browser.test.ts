@@ -12,6 +12,7 @@ import {
   keyWatchScript,
   LEAVE_INITIAL_DOCUMENT,
   LOAD_STATE,
+  MUTE_MEDIA,
   NAV_ARM,
   NAV_COUNT,
   NAV_DESTINATION,
@@ -449,8 +450,24 @@ const onClock = (v: ViewLike, timing: NavTiming, clock: Clock) => wrapView(v, ti
 // For "at once" checks: any wait for a landing costs at least graceMs.
 const slow = { graceMs: 1_000, settleMs: 2_000 };
 
+/** The calls without the mute script each landing runs. */
+const withoutMute = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && a[0] === MUTE_MEDIA));
 /** The calls an action made, without the watch's own page reads. */
-const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
+const own = (calls: Calls): Calls => withoutMute(calls).filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
+
+describe("wrapView mute (#227)", () => {
+  test("each landing mutes the page's media", async () => {
+    const v = fakeView();
+    wrapView(v, fast);
+    v.land("https://x/a");
+    v.land("https://x/b");
+    await Bun.sleep(0);
+    expect(v.calls).toEqual([
+      ["evaluate", [MUTE_MEDIA]],
+      ["evaluate", [MUTE_MEDIA]],
+    ]);
+  });
+});
 
 /** A view whose page reports, as WebKit's Navigation API does, that a
  *  cross-document navigation began: `page.navs` is what NAV_COUNT reads.
@@ -1354,7 +1371,7 @@ describe("wrapView interrupt", () => {
     const interrupted = onClock(v, fast, clock).interrupt();
     expect(await clock.settledAt(interrupted)).toBe(30);
     expect(await interrupted).toBe(true);
-    expect(v.calls).toEqual([["reload", []]]);
+    expect(withoutMute(v.calls)).toEqual([["reload", []]]);
   });
 
   test("counts a successful landing that happens before reload resolves", async () => {
@@ -1442,7 +1459,7 @@ describe("wrapView interrupt", () => {
     const interrupted = onClock(v, fast, clock).interrupt();
     await clock.settledAt(interrupted);
     expect(await interrupted).toBe(true);
-    expect(v.calls).toEqual([
+    expect(withoutMute(v.calls)).toEqual([
       ["reload", []],
       ["evaluate", [CANCEL_PENDING_NAVIGATION]],
     ]);
@@ -1785,7 +1802,9 @@ describe("navigate caps its wait for load (ET-52)", () => {
   const evaluated = (v: Fake, expr: string) => v.calls.filter(([n, a]) => n === "evaluate" && a[0] === expr).length;
   /** The calls past the first `skip`, without the watch's own reads. */
   const after = (v: Fake, skip: number) =>
-    v.calls.slice(skip).filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === TIME_ORIGIN)));
+    withoutMute(v.calls.slice(skip)).filter(
+      ([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === TIME_ORIGIN)),
+    );
 
   test(
     "answers 5 s after the new document is parsed and leaves the load running",

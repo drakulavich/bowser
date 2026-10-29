@@ -6,6 +6,7 @@ import {
   KEY_CODES,
   LEAVE_INITIAL_DOCUMENT,
   LOAD_STATE,
+  MUTE_MEDIA,
   NAV_ARM,
   NAV_COUNT,
   NAV_DESTINATION,
@@ -381,6 +382,7 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   view.onNavigated = () => {
     landed++;
     arrived++;
+    evaluate(MUTE_MEDIA).catch(() => {});
     onNavigation();
   };
   view.onNavigationFailed = (error) => {

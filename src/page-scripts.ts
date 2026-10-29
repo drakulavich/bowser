@@ -782,6 +782,11 @@ export const NAV_ARM = String.raw`(() => {
   s.count = 0;
 })()`;
 export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
+// The window is invisible but WebKit plays media out loud (#227).
+export const MUTE_MEDIA = String.raw`(() => {
+  document.querySelectorAll('audio, video').forEach((m) => { m.muted = true; });
+  document.addEventListener('play', (e) => { if (e.target instanceof HTMLMediaElement) e.target.muted = true; }, true);
+})()`;
 /** A new document has a new timeOrigin, even at the same URL (ET-52). */
 export const TIME_ORIGIN = "performance.timeOrigin";
 export const LOAD_STATE = "[performance.timeOrigin, document.readyState]";
