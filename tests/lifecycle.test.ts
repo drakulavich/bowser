@@ -185,6 +185,20 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
+  test("#245: a state.json whose profile is not a string gives the plain reopen hint", async () => {
+    const session = "245-profile-newer";
+    const d = await fakeDaemon(session, daemonOf("99.0.0"));
+    try {
+      await Bun.write(join(sessionDir(session), "state.json"), JSON.stringify({ name: session, url: "", title: "", refs: [], updatedAt: 0, profile: {} }));
+      expect(await failure(["snapshot", "-s", session])).toEqual({
+        stderr: `bowser: session '${session}' is running bowser 99.0.0 (this is ${pkg.version}); run 'bowser close -s ${session}', then open it again`,
+        code: 1,
+      });
+    } finally {
+      d.stop();
+    }
+  });
+
   test("a restart that finds a newer daemon once it holds the lock refuses it and stops nothing", async () => {
     const session = "ver-newer-after-lock";
     const d = await fakeDaemon(session, daemonOf("99.0.0"));
@@ -452,7 +466,7 @@ describe("F2: a daemon from another bowser version", () => {
     }
   });
 
-  test("#235: a state.json the hint cannot read still fails the command, with the plain hint", async () => {
+  test("#235, #245: a state.json whose profile is not a string still fails the command, with the plain hint", async () => {
     const session = "235-unknown-op-bad";
     const d = await fakeDaemon(session, (req) => (req.op === "waitFor" ? { ok: false, error: "unknown op: waitFor" } : daemonOf(pkg.version)(req)));
     try {
