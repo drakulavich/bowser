@@ -873,6 +873,16 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     expect(claimed).toBe(true);
   });
 
+  test("a claim that macOS fails with EINVAL as close removes the directory reads as closed (#232)", async () => {
+    const session = "et32-einval";
+    await ensureSessionDir(session);
+    const claim: typeof claimSession = async () => {
+      await rm(sessionDir(session), { recursive: true, force: true });
+      throw Object.assign(new Error("EINVAL: invalid argument, link"), { code: "EINVAL" });
+    };
+    expect(await closeOne({ session, json: false }, session, undefined, claim)).toBe(`session '${session}' is not open`);
+  });
+
   test("a restart that never finishes leaves its notice for the next command (ET-29)", async () => {
     const session = "et29-hung";
     const url = "https://example.com/cart";

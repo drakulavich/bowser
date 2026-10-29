@@ -782,9 +782,18 @@ export const NAV_ARM = String.raw`(() => {
   s.count = 0;
 })()`;
 export const NAV_COUNT = "window[Symbol.for('bowser.nav')]?.count ?? 0";
-/** A new document has a new timeOrigin, even at the same URL (ET-52). */
-export const TIME_ORIGIN = "performance.timeOrigin";
-export const LOAD_STATE = "[performance.timeOrigin, document.readyState]";
+// The window is invisible but WebKit plays media out loud (#227).
+export const MUTE_MEDIA = String.raw`(() => {
+  document.querySelectorAll('audio, video').forEach((m) => { m.muted = true; });
+  document.addEventListener('play', (e) => { if (e.target instanceof HTMLMediaElement) e.target.muted = true; }, true);
+  document.addEventListener('volumechange', (e) => { if (e.target instanceof HTMLMediaElement && !e.target.muted) e.target.muted = true; }, true);
+})()`;
+/** An id the first read stores on the document, so a new document has a new one, even at the same URL (ET-52).
+ *  Not performance.timeOrigin: one document's moved by 1 ms between reads in CI run 40854804772. */
+/** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
+export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
+export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
+export const LANDED_PAGE = "[location.href, document.referrer]";
 export const STOP_LOADING = "window.stop()";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
@@ -907,8 +916,8 @@ export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "re
  *    and `input` and `change`; a value the input does not keep is put back
  *    and refused;
  *  - anything else is emptied, like playwright's fill: an input/textarea's
- *    value, or a contenteditable element's content, with the caret put back
- *    inside it (the text node the click placed it in is gone).
+ *    value, or a contenteditable element's content through a native delete,
+ *    which editors that re-render from their own state (Lexical) apply too.
  *  The only value read is a date-like input's, never a password field's. */
 export function fillScript(selector: string, value: string): string {
   return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
@@ -925,10 +934,8 @@ export function fillScript(selector: string, value: string): string {
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return { outcome: 'set', type };
     }
-    if ('value' in el) el.value = '';
-    else if (el.isContentEditable) { el.textContent = ''; el.focus(); getSelection().collapse(el, 0); }
-    else return { outcome: 'type', type };
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
+    else if (el.isContentEditable) { el.focus(); getSelection().selectAllChildren(el); document.execCommand('delete'); }
     return { outcome: 'type', type }; })()`;
 }
 

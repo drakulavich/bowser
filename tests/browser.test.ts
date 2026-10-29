@@ -10,13 +10,15 @@ import {
   CANCEL_PENDING_NAVIGATION,
   keyCommandScript,
   keyWatchScript,
+  LANDED_PAGE,
   LEAVE_INITIAL_DOCUMENT,
+  DOC_ID,
   LOAD_STATE,
+  MUTE_MEDIA,
   NAV_ARM,
   NAV_COUNT,
   NAV_DESTINATION,
   STOP_LOADING,
-  TIME_ORIGIN,
 } from "../src/page-scripts.ts";
 
 type Calls = Array<[string, unknown[]]>;
@@ -449,8 +451,24 @@ const onClock = (v: ViewLike, timing: NavTiming, clock: Clock) => wrapView(v, ti
 // For "at once" checks: any wait for a landing costs at least graceMs.
 const slow = { graceMs: 1_000, settleMs: 2_000 };
 
+/** The calls without the mute script each landing runs. */
+const withoutMute = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && a[0] === MUTE_MEDIA));
 /** The calls an action made, without the watch's own page reads. */
-const own = (calls: Calls): Calls => calls.filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
+const own = (calls: Calls): Calls => withoutMute(calls).filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT)));
+
+describe("wrapView mute (#227)", () => {
+  test("each landing mutes the page's media", async () => {
+    const v = fakeView();
+    wrapView(v, fast);
+    v.land("https://x/a");
+    v.land("https://x/b");
+    await Bun.sleep(0);
+    expect(v.calls).toEqual([
+      ["evaluate", [MUTE_MEDIA]],
+      ["evaluate", [MUTE_MEDIA]],
+    ]);
+  });
+});
 
 /** A view whose page reports, as WebKit's Navigation API does, that a
  *  cross-document navigation began: `page.navs` is what NAV_COUNT reads.
@@ -1103,6 +1121,106 @@ describe("navigate over a navigation still loading", () => {
   });
 });
 
+// ET-13, measured on WebKit (Bun 1.4.4): navigate() answers whichever
+// navigation ends first, so a page that navigates itself by script can
+// stand in for the one asked for, with or without a failure first.
+describe("navigate while the page navigates itself (ET-13)", () => {
+  const FORM = "https://x/form";
+  const BOUNCED = "https://x/jsbounce?n=5";
+  const LEFT = "navigate: the navigation to https://x/form was cancelled by another navigation; run 'bowser snapshot' to see where the page is";
+  type Page = { href: string; referrer: string };
+  /** A page on the bouncing script page; `go` plays WebKit's answer to navigate(). */
+  function bouncing(go: (v: Fake, page: Page) => Promise<void>) {
+    const page: Page = { href: "https://x/jsbounce?n=4", referrer: "https://x/jsbounce?n=3" };
+    const v = fakeView({
+      navigate: () => go(v, page),
+      evaluate: async (expr) => (expr === LANDED_PAGE ? [page.href, page.referrer] : undefined),
+    });
+    v.url = page.href;
+    return v;
+  }
+  const landOn = (v: Fake, page: Page, href: string, referrer: string) => {
+    page.href = href;
+    page.referrer = referrer;
+    v.land(href);
+  };
+  const outcome = async (v: Fake, clock: ReturnType<typeof manualClock>, url = FORM) => {
+    const p = onClock(v, fast, clock).navigate(url);
+    const at = await clock.settledAt(p);
+    const error = await p.then(
+      () => undefined,
+      (e: Error) => e.message,
+    );
+    return { at, error };
+  };
+
+  test("the page's own navigation landing in place of the one asked for fails it", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, BOUNCED, "https://x/jsbounce?n=4"));
+    expect(await outcome(v, clock)).toEqual({ at: 0, error: LEFT });
+  });
+
+  test("the one asked for cancelled, then the page's own landing, fails it", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      v.onNavigationFailed?.(new Error(CANCELLED));
+      clock.setTimeout(() => landOn(v, page, BOUNCED, "https://x/jsbounce?n=4"), 5);
+      throw new Error(CANCELLED);
+    });
+    expect((await outcome(v, clock)).error).toBe(LEFT);
+  });
+
+  test("WebKit's 'Frame load interrupted' for the same, fails it with bowser's message", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      v.onNavigationFailed?.(new Error("Frame load interrupted"));
+      clock.setTimeout(() => landOn(v, page, BOUNCED, "https://x/jsbounce?n=4"), 5);
+      throw new Error("Frame load interrupted");
+    });
+    expect((await outcome(v, clock)).error).toBe(LEFT);
+  });
+
+  test("a server redirect from a fresh view lands elsewhere with no referrer, and succeeds", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, FORM, ""));
+    v.url = "";
+    expect(await outcome(v, clock, "https://x/r302")).toEqual({ at: 0, error: undefined });
+  });
+
+  test("a landing on the requested URL with its escapes decoded is the one asked for", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, "https://x/~user", "https://x/jsbounce?n=4"));
+    expect((await outcome(v, clock, "https://x/%7Euser")).error).toBeUndefined();
+  });
+
+  test("the page asked for, sent on twice by its own scripts before the read, succeeds", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => landOn(v, page, "https://x/jsbounce?n=2", "https://x/jsbounce?n=1"));
+    expect((await outcome(v, clock, "https://x/jsbounce")).error).toBeUndefined();
+  });
+
+  test("a landing that names the URL asked for before its page is there waits for the next landing", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      page.href = BOUNCED;
+      page.referrer = "https://x/jsbounce?n=4";
+      v.land(FORM);
+      clock.setTimeout(() => landOn(v, page, FORM, ""), 50);
+    });
+    const p = onClock(v, fast, clock).navigate(FORM);
+    expect(await clock.fulfilledAt(p)).toBe(50);
+  });
+
+  test("a pushState right after the landing does not wait", async () => {
+    const clock = manualClock();
+    const v = bouncing(async (v, page) => {
+      landOn(v, page, FORM, "");
+      page.href = "https://x/form/step-2";
+    });
+    expect(await outcome(v, clock)).toEqual({ at: 0, error: undefined });
+  });
+});
+
 describe("a navigation a previous command left pending", () => {
   const slow = { graceMs: 20, settleMs: 60 };
   /** A view whose `#send` starts a page navigation to `to` that nothing
@@ -1354,7 +1472,7 @@ describe("wrapView interrupt", () => {
     const interrupted = onClock(v, fast, clock).interrupt();
     expect(await clock.settledAt(interrupted)).toBe(30);
     expect(await interrupted).toBe(true);
-    expect(v.calls).toEqual([["reload", []]]);
+    expect(withoutMute(v.calls)).toEqual([["reload", []]]);
   });
 
   test("counts a successful landing that happens before reload resolves", async () => {
@@ -1442,7 +1560,7 @@ describe("wrapView interrupt", () => {
     const interrupted = onClock(v, fast, clock).interrupt();
     await clock.settledAt(interrupted);
     expect(await interrupted).toBe(true);
-    expect(v.calls).toEqual([
+    expect(withoutMute(v.calls)).toEqual([
       ["reload", []],
       ["evaluate", [CANCEL_PENDING_NAVIGATION]],
     ]);
@@ -1617,10 +1735,11 @@ describe("wrapView watchNavigation", () => {
     await b.navigate("https://x/1");
     v.land("https://x/1");
     expect(navigated).toBe(1);
-    // navigate's own baseline read for the load cap (ET-52), nothing after the landing.
+    // navigate's own reads: the load cap's baseline (ET-52) and the page it landed on (ET-13); nothing after the landing.
     expect(v.calls).toEqual([
-      ["evaluate", [TIME_ORIGIN]],
+      ["evaluate", [DOC_ID]],
       ["navigate", ["https://x/1"]],
+      ["evaluate", [LANDED_PAGE]],
     ]);
   });
 
@@ -1734,7 +1853,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
   const capped = { ...fast, loadPollMs: 500 };
   // In the full suite a manual-clock step waited up to 900 ms for the event loop (seed 1331868760).
   const CAP_TEST_MS = 20_000;
-  /** A page that commits a new document (timeOrigin 2) 50 ms after navigate()
+  /** A page that commits a new document (id 2) 50 ms after navigate()
    *  and never fires load. stop() ends loading at once and rejects the pending
    *  navigate with -999 5 ms later, as WebKit does (Bun 1.4.4). */
   function hangingLoad(
@@ -1765,7 +1884,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
         v.calls.push(["evaluate", [expr]]);
         const custom = opts.read?.(expr);
         if (custom) return custom;
-        if (expr === TIME_ORIGIN) return "origin" in opts ? opts.origin : page.origin;
+        if (expr === DOC_ID) return "origin" in opts ? opts.origin : page.origin;
         if (expr === LOAD_STATE) return [page.origin, page.state];
         if (expr === STOP_LOADING && fail) {
           const reject = fail;
@@ -1785,7 +1904,9 @@ describe("navigate caps its wait for load (ET-52)", () => {
   const evaluated = (v: Fake, expr: string) => v.calls.filter(([n, a]) => n === "evaluate" && a[0] === expr).length;
   /** The calls past the first `skip`, without the watch's own reads. */
   const after = (v: Fake, skip: number) =>
-    v.calls.slice(skip).filter(([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === TIME_ORIGIN)));
+    withoutMute(v.calls.slice(skip)).filter(
+      ([n, a]) => !(n === "evaluate" && (a[0] === NAV_ARM || a[0] === NAV_COUNT || a[0] === LOAD_STATE || a[0] === DOC_ID)),
+    );
 
   test(
     "answers 5 s after the new document is parsed and leaves the load running",
@@ -1799,6 +1920,68 @@ describe("navigate caps its wait for load (ET-52)", () => {
       expect(at).toBeLessThan(6100);
       expect(evaluated(v, STOP_LOADING)).toBe(0);
       expect(v.loading).toBe(true);
+    },
+    CAP_TEST_MS,
+  );
+
+  // CI run 40854804772: one document's timeOrigin read 1793268461382, then 1793268461383.0002, then 1793268461382.
+  test(
+    "a document whose performance.timeOrigin moves between reads is still capped 5 s after it is parsed",
+    async () => {
+      const clock = manualClock();
+      let reads = 0;
+      const { v, page } = hangingLoad(clock, {
+        read: (expr) => {
+          if (!expr.includes("performance.timeOrigin")) return undefined;
+          const origin = page.origin + (++reads % 2 ? 0 : 1.0002);
+          return Promise.resolve(expr.includes("readyState") ? [origin, page.state] : origin);
+        },
+      });
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"), 8000);
+      expect(at).toBeGreaterThanOrEqual(5500);
+      expect(at).toBeLessThan(6100);
+    },
+    CAP_TEST_MS,
+  );
+
+  // #248 review: the id is stored on the page's own document, which the page can make non-extensible.
+  for (const sealed of ["old", "new"] as const)
+    test(
+      `with the ${sealed} document made non-extensible by the page, the new one is still capped 5 s after it is parsed`,
+      async () => {
+        const clock = manualClock();
+        const docs = { 1: { readyState: "complete" } as object, 2: { readyState: "interactive" } as object };
+        Object.preventExtensions(docs[sealed === "old" ? 1 : 2]);
+        const { v, page } = hangingLoad(clock, {
+          read: (expr) =>
+            expr === DOC_ID || expr === LOAD_STATE ? Promise.resolve(new Function("document", `return (${expr})`)(docs[page.origin as 1 | 2])) : undefined,
+        });
+        const b = onClock(v, capped, clock);
+        const at = await clock.fulfilledAt(b.navigate("https://x/hang"), 8000);
+        expect(at).toBeGreaterThanOrEqual(5500);
+        expect(at).toBeLessThan(6100);
+      },
+      CAP_TEST_MS,
+    );
+
+  test(
+    "mutes the new document once it is parsed, before answering, though it never lands (#227)",
+    async () => {
+      const clock = manualClock();
+      const muted: number[] = [];
+      const { v } = hangingLoad(clock, {
+        read: (expr) => {
+          if (expr === MUTE_MEDIA) muted.push(clock.now());
+          return undefined;
+        },
+      });
+      const b = onClock(v, capped, clock);
+      const at = await clock.fulfilledAt(b.navigate("https://x/hang"));
+      // Parsed at the first read after 50 ms (500).
+      expect(muted).toHaveLength(1);
+      expect(muted[0]).toBeGreaterThanOrEqual(500);
+      expect(muted[0]).toBeLessThan(at);
     },
     CAP_TEST_MS,
   );
@@ -1953,7 +2136,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
   );
 
   test(
-    "with no baseline timeOrigin there is no watcher: no reads, navigate waits for load",
+    "with no baseline document id there is no watcher: no reads, navigate waits for load",
     async () => {
       const clock = manualClock();
       const { v } = hangingLoad(clock, { origin: undefined });
@@ -1996,7 +2179,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
       const clock = manualClock();
       const { v } = hangingLoad(clock, {
         read: (expr) =>
-          expr === TIME_ORIGIN
+          expr === DOC_ID
             ? new Promise((r) => {
                 clock.setTimeout(() => r(1), 1500);
               })
@@ -2096,7 +2279,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
       const clock = manualClock();
       const { v } = hangingLoad(clock, {
         read: (expr) =>
-          expr === TIME_ORIGIN
+          expr === DOC_ID
             ? new Promise((r) => {
                 clock.setTimeout(() => r(1), 300);
               })
