@@ -237,6 +237,7 @@ describe("F2: a daemon from another bowser version", () => {
       if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
       else process.env.BOWSER_OP_TIMEOUT_MS = prev;
       await chmod(sessionDir(session), 0o755);
+      await unlink(lock);
       d.stop();
     }
   });
