@@ -180,12 +180,6 @@ const realProcess: ProcessOps = {
   graceMs: 2000,
 };
 
-/** The pid the daemon recorded for this session, or null if it recorded none
- *  (a session from before pidfiles, or one whose daemon never started). */
-async function readPid(session: string): Promise<number | null> {
-  return readPidFile(pidPath(session));
-}
-
 async function readPidFile(path: string): Promise<number | null> {
   try {
     const pid = Number((await readFile(path, "utf8")).trim());
@@ -210,7 +204,7 @@ export async function stopDaemon(
   session: string,
   proc: ProcessOps = realProcess,
 ): Promise<{ pid: number | null; ended: boolean; answered: boolean }> {
-  const pid = await readPid(session);
+  const pid = await readPidFile(pidPath(session));
   let answered = false;
 
   // Ask the daemon to stop, whatever its version: an upgrade can leave an
@@ -277,7 +271,7 @@ export async function closeOne(ctx: CommandContext, session: string, proc: Proce
 async function closeSession(
   ctx: CommandContext,
   session: string,
-  proc: ProcessOps = realProcess,
+  proc: ProcessOps,
   claim = claimSession,
 ): Promise<{ text: string; open: boolean }> {
   // An upgrade restart holds the lock from its stop to its open (ET-32).
@@ -297,7 +291,7 @@ async function closeLocked(ctx: CommandContext, session: string, proc: ProcessOp
   // A concurrent `open` can start a replacement daemon while the steps above
   // are waiting. Removing the directory then deletes the newcomer's socket and
   // pidfile while it runs — the very orphan this command exists to prevent.
-  const current = await readPid(session);
+  const current = await readPidFile(pidPath(session));
   if (current !== null && current !== pid && proc.alive(current)) {
     throw new Error(`close: session '${session}' was reopened while closing (pid ${current}); left it running`);
   }
@@ -352,14 +346,18 @@ async function closeLegacy(name: string): Promise<boolean> {
  *  could not close fails the command with the reason a single `close` of it
  *  gives, which is a runtime error (exit 2); the sessions it did close are
  *  listed in the same message (F31). */
-async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> {
-  let names: string[] = [];
+/** Every directory under the sessions root; none when there is no root. */
+async function sessionNames(): Promise<string[]> {
   try {
     const entries = await readdir(sessionsRoot(), { withFileTypes: true });
-    names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
   } catch {
-    // no sessions root; nothing to close
+    return [];
   }
+}
+
+async function closeAll(ctx: CommandContext, proc: ProcessOps): Promise<string> {
+  const names = await sessionNames();
   const results = await Promise.all(
     names.map(async (name) => {
       try {
@@ -397,13 +395,7 @@ async function isLive(ctx: CommandContext, session: string): Promise<boolean> {
 }
 
 export async function cmdList(ctx: CommandContext): Promise<string> {
-  let names: string[] = [];
-  try {
-    const entries = await readdir(sessionsRoot(), { withFileTypes: true });
-    names = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch {
-    // no sessions root; nothing is live
-  }
+  const names = await sessionNames();
   // A directory is not a session an agent can use, so every name is probed.
   // Concurrently: one dead session waits out a connect, and serially that cost
   // would multiply by however many directories have accumulated.

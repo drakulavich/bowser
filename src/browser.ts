@@ -21,8 +21,6 @@ import {
 import type { KeyModifier } from "./daemon/protocol.ts";
 
 export interface BrowserOptions {
-  width?: number;
-  height?: number;
   /** Persistent profile directory (`open --persistent`); ephemeral without. */
   profile?: string;
 }
@@ -147,8 +145,8 @@ export async function openBrowser(opts: BrowserOptions = {}): Promise<Browser> {
   try {
     view = new Bun.WebView({
       backend: "webkit",
-      width: opts.width ?? 1280,
-      height: opts.height ?? 800,
+      width: 1280,
+      height: 800,
       ...(opts.profile ? { dataStore: { directory: opts.profile } } : {}),
     });
   } catch (err) {
