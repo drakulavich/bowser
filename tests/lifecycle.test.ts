@@ -437,6 +437,20 @@ describe("F2: a daemon from another bowser version", () => {
       d.stop();
     }
   });
+
+  test("#235: a daemon of this version from an older build names the command and the fix", async () => {
+    const session = "235-unknown-op-ver";
+    const d = await fakeDaemon(session, (req) => (req.op === "waitFor" ? { ok: false, error: "unknown op: waitFor" } : daemonOf(pkg.version)(req)));
+    try {
+      const failure = await run(["wait-for", "--text=x", "-s", session]).then((out) => ({ stderr: `no failure: ${out}`, code: 0 }), reportFailure);
+      expect(failure).toEqual({
+        stderr: `bowser: session '235-unknown-op-ver' was started by an older bowser build that does not know 'wait-for'; run 'bowser close -s 235-unknown-op-ver', then open it again`,
+        code: 1,
+      });
+    } finally {
+      d.stop();
+    }
+  });
 });
 
 describe("F3: close of a silent daemon with no pidfile", () => {
