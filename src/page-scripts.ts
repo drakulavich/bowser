@@ -802,6 +802,12 @@ export const LANDED_PAGE = `[location.href, document.referrer, ${ENTRY_KEY}]`;
 export const STOP_LOADING = "window.stop()";
 export const NAV_DESTINATION = "window[Symbol.for('bowser.nav')]?.url";
 
+/** `type` with a newline (#243): remembers the focused element and answers
+ *  whether it is contenteditable; TYPE_TARGET_FOCUSED answers whether it still
+ *  has focus. */
+export const TYPE_TARGET_MARK = `(() => { const el = document.activeElement; window[Symbol.for('bowser.typeTarget')] = el; return el?.isContentEditable === true; })()`;
+export const TYPE_TARGET_FOCUSED = `document.activeElement === window[Symbol.for('bowser.typeTarget')]`;
+
 /** wait-for's check (#114); the value goes in as JSON, never spliced as text. */
 export function waitForScript(kind: "url" | "text", value: string): string {
   const needle = JSON.stringify(value);
