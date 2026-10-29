@@ -89,13 +89,13 @@ describe("screenshot is documented as the viewport", () => {
 });
 
 // The Bun floor is engines.bun in package.json; the runtime guard reads it
-// there. The docs and the openspec notes state it by hand, CI runs the Bun in
+// there. The docs state it by hand, CI runs the Bun in
 // .bun-version, and a bump that missed one would go unnoticed. Every statement
 // must name the floor, and each file must keep at least one, so a deleted
 // statement fails too.
 describe("every statement of the Bun floor names engines.bun", () => {
   const floor = pkg.engines.bun.replace(/^>=\s*/, "");
-  const FLOOR_FILES = ["README.md", "skills/bowser/SKILL.md", "openspec/config.yaml", "openspec/specs/GLOSSARY.md"];
+  const FLOOR_FILES = ["README.md", "skills/bowser/SKILL.md"];
   for (const file of FLOOR_FILES) {
     test(file, () => {
       const text = readFileSync(join(ROOT, file), "utf8");

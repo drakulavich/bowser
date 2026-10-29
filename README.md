@@ -307,16 +307,16 @@ bowser's scripts run in the page's own JavaScript world, and WebKit returns thei
 
 ```bash
 bun run check                                  # typecheck, lint, then unit tests
-bun run typecheck                              # tsc
-bun run lint                                   # Biome (import cycles, layer rules) and Knip (unused files, exports)
+bun run typecheck                              # bun check
+bun run lint                                   # bun fmt --check, Biome (import cycles, layer rules) and Knip (unused files, exports)
 bun test                                       # unit + command tests with a fake daemon
 BOWSER_E2E=1 bun test                          # + end-to-end on WebKit
 BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub search)
 ```
 
 **End-to-end examples included:**
-- `tests/e2e.test.ts` — open/snapshot/click on a `data:` URL (no network)
-- `tests/e2e-todo.test.ts` — a local todo app served by `Bun.serve`: add three todos, toggle one, clear completed. Proves the daemon keeps state across commands.
+- `tests/e2e.test.ts` — screenshots and >8 KB snapshots and URLs on `data:` pages (no network)
+- `tests/e2e-snapshot.test.ts` — a local todo app served by `Bun.serve`: fill, click Add and check, each tree compared to `playwright-cli`'s golden.
 - `tests/e2e-webkit.test.ts` — every command driven on WebKit, with page state read back via `eval` after each one.
 - `tests/e2e-compat.test.ts` — diffs bowser against `playwright-cli` on the todo flow, asserting bowser's refs are a subset of playwright-cli's tree; skips without playwright-cli's WebKit installed.
 - `tests/e2e-search.test.ts` — live web: search GitHub for OpenClaw, find the repo link, type into the search box and press Enter.

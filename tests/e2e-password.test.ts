@@ -144,8 +144,6 @@ runOrSkip("e2e: snapshot never reveals a password field's value", () => {
       .split("\n")
       .map((l) => l.trim());
     expect(lines).toContain(`- textbox "User" [active] [ref=${ids.User}]: ${USER}`);
-    const saved = JSON.parse(stateText).refs.find((r: { id: string }) => r.id === ids.User);
-    expect(saved.value).toBe(USER);
   });
 
   test("fill --stdin: the piped secret is in no snapshot output and not in state.json", async () => {
@@ -170,9 +168,9 @@ runOrSkip("e2e: snapshot never reveals a password field's value", () => {
     ).toContain(`- textbox "Password" [active] [ref=${pw}]`);
   }, 60_000);
 
-  test("the saved refs of password fields carry no value", () => {
+  test("no saved ref carries a field's value, a password's or any other", () => {
     const refs = JSON.parse(stateText).refs as Array<{ id: string; value?: string }>;
-    for (const name of ["Password", "PIN", "Code"]) {
+    for (const name of ["User", "Password", "PIN", "Code"]) {
       expect(refs.find((r) => r.id === ids[name])).not.toHaveProperty("value");
     }
   });

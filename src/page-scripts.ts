@@ -429,15 +429,11 @@ const ROLE_NAME = String.raw`
 // between snapshots of one document while the element's role and name are
 // unchanged, and a new document starts at e1. The store's random `doc` id
 // is saved with the refs, so they resolve in no other document (#105), even
-// one that numbers its own refs the same. Each ref is saved with its
-// CSS_PATH; an action resolves the ref through the reverse map first
-// (resolveRefScript) and uses a path computed at that moment.
+// one that numbers its own refs the same. An action resolves the ref through
+// the reverse map (resolveRefScript) and uses a path computed at that moment.
 export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const KEY = Symbol.for('bowser.aria-refs');
-  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0 });
-  // A store from a previous bowser version has no byRef or doc.
-  if (!store.byRef) store.byRef = new Map();
-  if (!store.doc) store.doc = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0, doc: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') });
   // Forget refs whose element is gone, so byRef does not grow with every re-render.
   for (const [ref, w] of store.byRef) if (!w.deref()?.isConnected) store.byRef.delete(ref);
 
@@ -489,8 +485,6 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     store.byRef.set(r.ref, new WeakRef(el));
     n.ref = r.ref;
     const saved = { id: r.ref, role: n.role, name: n.name, tag: el.tagName.toLowerCase() };
-    if (tagOf(el) === 'A' && el.getAttribute('href')) saved.href = el.getAttribute('href');
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagOf(el)) && valueOf(el)) saved.value = String(valueOf(el)).slice(0, 120);
     if (el.isContentEditable) saved.editable = true;
     refs.push(saved);
   }
@@ -742,7 +736,6 @@ export function dialogAnswerScript(answer: { accept: boolean; text?: string }): 
 // the page, which is what the layer rule claims.
 export const READ_URL = "location.href";
 export const READ_TITLE = "document.title";
-export const RELOAD = "location.reload()";
 /** The viewport in CSS pixels and the pixel ratio: what a failed
  *  screenshot checks against WebKit's capture limit (#69). */
 export const READ_VIEWPORT = "[innerWidth, innerHeight, devicePixelRatio]";
@@ -1127,7 +1120,6 @@ const TO_MARKDOWN = String.raw`
 // Every wait shares one deadline: an unbounded one hung the session at budget 0 (ET-61).
 const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
     const u = new URL(location.href);
-    if (u.hostname === 'youtu.be') return u.pathname.split('/')[1] || null;
     if (u.pathname === '/watch') return u.searchParams.get('v');
     const s = /^\/shorts\/([^/]+)/.exec(u.pathname);
     return s ? s[1] : null;

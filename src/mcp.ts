@@ -218,12 +218,6 @@ async function runToolCall(id: unknown, argv: string[], deps: McpDeps): Promise<
   }
 }
 
-async function handleToolCall(id: unknown, params: unknown, deps: McpDeps) {
-  const prepared = prepareToolCall(id, params);
-  if ("reply" in prepared) return prepared.reply;
-  return (await runToolCall(id, prepared.argv, deps)).res;
-}
-
 /** Process one parsed JSON-RPC message. Returns the response object, or null for
  *  notifications (no id) and the client's responses, which get no reply per JSON-RPC. */
 export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<object | null> {
@@ -253,24 +247,11 @@ export async function handleMcpRequest(req: unknown, deps: McpDeps): Promise<obj
     }
     case "tools/list":
       return jsonRpcResult(r.id, { tools: buildTools() });
-    case "tools/call":
-      return handleToolCall(r.id, r.params, deps);
     case "ping":
       return jsonRpcResult(r.id, {});
     default:
       return jsonRpcError(r.id, -32601, `Method not found: ${r.method}`);
   }
-}
-
-/** Parse one stdin line and dispatch. Malformed JSON → -32700. */
-export async function handleMcpLine(line: string, deps: McpDeps): Promise<object | null> {
-  let req: unknown;
-  try {
-    req = JSON.parse(line);
-  } catch {
-    return jsonRpcError(null, -32700, "Parse error");
-  }
-  return handleMcpRequest(req, deps);
 }
 
 export interface McpServer {

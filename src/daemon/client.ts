@@ -9,7 +9,7 @@ import { opTimeoutMs } from "../budget.ts";
 import { withTimeout } from "../serialize.ts";
 import { lineReader } from "../socket-lines.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
-import { checkNewSessionName, loadState, profileDir, sessionDir, statePath } from "../state.ts";
+import { checkNewSessionName, ensureSessionDir, loadState, profileDir, sessionDir, statePath } from "../state.ts";
 import type { DaemonConnection, DaemonResponse, DialogReport, Op, RequestParams, ResultOf } from "./protocol.ts";
 import { UserError } from "../errors.ts";
 
@@ -371,7 +371,6 @@ export function daemonCommand(session: string): string[] {
 }
 
 async function spawnDaemon(session: string, profile?: string, budgetMs?: number | null): Promise<void> {
-  const { ensureSessionDir } = await import("../state.ts");
   await ensureSessionDir(session);
   // Create the profile here, in the CLI, and only for a daemon about to be
   // spawned: no daemon runs, so there is no store conflict to refuse and

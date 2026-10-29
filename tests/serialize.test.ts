@@ -83,10 +83,6 @@ describe("withTimeout", () => {
     await expect(withTimeout(slow, 5, "evaluate")).rejects.toThrow(/operation 'evaluate' timed out/);
   });
 
-  test("passes the promise through unchanged when ms <= 0", async () => {
-    expect(await withTimeout(Promise.resolve("v"), 0, "op")).toBe("v");
-  });
-
   test("propagates a rejection from p (not a timeout error)", async () => {
     await expect(withTimeout(Promise.reject(new Error("inner")), 1000, "op")).rejects.toThrow("inner");
   });

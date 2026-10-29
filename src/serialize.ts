@@ -36,10 +36,8 @@ export function createSerializer(): Serializer {
   return Object.defineProperty(serialize, "running", { get: () => running }) as Serializer;
 }
 
-/** Reject with a clear, labelled error if `p` does not settle within `ms`.
- *  When `ms <= 0` the timeout is disabled and `p` is returned unchanged. */
+/** Reject with a clear, labelled error if `p` does not settle within `ms`. */
 export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  if (!(ms > 0)) return p;
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`operation '${label}' timed out after ${ms}ms`)), ms);
     p.then(

@@ -1,9 +1,5 @@
-// State persisted between CLI invocations.
-// One-shot mode means each command spawns a fresh WebView, so we need to
-// persist just enough to make multi-step flows work:
-//   - the current URL (so we can re-navigate)
-//   - the last snapshot's refs (a ref command checks the ref's kind against it)
-//
+// State persisted between CLI invocations: the page's URL and the last
+// snapshot's refs (a ref command checks the ref's kind against them).
 // State lives under ~/.bowser/sessions/<name>/.
 
 import { mkdir } from "node:fs/promises";
@@ -16,8 +12,6 @@ export interface Ref {
   role: string;
   name: string;
   tag: string;
-  href?: string;
-  value?: string;
   /** The element is contentEditable; `fill` accepts it whatever its role. */
   editable?: boolean;
 }

@@ -48,7 +48,7 @@ export interface Command {
   /** The MCP tool description, when `summary` names something MCP does not
    *  offer (a flag marked `mcp: false`). Same rules as `summary`. */
   mcpSummary?: string;
-  /** Omit from `bowser mcp`. Replaces MCP_EXCLUDED. */
+  /** Omit from `bowser mcp`. */
   mcp?: false;
   run(ctx: CommandContext, args: CommandArgs): Promise<string>;
 }

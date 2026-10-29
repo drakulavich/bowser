@@ -24,8 +24,6 @@ function fakeBrowser(over: Partial<Browser> = {}): Browser & { calls: Array<[str
     };
   const b: Browser & { calls: typeof calls } = {
     calls,
-    url: "https://x/",
-    title: "X",
     realUrl: rec("realUrl", "https://x/"),
     realTitle: rec("realTitle", "X"),
     navigate: rec("navigate", undefined),
@@ -453,7 +451,7 @@ test("an urgent op answers while a queued op is wedged", async () => {
 });
 
 test("a queued op that overruns its budget answers with a timeout error", async () => {
-  // Both tests above pass timeoutMs: 0, which makes withTimeout a no-op, so
+  // Both tests above pass timeoutMs: 0, which turns the per-op budget off, so
   // neither reaches the timeout branch. Without this the whole per-op budget
   // could be deleted and the suite would stay green — the final review of
   // PR 6 proved exactly that by deleting it.

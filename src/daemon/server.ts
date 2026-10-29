@@ -4,12 +4,7 @@
 // everything the page accumulated (typed text, modals, dynamic DOM).
 //
 // The op set lives in ./protocol.ts. `handlers` below is typed from it, so
-// an op without a handler here does not compile. `state` and
-// `dialog-answer` are the exceptions and are answered by closures in
-// createHandler(), because they alone use the daemon's own state, which a
-// handlers entry is not given. Removing either closure does not compile either, for a
-// different reason: req.op spans every op, and Handlers excludes them, so the
-// lookup stops being index-safe.
+// an op without a handler here does not compile; Handlers names the exceptions.
 //
 // Dialogs: none ever stays open. WebKit has no dialog events, so a page shim
 // (page-scripts.ts dialogShim) answers each dialog the moment it opens (the
@@ -354,23 +349,17 @@ const handlers: Handlers = {
   },
   uncheck: (browser, selector) => browser.setChecked(selector, false),
   screenshot: async (browser, path, scale) => {
-    // When the CLI passes an absolute path, the daemon writes the PNG itself
-    // so the ~140 KB base64 never crosses the socket. With no path, return
-    // base64 — reserved for a future --stdout / programmatic caller.
+    // The daemon writes the PNG itself so the ~140 KB base64 never crosses the socket.
     const fontsLoading = (await browser.evaluate(AWAIT_FONTS)) === true;
     let dpr: number | undefined;
     if (scale !== undefined) {
       dpr = ((await browser.evaluate(READ_VIEWPORT)) as [number, number, number])[2];
       if (scale > dpr) return { dpr };
     }
-    const b64 = await browser.screenshot();
-    if (path) {
-      let png: Uint8Array = Buffer.from(b64, "base64");
-      if (dpr !== undefined && scale !== dpr) png = await scalePng(png, scale! / dpr);
-      await Bun.write(path, png);
-      return fontsLoading ? { path, fontsLoading } : { path };
-    }
-    return b64;
+    let png: Uint8Array = Buffer.from(await browser.screenshot(), "base64");
+    if (dpr !== undefined && scale !== dpr) png = await scalePng(png, scale! / dpr);
+    await Bun.write(path, png);
+    return fontsLoading ? { path, fontsLoading } : { path };
   },
   resize: (browser, width, height) => browser.resize(width, height),
   back: (browser) => browser.back(),
@@ -481,10 +470,6 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
   }
 
   async function run(req: DaemonRequest): Promise<DaemonResponse> {
-    // `state` and `dialog-answer` are answered by closures, not entries in
-    // `handlers`: they are the ops that use the daemon's own state, and
-    // threading it through the other handlers would be a change with two
-    // consumers.
     const fn =
       req.op === "state"
         ? async (b: Browser): Promise<PageState> => ({
@@ -726,8 +711,6 @@ export async function startDaemon(session: string, profile?: string): Promise<bo
   });
 
   // Keep the process alive. Bun.WebView doesn't hold the loop open on its own.
-  const keepalive = setInterval(() => {}, 60_000);
-  // Clean up if the event loop does settle.
-  process.on("beforeExit", () => clearInterval(keepalive));
+  setInterval(() => {}, 60_000);
   return true;
 }

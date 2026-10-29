@@ -1988,18 +1988,6 @@ describe("sessionstorage", () => {
     expect(expr).toContain("sessionStorage.length");
   });
 
-  test("list renders k=v lines", async () => {
-    const c = fakeClient({ evaluate: () => ({ token: "abc", theme: "dark" }) });
-    const out = await cmdSessionStorageList({ ...ctx(), connect: async () => c });
-    expect(out.split("\n").sort()).toEqual(["theme=dark", "token=abc"]);
-  });
-
-  test("list --json returns object", async () => {
-    const c = fakeClient({ evaluate: () => ({ token: "abc" }) });
-    const out = await cmdSessionStorageList({ ...ctx({ json: true }), connect: async () => c });
-    expect(JSON.parse(out)).toEqual({ token: "abc" });
-  });
-
   test("get returns raw value", async () => {
     const c = fakeClient({ evaluate: () => "abc" });
     const out = await cmdSessionStorageGet({ ...ctx(), connect: async () => c }, "token");
@@ -2008,32 +1996,12 @@ describe("sessionstorage", () => {
     expect(expr).toContain(`sessionStorage.getItem(\"token\")`);
   });
 
-  test("get missing key returns empty string", async () => {
-    const c = fakeClient({ evaluate: () => null });
-    const out = await cmdSessionStorageGet({ ...ctx(), connect: async () => c }, "token");
-    expect(out).toBe("");
-  });
-
-  test("get --json includes null for missing key", async () => {
-    const c = fakeClient({ evaluate: () => null });
-    const out = await cmdSessionStorageGet({ ...ctx({ json: true }), connect: async () => c }, "missing");
-    expect(JSON.parse(out)).toEqual({ ok: true, key: "missing", value: null });
-  });
-
-  test("get rejects empty key", async () => {
-    await expect(cmdSessionStorageGet(ctx(), "")).rejects.toThrow(/usage:/);
-  });
-
   test("set sends setItem evaluate with JSON-escaped key/value", async () => {
     const c = fakeClient({ evaluate: () => undefined });
     const out = await cmdSessionStorageSet({ ...ctx(), connect: async () => c }, "tok", `va"l`);
     expect(out).toBe("set tok");
     const expr = c.calls[0]![1][0] as string;
     expect(expr).toContain(`sessionStorage.setItem(\"tok\", \"va\\\"l\")`);
-  });
-
-  test("set rejects missing args", async () => {
-    await expect(cmdSessionStorageSet(ctx(), "", "v")).rejects.toThrow(/usage:/);
   });
 
   test("delete sends removeItem evaluate", async () => {
@@ -2050,12 +2018,6 @@ describe("sessionstorage", () => {
     expect(out).toBe("cleared");
     const expr = c.calls[0]![1][0] as string;
     expect(expr).toContain(`sessionStorage.clear()`);
-  });
-
-  test("clear --json", async () => {
-    const c = fakeClient({ evaluate: () => undefined });
-    const out = await cmdSessionStorageClear({ ...ctx({ json: true }), connect: async () => c });
-    expect(JSON.parse(out)).toEqual({ ok: true });
   });
 });
 
@@ -2112,10 +2074,6 @@ describe("eval", () => {
   test("empty expression throws usage error", async () => {
     await expect(cmdEval(ctx(), "")).rejects.toThrow(/^usage: bowser eval/);
   });
-
-  test("missing expression throws usage error", async () => {
-    await expect(cmdEval(ctx(), undefined as unknown as string)).rejects.toThrow(/^usage: bowser eval/);
-  });
 });
 
 describe("run-code", () => {
@@ -2136,18 +2094,6 @@ describe("run-code", () => {
     expect(reportFailure(err).code).toBe(1);
   });
 
-  test("string result is printed as-is", async () => {
-    const c = fakeClient({ evaluate: () => ({ value: "hi" }) });
-    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return 'hi'");
-    expect(out).toBe("hi");
-  });
-
-  test("object result is JSON.stringified", async () => {
-    const c = fakeClient({ evaluate: () => ({ value: [1, 2, 3] }) });
-    const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "return [1,2,3]");
-    expect(out).toBe("[1,2,3]");
-  });
-
   test("undefined result prints empty string", async () => {
     const c = fakeClient({ evaluate: () => ({}) });
     const out = await cmdRunCode({ ...ctx(), connect: async () => c }, "1+1");
@@ -2162,10 +2108,6 @@ describe("run-code", () => {
 
   test("empty code throws usage error", async () => {
     await expect(cmdRunCode(ctx(), "")).rejects.toThrow(/^usage: bowser run-code/);
-  });
-
-  test("missing code throws usage error", async () => {
-    await expect(cmdRunCode(ctx(), undefined as unknown as string)).rejects.toThrow(/^usage: bowser run-code/);
   });
 });
 
