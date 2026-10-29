@@ -31,7 +31,7 @@ jobs:
       - name: Upload to Flakiness.io
         if: always()
         continue-on-error: true
-        run: npx --yes @flakiness/junit-xml@1.4.0 unit.xml --category bun --flakiness-project Laputa/bowser
+        run: bun scripts/upload-flakiness.ts unit.xml bun Laputa/bowser
 
   e2e-webkit:
     name: e2e (WebKit, macOS)
@@ -54,7 +54,7 @@ jobs:
       - name: Upload to Flakiness.io
         if: always()
         continue-on-error: true
-        run: npx --yes @flakiness/junit-xml@1.4.0 e2e.xml --category bun --flakiness-project Laputa/bowser
+        run: bun scripts/upload-flakiness.ts e2e.xml bun Laputa/bowser
       - name: E2E - the npm package, installed
         # Runs what a user installs: `npm pack`, then `npm i -g` into a temp
         # prefix, then that prefix's bin/bowser. This covers the `files` list (a
