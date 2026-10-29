@@ -384,7 +384,8 @@ const PAGE_CRASHED = "the page crashed (its web process exited); run 'bowser rel
  *  promise that could never settle (ET-07, Bun 1.4.4), or a reload or
  *  navigation ended the call (a fill during recovery, 2026-09-28 session log). */
 const PROMISE_DROPPED = "Completion handler for function call is no longer reachable";
-const CALL_DROPPED = "the page dropped the call before it answered: the expression returned a promise that never settles, or the page navigated or reloaded while it ran; run 'bowser snapshot' to see the page";
+const CALL_DROPPED =
+  "the page dropped the call before it answered: the expression returned a promise that never settles, or the page navigated or reloaded while it ran; run 'bowser snapshot' to see the page";
 
 /** What createHandler returns: the request handler, and the hook `dispatch`
  *  calls when a request overruns its budget. */
