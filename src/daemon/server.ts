@@ -4,12 +4,7 @@
 // everything the page accumulated (typed text, modals, dynamic DOM).
 //
 // The op set lives in ./protocol.ts. `handlers` below is typed from it, so
-// an op without a handler here does not compile. `state` and
-// `dialog-answer` are the exceptions and are answered by closures in
-// createHandler(), because they alone use the daemon's own state, which a
-// handlers entry is not given. Removing either closure does not compile either, for a
-// different reason: req.op spans every op, and Handlers excludes them, so the
-// lookup stops being index-safe.
+// an op without a handler here does not compile; Handlers names the exceptions.
 //
 // Dialogs: none ever stays open. WebKit has no dialog events, so a page shim
 // (page-scripts.ts dialogShim) answers each dialog the moment it opens (the
@@ -475,10 +470,6 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
   }
 
   async function run(req: DaemonRequest): Promise<DaemonResponse> {
-    // `state` and `dialog-answer` are answered by closures, not entries in
-    // `handlers`: they are the ops that use the daemon's own state, and
-    // threading it through the other handlers would be a change with two
-    // consumers.
     const fn =
       req.op === "state"
         ? async (b: Browser): Promise<PageState> => ({

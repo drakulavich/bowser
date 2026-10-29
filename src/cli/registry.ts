@@ -2,14 +2,6 @@
 // that implements it. Dispatch (cli.ts), --help (cli.ts) and the MCP tool
 // list (mcp.ts) all read this, so a command cannot exist in one and not the
 // others. SCHEMAS is derived here; the parser still owns argv parsing.
-//
-// COMMANDS groups by the module that owns each command (navigation,
-// snapshot, interaction, dialog, web-storage, scripting, storage-state, then
-// mcp), not by today's hand-maintained SCHEMAS.commands order — a module's own
-// COMMANDS array can only be spread as one contiguous block, and interaction's
-// commands (click..uncheck, resize) are split around snapshot's `screenshot`
-// in that order. Every downstream consumer looks commands up by name
-// (findCommand, parser.ts's `find`), so the grouping is cosmetic.
 
 import type { Command } from "../commands/context.ts";
 import { COMMANDS as DIALOG } from "../commands/dialog.ts";
@@ -22,10 +14,8 @@ import { COMMANDS as WEB_STORAGE } from "../commands/web-storage.ts";
 import type { Schemas } from "./parser.ts";
 import { UserError } from "../errors.ts";
 
-/** `mcp` has no implementation module — it is a long-lived server intercepted
- *  at the import.meta.main entry layer (it never returns a string), so it
- *  never reaches the dispatcher in normal use. This guard only fires if
- *  run(["mcp"]) is called directly, mirroring today's `case "mcp"` in cli.ts. */
+/** `mcp` is a long-lived server that cli.ts starts at its entry point, never
+ *  through run(); this guard answers a direct run(["mcp"]). */
 const MCP_COMMAND: Command = {
   name: "mcp",
   summary: "Run a Model Context Protocol stdio server exposing commands as tools",

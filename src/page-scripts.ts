@@ -429,9 +429,8 @@ const ROLE_NAME = String.raw`
 // between snapshots of one document while the element's role and name are
 // unchanged, and a new document starts at e1. The store's random `doc` id
 // is saved with the refs, so they resolve in no other document (#105), even
-// one that numbers its own refs the same. Each ref is saved with its
-// CSS_PATH; an action resolves the ref through the reverse map first
-// (resolveRefScript) and uses a path computed at that moment.
+// one that numbers its own refs the same. An action resolves the ref through
+// the reverse map (resolveRefScript) and uses a path computed at that moment.
 export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const KEY = Symbol.for('bowser.aria-refs');
   const store = window[KEY] || (window[KEY] = { refs: new WeakMap(), byRef: new Map(), last: 0, doc: Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') });

@@ -126,14 +126,8 @@ function assignFlag(out: Parsed, spec: FlagSpec, value: string | boolean): void 
   out.flags[spec.name] = value;
 }
 
-/** Read a string flag. A `Command`'s `run` receives flags as
- *  `Record<string, string | boolean>`, because one bag holds both kinds; this
- *  narrows one back to what its `FlagSpec` declared. Prefer it to `as string |
- *  undefined`: the cast also silently accepts a boolean, so declaring a flag
- *  `kind: "boolean"` and then reading it as a string would compile and hand
- *  the command `true`. Lives here rather than beside `Command` because
- *  registry.ts imports the command modules, so importing a value back from it
- *  would be a cycle. */
+/** Read a string flag. Prefer it to `as string | undefined`, which also
+ *  accepts a boolean flag's `true` and hands it to the command. */
 export function str(flags: Record<string, string | boolean>, name: string): string | undefined {
   const v = flags[name];
   return typeof v === "string" ? v : undefined;
