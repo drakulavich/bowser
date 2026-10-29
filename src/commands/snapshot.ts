@@ -70,12 +70,12 @@ export async function cmdMarkdown(ctx: CommandContext, ref?: string, opts: { fil
       failed?: boolean;
     };
     if (failed) throw new Error(`markdown: the transcript of ${url} did not load within ${fetchMs}ms`);
+    const empty = `markdown: ${ref === undefined ? "the page" : `ref '${ref}'`} has no text (${JSON.stringify(title)}, ${url})`;
     if (opts.filename) {
       const abs = resolve(opts.filename);
       await Bun.write(abs, markdown + "\n");
-      return replyPage(ctx, c, { ok: true, filename: abs, source }, `wrote ${abs}`);
+      return replyPage(ctx, c, { ok: true, filename: abs, source, url, title }, markdown ? `wrote ${abs}` : `${empty}\nwrote ${abs}`);
     }
-    const empty = `markdown: ${ref === undefined ? "the page" : `ref '${ref}'`} has no text (${JSON.stringify(title)}, ${url})`;
     return replyPage(ctx, c, { markdown, source, url, title }, markdown || empty);
   });
 }

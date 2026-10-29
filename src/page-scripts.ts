@@ -970,6 +970,8 @@ export function storageRestoreScript(area: StorageArea, entries: Array<{ name: s
 
 const TO_MARKDOWN = String.raw`
   const BT = String.fromCharCode(96);
+  // GitHub hides a read-only task checkbox with display: none; its state is still the task's (#154).
+  const task = (el) => { const li = el.tagName === 'INPUT' && el.type === 'checkbox' && el.closest('li'); return !!li && getComputedStyle(li).visibility === 'visible'; };
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG', 'CANVAS', 'IFRAME', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
   const BLOCK = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE', 'FIGURE', 'FIGCAPTION', 'FORM', 'FIELDSET', 'DETAILS', 'SUMMARY', 'ADDRESS', 'DL', 'DT', 'DD', 'LI', 'BODY', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'TABLE', 'BLOCKQUOTE', 'HR']);
   const skipped = (el) => {
@@ -989,6 +991,7 @@ const TO_MARKDOWN = String.raw`
   const mark = (m, s) => { const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(s); return core ? lead + m + core + m + trail : lead + trail; };
   const inline = (n) => {
     if (n.nodeType === 3) return text(n);
+    if (n.nodeType === 1 && task(n)) return n.checked ? '[x] ' : '[ ] ';
     if (n.nodeType !== 1 || skipped(n)) return '';
     const t = n.tagName;
     // A block-level child is a word of its own, as the snapshot's name reads it (ET-47).
@@ -1062,6 +1065,7 @@ const TO_MARKDOWN = String.raw`
   };
   const blocks = (n, out) => {
     if (n.nodeType === 3) { out.push({ inline: text(n) }); return; }
+    if (n.nodeType === 1 && task(n)) { out.push({ inline: inline(n) }); return; }
     if (n.nodeType !== 1 || skipped(n)) return;
     const t = n.tagName;
     const h = /^H([1-6])$/.exec(t);
@@ -1200,7 +1204,9 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
   if (link) {
     try {
       const r = await fetch(link.href, { signal });
-      if (r.ok && !/html/i.test(r.headers.get('content-type') || '')) return { markdown: (await r.text()).trimEnd(), source: 'page' };
+      // Relative links in the site's Markdown: the DOM conversion has them absolute, so it answers instead (#154).
+      const text = r.ok && !/html/i.test(r.headers.get('content-type') || '') ? (await r.text()).trimEnd() : null;
+      if (text !== null && !/\]\(\s*<?\.{0,2}\//.test(text)) return { markdown: text, source: 'page' };
     } catch {}
   }`
       : "";
