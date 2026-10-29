@@ -153,9 +153,10 @@ them broken); before the stop they may still arrive.
 ## Not in scope
 
 - The BBC wedge (no `evaluate` answers during that load, CPU idle): needs a look at Bun.WebView first.
-- `click` on a link to such a page, `reload`, `go-back` and `go-forward`: they wait on the same `load` through
-  `act()`. If the cap proves out on `open`/`goto`, a follow-up issue carries it there.
-- `wait-for` and `close` do not stop a load left running: `wait-for` reads the page, and `close` ends the view.
+- The cap itself on `click` on a link to such a page, `reload`, `go-back` and `go-forward`: their own wait for
+  `load` through `act()` stays uncapped. If the cap proves out on `open`/`goto`, a follow-up issue carries it
+  there. They do stop a load an earlier `open` or `goto` left running (above).
+- `wait-for` does not stop a load left running: it only reads the page.
 
 ## Definition of Done
 
