@@ -12,7 +12,17 @@ import { ensureSessionDir, profileDir, saveState, sessionDir } from "../src/stat
 
 import pkg from "../package.json";
 import { reportFailure } from "../src/cli.ts";
-import { connectOrSpawn, daemonCommand, daemonEnv, daemonLogPath, DaemonClient, DaemonNotAnswering, pidPath, socketPath } from "../src/daemon/client.ts";
+import {
+  connectOrSpawn,
+  type ConnectOptions,
+  daemonCommand,
+  daemonEnv,
+  daemonLogPath,
+  DaemonClient,
+  DaemonNotAnswering,
+  pidPath,
+  socketPath,
+} from "../src/daemon/client.ts";
 import { removePidFileIfOwned } from "../src/daemon/server.ts";
 import { claimSession, looksLikeOurDaemon } from "../src/daemon/pidfile.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
@@ -318,6 +328,50 @@ describe("connectOrSpawn after the session's browser exited (F28)", () => {
     await crashed(session);
     // Past the refusal, the spawn path's own platform check answers.
     await expect(connectOrSpawn(session, { platform: "linux", reopen: true })).rejects.toThrow("bowser requires macOS (WebKit)");
+  });
+
+  // ET-63: its socket removed, the daemon runs on, and only close ends it.
+  describe("a live daemon of ours that does not accept connections", () => {
+    const unreachable = async (session: string) => {
+      await crashed(session);
+      const holder = Bun.spawn([process.execPath, "-e", "setInterval(()=>{},1e9)", "/x/src/daemon/main.ts", session], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      await waitFor(async () => (await daemonPids(session)).includes(holder.pid));
+      await Bun.write(pidPath(session), String(holder.pid));
+      return holder;
+    };
+    const refusal = (session: string, opts: ConnectOptions) =>
+      connectOrSpawn(session, opts).then(
+        () => "no refusal",
+        (e: unknown) => (e as Error).message,
+      );
+
+    test("a command names close, not open", async () => {
+      const session = "unreachable-cmd";
+      const holder = await unreachable(session);
+      try {
+        expect(await refusal(session, { platform: "linux" })).toBe(
+          `session '${session}' is not reachable: its daemon (pid ${holder.pid}) is running but does not accept connections; run 'bowser close -s ${session}'`,
+        );
+      } finally {
+        holder.kill();
+      }
+    });
+
+    test("open names close once its new daemon finds the session held", async () => {
+      const session = "unreachable-open";
+      const holder = await unreachable(session);
+      try {
+        expect(await refusal(session, { reopen: true })).toBe(
+          `session '${session}' is not reachable: its daemon (pid ${holder.pid}) is running but does not accept connections; run 'bowser close -s ${session}'`,
+        );
+      } finally {
+        await killDaemons(session);
+      }
+    }, 15_000);
   });
 
   test("a session that never ran a daemon still starts one", async () => {

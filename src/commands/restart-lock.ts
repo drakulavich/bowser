@@ -36,7 +36,9 @@ export async function claimRestartLock(session: string, claim = claimSession): P
       // EINVAL: macOS's write or link while `close` removes the directory (#232).
       const code = (e as { code?: string }).code;
       if (code === "ENOENT" || code === "EINVAL" || code === "ENAMETOOLONG") return false;
-      throw e;
+      if (code !== "EACCES") throw e;
+      // An unwritable session directory: `close` still stops its daemon, unless a live restart holds the lock (ET-60).
+      if (otherHolder(session) === null) return false;
     }
     // claimSession leaves a corrupt lock for `close`, which removes the directory.
     if (corrupt(lock)) return false;

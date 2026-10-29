@@ -1,7 +1,7 @@
 // Command-layer tests with a fake daemon client. No real browser needed.
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import pkg from "../package.json";
 import { tmpdir } from "node:os";
@@ -658,6 +658,35 @@ describe("close", () => {
     expect(termed).toBe(true);
     expect(out).toContain("ended unreachable daemon 4242");
     expect(existsSync(sessionDir(session))).toBe(false);
+  });
+
+  test("in an unwritable session directory, stops the daemon and names the directory it could not remove (ET-60)", async () => {
+    await ensureSessionDir(session);
+    await Bun.write(pidPath(session), "4242");
+    await chmod(sessionDir(session), 0o555);
+    let termed = false;
+    try {
+      const err = await closeOne(
+        { ...ctx(), connect: unreachable },
+        session,
+        procOps({
+          alive: () => !termed,
+          ours: async () => true,
+          term: () => {
+            termed = true;
+          },
+        }),
+      ).then(
+        () => undefined,
+        (e: unknown) => e as Error,
+      );
+      expect(termed).toBe(true);
+      expect(err?.message).toBe(
+        `close: session '${session}' is stopped, but ${sessionDir(session)} could not be removed: ENOTEMPTY: directory not empty, rm '${sessionDir(session)}'; make it writable, then run 'bowser close -s ${session}' again`,
+      );
+    } finally {
+      await chmod(sessionDir(session), 0o755);
+    }
   });
 
   test("never signals, nor writes off, a live pid it cannot identify", async () => {

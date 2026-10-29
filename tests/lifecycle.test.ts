@@ -6,7 +6,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -230,6 +230,29 @@ describe("F2: a daemon from another bowser version", () => {
       expect(await run(["eval", "1", "-s", session])).toBe("1");
     } finally {
       (await next).stop();
+    }
+  });
+
+  test("in an unwritable session directory, close leaves a daemon whose restart holds the lock (ET-60, Codex #332)", async () => {
+    const session = "ver-ro-restart";
+    const d = await fakeDaemon(session, daemonOf(pkg.version));
+    const lock = join(sessionDir(session), LOCK);
+    await Bun.write(lock, String(holder.pid));
+    await chmod(sessionDir(session), 0o555);
+    const prev = process.env.BOWSER_OP_TIMEOUT_MS;
+    process.env.BOWSER_OP_TIMEOUT_MS = "300";
+    try {
+      expect(await failure(["close", "-s", session])).toEqual({
+        stderr: `bowser: session '${session}' is being restarted by pid ${holder.pid} (${lock}); retry in a moment`,
+        code: 1,
+      });
+      expect(d.ops).not.toContain("shutdown");
+    } finally {
+      if (prev === undefined) delete process.env.BOWSER_OP_TIMEOUT_MS;
+      else process.env.BOWSER_OP_TIMEOUT_MS = prev;
+      await chmod(sessionDir(session), 0o755);
+      await unlink(lock);
+      d.stop();
     }
   });
 

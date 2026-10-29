@@ -2,11 +2,12 @@
 // spawn the daemon first), send typed requests, match replies by id.
 
 import { closeSync, existsSync, openSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import pkg from "../../package.json";
 import { opTimeoutMs } from "../budget.ts";
 import { withTimeout } from "../serialize.ts";
+import { isAlive, isOurDaemon } from "./pidfile.ts";
 import { lineReader } from "../socket-lines.ts";
 import { flushSocket, socketWriteAll, type WritableSocket } from "../socket-write.ts";
 import { checkNewSessionName, ensureSessionDir, loadState, profileDir, sessionDir, statePath } from "../state.ts";
@@ -268,7 +269,17 @@ async function checked(client: DaemonClient, session: string, answer: unknown, o
  *  refs and, for `--persistent`, its store went with it, and a new daemon
  *  started quietly would be an empty in-memory browser. A user error (exit 1). */
 export async function browserExited(session: string): Promise<string> {
+  const held = await unreachableDaemon(session);
+  if (held) return held;
   return `session '${session}' is not open (its browser exited); run '${await openCommand(session)}'`;
+}
+
+/** Why a session whose pidfile names a live daemon of ours cannot be used:
+ *  its socket is gone or refuses, and only `close` ends it (ET-63). */
+async function unreachableDaemon(session: string): Promise<string | undefined> {
+  const pid = Number((await readFile(pidPath(session), "utf8").catch(() => "")).trim());
+  if (!Number.isInteger(pid) || pid <= 0 || !isAlive(pid) || !(await isOurDaemon(pid, session))) return undefined;
+  return `session '${session}' is not reachable: its daemon (pid ${pid}) is running but does not accept connections; run 'bowser close -s ${session}'`;
 }
 
 /** The profile the session's `open` recorded, null for none. State from an
@@ -367,6 +378,8 @@ export async function connectOrSpawn(session: string, opts: ConnectOptions = {})
       }
       return checked(c, session, reply, opts);
     }
+    const held = await unreachableDaemon(session);
+    if (held) throw new Error(held);
     const log = process.env.BOWSER_DAEMON_DEBUG === "1" ? `; its output is in ${daemonLogPath(session)}` : "; rerun with BOWSER_DAEMON_DEBUG=1 to see why";
     throw new Error(`daemon for session '${session}' did not start in time${log}`);
   }
