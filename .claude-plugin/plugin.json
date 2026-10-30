@@ -1,0 +1,13 @@
+{
+  "name": "bowser",
+  "version": "0.12.0",
+  "description": "The bowser skill and the bowser mcp server: drive a headless WebKit browser on macOS with playwright-cli-compatible commands. Needs the bowser CLI on PATH (npm install -g @drakulavich/bowser-cli).",
+  "author": { "name": "Anton Yakutovich", "url": "https://github.com/drakulavich" },
+  "homepage": "https://github.com/drakulavich/bowser#readme",
+  "repository": "https://github.com/drakulavich/bowser",
+  "license": "MIT",
+  "keywords": ["browser", "automation", "webkit", "playwright", "mcp"],
+  "mcpServers": {
+    "bowser": { "command": "bowser", "args": ["mcp"] }
+  }
+}

@@ -53,6 +53,17 @@ bun link                     # exposes `bowser` on $PATH
 
 The npm package runs on the `bun` it finds on your `PATH`. [docs/install.md](https://github.com/drakulavich/bowser/blob/main/docs/install.md) covers the Bun version check, moving off a release binary, and what happens to open sessions and `bowser mcp` on an upgrade.
 
+### Claude Code plugin
+
+This repo is also a Claude Code plugin marketplace. The plugin installs the `bowser` skill and registers `bowser mcp` as an MCP server:
+
+```bash
+claude plugin marketplace add drakulavich/bowser
+claude plugin install bowser@bowser
+```
+
+Inside a session, `/plugin install bowser --marketplace drakulavich/bowser` does both. The plugin does not contain the CLI: install it from npm first. Without `bowser` on the `PATH`, the skill's commands fail with `command not found` and `/mcp` shows `plugin:bowser:bowser` as failed (`Executable not found in $PATH`). `claude plugin update bowser@bowser` picks up a new release.
+
 ## Quickstart
 
 ```bash
@@ -331,7 +342,7 @@ BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub sea
 - [x] `resize`
 - [x] `dialog-accept`/`dismiss` — the answer is set before the action; see [Dialogs](#dialogs)
 - [x] MCP bridge subcommand for non-CLI clients (`bowser mcp`)
-- [ ] Agent skill published to [agentskills.io](https://agentskills.io)
+- [ ] Agent skill: follows the [agentskills.io](https://agentskills.io/specification) spec and ships as a Claude Code plugin from this repo's marketplace ([Claude Code plugin](#claude-code-plugin)); a listing in Anthropic's plugin directory is still open
 
 ## Migrating from 0.1.0
 

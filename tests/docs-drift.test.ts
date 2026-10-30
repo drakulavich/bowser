@@ -109,3 +109,25 @@ describe("every statement of the Bun floor names engines.bun", () => {
     expect(readFileSync(join(ROOT, ".bun-version"), "utf8").trim()).toBe(floor);
   });
 });
+
+// The Claude Code plugin is this repo's root, so it ships skills/bowser as
+// checked above. A plugin.json version left behind keeps every install on the
+// old copy: `claude plugin update` compares that field, not the commit.
+describe("the Claude Code plugin", () => {
+  const manifest = JSON.parse(readFileSync(join(ROOT, ".claude-plugin/plugin.json"), "utf8"));
+  const marketplace = JSON.parse(readFileSync(join(ROOT, ".claude-plugin/marketplace.json"), "utf8"));
+
+  test("plugin.json has package.json's version", () => {
+    expect(manifest.version).toBe(pkg.version);
+  });
+
+  test("the marketplace entry is the repo root, under the manifest's name", () => {
+    expect(marketplace.plugins).toEqual([{ name: "bowser", source: "./" }]);
+    expect(manifest.name).toBe("bowser");
+  });
+
+  test("its MCP server runs `bowser mcp`", () => {
+    expect(manifest.mcpServers).toEqual({ bowser: { command: "bowser", args: ["mcp"] } });
+    expect(REGISTERED.has("mcp")).toBe(true);
+  });
+});

@@ -1,0 +1,6 @@
+{
+  "name": "bowser",
+  "description": "bowser, a Bun.WebView browser CLI for AI agents",
+  "owner": { "name": "Anton Yakutovich", "url": "https://github.com/drakulavich" },
+  "plugins": [{ "name": "bowser", "source": "./" }]
+}
