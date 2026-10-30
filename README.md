@@ -3,9 +3,32 @@
 [![test](https://github.com/drakulavich/bowser/actions/workflows/test.yml/badge.svg)](https://github.com/drakulavich/bowser/actions/workflows/test.yml)
 [![npm](https://img.shields.io/npm/v/@drakulavich/bowser-cli.svg)](https://www.npmjs.com/package/@drakulavich/bowser-cli)
 
-A Bun-native, drop-in command-compatible alternative to Microsoft [`playwright-cli`](https://github.com/microsoft/playwright-cli) for AI agents. Same commands, same flag syntax, same snapshot YAML — replace `playwright` with `bowser` and existing playwright-cli skills work unchanged.
+bowser gives your AI agent a browser on your Mac: nothing to install beyond Bun, and snapshots never show a password's value.
 
-Built on [`Bun.WebView`](https://bun.com/docs/runtime/webview) (new in Bun 1.3.12), it drives the native WebKit engine on macOS, so there is no browser to download: nothing to install beyond Bun itself. bowser runs on macOS only. If you need Chromium, or Linux or Windows, use [`playwright-cli`](https://github.com/microsoft/playwright-cli).
+```bash
+npm install -g @drakulavich/bowser-cli   # macOS, Bun ≥ 1.4.4
+bowser open https://example.com          # start a session and load the page
+bowser snapshot                          # the page's accessibility tree, with refs
+bowser click e3                          # click the element with ref e3
+```
+
+It drives the WebKit engine macOS already has, through [`Bun.WebView`](https://bun.com/docs/runtime/webview), so there is no browser to download. The commands, flags and snapshot format are those of Microsoft's [`playwright-cli`](https://github.com/microsoft/playwright-cli): replace `playwright` with `bowser` and existing playwright-cli skills work unchanged. bowser runs on macOS only. For Chromium, Linux or Windows, use playwright-cli.
+
+## Password values stay out of snapshots
+
+A filled `<input type="password">` prints in a snapshot as `textbox "Password" [ref=e3]`, with no value, and `state.json` does not store it. `fill` and `type` never echo the text they entered, in any field. To keep a secret out of the process arguments as well, pipe it in with `fill --stdin`:
+
+```bash
+op read op://vault/app/password | bowser fill e4 --stdin   # prints: filled e4 (textbox "Password")
+```
+
+`playwright-cli` prints a password field's value in its snapshot. `eval` and `run-code` run whatever JavaScript the agent gives them, so they can still read a field's value.
+
+## Read a page cheaply with `markdown`
+
+`bowser markdown` prints the page as Markdown (headings, text, lists, tables, links and code) without the refs and roles a snapshot carries. Use it to read a page, and `snapshot` when the agent needs refs to act on. When the page publishes its own Markdown, through a `rel="alternate"` link or as a claude.ai artifact's source, you get that text. `bowser markdown e12` converts one element.
+
+A prototype of the converter was measured on 7 pages in [#130](https://github.com/drakulavich/bowser/issues/130). On six of them its Markdown was 17% to 37% of the snapshot's size: Wikipedia's WebKit article went from 346 KB to 59 KB, and the Hacker News front page from 55 KB to 15 KB. A claude.ai artifact, which has little markup to strip, came out at 73%.
 
 ## Why
 
@@ -16,8 +39,6 @@ What sets it apart from `playwright-cli`:
 - **Persistent sessions.** Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
 ## Install
-
-bowser runs on macOS only (it needs WebKit, which `Bun.WebView` provides only there).
 
 ```bash
 # From npm
@@ -30,69 +51,7 @@ bun install
 bun link                     # exposes `bowser` on $PATH
 ```
 
-Bun ≥ 1.4.4 must be on your `PATH`: the npm package runs `src/cli.ts` with the `bun` it finds there.
-npm does not enforce that, so on an older Bun a command that would start a session fails with the
-error "bowser requires Bun >=1.4.4 (found <version>)" (exit 1).
-
-bowser is distributed only through npm and from source; releases no longer attach binaries. If you
-used a release binary, run `bowser close --all` with it, delete it, then
-`npm i -g @drakulavich/bowser-cli`.
-
-On another platform, any command that would start a session fails with the error "bowser requires macOS (WebKit)" (exit 1).
-
-### Upgrading
-
-Open sessions survive an upgrade. The first command after it finds the daemon the old bowser
-started, stops it, and opens the session again with its profile and its page. It then runs as
-asked, and prints one line on stderr first:
-"bowser: session '<name>' restarted for bowser <w> (was <v>): page reloaded at <url>; refs cleared,
-run 'bowser snapshot'". A session opened without `--persistent` or `--profile` adds "cookies and
-storage were lost (no --persistent)": those lived only in the old daemon. When that first command is
-`open <url>` or `goto <url>`, the old page is not loaded again and the line says "page at <old url> not
-reloaded". A ref from before the
-upgrade fails with "is from a page that is no longer loaded", so take a new snapshot. The page is the
-one the old daemon showed, and the session keeps the `BOWSER_OP_TIMEOUT_MS` it was opened with. A
-session started by bowser 0.12 or older gets the default 30 s instead, whatever the first command after
-the upgrade sets. The restart has its own budget, so that first command can take up to twice the budget,
-plus a few seconds to stop the old daemon.
-
-From 0.12.0 on, a running `bowser mcp` server hands its calls over to the installed version on the
-first tool call after the upgrade, and the restart line comes first in that call's text. A command or
-tool call that waited for another one's restart prints the line too. A call that starts after the restart
-has finished and its line was printed does not get it (#261). The server's tool list stays the
-one the client got when it connected, so a new command shows up once the client restarts the
-server. A server started by 0.11 or older can't hand over: restart it once after the upgrade.
-It hands over only to a newer version. After a downgrade it keeps running its own version, and the
-first tool call's text begins with a line saying the installed bowser is older and that restarting
-the MCP server switches to it. If the handover fails, `ping` and `tools/list` are still answered,
-and each tool call gets "bowser mcp could not hand over to the installed bowser <v>: <reason>;
-restart the MCP server". A call the installed bowser was running when it exited gets "the installed
-bowser <v> exited (code N) while running this call" instead.
-
-A daemon newer than the bowser you run (after a downgrade) is still refused: "session '<name>' is
-running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it again" (exit 1).
-
-### Screenshots
-
-Screenshots are written as PNG files, or JPEG when `--filename` ends in `.jpg` or `.jpeg` (quality 80);
-any other extension, or none, fails with exit code 1. `bowser screenshot --filename out.png` writes
-to `out.png` (relative paths resolve against your current directory); without
-`--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
-if that file already exists. The reply names the absolute path written and the image's size in pixels
-(`wrote /…/out.png (1600×1200)`, `{"ok":true,"filename":"/…/out.png","width":1600,"height":1200}`);
-`snapshot --filename` names the path too. The size follows the display's pixel ratio: an 800×600 viewport
-is 1600×1200 on a Retina display and 800×600 on one at ratio 1. `--scale=N` fixes it at
-`innerWidth·N × innerHeight·N` by scaling the capture down, or fails with exit code 1 when N is above
-the display's ratio, since bowser cannot render more pixels than the display has. A capture is the
-viewport, as in `playwright-cli` without `--full-page`: bowser has no full-page or
-element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `resize` to capture more.
-WebKit cannot capture a viewport whose pixels fill 4 GiB. On a Retina display (pixel ratio 2)
-that is reached only near `resize`'s maximum: `resize 16384 16384` cannot be captured,
-`resize 16384 16383` can. `screenshot` then fails with exit code 1 and names the size to resize to.
-Before it captures, `screenshot` waits up to 5 s for the web fonts the page itself has asked for (not those
-of its iframes), such as a font first used by text a script added after the page loaded. If they are still loading after 5 s it captures
-anyway and adds `; fonts still loading` to the reply (`"fontsLoading":true` under `--json`): the image may
-show text in a fallback font or none at all, so retry, or check that the font URL answers.
+The npm package runs on the `bun` it finds on your `PATH`. [docs/install.md](https://github.com/drakulavich/bowser/blob/main/docs/install.md) covers the Bun version check, moving off a release binary, and what happens to open sessions and `bowser mcp` on an upgrade.
 
 ## Quickstart
 
@@ -214,6 +173,28 @@ An action on a ref whose element changed its role or name since the snapshot (a 
 bowser --json snapshot | jq -r .snapshot | grep 'button'
 ```
 
+### Screenshots
+
+Screenshots are written as PNG files, or JPEG when `--filename` ends in `.jpg` or `.jpeg` (quality 80);
+any other extension, or none, fails with exit code 1. `bowser screenshot --filename out.png` writes
+to `out.png` (relative paths resolve against your current directory); without
+`--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …)
+if that file already exists. The reply names the absolute path written and the image's size in pixels
+(`wrote /…/out.png (1600×1200)`, `{"ok":true,"filename":"/…/out.png","width":1600,"height":1200}`);
+`snapshot --filename` names the path too. The size follows the display's pixel ratio: an 800×600 viewport
+is 1600×1200 on a Retina display and 800×600 on one at ratio 1. `--scale=N` fixes it at
+`innerWidth·N × innerHeight·N` by scaling the capture down, or fails with exit code 1 when N is above
+the display's ratio, since bowser cannot render more pixels than the display has. A capture is the
+viewport, as in `playwright-cli` without `--full-page`: bowser has no full-page or
+element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `resize` to capture more.
+WebKit cannot capture a viewport whose pixels fill 4 GiB. On a Retina display (pixel ratio 2)
+that is reached only near `resize`'s maximum: `resize 16384 16384` cannot be captured,
+`resize 16384 16383` can. `screenshot` then fails with exit code 1 and names the size to resize to.
+Before it captures, `screenshot` waits up to 5 s for the web fonts the page itself has asked for (not those
+of its iframes), such as a font first used by text a script added after the page loaded. If they are still loading after 5 s it captures
+anyway and adds `; fonts still loading` to the reply (`"fontsLoading":true` under `--json`): the image may
+show text in a fallback font or none at all, so retry, or check that the font URL answers.
+
 ## Command reference
 
 | Command | Description |
@@ -311,7 +292,7 @@ bowser's scripts run in the page's own JavaScript world, and WebKit returns thei
 
 | Variable | Effect |
 | --- | --- |
-| `BOWSER_OP_TIMEOUT_MS` | Per-command timeout in milliseconds (default `30000`; `0` disables). It covers the whole command: each step of a command gets the time the command has left, and time spent queued behind another command counts, so a wedged browser makes a command exit with a timeout error instead of blocking forever. The daemon reads it once, when the session starts, and a value set on a later command applies to that command only when it is smaller. To raise it, `close` the session and `open` it again with the new value. An upgrade restart keeps it (see "Upgrading"). A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2). When the time runs out after an action was sent, the timeout says the action may have reached the page: `'click' timed out after 3000ms; the click may have been delivered, check the page before retrying`. Once the action has returned it says `the click was delivered`, and `waiting for the page it opened` when the action started a navigation that has not loaded yet. Retrying without checking may act twice. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser (in a session that has not loaded a page yet, where a reload does nothing, it leaves the blank page instead). A command whose client goes away (killed, or its terminal closed) gets 5 s more to finish once its connection closes (or what is left of its budget, if less), and is then ended the same way, with or without a budget. If the command outlives that reload, every other command fails at once with `session is stuck: '<cmd>' is still running after a reload; run 'bowser close'` (exit 2) until it ends; `close` always works. A command sent during the 2 s and the reload waits for them, so the first such failure can take up to 12 s after the timeout (up to 22 s in a session that has not loaded a page yet, where leaving the blank page can take two 10 s tries). An action such as `click` or `fill` on a page still loading a navigation that an earlier command started waits for it, and fails with `page is still loading <url>; retry later, or run 'bowser close'` (exit 2) if the time runs out first. If the daemon itself stops answering mid-command (frozen or swapped out), the command gives up 2 s after its budget with `daemon for session '<s>' did not answer; run 'bowser close -s <s>' to stop it` (exit 2), and `bowser close -s <s>` ends it. |
+| `BOWSER_OP_TIMEOUT_MS` | Per-command timeout in milliseconds (default `30000`; `0` disables). It covers the whole command: each step of a command gets the time the command has left, and time spent queued behind another command counts, so a wedged browser makes a command exit with a timeout error instead of blocking forever. The daemon reads it once, when the session starts, and a value set on a later command applies to that command only when it is smaller. To raise it, `close` the session and `open` it again with the new value. An upgrade restart keeps it (see [Upgrading](https://github.com/drakulavich/bowser/blob/main/docs/install.md#upgrading)). A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2). When the time runs out after an action was sent, the timeout says the action may have reached the page: `'click' timed out after 3000ms; the click may have been delivered, check the page before retrying`. Once the action has returned it says `the click was delivered`, and `waiting for the page it opened` when the action started a navigation that has not loaded yet. Retrying without checking may act twice. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser (in a session that has not loaded a page yet, where a reload does nothing, it leaves the blank page instead). A command whose client goes away (killed, or its terminal closed) gets 5 s more to finish once its connection closes (or what is left of its budget, if less), and is then ended the same way, with or without a budget. If the command outlives that reload, every other command fails at once with `session is stuck: '<cmd>' is still running after a reload; run 'bowser close'` (exit 2) until it ends; `close` always works. A command sent during the 2 s and the reload waits for them, so the first such failure can take up to 12 s after the timeout (up to 22 s in a session that has not loaded a page yet, where leaving the blank page can take two 10 s tries). An action such as `click` or `fill` on a page still loading a navigation that an earlier command started waits for it, and fails with `page is still loading <url>; retry later, or run 'bowser close'` (exit 2) if the time runs out first. If the daemon itself stops answering mid-command (frozen or swapped out), the command gives up 2 s after its budget with `daemon for session '<s>' did not answer; run 'bowser close -s <s>' to stop it` (exit 2), and `bowser close -s <s>` ends it. |
 | `BOWSER_DAEMON_DEBUG` | `1` writes the output of a session daemon that this command starts to `~/.bowser/sessions/<session>/daemon.log`, for debugging a daemon that fails to start. `close` deletes it with the session directory. |
 
 ## Tests

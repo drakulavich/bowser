@@ -95,7 +95,7 @@ describe("screenshot is documented as the viewport", () => {
 // statement fails too.
 describe("every statement of the Bun floor names engines.bun", () => {
   const floor = pkg.engines.bun.replace(/^>=\s*/, "");
-  const FLOOR_FILES = ["README.md", "skills/bowser/SKILL.md"];
+  const FLOOR_FILES = ["README.md", "docs/install.md", "skills/bowser/SKILL.md"];
   for (const file of FLOOR_FILES) {
     test(file, () => {
       const text = readFileSync(join(ROOT, file), "utf8");
