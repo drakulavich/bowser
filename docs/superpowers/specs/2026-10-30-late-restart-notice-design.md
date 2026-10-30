@@ -69,6 +69,6 @@ steps. The options weighed are in a comment on #261.
 - [x] CHANGELOG unreleased: `grep -n "was running when the restart finished" CHANGELOG.md` prints a line, and
   `grep -n "still gets no notice (#261)" CHANGELOG.md` prints nothing (before: line 33).
 - [x] `bun run check` passes.
-- [ ] `BOWSER_E2E=1 bun test` passes in CI.
+- [x] `BOWSER_E2E=1 bun test` passes in CI.
 - [x] Each new unit test goes red under one mutation of the line it checks, quoted in the PR as one line per test.
   The e2e test was not mutated: `BOWSER_E2E` does not run locally.
