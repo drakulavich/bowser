@@ -832,7 +832,8 @@ export function wrapView(
           let expected: unknown;
           let previous: ClickSample | undefined;
           while (clock.now() < end) {
-            const sample = await nav.ask(poll, end - clock.now());
+            const answer = await nav.ask(poll, end - clock.now());
+            const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
             if (Array.isArray(sample) && typeof sample[1] === "number") {
               expected ??= sample[0];
               const step = clickStep(previous, sample as ClickSample, expected);

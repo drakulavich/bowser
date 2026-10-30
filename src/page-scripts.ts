@@ -796,10 +796,10 @@ export const MUTE_MEDIA = String.raw`(() => {
 /** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
 export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
 export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
-/** One poll of the click wait (#267): `[doc, frame]`, plus `left, top, width, height, hit` when the target has a box with its centre in view.
+/** One poll of the click wait (#267), as PAGE_JSON text: `[doc, frame]`, plus `left, top, width, height, hit` when the target has a box with its centre in view.
  *  Synchronous: an evaluate that awaits a frame never settles once its page is in the back-forward cache. */
 export function clickPollScript(selector: string): string {
-  return String.raw`(() => {
+  return String.raw`${PAGE_JSON}((() => {
   const k = Symbol.for('bowser.frames');
   const c = window[k] ??= { f: 0, armed: false, polled: 0 };
   c.polled = performance.now();
@@ -820,7 +820,7 @@ export function clickPollScript(selector: string): string {
   if (!(r.width > 0 && r.height > 0 && x >= 0 && y >= 0 && x < innerWidth && y < innerHeight)) return [doc, c.f];
   const hit = document.elementFromPoint(x, y);
   return [doc, c.f, r.left, r.top, r.width, r.height, !!hit && el.contains(hit)];
-})()`;
+})())`;
 }
 /** The history entry's key: a location.replace keeps it, a navigate() pushes a new one (ET-13, measured on Bun 1.4.4). */
 export const ENTRY_KEY = "globalThis.navigation?.currentEntry?.key";

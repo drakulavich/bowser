@@ -547,11 +547,8 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     // page's answer: a document the back-forward cache restores still has
     // its shim and answer. Not left to the navigation callback alone.
     if (NAVIGATES.has(req.op)) shimmed = false;
-    // Bun's click otherwise waits 30 s for a covered target, past the
-    // recovery reload, which leaves the session stuck (#112).
-    const res = await run(
-      req.op === "click" && deadline !== Infinity ? { ...req, args: [req.args?.[0], Math.max(0, deadline + REPLY_MARGIN_MS - clock.now())] } : req,
-    );
+    // A click's own wait ends at the deadline, so its timeout is answered before the budget's timer reads the phase as idle (#112, #267).
+    const res = await run(req.op === "click" && deadline !== Infinity ? { ...req, args: [req.args?.[0], Math.max(0, deadline - clock.now())] } : req);
     await sync();
     return res;
   }

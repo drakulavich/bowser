@@ -27,7 +27,7 @@ bowser runs the same wait itself with synchronous evaluates, then calls `view.cl
 - keeps a frame counter `f` on the window under `Symbol.for('bowser.frames')`. Each poll starts an rAF loop if none is running; the loop increments `f` every frame and stops 100 ms after the last poll. A new document starts at `f = 0`;
 - reads the document token: the ref store's `doc` when `doc` is given (#111), else `DOC_ID` (`src/page-scripts.ts:797`);
 - finds the element with `document.querySelector(selector)`;
-- returns `[token, f, left, top, width, height, hit]` when the element has a non-zero box with its centre in the viewport, `hit` being whether `document.elementFromPoint` at the centre is the element or a descendant. Otherwise it returns `[token, f]`.
+- returns `[token, f, left, top, width, height, hit]` when the element has a non-zero box with its centre in the viewport, `hit` being whether `document.elementFromPoint` at the centre is the element or a descendant. Otherwise it returns `[token, f]`. The array crosses as `PAGE_JSON` text, so a page that patches `Array.prototype.toJSON` (#76) cannot rewrite it.
 
 ### The loop
 
@@ -37,7 +37,7 @@ bowser runs the same wait itself with synchronous evaluates, then calls `view.cl
 - `click` at the box centre when the sample is from the frame right after `previous`, both have the same box, and the sample's `hit` is true;
 - `retry` otherwise.
 
-On `click` bowser calls `view.click(left + width / 2, top + height / 2)` with no options. The wait ends at `timeoutMs`, 30000 ms when absent, with `timeout waiting for '<selector>' to be actionable`, the text Bun throws today. The daemon's budget (`src/daemon/server.ts:553`) and its mapping of that text to the acting timeout (`src/daemon/server.ts:260`) stay as they are.
+On `click` bowser calls `view.click(left + width / 2, top + height / 2)` with no options. The wait ends at `timeoutMs`, 30000 ms when absent, with `timeout waiting for '<selector>' to be actionable`, the text Bun throws today. The daemon's mapping of that text to the acting timeout (`src/daemon/server.ts:260`) stays. The daemon now gives the click the time left to its handler deadline, 50 ms before the budget's timer, instead of the time to the timer: Bun's wait ended a frame late, so the timer always answered first, while bowser's ends on time and lost that race to the dialog sync after the op, which read the phase as idle and dropped "may have been delivered" (CI run 41040855388, `tests/e2e-covered.test.ts:214`).
 
 `navigated` fails with `click: the page navigated before the click; nothing was clicked, run 'bowser snapshot' to see the new page`. It is a daemon error, so the CLI exits 2. `fill` clicks through `Browser.click` and gives the same message. A same-document navigation (`pushState`, a hash change) keeps the token, so the wait goes on.
 

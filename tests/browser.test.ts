@@ -94,13 +94,13 @@ function fakeView(over: Partial<Fake> = {}, { clickable = true } = {}): Fake {
       get: () => {
         const inner = evaluate;
         return (expr: string) => {
-          const poll = /^\(\(\) => \{\n  const k = Symbol\.for\('bowser\.frames'\)[^]*document\.querySelector\((".*")\);\n/.exec(expr);
+          const poll = /Symbol\.for\('bowser\.frames'\)[^]*?document\.querySelector\((".*")\);\n/.exec(expr);
           if (!poll) return inner(expr);
           const selector = JSON.parse(poll[1]!) as string;
           let i = polled.findIndex((p) => p.selector === selector);
           if (i < 0) i = polled.push({ selector, frame: 0 }) - 1;
           const sample: ClickSample = ["fake-doc", polled[i]!.frame++, 10 * i, 0, 10, 10, true];
-          return Promise.resolve(sample);
+          return Promise.resolve(JSON.stringify(sample));
         };
       },
       set: (fn: ViewLike["evaluate"]) => {
@@ -150,7 +150,7 @@ describe("wrapView click waits for the target itself (#267)", () => {
       {
         evaluate: async (expr) => {
           v.calls.push(["evaluate", [expr]]);
-          return expr === clickPollScript("#a") ? sample(n++) : undefined;
+          return expr === clickPollScript("#a") ? JSON.stringify(sample(n++)) : undefined;
         },
       },
       { clickable: false },
