@@ -388,7 +388,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       const late = await b.call(2, "localstorage-get", { key: "tok" });
       expect(late).toStartWith(restarted);
       expect(late).toContain("cookies and storage were lost");
-      expect(await b.call(3, "eval", { expression: "1" })).toBe("1");
+      expect(await b.call(3, "eval", { expression: "1" })).toBe('{"ok":true,"result":1}');
       expect(await run(cli, s, ["eval", "1"])).toEqual({ code: 0, out: "1", err: "" });
     } finally {
       await a.stop();
