@@ -20,6 +20,14 @@ All notable changes to this project are documented here. This project follows
   output marks it `<name> (not answering; run 'bowser close -s <name>')`. `list` used to leave
   it out, so an agent that checked `list` before `open` saw a free name. (ET-64, #155)
 
+### Fixed
+
+- **`bowser mcp` after a handover: no reply to a cancelled call, and no 10 s wait at exit.** A
+  call forwarded to the installed bowser and then cancelled by the client got a false "could not
+  hand over" reply when the server exited; it now gets none. The server also stayed alive until
+  10 s after the handover began, though stdin had closed and the installed bowser had exited; it
+  now exits once both are done. (ET-40, ET-39, #153)
+
 ## [0.12.0] — 2026-10-21
 
 ### Added

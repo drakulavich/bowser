@@ -1108,6 +1108,44 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  // Answers initialize only and exits 0 when its stdin ends, as the installed server does.
+  const initOnly =
+    'for await (const c of Bun.stdin.stream()) { if (new TextDecoder().decode(c).includes("bowser-handover")) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); }';
+
+  test("handover: a forwarded call the client cancels gets no reply when the child exits (ET-40)", async () => {
+    const h = harness();
+    const cancel = JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 7 } });
+    const code = await serveLines(
+      feed([INIT, call(7, "snapshot"), cancel, call(8, "snapshot")]),
+      h.server,
+      (l) => {
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "2.0.0",
+        child: [process.execPath, "-e", initOnly],
+      },
+    );
+    expect(code).toBe(0);
+    const res = h.responses();
+    expect(res.map((r) => r.id)).toEqual([1, 8]);
+    expect(res[1].result.content[0].text).toBe("bowser mcp could not hand over to the installed bowser 2.0.0: it exited (code 0); restart the MCP server");
+  });
+
+  test("handover: the process exits once stdin ends and the child is gone, not 10 s after the handover (ET-39)", async () => {
+    const script = `
+      import { serveLines, createMcpServer } from ${JSON.stringify(join(import.meta.dir, "..", "src", "mcp.ts"))};
+      async function* feed() { yield ${JSON.stringify(INIT)}; yield ${JSON.stringify(call(7, "snapshot"))}; }
+      const server = createMcpServer({ run: async () => "old server", version: "1.0.0" }, () => {});
+      await serveLines(feed(), server, () => {}, { version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", ${JSON.stringify(initOnly)}] });
+    `;
+    const proc = Bun.spawn([process.execPath, "-e", script], { stdout: "ignore", stderr: "inherit" });
+    const exited = await Promise.race([proc.exited.then(() => "exited"), Bun.sleep(3000).then(() => "still running after 3 s")]);
+    proc.kill();
+    expect(exited).toBe("exited");
+  });
 });
 
 describe("a restart's notice is delivered only by a written response (#152)", () => {
