@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMMANDS, findCommand, SCHEMAS } from "./cli/registry.ts";
 import { parse } from "./cli/parser.ts";
-import { failedModalState } from "./commands/context.ts";
+import { failedModalState, type CommandContext } from "./commands/context.ts";
 import type { CommandSchema } from "./cli/parser.ts";
 import pkg from "../package.json";
 import { UserError } from "./errors.ts";
@@ -35,7 +35,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] a
 
 export interface McpDeps {
   /** The CLI dispatcher. Injected in tests; defaults to cli.run. */
-  run: (argv: string[], base?: { notices?: string[]; acks?: (() => void)[] }) => Promise<string>;
+  run: (argv: string[], base?: Pick<CommandContext, "notices" | "acks" | "restarts">) => Promise<string>;
   /** serverInfo.version. */
   version: string;
 }
@@ -203,12 +203,18 @@ function prepareToolCall(id: unknown, params: unknown): PreparedCall {
 }
 
 /** The response, and what to call once it is written: `acks` mark its notices delivered. */
-async function runToolCall(id: unknown, argv: string[], deps: McpDeps, notice?: string): Promise<{ res: object; acks: (() => void)[] }> {
+async function runToolCall(
+  id: unknown,
+  argv: string[],
+  deps: McpDeps,
+  restarts: NonNullable<CommandContext["restarts"]>,
+  notice?: string,
+): Promise<{ res: object; acks: (() => void)[] }> {
   const notices: string[] = notice === undefined ? [] : [notice];
   const acks: (() => void)[] = [];
   const first = (text: string) => [...notices, text].filter(Boolean).join("\n");
   try {
-    const out = await deps.run(argv, { notices, acks });
+    const out = await deps.run(argv, { notices, acks, restarts });
     return { res: toolResult(id, first(out || "")), acks };
   } catch (e) {
     // A failed page command still reports the dialogs it answered.
@@ -286,6 +292,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
   const inFlight = new Map<unknown, { cancelled: boolean }>();
   const running = new Set<Promise<unknown>>();
   let pending: string | undefined;
+  const restarts = { since: Date.now(), seen: new Map<string, number>() };
 
   const send = async (res: object): Promise<boolean> => {
     try {
@@ -317,7 +324,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
         if (token.cancelled) return;
         const notice = pending;
         pending = undefined;
-        const { res, acks } = await runToolCall(id, argv, deps, notice);
+        const { res, acks } = await runToolCall(id, argv, deps, restarts, notice);
         // Keep this session's chain behind stdout completion. If the peer
         // closed its pipe, the write callback reports EPIPE before a queued
         // command can start and cause another side effect.
@@ -346,6 +353,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     const r = (req ?? {}) as { id?: unknown; method?: string; params?: unknown };
     const hasId = typeof req === "object" && req !== null && "id" in req && r.id !== null && r.id !== undefined;
     if (hasId && r.method === "tools/call") return schedule(r.id, r.params);
+    if (r.method === "initialize" && r.id === HANDOVER_ID) restarts.since = 0;
     if (!hasId && r.method === "notifications/cancelled") {
       const requestId = (r.params as { requestId?: unknown } | undefined)?.requestId;
       const token = inFlight.get(requestId);

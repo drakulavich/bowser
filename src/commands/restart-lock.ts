@@ -1,7 +1,7 @@
 // The lock an upgrade restart and `close` hold on a session (`upg`), and the
 // notice a restart leaves for the next surface to print (`msg`) (#149, #152).
 
-import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { opTimeoutMs } from "../budget.ts";
 import { claimSession, isAlive, isBowser } from "../daemon/pidfile.ts";
@@ -73,13 +73,21 @@ export function writeNotice(session: string, text: string): void {
   unlink(deliveredPath(session));
 }
 
+export interface Notice {
+  text: string;
+  mtimeMs: number;
+  delivered: boolean;
+}
+
 /** The undelivered notice, or with `delivered` the last restart's notice either way. */
-export function readNotice(session: string, delivered = false): string {
-  return readTrimmed(msgPath(session)) || (delivered ? readTrimmed(deliveredPath(session)) : "");
+export function readNotice(session: string, delivered = false): Notice {
+  const pending = readStamped(msgPath(session));
+  if (pending.text || !delivered) return { ...pending, delivered: false };
+  return { ...readStamped(deliveredPath(session)), delivered: true };
 }
 
 export function markDelivered(session: string, text: string): void {
-  if (readNotice(session) !== text) return;
+  if (readNotice(session).text !== text) return;
   try {
     renameSync(msgPath(session), deliveredPath(session));
   } catch {}
@@ -104,6 +112,19 @@ function corrupt(lock: string): boolean {
     return false;
   }
   return !/^\d+$/.test(held) || Number(held) <= 0;
+}
+
+function readStamped(path: string): { text: string; mtimeMs: number } {
+  try {
+    const fd = openSync(path, "r");
+    try {
+      return { text: readFileSync(fd, "utf8").trim(), mtimeMs: fstatSync(fd).mtimeMs };
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return { text: "", mtimeMs: 0 };
+  }
 }
 
 function readTrimmed(path: string): string {

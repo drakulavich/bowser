@@ -321,4 +321,78 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       await reading.catch(() => {});
     }
   }, 120_000);
+
+  test("an MCP server idle during another's restart gets its notice on its next call (#261)", async () => {
+    const cli = await copyAt("old-mcp-261", "0.0.1");
+    const s = session("mcp-261");
+    await ok(cli, s, ["open", `${base}/cart`]);
+    await ok(cli, s, ["localstorage-set", "tok", "7"]);
+    const mcp = () => {
+      const proc = Bun.spawn([process.execPath, cli, "mcp"], {
+        env: { ...process.env, HOME: home },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+      const lines: string[] = [];
+      const reading = (async () => {
+        const decoder = new TextDecoder();
+        let buf = "";
+        for await (const chunk of proc.stdout) {
+          buf += decoder.decode(chunk, { stream: true });
+          let i: number;
+          while ((i = buf.indexOf("\n")) !== -1) {
+            lines.push(buf.slice(0, i));
+            buf = buf.slice(i + 1);
+          }
+        }
+      })();
+      const answer = async (id: number) => {
+        for (let t = 0; t < 600; t++) {
+          const hit = lines.map((l) => JSON.parse(l)).find((r) => r.id === id);
+          if (hit) return hit;
+          await Bun.sleep(100);
+        }
+        throw new Error(`no answer for id ${id}`);
+      };
+      const send = (m: object) => {
+        proc.stdin.write(JSON.stringify(m) + "\n");
+        proc.stdin.flush();
+      };
+      return {
+        answer,
+        send,
+        call: async (id: number, name: string, args: object): Promise<string> => {
+          send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: { session: s, ...args } } });
+          return (await answer(id)).result.content[0].text;
+        },
+        stop: async () => {
+          proc.stdin.end();
+          await Promise.race([proc.exited, Bun.sleep(10_000)]);
+          proc.kill();
+          await reading.catch(() => {});
+        },
+      };
+    };
+    const a = mcp();
+    const b = mcp();
+    try {
+      for (const m of [a, b]) {
+        m.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+        m.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+        await m.answer(1);
+      }
+      await Bun.write(join(tmp, "old-mcp-261", "package.json"), JSON.stringify({ ...pkg, version: "0.0.2" }, null, 2));
+      const restarted = `session '${s}' restarted for bowser 0.0.2 (was 0.0.1)`;
+      expect(await a.call(2, "snapshot", {})).toStartWith(restarted);
+      const late = await b.call(2, "localstorage-get", { key: "tok" });
+      expect(late).toStartWith(restarted);
+      expect(late).toContain("cookies and storage were lost");
+      expect(await b.call(3, "eval", { expression: "1" })).toBe('{"ok":true,"result":1}');
+      expect(await run(cli, s, ["eval", "1"])).toEqual({ code: 0, out: "1", err: "" });
+    } finally {
+      await a.stop();
+      await b.stop();
+    }
+  }, 120_000);
 });

@@ -26,6 +26,8 @@ export interface CommandContext {
   notices?: string[];
   /** One per notice: the surface calls it once the notice is out. */
   acks?: (() => void)[];
+  /** Set by `bowser mcp`: its start time, and per session the mtime of the last notice it printed (#261). */
+  restarts?: { since: number; seen: Map<string, number> };
   // Injected by `run`: restart.ts imports navigation.ts, which imports this module.
   restart?: (ctx: CommandContext, err: OlderDaemon | BrowserExited) => Promise<boolean>;
 }
@@ -105,13 +107,23 @@ async function reconnect(ctx: CommandContext, connect: () => Promise<DaemonConne
 
 /** The notice a restart left in the session (ET-29), unless a restart is still running.
  *  The restarter takes its own even when a command it held off now holds the lock (#171).
- *  A command that waited on the restart gets it too, and leaves it for the rest (ET-44). */
+ *  A command that waited on the restart gets it too, and leaves it for the rest (ET-44).
+ *  An MCP server also gets a delivered one that is newer than itself, once (#261). */
 function takeNotice(ctx: CommandContext, own: boolean, waited: boolean): void {
   if (!ctx.notices || (!own && otherHolder(ctx.session) !== null)) return;
-  const text = readNotice(ctx.session, waited);
-  if (!text || ctx.notices.includes(text)) return;
-  ctx.notices.push(text);
-  if (!waited) ctx.acks?.push(() => markDelivered(ctx.session, text));
+  const r = ctx.restarts;
+  const late = r !== undefined && !own && !waited;
+  const n = readNotice(ctx.session, waited || late);
+  if (!n.text || ctx.notices.includes(n.text)) return;
+  const seen = r?.seen.get(ctx.session);
+  if (r && n.mtimeMs <= (seen ?? (late && n.delivered ? r.since : -Infinity))) return;
+  ctx.notices.push(n.text);
+  const deliver = !waited && !n.delivered;
+  if (!deliver && !r) return;
+  ctx.acks?.push(() => {
+    if (deliver) markDelivered(ctx.session, n.text);
+    r?.seen.set(ctx.session, n.mtimeMs);
+  });
 }
 
 export function emptyState(name: string): SessionState {
