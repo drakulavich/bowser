@@ -1133,7 +1133,7 @@ describe("--json of every ref command names the element (#117)", () => {
   for (const [argv, expected] of [
     [["click", "e1"], { ok: true, ref: "e1", element: { role: "link", name: "Home" }, url: "" }],
     [["fill", "e2", "hi"], { ok: true, ref: "e2", element: { role: "textbox", name: "Email" } }],
-    [["hover", "e1"], { ok: true, ref: "e1", element: { role: "link", name: "Home" } }],
+    [["hover", "e1"], { ok: true, ref: "e1", element: { role: "link", name: "Home" }, changed: true }],
     [["select", "e3", "red"], { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" }],
     [["check", "e4"], { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
     [["uncheck", "e4"], { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
@@ -1362,6 +1362,19 @@ describe("hover", () => {
     await cmdHover({ ...ctx(), connect: async () => c }, "e1");
     expect(c.calls).toContainEqual(["hover", ["a"]]);
   });
+
+  for (const [changed, text] of [
+    [false, "hovered e1; the page did not change within 200 ms (bowser cannot trigger CSS :hover)"],
+    [true, "hovered e1"],
+  ] as const) {
+    test(`a page that ${changed ? "changed" : "did not change"} answers ${JSON.stringify(text)} and "changed": ${changed} (#270)`, async () => {
+      await saveState({ name: session, url: "https://x", title: "X", refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }], updatedAt: Date.now() });
+      const c = fakeClient({ evaluate: resolving({ e1: "a" }), hover: () => changed });
+      expect(await cmdHover({ ...ctx(), connect: async () => c }, "e1")).toBe(text);
+      const json = JSON.parse(await cmdHover({ ...ctx(), json: true, connect: async () => c }, "e1"));
+      expect(json).toEqual({ ok: true, ref: "e1", element: { role: "link", name: "Home" }, changed });
+    });
+  }
 });
 
 describe("select", () => {

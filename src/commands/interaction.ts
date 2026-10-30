@@ -190,8 +190,9 @@ export async function cmdPress(ctx: CommandContext, input: string): Promise<stri
 export async function cmdHover(ctx: CommandContext, ref: string): Promise<string> {
   const { target, doc } = await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
-    acted(ref, await c.request("hover", [await liveSelector(c, target, { doc }), doc]));
-    return replyPage(ctx, c, { ok: true, ref, element: element(target) }, `hovered ${ref}`);
+    const changed = acted(ref, await c.request("hover", [await liveSelector(c, target, { doc }), doc]));
+    const text = changed ? `hovered ${ref}` : `hovered ${ref}; the page did not change within 200 ms (bowser cannot trigger CSS :hover)`;
+    return replyPage(ctx, c, { ok: true, ref, element: element(target), changed }, text);
   });
 }
 

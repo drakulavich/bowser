@@ -16,6 +16,8 @@ import {
   LEAVE_INITIAL_DOCUMENT,
   DOC_ID,
   docMatches,
+  hoverRead,
+  hoverScript,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
@@ -1973,11 +1975,12 @@ describe("every ACTS op runs inside the navigation watch", () => {
       const seq = v.calls.map(([name, a]) => {
         if (name === "evaluate" && a[0] === NAV_ARM) return "arm";
         if (name === "evaluate" && a[0] === NAV_COUNT) return "count";
+        if (name === "evaluate" && (a[0] === hoverRead(false) || a[0] === hoverRead(true))) return "watch";
         return a.some((x) => String(x).includes(args[0]!)) ? "act" : "other";
       });
       const arm = seq.indexOf("arm");
       expect(arm).toBeGreaterThanOrEqual(0);
-      expect(seq.slice(arm + 1, seq.indexOf("count", arm))).toEqual(["act"]);
+      expect(seq.slice(arm + 1, seq.indexOf("count", arm))).toEqual(op === "hover" ? ["act", "watch"] : ["act"]);
     });
   }
 
@@ -2389,6 +2392,65 @@ describe("navigate caps its wait for load (ET-52)", () => {
     clock.setTimeout(() => b.cancelAction?.(), 200);
     await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
     expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
+  });
+});
+
+describe("wrapView hover watches whether the page changed (#270)", () => {
+  /** A view whose hover of `#a` answers `reads[n]` on its n-th read; `at` logs the clock at each read. */
+  function watched(reads: unknown[], clock: ReturnType<typeof manualClock>, doc?: string) {
+    const at: Array<[number, boolean]> = [];
+    const v = fakeView({
+      evaluate: async (e) => {
+        if (e === hoverScript("#a", doc)) return doc === "d1" ? { gone: true } : undefined;
+        for (const last of [false, true])
+          if (e === hoverRead(last)) {
+            at.push([clock.now(), last]);
+            return reads[Math.min(at.length - 1, reads.length - 1)];
+          }
+        return undefined;
+      },
+    });
+    return { b: wrapView(v, fast, undefined, undefined, undefined, clock), at };
+  }
+
+  test("a change seen on the first read answers true after that one read", async () => {
+    const clock = manualClock();
+    const { b, at } = watched([true], clock);
+    const hover = b.hover("#a");
+    await clock.settledAt(hover);
+    expect(await hover).toBe(true);
+    expect(at).toEqual([[0, false]]);
+  });
+
+  test("no change answers false after the last read at 200 ms", async () => {
+    const clock = manualClock();
+    const { b, at } = watched([false], clock);
+    const hover = b.hover("#a");
+    await clock.settledAt(hover);
+    expect(await hover).toBe(false);
+    expect(at.at(-1)).toEqual([200, true]);
+    expect(at.length).toBe(21);
+  });
+
+  test("a read that finds no record answers true", async () => {
+    const clock = manualClock();
+    const { b, at } = watched([false, null], clock);
+    const hover = b.hover("#a");
+    await clock.settledAt(hover);
+    expect(await hover).toBe(true);
+    expect(at).toEqual([
+      [0, false],
+      [10, false],
+    ]);
+  });
+
+  test("a doc from another document answers gone without reading", async () => {
+    const clock = manualClock();
+    const { b, at } = watched([true], clock, "d1");
+    const hover = b.hover("#a", "d1");
+    await clock.settledAt(hover);
+    expect(await hover).toEqual({ gone: true });
+    expect(at).toEqual([]);
   });
 });
 

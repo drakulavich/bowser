@@ -894,8 +894,36 @@ export function hoverScript(selector: string, doc?: string): string {
         if (!el) throw new Error('hover: element not found');
         const r = el.getBoundingClientRect();
         const x = r.x + r.width / 2, y = r.y + r.height / 2;
-        el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: x, clientY: y }));
-        el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: x, clientY: y }));
+        const chain = [];
+        for (let n = el; n; n = n.parentElement ?? (n.parentNode instanceof ShadowRoot ? n.parentNode.host : null)) chain.unshift(n);
+        const k = Symbol.for('bowser.hover');
+        window[k]?.mo.disconnect();
+        const st = { changed: false, mo: new MutationObserver(() => { st.changed = true; }) };
+        window[k] = st;
+        const watch = { subtree: true, childList: true, attributes: true, characterData: true };
+        st.mo.observe(document, watch);
+        // An observer on document does not see inside a shadow tree.
+        for (const n of chain) for (const root of [n.getRootNode(), n.shadowRoot]) if (root instanceof ShadowRoot) st.mo.observe(root, watch);
+        const at = { clientX: x, clientY: y, view: window };
+        const over = { ...at, bubbles: true, cancelable: true, composed: true };
+        const pointer = { pointerType: 'mouse', isPrimary: true };
+        el.dispatchEvent(new PointerEvent('pointerover', { ...over, ...pointer }));
+        for (const n of chain) n.dispatchEvent(new PointerEvent('pointerenter', { ...at, ...pointer }));
+        el.dispatchEvent(new MouseEvent('mouseover', over));
+        for (const n of chain) n.dispatchEvent(new MouseEvent('mouseenter', at));
+        el.dispatchEvent(new PointerEvent('pointermove', { ...over, ...pointer }));
+        el.dispatchEvent(new MouseEvent('mousemove', over));
+      })()`;
+}
+
+/** Whether the page changed since hoverScript armed its observer; null when this document has no record (it was replaced).
+ *  The last read disconnects the observer. */
+export function hoverRead(last: boolean): string {
+  return `(() => {
+        const st = window[Symbol.for('bowser.hover')];
+        if (!st) return null;
+        if (st.changed || ${last}) st.mo.disconnect();
+        return st.changed;
       })()`;
 }
 

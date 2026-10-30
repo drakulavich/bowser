@@ -854,7 +854,7 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
   for (const [tool, args, expected] of [
     ["click", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" }, url: "" }],
     ["fill", { ref: "e2", text: SECRET }, { ok: true, ref: "e2", element: { role: "textbox", name: "Password" } }],
-    ["hover", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" } }],
+    ["hover", { ref: "e1" }, { ok: true, ref: "e1", element: { role: "button", name: "Add to cart" }, changed: true }],
     ["select", { ref: "e3", value: "red" }, { ok: true, ref: "e3", element: { role: "combobox", name: "Color" }, value: "red" }],
     ["check", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
     ["uncheck", { ref: "e4" }, { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
