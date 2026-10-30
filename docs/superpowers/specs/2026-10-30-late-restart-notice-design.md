@@ -49,9 +49,14 @@ keeps the file's mtime (checked on APFS: `mtimeMs` before and after `renameSync`
 
 ### 1. The rule
 
-A `bowser mcp` process has a start time `since` (0 for a handover child, below) and a map `seen` from session name to the mtime of the last notice
-it put in a response for that session. A tool call that neither restarted nor waited reads `msg.done` as well as
-`msg`, and takes the notice from `msg.done` when that file's mtime is later than `seen.get(session) ?? since`.
+A `bowser mcp` process has a start time `since` (0 for a handover child, below) and a map `seen` from session name to
+the mtime of the last notice it put in a response for that session. A tool call that neither restarted nor waited
+reads `msg.done` as well as `msg`, and takes the notice from `msg.done` when that file's mtime is later than
+`seen.get(session) ?? since`.
+
+In an MCP call `seen` also filters `msg`, on every path: a notice whose file's mtime is not later than
+`seen.get(session)` is not taken again. A waiter that printed a still-pending `msg` (its ack leaves the file in place)
+would otherwise take it once more on its next call, as an ET-29 reader, before the restarter's ack renames it.
 
 - `msg.done` is cleared as today: the next restart's `writeNotice`, a failed restart's `removeNotice`, and `close`,
   which removes the session directory. Nothing new clears it. A stale `msg.done` reaches only a server that was
@@ -130,6 +135,8 @@ read (`msg.done`, absent on most calls) and one `stat` when it exists. Nothing p
   - a pending `msg` (ET-29) read by a call that reached a daemon of this version, acks run;
   - the ET-44 waiter, both variants: `acks` holds one ack, and after it runs `msg` (or `msg.done`) still holds the
     text, as the ET-44 test expects today.
+  - the ET-44 waiter that read a still-pending `msg`: its second call runs before the restarter's ack, with `msg`
+    still in place.
 - `tests/mcp.test.ts`, test "a handover child counts every restart as news (#261)": a server that accepted an
   `initialize` with id `bowser-handover` passes `restarts.since` 0 to `deps.run`; one that accepted another id
   passes a `since` no earlier than the time taken before `createMcpServer`.
