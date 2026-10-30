@@ -7,6 +7,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- **`markdown --link-text` drops link URLs.** Each converted link prints as its text, with its
+  bold or code kept; images keep their URLs, and the page's own Markdown and a YouTube transcript
+  are unchanged. On Wikipedia's WebKit article the Markdown goes from 57,462 to 30,392 bytes, on
+  the Hacker News front page from 14,258 to 4,014. The MCP `markdown` tool takes `link-text`. (#134)
 - **`screenshot --filename=x.jpg` writes a JPEG.** The format follows the extension: `.png` is
   PNG, `.jpg` and `.jpeg` (in any case) are JPEG at quality 80, and the reply reports the JPEG's
   size. Any other extension, or none, is a usage error (exit 1) before anything is captured; a
@@ -36,7 +40,10 @@ All notable changes to this project are documented here. This project follows
   never fires once the old page is in the back-forward cache, so the click timed out and the
   session was stuck until `bowser close`. bowser now waits with its own polls and clicks the
   target's centre. (#267)
-
+- **A ref action no longer lands on a page that replaced its snapshot's.** When the page navigated
+  between the ref lookup and the action, `click`, `fill`, `hover`, `select`, `check` and `uncheck`
+  acted on the new document at the old element's CSS path. They now do nothing there and fail with
+  `ref 'e2' is from a page that is no longer loaded; take a new snapshot`, exit 1. (#111)
 - **`bowser mcp` after a handover: no reply to a cancelled call, and no 10 s wait at exit.** A
   call forwarded to the installed bowser and then cancelled by the client got a false "could not
   hand over" reply when the server exited; it now gets none. The server also stayed alive until

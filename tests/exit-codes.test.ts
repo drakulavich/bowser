@@ -122,6 +122,11 @@ const USER_ERRORS: Case[] = [
   },
   {
     argv: ["click", "e1"],
+    handlers: { resolve: () => "#go", click: () => ({ gone: true }) },
+    stderr: "ref 'e1' is from a page that is no longer loaded; take a new snapshot",
+  },
+  {
+    argv: ["click", "e1"],
     handlers: { resolve: () => ({ covered: { role: "generic", name: "", tag: "div" } }) },
     stderr: `ref 'e1' (button "Go") is covered by generic <div> at its click point; take a new snapshot or close what covers it`,
   },

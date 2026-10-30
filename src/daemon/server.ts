@@ -22,6 +22,7 @@ import { lineReader } from "../socket-lines.ts";
 import { socketWriteAll, flushSocket, type WritableSocket } from "../socket-write.ts";
 import {
   IS_URGENT,
+  isGone,
   pngSize,
   screenshotFormat,
   type ArgsOf,
@@ -345,15 +346,16 @@ const handlers: Handlers = {
   navigate: (browser, url) => browser.navigate(url),
   evaluate: (browser, expr) => browser.evaluate(expr),
   resolve: (browser, expr) => browser.evaluate(expr),
-  click: (browser, selector, timeoutMs) => browser.click(selector, timeoutMs),
-  type: (browser, text) => browser.type(text),
+  click: (browser, selector, doc, timeoutMs) => browser.click(selector, timeoutMs, doc),
+  type: (browser, text, doc) => browser.type(text, doc),
   press: (browser, key, modifiers) => browser.press(key, modifiers),
-  hover: (browser, selector) => browser.hover(selector),
-  select: (browser, selector, value) => browser.select(selector, value),
-  check: async (browser, selector) => {
-    await browser.setChecked(selector, true);
+  hover: (browser, selector, doc) => browser.hover(selector, doc),
+  select: (browser, selector, value, doc) => browser.select(selector, value, doc),
+  check: async (browser, selector, doc) => {
+    const answer = await browser.setChecked(selector, true, doc);
+    if (isGone(answer)) return answer;
   },
-  uncheck: (browser, selector) => browser.setChecked(selector, false),
+  uncheck: (browser, selector, doc) => browser.setChecked(selector, false, doc),
   screenshot: async (browser, path, scale) => {
     // The daemon writes the PNG itself so the ~140 KB base64 never crosses the socket.
     const fontsLoading = (await browser.evaluate(AWAIT_FONTS)) === true;
@@ -548,7 +550,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     // its shim and answer. Not left to the navigation callback alone.
     if (NAVIGATES.has(req.op)) shimmed = false;
     // A click's own wait ends at the deadline, so its timeout is answered before the budget's timer reads the phase as idle (#112, #267).
-    const res = await run(req.op === "click" && deadline !== Infinity ? { ...req, args: [req.args?.[0], Math.max(0, deadline - clock.now())] } : req);
+    const res = await run(
+      req.op === "click" && deadline !== Infinity ? { ...req, args: [req.args?.[0], req.args?.[1], Math.max(0, deadline - clock.now())] } : req,
+    );
     await sync();
     return res;
   }

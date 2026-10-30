@@ -796,9 +796,9 @@ export const MUTE_MEDIA = String.raw`(() => {
 /** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
 export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
 export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
-/** One poll of the click wait (#267), as PAGE_JSON text: `[doc, frame]`, plus `left, top, width, height, hit` when the target has a box with its centre in view.
+/** One poll of the click wait (#267), as PAGE_JSON text: `[doc, frame]` (`doc` is the ref store's when one is given, #111), plus `left, top, width, height, hit` when the target has a box with its centre in view.
  *  Synchronous: an evaluate that awaits a frame never settles once its page is in the back-forward cache. */
-export function clickPollScript(selector: string): string {
+export function clickPollScript(selector: string, doc?: string): string {
   return String.raw`${PAGE_JSON}((() => {
   const k = Symbol.for('bowser.frames');
   const c = window[k] ??= { f: 0, armed: false, polled: 0 };
@@ -812,7 +812,7 @@ export function clickPollScript(selector: string): string {
     };
     requestAnimationFrame(tick);
   }
-  const doc = ${DOC_ID};
+  const doc = ${doc == null ? DOC_ID : `window[Symbol.for('bowser.aria-refs')]?.doc ?? null`};
   const el = document.querySelector(${JSON.stringify(selector)});
   if (!el) return [doc, c.f];
   const r = el.getBoundingClientRect();
@@ -883,8 +883,13 @@ export function keyCommandScript(command: "selectAll" | "undo" | "redo"): string
 })()`;
 }
 
-export function hoverScript(selector: string): string {
+export const docMatches = (doc: string): string => `(window[Symbol.for("bowser.aria-refs")]?.doc === ${JSON.stringify(doc)})`;
+
+const docGuard = (doc: string | undefined, refused = "{ gone: true }"): string => (doc == null ? "" : `if (!${docMatches(doc)}) return ${refused};`);
+
+export function hoverScript(selector: string, doc?: string): string {
   return `(() => {
+        ${docGuard(doc)}
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('hover: element not found');
         const r = el.getBoundingClientRect();
@@ -898,8 +903,9 @@ export function hoverScript(selector: string): string {
  *  text: playwright's selectOption rule. Answers false, touching nothing and
  *  firing no event, when no option matches: assigning an unknown value would
  *  deselect every option. */
-export function selectScript(selector: string, value: string): string {
+export function selectScript(selector: string, value: string, doc?: string): string {
   return `(() => {
+        ${docGuard(doc)}
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('select: element not found');
         const want = ${JSON.stringify(value)};
@@ -920,8 +926,9 @@ export function selectScript(selector: string, value: string): string {
  *  aria-checked="mixed" is off for `check`, as in playwright, and on for
  *  `uncheck`: a mixed checkbox usually goes to true on a click (the APG
  *  cycle), so `uncheck` clicks once more when it then reads true. */
-export function setCheckedScript(selector: string, checked: boolean): string {
+export function setCheckedScript(selector: string, checked: boolean, doc?: string): string {
   return `(() => {
+        ${docGuard(doc)}
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('check: element not found');
         const input = el instanceof HTMLInputElement;
@@ -943,7 +950,7 @@ const FILL_SET_TYPES = ["date", "time", "datetime-local", "month", "week", "colo
 
 /** What `fillScript` found: `type` means the caller types the text now;
  *  `set` means the page took it; the rest are refusals, value untouched. */
-export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "rejected";
+export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "rejected" | "gone";
 
 /** Readies the element `fill` has just clicked, and answers
  *  `{ outcome: FillOutcome, type }` with the input's type (or ""):
@@ -956,8 +963,8 @@ export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "re
  *    value, or a contenteditable element's content through a native delete,
  *    which editors that re-render from their own state (Lexical) apply too.
  *  The only value read is a date-like input's, never a password field's. */
-export function fillScript(selector: string, value: string): string {
-  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
+export function fillScript(selector: string, value: string, doc?: string): string {
+  return `(() => { ${docGuard(doc, "{ outcome: 'gone' }")} const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
     const type = el instanceof HTMLInputElement ? el.type : '';
     if (el.matches(':disabled')) return { outcome: 'disabled', type };
     if (el.readOnly === true) return { outcome: 'readonly', type };
@@ -1065,7 +1072,7 @@ const TO_MARKDOWN = String.raw`
       const k = kids().trim();
       if (['#', '¶', '🔗'].includes(k)) return '';
       const href = n.getAttribute('href') || '';
-      return k && href && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + url(n.href) + ')' : k;
+      return k && href && !linkText && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + url(n.href) + ')' : k;
     }
     return kids();
   };
@@ -1226,7 +1233,7 @@ const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
     }
   }`;
 
-export function markdownScript(selector?: string, fetchMs?: number): string {
+export function markdownScript(selector?: string, fetchMs?: number, linkText = false): string {
   const own =
     selector === undefined
       ? String.raw`
@@ -1256,6 +1263,7 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
       : `[document.querySelector(${JSON.stringify(selector)})]`;
   return String.raw`(async () => {
   const result = await (async () => {${own}
+  const linkText = ${linkText};
   ${TO_MARKDOWN}
   return { markdown: convert(${nodes}), source: 'converted' };
   })();

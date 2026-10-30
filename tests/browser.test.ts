@@ -15,6 +15,7 @@ import {
   ENTRY_KEY,
   LEAVE_INITIAL_DOCUMENT,
   DOC_ID,
+  docMatches,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
@@ -36,7 +37,7 @@ type Fake = Omit<ViewLike, "click"> & { click: FakeClick; calls: Calls; loading:
 
 /** With `clickable`, the view answers every click poll, unrecorded, with a target that is ready at once,
  *  and its `click` gets that poll's selector instead of the point. */
-function fakeView(over: Partial<Fake> = {}, { clickable = true } = {}): Fake {
+function fakeView(over: Partial<Fake> = {}, { clickable = true, doc = "fake-doc" } = {}): Fake {
   const calls: Calls = [];
   const v: Fake = {
     calls,
@@ -99,7 +100,7 @@ function fakeView(over: Partial<Fake> = {}, { clickable = true } = {}): Fake {
           const selector = JSON.parse(poll[1]!) as string;
           let i = polled.findIndex((p) => p.selector === selector);
           if (i < 0) i = polled.push({ selector, frame: 0 }) - 1;
-          const sample: ClickSample = ["fake-doc", polled[i]!.frame++, 10 * i, 0, 10, 10, true];
+          const sample: ClickSample = [doc, polled[i]!.frame++, 10 * i, 0, 10, 10, true];
           return Promise.resolve(JSON.stringify(sample));
         };
       },
@@ -143,14 +144,14 @@ describe("clickStep (#267)", () => {
 });
 
 describe("wrapView click waits for the target itself (#267)", () => {
-  /** A view whose poll of `#a` answers `sample(n)` on its n-th call. */
-  function polled(sample: (n: number) => unknown[]): Fake {
+  /** A view whose poll of `#a` (with `doc`) answers `sample(n)` on its n-th call. */
+  function polled(sample: (n: number) => unknown[], doc?: string): Fake {
     let n = 0;
     const v = fakeView(
       {
         evaluate: async (expr) => {
           v.calls.push(["evaluate", [expr]]);
-          return expr === clickPollScript("#a") ? JSON.stringify(sample(n++)) : undefined;
+          return expr === clickPollScript("#a", doc) ? JSON.stringify(sample(n++)) : undefined;
         },
       },
       { clickable: false },
@@ -175,6 +176,15 @@ describe("wrapView click waits for the target itself (#267)", () => {
     const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000);
     await clock.settledAt(click);
     await expect(click).rejects.toThrow("click: the page navigated before the click; nothing was clicked, run 'bowser snapshot' to see the new page");
+    expect(clicks(v)).toEqual([]);
+  });
+
+  test("with a ref's doc, a first sample from another document is gone and nothing is clicked (#111)", async () => {
+    const clock = manualClock();
+    const v = polled((n) => ["d2", n, 10, 20, 100, 40, true], "d1");
+    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d1");
+    await clock.settledAt(click);
+    expect(await click).toEqual({ gone: true });
     expect(clicks(v)).toEqual([]);
   });
 
@@ -2379,5 +2389,44 @@ describe("navigate caps its wait for load (ET-52)", () => {
     clock.setTimeout(() => b.cancelAction?.(), 200);
     await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
     expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
+  });
+});
+
+describe("a ref action on another document than its snapshot's does nothing (#111)", () => {
+  const other = () =>
+    fakeView(
+      {
+        evaluate: async (e) => {
+          if (e === docMatches("d1")) return false;
+          return e.includes(docMatches("d1")) ? { gone: true } : undefined;
+        },
+      },
+      { doc: "d2" },
+    );
+
+  test("click and type answer gone and never call the view", async () => {
+    const v = other();
+    const b = wrapView(v, fast);
+    expect(await b.click("#a", undefined, "d1")).toEqual({ gone: true });
+    expect(await b.type("hi", "d1")).toEqual({ gone: true });
+    expect(v.calls.filter(([name]) => name === "click" || name === "type")).toEqual([]);
+  });
+
+  test("hover, select and setChecked pass the page's gone answer through", async () => {
+    const b = wrapView(other(), fast);
+    expect(await b.hover("#a", "d1")).toEqual({ gone: true });
+    expect(await b.select("#a", "v", "d1")).toEqual({ gone: true });
+    expect(await b.setChecked("#a", false, "d1")).toEqual({ gone: true });
+  });
+
+  test("on the snapshot's document click and type call the view", async () => {
+    const v = fakeView({ evaluate: async (e) => e === docMatches("d1") }, { doc: "d1" });
+    const b = wrapView(v, fast);
+    await b.click("#a", undefined, "d1");
+    await b.type("hi", "d1");
+    expect(v.calls).toEqual([
+      ["click", ["#a"]],
+      ["type", ["hi"]],
+    ]);
   });
 });

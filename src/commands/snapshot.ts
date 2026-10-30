@@ -54,14 +54,14 @@ export async function cmdSnapshot(ctx: CommandContext, opts: { filename?: string
  *  session (ET-61, #154). */
 const ALTERNATE_MS = 5000;
 
-export async function cmdMarkdown(ctx: CommandContext, ref?: string, opts: { filename?: string } = {}): Promise<string> {
+export async function cmdMarkdown(ctx: CommandContext, ref?: string, opts: { filename?: string; linkText?: boolean } = {}): Promise<string> {
   checkFilename(opts.filename);
   const saved = ref === undefined ? undefined : await loadRef(ctx.session, ref);
   return withPageClient(ctx, async (c) => {
     const selector = saved && (await liveSelector(c, saved.target, { doc: saved.doc, scroll: false }));
     const budget = opTimeoutMs();
     const fetchMs = Math.min(ALTERNATE_MS, budget ? Math.floor(budget / 2) : ALTERNATE_MS);
-    const { markdown, source, url, title, failed } = (await c.request("evaluate", [markdownScript(selector, fetchMs)])) as {
+    const { markdown, source, url, title, failed } = (await c.request("evaluate", [markdownScript(selector, fetchMs, opts.linkText)])) as {
       markdown: string;
       source: string;
       url: string;
@@ -199,8 +199,11 @@ export const COMMANDS: Command[] = [
     name: "markdown",
     summary: "Print the page, or one ref's element, as Markdown to read it: far smaller than a snapshot, and without refs",
     positional: [{ name: "ref", required: false }],
-    flags: [{ name: "filename", kind: "string" }],
-    run: (ctx, a) => cmdMarkdown(ctx, a.positional[0], { filename: str(a.flags, "filename") }),
+    flags: [
+      { name: "filename", kind: "string" },
+      { name: "link-text", kind: "boolean" },
+    ],
+    run: (ctx, a) => cmdMarkdown(ctx, a.positional[0], { filename: str(a.flags, "filename"), linkText: Boolean(a.flags["link-text"]) }),
   },
   {
     name: "screenshot",

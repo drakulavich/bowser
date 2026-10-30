@@ -26,7 +26,7 @@ To read a page rather than act on it, `bowser markdown` costs a fraction of a sn
 | `bowser goto <url>` | Navigate in the session (adds `https://`, or `http://` for localhost) |
 | `bowser wait-for --url <part>` / `--text <text>` | Wait until the URL or the visible text contains the value, after a click whose result comes later |
 | `bowser snapshot [--filename=f] [--depth=N]` | Aria tree with refs; `--depth` limits levels |
-| `bowser markdown [ref] [--filename=f]` | The page, or one element, as Markdown |
+| `bowser markdown [ref] [--filename=f] [--link-text]` | The page, or one element, as Markdown; `--link-text` drops link URLs |
 | `bowser click <ref>` | Click |
 | `bowser fill <ref> <text>` / `fill <ref> --stdin` | Clear and type into a field; `--stdin` keeps a secret out of argv |
 | `bowser type <text>` | Type into the focused element |

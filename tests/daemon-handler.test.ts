@@ -336,6 +336,32 @@ describe("createHandler", () => {
     expect(args[1]).toBeLessThanOrEqual(1000);
   });
 
+  test("a click's doc reaches browser.click after the time left, which never takes its place (#111, #112)", async () => {
+    const b = fakeBrowser();
+    await createHandler(b)(req("click", ["#a", "d1"]), Date.now() + 1000);
+    const [, args] = b.calls.find(([name]) => name === "click")!;
+    expect(args[0]).toBe("#a");
+    expect(args[1]).toBeGreaterThan(950);
+    expect(args[2]).toBe("d1");
+  });
+
+  for (const [op, args] of [
+    ["check", ["#a", "d1"]],
+    ["uncheck", ["#a", "d1"]],
+    ["select", ["#a", "v", "d1"]],
+  ] as const) {
+    test(`${op} answers the browser's gone and passes it the doc (#111)`, async () => {
+      const seen: unknown[] = [];
+      const gone = async (...a: unknown[]) => {
+        seen.push(a.at(-1));
+        return { gone: true } as const;
+      };
+      const b = fakeBrowser({ setChecked: gone, select: gone });
+      expect(await createHandler(b)(req(op, [...args]))).toEqual({ id: 7, ok: true, result: { gone: true } });
+      expect(seen).toEqual(["d1"]);
+    });
+  }
+
   test("a click with no budget is given no timeout", async () => {
     const b = fakeBrowser();
     await createHandler(b)(req("click", ["#a"]));
