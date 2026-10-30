@@ -1039,7 +1039,7 @@ const TO_MARKDOWN = String.raw`
       const k = kids().trim();
       if (['#', '¶', '🔗'].includes(k)) return '';
       const href = n.getAttribute('href') || '';
-      return k && href && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + url(n.href) + ')' : k;
+      return k && href && !linkText && !href.startsWith('#') && !href.startsWith('javascript:') ? '[' + k + '](' + url(n.href) + ')' : k;
     }
     return kids();
   };
@@ -1200,7 +1200,7 @@ const YOUTUBE_TRANSCRIPT = (ms: number) => String.raw`const video = (() => {
     }
   }`;
 
-export function markdownScript(selector?: string, fetchMs?: number): string {
+export function markdownScript(selector?: string, fetchMs?: number, linkText = false): string {
   const own =
     selector === undefined
       ? String.raw`
@@ -1230,6 +1230,7 @@ export function markdownScript(selector?: string, fetchMs?: number): string {
       : `[document.querySelector(${JSON.stringify(selector)})]`;
   return String.raw`(async () => {
   const result = await (async () => {${own}
+  const linkText = ${linkText};
   ${TO_MARKDOWN}
   return { markdown: convert(${nodes}), source: 'converted' };
   })();
