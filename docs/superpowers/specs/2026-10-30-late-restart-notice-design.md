@@ -41,31 +41,34 @@ steps. The options weighed are in a comment on #261.
 
 ## Definition of Done
 
-- `tests/lifecycle.test.ts`, test "a late MCP call gets the last restart's delivered notice once (#261)", with
+- [x] `tests/lifecycle.test.ts`, test "a late MCP call gets the last restart's delivered notice once (#261)", with
   `run(argv, { notices, acks, restarts })` against a fake daemon of this version and a `msg.done` written in the
   test:
   - `since` before the file's mtime: `notices` equals the file's text, `msg.done` still holds it after the acks run,
     and a second call with the same `restarts` gets `[]`;
   - `since` after the file's mtime: `[]`;
   - without `restarts`: `[]`, and `acks` is `[]`.
-- `tests/lifecycle.test.ts`, test "every notice an MCP call printed is recorded, so the next call does not repeat it
+- [x] `tests/lifecycle.test.ts`, test "every notice an MCP call printed is recorded, so the next call does not repeat it
   (#261)": a second call with the same `restarts` gets `[]` after each of these: the restarter (its acks rename `msg`
   to `msg.done`), a pending `msg` (ET-29), both ET-44 waiter variants (after the ack, `msg` or `msg.done` still holds
   the text), and a waiter that read a pending `msg`, called again before the restarter's ack.
-- `tests/mcp.test.ts`, test "a handover child counts every restart as news (#261)": after an `initialize` with id
+- [x] `tests/mcp.test.ts`, test "a handover child counts every restart as news (#261)": after an `initialize` with id
   `bowser-handover`, `deps.run` gets `restarts.since` 0; after another id, a `since` no earlier than the time taken
   before `createMcpServer`.
-- `tests/e2e-upgrade.test.ts`, test "an MCP server idle during another's restart gets its notice on its next call
+- [x] `tests/e2e-upgrade.test.ts`, test "an MCP server idle during another's restart gets its notice on its next call
   (#261)": two servers from `copyAt("old-mcp", "0.0.1")`, both initialized before the upgrade, on one ephemeral
   session with `localStorage` `tok` set. After the version bump A's call restarts it and carries the notice; B's
   first call, `localstorage-get tok`, answers text that starts with the notice and holds
   `cookies and storage were lost`; B's second call has no notice; a CLI `eval 1` then prints `1` and nothing on
   stderr.
-- `bun test tests/lifecycle.test.ts -t "#261"` and `bun test tests/mcp.test.ts -t "#261"` each run at least one
+- [x] `bun test tests/lifecycle.test.ts -t "#261"` and `bun test tests/mcp.test.ts -t "#261"` each run at least one
   test, all passing (today: `regex "#261" matched 0 tests`).
-- README "Upgrading": `grep -n "was running when the restart finished" README.md` prints one line, and
-  `grep -n "does not get it (#261)" README.md` prints nothing (today: line 62).
-- CHANGELOG unreleased: `grep -n "was running when the restart finished" CHANGELOG.md` prints a line, and
-  `grep -n "still gets no notice (#261)" CHANGELOG.md` prints nothing (today: line 29).
-- `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
-- Each new test goes red under one mutation of the line it checks, quoted in the PR as one line per test.
+- [x] "Upgrading" in `docs/install.md` (moved there from README in #264):
+  `grep -n "was running when the restart finished" docs/install.md` prints one line, and
+  `grep -n "does not get it (#261)" docs/install.md` prints nothing (before: line 34).
+- [x] CHANGELOG unreleased: `grep -n "was running when the restart finished" CHANGELOG.md` prints a line, and
+  `grep -n "still gets no notice (#261)" CHANGELOG.md` prints nothing (before: line 33).
+- [x] `bun run check` passes.
+- [ ] `BOWSER_E2E=1 bun test` passes in CI.
+- [x] Each new unit test goes red under one mutation of the line it checks, quoted in the PR as one line per test.
+  The e2e test was not mutated: `BOWSER_E2E` does not run locally.

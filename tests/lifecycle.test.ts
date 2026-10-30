@@ -6,12 +6,13 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, rename, rm, unlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import pkg from "../package.json";
 import { reportFailure, run } from "../src/cli.ts";
+import type { CommandContext } from "../src/commands/context.ts";
 import { connectOrSpawn, NoDaemon, OlderDaemon, socketPath, type ConnectOptions } from "../src/daemon/client.ts";
 import { claimSession, isBowser } from "../src/daemon/pidfile.ts";
 import { closeOne } from "../src/commands/navigation.ts";
@@ -1071,11 +1072,98 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     await ensureSessionDir(session);
     await Bun.write(delivered, "old");
     writeNotice(session, "new");
-    expect(readNotice(session, true)).toBe("new");
+    expect(readNotice(session, true).text).toBe("new");
     expect(existsSync(delivered)).toBe(false);
     await Bun.write(delivered, "old");
     removeNotice(session);
-    expect(readNotice(session, true)).toBe("");
+    expect(readNotice(session, true).text).toBe("");
+  });
+
+  type Restarts = NonNullable<CommandContext["restarts"]>;
+  const doneOf = (s: string) => join(sessionDir(s), DELIVERED);
+  /** One MCP-style call: its notices, and how many acks it left, all of them run. */
+  async function lateCall(session: string, restarts?: Restarts, connect?: CommandContext["connect"]) {
+    const notices: string[] = [];
+    const acks: (() => void)[] = [];
+    expect(await run(["eval", "1", "-s", session], { notices, acks, ...(restarts && { restarts }), ...(connect && { connect }) })).toBe("1");
+    for (const ack of acks) ack();
+    return { notices, acks: acks.length };
+  }
+
+  test("a late MCP call gets the last restart's delivered notice once (#261)", async () => {
+    const session = "261-late";
+    const text = notice(session, "no page was open");
+    await ensureSessionDir(session);
+    await Bun.write(doneOf(session), text);
+    const { mtimeMs } = await stat(doneOf(session));
+    const d = await fakeDaemon(session, daemonOf(pkg.version));
+    try {
+      const restarts: Restarts = { since: mtimeMs - 1, seen: new Map() };
+      expect(await lateCall(session, restarts)).toEqual({ notices: [text], acks: 1 });
+      expect(await Bun.file(doneOf(session)).text()).toBe(text);
+      expect(await lateCall(session, restarts)).toEqual({ notices: [], acks: 0 });
+      expect(await lateCall(session, { since: mtimeMs + 1, seen: new Map() })).toEqual({ notices: [], acks: 0 });
+      expect(await lateCall(session)).toEqual({ notices: [], acks: 0 });
+    } finally {
+      d.stop();
+    }
+  });
+
+  test("every notice an MCP call printed is recorded, so the next call does not repeat it (#261)", async () => {
+    const url = "https://example.com/cart";
+    const restarter = "261-restarter";
+    await saveState({ name: restarter, url, title: "", refs: [], updatedAt: 0, profile: null });
+    const up = await upgrade(restarter, "0.6.1", { url });
+    try {
+      const restarts: Restarts = { since: 0, seen: new Map() };
+      expect(await lateCall(restarter, restarts, up.connect)).toEqual({ notices: [notice(restarter, `page reloaded at ${url}`)], acks: 1 });
+      expect(existsSync(msgOf(restarter))).toBe(false);
+      expect(await Bun.file(doneOf(restarter)).text()).toBe(notice(restarter, `page reloaded at ${url}`));
+      expect(await lateCall(restarter, restarts, up.connect)).toEqual({ notices: [], acks: 0 });
+    } finally {
+      up.stop();
+    }
+
+    const pending = "261-pending";
+    const text = notice(pending, "no page was open");
+    await ensureSessionDir(pending);
+    await Bun.write(msgOf(pending), text);
+    const d = await fakeDaemon(pending, daemonOf(pkg.version));
+    try {
+      const restarts: Restarts = { since: 0, seen: new Map() };
+      expect(await lateCall(pending, restarts)).toEqual({ notices: [text], acks: 1 });
+      expect(await Bun.file(doneOf(pending)).text()).toBe(text);
+      expect(await lateCall(pending, restarts)).toEqual({ notices: [], acks: 0 });
+    } finally {
+      d.stop();
+    }
+
+    // Without `delivered`, the waiter read a still-pending `msg`, and its second call runs before any restarter's ack.
+    for (const delivered of [false, true]) {
+      const session = delivered ? "261-waiter-delivered" : "261-waiter";
+      const text = notice(session, "no page was open");
+      await ensureSessionDir(session);
+      await Bun.write(msgOf(session), text);
+      await Bun.write(lockOf(session), String(holder.pid));
+      const old = await fakeDaemon(session, daemonOf("0.6.1"));
+      const next = meanwhile(async () => {
+        old.stop();
+        await unlink(socketPath(session)).catch(() => {});
+        const d = await fakeDaemon(session, daemonOf(pkg.version));
+        if (delivered) await rename(msgOf(session), doneOf(session));
+        await unlink(lockOf(session));
+        return d;
+      });
+      try {
+        const restarts: Restarts = { since: 0, seen: new Map() };
+        expect(await lateCall(session, restarts)).toEqual({ notices: [text], acks: 1 });
+        expect(await Bun.file(delivered ? doneOf(session) : msgOf(session)).text()).toBe(text);
+        expect(await lateCall(session, restarts)).toEqual({ notices: [], acks: 0 });
+      } finally {
+        old.stop();
+        (await next).stop();
+      }
+    }
   });
 
   test("a command that takes over a dead holder's restart prints only its own notice (ET-29)", async () => {
