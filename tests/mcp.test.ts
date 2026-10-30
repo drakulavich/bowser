@@ -1255,6 +1255,54 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     );
     expect(byId.get(8)?.result.content[0].text).toBe("old server");
   });
+
+  test("handover: a request sent after the child exited, while its last reply is still being written, is refused", async () => {
+    const h = harness();
+    const answersSevenThenExits =
+      'let b = ""; for await (const c of Bun.stdin.stream()) { b += new TextDecoder().decode(c); let i; while ((i = b.indexOf("\\n")) >= 0) { const l = JSON.parse(b.slice(0, i)); b = b.slice(i + 1); if (l.id === "bowser-handover" || l.id === 7) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: l.id, result: { pid: process.pid } }) + "\\n"); if (l.id === 7) process.exit(0); } }';
+    let pid: number | undefined;
+    let unblock!: () => void;
+    const blocked = new Promise<void>((r) => {
+      unblock = r;
+    });
+    const alive = (p: number) => {
+      try {
+        process.kill(p, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    async function* lines() {
+      yield INIT;
+      yield call(7, "snapshot");
+      while (pid === undefined || alive(pid)) await Bun.sleep(5);
+      yield call(8, "snapshot");
+      unblock();
+    }
+    const code = await serveLines(
+      lines(),
+      h.server,
+      async (l) => {
+        const res = JSON.parse(l);
+        if (res.id === 7) {
+          pid = res.result.pid;
+          await blocked;
+        }
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "2.0.0",
+        child: [process.execPath, "-e", answersSevenThenExits],
+      },
+    );
+    expect(code).toBe(0);
+    const byId = new Map(h.responses().map((r) => [r.id, r]));
+    expect(byId.get(8)?.result.content[0].text).toBe(
+      "bowser mcp could not hand over to the installed bowser 2.0.0: it exited (code 0); restart the MCP server",
+    );
+  });
 });
 
 describe("a restart's notice is delivered only by a written response (#152)", () => {

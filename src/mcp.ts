@@ -635,7 +635,14 @@ function startHandover(
         if (id !== undefined) outstanding.set(id, line);
         const cancelled = cancelledId(line);
         if (cancelled !== undefined) outstanding.delete(cancelled);
-        toChild(line);
+        try {
+          toChild(line);
+        } catch {
+          // The child has exited, and `failed` is set only once its last output is written.
+          if (id !== undefined) outstanding.delete(id);
+          await exited;
+          return refuse(line);
+        }
       });
     },
     async end() {

@@ -51,7 +51,8 @@ All notable changes to this project are documented here. This project follows
   get the "could not hand over" error until a restart. A call the installed bowser was running
   when it exited now says so: "the installed bowser <v> exited (code N) while running this call".
   During the handover's drain the server answers `ping` at once instead of after the slowest
-  running call. (ET-41, ET-42, #153)
+  running call. A request that arrived just after the installed bowser exited, while its last
+  reply was still being written, used to stop the server; it now gets the refusal. (ET-41, ET-42, #153)
 
 ## [0.12.0] — 2026-10-21
 
