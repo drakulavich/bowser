@@ -952,7 +952,7 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     expect(h.runs()).toBe(0);
   });
 
-  test("handover: a child that answers initialize and then exits leaves each call an isError", async () => {
+  test("handover: a child that answers initialize and exits while running calls says so in each (ET-41)", async () => {
     const h = harness();
     const once =
       'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(0);';
@@ -972,7 +972,9 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     const byId = new Map(h.responses().map((r) => [r.id, r]));
     for (const id of [7, 8]) {
       expect(byId.get(id)?.result.isError).toBe(true);
-      expect(byId.get(id)?.result.content[0].text).toStartWith("bowser mcp could not hand over to the installed bowser 2.0.0: it exited");
+      expect(byId.get(id)?.result.content[0].text).toBe(
+        "bowser mcp: the installed bowser 2.0.0 exited (code 0) while running this call; restart the MCP server",
+      );
     }
   });
 
@@ -1131,7 +1133,7 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     expect(code).toBe(0);
     const res = h.responses();
     expect(res.map((r) => r.id)).toEqual([1, 8]);
-    expect(res[1].result.content[0].text).toBe("bowser mcp could not hand over to the installed bowser 2.0.0: it exited (code 0); restart the MCP server");
+    expect(res[1].result.content[0].text).toBe("bowser mcp: the installed bowser 2.0.0 exited (code 0) while running this call; restart the MCP server");
   });
 
   test("handover: the process exits once stdin ends and the child is gone, not 10 s after the handover (ET-39)", async () => {
@@ -1145,6 +1147,161 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     const exited = await Promise.race([proc.exited.then(() => "exited"), Bun.sleep(3000).then(() => "still running after 3 s")]);
     proc.kill();
     expect(exited).toBe("exited");
+  });
+
+  const request = (id: number, method: string) => JSON.stringify({ jsonrpc: "2.0", id, method });
+
+  test("handover: after the child exited, ping and tools/list are answered and a later call is refused (ET-41)", async () => {
+    const h = harness();
+    const once =
+      'for await (const c of Bun.stdin.stream()) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "bowser-handover", result: {} }) + "\\n"); break; } process.exit(0);';
+    const answered = (id: number) => h.out.some((l) => JSON.parse(l).id === id);
+    async function* lines() {
+      yield INIT;
+      yield call(7, "snapshot");
+      while (!answered(7)) await Bun.sleep(5);
+      yield request(20, "ping");
+      yield request(21, "tools/list");
+      yield call(9, "snapshot");
+    }
+    await serveLines(
+      lines(),
+      h.server,
+      (l) => {
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "2.0.0",
+        child: [process.execPath, "-e", once],
+      },
+    );
+    const byId = new Map(h.responses().map((r) => [r.id, r]));
+    expect(byId.get(20)).toEqual({ jsonrpc: "2.0", id: 20, result: {} });
+    expect(byId.get(21)?.result.tools.length).toBe(buildTools().length);
+    expect(byId.get(9)?.result.content[0].text).toBe(
+      "bowser mcp could not hand over to the installed bowser 2.0.0: it exited (code 0); restart the MCP server",
+    );
+  });
+
+  test("handover: a ping during the drain is answered at once, before the running call (ET-42)", async () => {
+    const out: string[] = [];
+    let started = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const server = createMcpServer(
+      {
+        run: async () => {
+          started++;
+          await gate;
+          return "old server";
+        },
+        version: "1.0.0",
+      },
+      (line) => {
+        out.push(line);
+      },
+    );
+    const ids = () => out.map((l) => JSON.parse(l).id);
+    async function* lines() {
+      yield INIT;
+      yield call(5, "snapshot");
+      while (started === 0) await Bun.sleep(5);
+      yield call(7, "list");
+      yield request(6, "ping");
+      const deadline = Date.now() + 1000;
+      while (!ids().includes(6) && Date.now() < deadline) await Bun.sleep(5);
+      release();
+    }
+    await serveLines(
+      lines(),
+      server,
+      (l) => {
+        out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => (started > 0 ? "2.0.0" : "1.0.0"),
+        child: [process.execPath, "-e", initOnly],
+      },
+    );
+    expect(ids()).toContain(5);
+    expect(ids().indexOf(6)).toBeGreaterThan(-1);
+    expect(ids().indexOf(6)).toBeLessThan(ids().indexOf(5));
+  });
+
+  test("handover: an installed bowser older than this server is not handed to; the first call says so, once (ET-43)", async () => {
+    const h = harness();
+    const marker = join(tmpdir(), `bowser-handover-older-${process.pid}`);
+    await serveLines(
+      feed([INIT, call(7, "snapshot"), call(8, "snapshot")]),
+      h.server,
+      (l) => {
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "0.9.0",
+        child: [process.execPath, "-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "")`],
+      },
+    );
+    expect(h.runs()).toBe(2);
+    expect(existsSync(marker)).toBe(false);
+    const byId = new Map(h.responses().map((r) => [r.id, r]));
+    expect(byId.get(7)?.result.content[0].text).toBe(
+      "the installed bowser 0.9.0 is older than this MCP server (1.0.0), which keeps running 1.0.0; restart the MCP server to use 0.9.0\nold server",
+    );
+    expect(byId.get(8)?.result.content[0].text).toBe("old server");
+  });
+
+  test("handover: a request sent after the child exited, while its last reply is still being written, is refused", async () => {
+    const h = harness();
+    const answersSevenThenExits =
+      'let b = ""; for await (const c of Bun.stdin.stream()) { b += new TextDecoder().decode(c); let i; while ((i = b.indexOf("\\n")) >= 0) { const l = JSON.parse(b.slice(0, i)); b = b.slice(i + 1); if (l.id === "bowser-handover" || l.id === 7) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: l.id, result: { pid: process.pid } }) + "\\n"); if (l.id === 7) process.exit(0); } }';
+    let pid: number | undefined;
+    let unblock!: () => void;
+    const blocked = new Promise<void>((r) => {
+      unblock = r;
+    });
+    const alive = (p: number) => {
+      try {
+        process.kill(p, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    async function* lines() {
+      yield INIT;
+      yield call(7, "snapshot");
+      while (pid === undefined || alive(pid)) await Bun.sleep(5);
+      yield call(8, "snapshot");
+      unblock();
+    }
+    const code = await serveLines(
+      lines(),
+      h.server,
+      async (l) => {
+        const res = JSON.parse(l);
+        if (res.id === 7) {
+          pid = res.result.pid;
+          await blocked;
+        }
+        h.out.push(l);
+      },
+      {
+        version: "1.0.0",
+        installed: async () => "2.0.0",
+        child: [process.execPath, "-e", answersSevenThenExits],
+      },
+    );
+    expect(code).toBe(0);
+    const byId = new Map(h.responses().map((r) => [r.id, r]));
+    expect(byId.get(8)?.result.content[0].text).toBe(
+      "bowser mcp could not hand over to the installed bowser 2.0.0: it exited (code 0); restart the MCP server",
+    );
   });
 });
 

@@ -102,7 +102,7 @@ sequenceDiagram
 ### 2. A running MCP server hands over to the installed version
 
 The read loop in `runMcpServer` checks every `tools/call` line before it accepts it: does
-`installedVersion()` return a version other than the server's own? While it does not, nothing
+`installedVersion()` return a version newer than the server's own (`Bun.semver.order`)? While it does not, nothing
 changes, and undefined (no `package.json` beside the code) never hands over, as in section 1. The
 first time it does, the server hands over, once:
 
@@ -124,7 +124,17 @@ first time it does, the server hands over, once:
 If the child exits, or does not answer `initialize` in 10 s, the server answers every queued and
 later request itself: a `tools/call` with `isError` and "bowser mcp could not hand over to the
 installed bowser <v>: <reason>; restart the MCP server", any other request with JSON-RPC error
--32603 and the same text.
+-32603 and the same text. `ping` and `tools/list` are the exception: it answers them as it did
+before the handover (ET-41). A `tools/call` the child was running when it exited gets "bowser mcp:
+the installed bowser <v> exited (code N) while running this call; restart the MCP server".
+
+Until the child has answered `initialize`, the old server answers `ping` itself, at once, also
+during the drain (ET-42).
+
+An installed version older than the server's own (a downgrade) is not handed to. The server keeps
+running its own version, and the first tool result it writes starts with "the installed bowser <v>
+is older than this MCP server (<w>), which keeps running <w>; restart the MCP server to use <v>"
+(ET-43).
 
 The child then meets the old daemon and restarts it as in section 1, and its notice reaches the agent
 in the tool result.

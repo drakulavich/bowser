@@ -62,6 +62,12 @@ tool call that waited for another one's restart prints the line too. A call that
 has finished and its line was printed does not get it (#261). The server's tool list stays the
 one the client got when it connected, so a new command shows up once the client restarts the
 server. A server started by 0.11 or older can't hand over: restart it once after the upgrade.
+It hands over only to a newer version. After a downgrade it keeps running its own version, and the
+first tool call's text begins with a line saying the installed bowser is older and that restarting
+the MCP server switches to it. If the handover fails, `ping` and `tools/list` are still answered,
+and each tool call gets "bowser mcp could not hand over to the installed bowser <v>: <reason>;
+restart the MCP server". A call the installed bowser was running when it exited gets "the installed
+bowser <v> exited (code N) while running this call" instead.
 
 A daemon newer than the bowser you run (after a downgrade) is still refused: "session '<name>' is
 running bowser <v> (this is <w>); run 'bowser close -s <name>', then open it again" (exit 1).
@@ -286,7 +292,7 @@ Notes:
 - The server is a thin client of the same per-session daemons the CLI uses; the first tool call on a fresh session spawns one.
 - Relative file paths (`screenshot`, `snapshot` `filename`, `state-save`, `state-load`) resolve against the server's working directory. If the client starts it from `/` or another directory it cannot write, the server uses `<os.tmpdir()>/bowser-mcp` instead (`$TMPDIR/bowser-mcp`). Replies name the absolute path written. An absolute path is used as given.
 - The protocol is hand-rolled (newline-delimited JSON-RPC) with zero runtime dependencies. It speaks MCP `2025-11-25`, `2025-06-18` and `2024-11-05`: `initialize` answers with the client's version when it is one of these, and with `2025-11-25` otherwise. The stateless `2026-07-28` revision is not implemented; its `server/discover` probe gets `-32601 Method not found`, on which a client falls back to `initialize`.
-- `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run.
+- `initialize`, `ping`, `tools/list` and notifications are answered at once, even while tool calls run. During a handover the server answers `ping` itself until the installed bowser is up, so a `ping` does not wait for the calls the server finishes first.
 - A JSON-RPC batch (an array) or a line that is not a JSON object gets one `-32600 Invalid Request` error with `id: null`; nothing in a batch runs. MCP `2025-06-18` has no batching.
 - A request without a string `method` gets `-32600 Invalid Request` with its `id`, and a `tools/call` of a tool the server does not have gets `-32602 Unknown tool`. A response from the client (a message with `result` or `error`) gets no answer.
 - Tool calls for different sessions run concurrently; calls for the same session run one at a time, in the order they arrived. Responses may therefore arrive out of order (JSON-RPC matches them by `id`).
