@@ -42,23 +42,26 @@ export async function restartSession(ctx: CommandContext, err: OlderDaemon | Bro
     const url = old?.url ?? saved?.url ?? "";
     const profile = await recordedProfile(session);
     const page = url && url !== "about:blank" ? url : undefined;
+    const navigates = ctx.navigates && (ctx.navigates.profile === undefined || ctx.navigates.profile === profile);
+    const skipped = page && navigates ? `page at ${page} not reloaded` : undefined;
+    const reloadAt = skipped ? undefined : page;
     const lost = profile === null ? "; cookies and storage were lost (no --persistent)" : "";
     const notice = (reload: string) =>
       `session '${session}' restarted for bowser ${pkg.version} (was ${err.was}): ${reload}; refs cleared, run 'bowser snapshot'${lost}`;
     // Left behind if this process is killed before a surface prints it (ET-29).
-    writeNotice(session, notice(page ? `page reload at ${page} was interrupted` : "no page was open"));
+    writeNotice(session, notice(skipped ?? (page ? `page reload at ${page} was interrupted` : "no page was open")));
     try {
       await stopDaemon(ctx, session);
       if (saved) await saveState({ ...saved, refs: [], doc: undefined });
-      let reload = page ? `page reloaded at ${page}` : "no page was open";
+      let reload = skipped ?? (page ? `page reloaded at ${page}` : "no page was open");
       try {
-        await cmdOpen({ ...ctx, notices: undefined, acks: undefined, json: false, command: "open" }, page, {
+        await cmdOpen({ ...ctx, notices: undefined, acks: undefined, json: false, command: "open" }, reloadAt, {
           ...(profile === null ? {} : { profile }),
           daemonBudgetMs: old?.budgetMs ?? null,
         });
       } catch (err) {
-        if (!page) throw err;
-        reload = `page did not reload at ${page} (${err instanceof Error ? err.message : String(err)})`;
+        if (!reloadAt) throw err;
+        reload = `page did not reload at ${reloadAt} (${err instanceof Error ? err.message : String(err)})`;
       }
       writeNotice(session, notice(reload));
     } catch (err) {

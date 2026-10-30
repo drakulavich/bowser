@@ -168,7 +168,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     ["", undefined],
     [" with a dead holder's lock left behind", "dead"],
   ] as const) {
-    test(`two commands at once restart the session once${label}`, async () => {
+    test(`two commands at once restart the session once, and both print the notice${label}`, async () => {
       const old = await copyAt(`old-d${lockedBy ?? ""}`, "0.0.1");
       const s = session(`twice${lockedBy ?? ""}`);
       await ok(old, s, ["open", `${base}/`]);
@@ -179,7 +179,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
       }
       const [a, b] = await Promise.all([run(CLI, s, ["snapshot"]), run(CLI, s, ["snapshot"])]);
       expect([a.code, b.code]).toEqual([0, 0]);
-      expect([a.err, b.err].filter((e) => e.includes("restarted"))).toHaveLength(1);
+      expect([a.err, b.err].filter((e) => e.includes("restarted"))).toHaveLength(2);
       expect(await daemonPids(s)).toHaveLength(1);
     }, 60_000);
   }

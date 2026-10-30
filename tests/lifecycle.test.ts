@@ -6,7 +6,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rename, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,7 +16,7 @@ import { connectOrSpawn, NoDaemon, OlderDaemon, socketPath, type ConnectOptions 
 import { claimSession, isBowser } from "../src/daemon/pidfile.ts";
 import { closeOne } from "../src/commands/navigation.ts";
 import { restartSession } from "../src/commands/restart.ts";
-import { LOCK, MSG, otherHolder } from "../src/commands/restart-lock.ts";
+import { DELIVERED, LOCK, MSG, otherHolder, readNotice, removeNotice, writeNotice } from "../src/commands/restart-lock.ts";
 import type { DaemonRequest, DaemonResponse, PageState } from "../src/daemon/protocol.ts";
 import { dispatch } from "../src/daemon/server.ts";
 import { createMcpServer } from "../src/mcp.ts";
@@ -1028,35 +1028,54 @@ describe("#152: close against an upgrade restart, and the restart's notice", () 
     try {
       expect(await cli()).toEqual({ out: "1\n", err: `bowser: ${text}\n` });
       expect(existsSync(msgOf(session))).toBe(false);
+      expect(await Bun.file(join(sessionDir(session), DELIVERED)).text()).toBe(text);
       expect(await cli()).toEqual({ out: "1\n", err: "" });
     } finally {
       d.stop();
     }
   });
 
-  test("a command that waited for another's restart leaves the notice to it (ET-29)", async () => {
-    const session = "et29-waiter";
-    const text = notice(session, "no page was open");
-    await ensureSessionDir(session);
-    await Bun.write(msgOf(session), text);
-    await Bun.write(lockOf(session), String(holder.pid));
-    const old = await fakeDaemon(session, daemonOf("0.6.1"));
-    const next = meanwhile(async () => {
-      old.stop();
-      await unlink(socketPath(session)).catch(() => {});
-      const d = await fakeDaemon(session, daemonOf(pkg.version));
-      await unlink(lockOf(session));
-      return d;
+  for (const delivered of [false, true]) {
+    test(`a command that waited for another's restart prints its notice too (ET-44)${delivered ? ": the restarter printed it first" : ""}`, async () => {
+      const session = delivered ? "et44-delivered" : "et44-waiter";
+      const text = notice(session, "no page was open");
+      await ensureSessionDir(session);
+      await Bun.write(msgOf(session), text);
+      await Bun.write(lockOf(session), String(holder.pid));
+      const old = await fakeDaemon(session, daemonOf("0.6.1"));
+      const next = meanwhile(async () => {
+        old.stop();
+        await unlink(socketPath(session)).catch(() => {});
+        const d = await fakeDaemon(session, daemonOf(pkg.version));
+        if (delivered) await rename(msgOf(session), join(sessionDir(session), DELIVERED));
+        await unlink(lockOf(session));
+        return d;
+      });
+      try {
+        const notices: string[] = [];
+        const acks: (() => void)[] = [];
+        expect(await run(["eval", "1", "-s", session], { notices, acks })).toBe("1");
+        expect(notices).toEqual([text]);
+        expect(acks).toEqual([]);
+        if (!delivered) expect(await Bun.file(msgOf(session)).text()).toBe(text);
+      } finally {
+        old.stop();
+        (await next).stop();
+      }
     });
-    try {
-      const notices: string[] = [];
-      expect(await run(["eval", "1", "-s", session], { notices, acks: [] })).toBe("1");
-      expect(notices).toEqual([]);
-      expect(await Bun.file(msgOf(session)).text()).toBe(text);
-    } finally {
-      old.stop();
-      (await next).stop();
-    }
+  }
+
+  test("a new restart's notice, or its failure, drops the last restart's delivered one (ET-44)", async () => {
+    const session = "et44-stale";
+    const delivered = join(sessionDir(session), DELIVERED);
+    await ensureSessionDir(session);
+    await Bun.write(delivered, "old");
+    writeNotice(session, "new");
+    expect(readNotice(session, true)).toBe("new");
+    expect(existsSync(delivered)).toBe(false);
+    await Bun.write(delivered, "old");
+    removeNotice(session);
+    expect(readNotice(session, true)).toBe("");
   });
 
   test("a command that takes over a dead holder's restart prints only its own notice (ET-29)", async () => {
@@ -1164,6 +1183,39 @@ describe("#152: the restart keeps the session's page and budget", () => {
   test("ET-30, no cap: a budget of 0 stays 0", async () => {
     const r = await withBudget("200", () => restart("et30-zero", { url: start, oldState: { url: start, title: "", budgetMs: 0 } }));
     expect(budgets(r.calls)).toEqual([0]);
+  });
+
+  for (const command of ["open", "goto"]) {
+    test(`ET-37: ${command} <url> as the first command loads only that URL`, async () => {
+      const session = `et37-${command}`;
+      const next = "https://example.com/next";
+      await saveState({ name: session, url: start, title: "", refs: [], updatedAt: 0, profile: null });
+      const up = await upgrade(session, "0.6.1", { url: next, oldUrl: start });
+      try {
+        const notices: string[] = [];
+        await run([command, next, "-s", session], { connect: up.connect, notices });
+        expect(notices).toEqual([
+          `session '${session}' restarted for bowser ${pkg.version} (was 0.6.1): page at ${start} not reloaded; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`,
+        ]);
+        expect(up.next()?.ops.filter((op) => op === "navigate")).toEqual(["navigate"]);
+      } finally {
+        up.stop();
+      }
+    });
+  }
+
+  test("ET-37: open <url> with a profile the session lacks reloads the old page before it is refused", async () => {
+    const session = "et37-profile";
+    await saveState({ name: session, url: start, title: "", refs: [], updatedAt: 0, profile: null });
+    const up = await upgrade(session, "0.6.1", { url: start });
+    try {
+      const notices: string[] = [];
+      const err = await run(["open", "https://example.com/next", "--persistent", "-s", session], { connect: up.connect, notices }).catch((e: Error) => e);
+      expect(String(err)).toContain("is already open with a different profile");
+      expect(notices).toEqual([reloaded(session, start)]);
+    } finally {
+      up.stop();
+    }
   });
 
   test("ET-35: a lock held by a live bowser process still counts", async () => {
