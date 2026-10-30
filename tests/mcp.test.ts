@@ -74,11 +74,12 @@ describe("buildTools", () => {
     expect(s.properties.profile.type).toBe("string");
   });
 
-  test("markdown inputSchema: optional ref and filename", () => {
+  test("markdown inputSchema: optional ref, filename and link-text", () => {
     const s = buildTools().find((t) => t.name === "markdown")!.inputSchema;
     expect(s.required).toEqual([]);
     expect(s.properties.ref.type).toBe("string");
     expect(s.properties.filename.type).toBe("string");
+    expect(s.properties["link-text"].type).toBe("boolean");
   });
 
   test("select inputSchema: required positionals", () => {

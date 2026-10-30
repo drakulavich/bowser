@@ -7,6 +7,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- **`markdown --link-text` drops link URLs.** Each converted link prints as its text, with its
+  bold or code kept; images keep their URLs, and the page's own Markdown and a YouTube transcript
+  are unchanged. On Wikipedia's WebKit article the Markdown goes from 57,462 to 30,392 bytes, on
+  the Hacker News front page from 14,258 to 4,014. The MCP `markdown` tool takes `link-text`. (#134)
 - **`screenshot --filename=x.jpg` writes a JPEG.** The format follows the extension: `.png` is
   PNG, `.jpg` and `.jpeg` (in any case) are JPEG at quality 80, and the reply reports the JPEG's
   size. Any other extension, or none, is a usage error (exit 1) before anything is captured; a
