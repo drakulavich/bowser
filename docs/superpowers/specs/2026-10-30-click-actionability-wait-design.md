@@ -5,7 +5,7 @@ Status: draft, waiting for review.
 
 ## Goal
 
-When the page navigates while `click` waits for its target, the command fails within its budget with a message that names the navigation, exit 2. Nothing is clicked on the new page, and the next command works without `bowser close`.
+When the page navigates while `click` waits for its target, the command fails within its budget with a message that names the navigation, exit 2. A page that commits before the last poll gets no click (the last poll and the native click are separate calls, see Out of scope), and the next command works without `bowser close`.
 
 ## What happens today
 
@@ -53,7 +53,7 @@ One poll sends about 0.9 KB of script and gets back under 100 bytes; it took 0.0
 
 - Playwright's actionability beyond Bun's checks (the `visibility` check, the retry backoff, waits for `hover`, `check`, `uncheck` and `select`): #270.
 - A page that seals its document reads the same `DOC_ID` before and after a navigation, so the click can land on the new page: #274.
-- A document that commits between the last poll and `view.click(x, y)` is clicked at those coordinates.
+- A document that commits between the last poll and `view.click(x, y)` is clicked at those coordinates. Bun has the same gap today: its host clicks natively at the centre its script returned. bowser's gap is one daemon to page round trip longer (a poll takes 0.09 ms median). Closing it needs a check inside the page while the pointer events arrive, as Playwright's `setupHitTargetInterceptor` does: #270.
 
 ## Definition of done
 
