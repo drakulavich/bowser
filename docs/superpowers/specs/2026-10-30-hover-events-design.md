@@ -1,6 +1,6 @@
 # hover sends the pointer's entry events and says when the page did not react (#270)
 
-Issue: #270 (the hover part). Status: draft, waiting for review.
+Issue: #270 (the hover part). Status: implemented in this branch (PR #275).
 
 ## Goal
 
@@ -59,18 +59,26 @@ The script grows by about 1 KB. A hover that changes the page costs one more eva
 
 ## Definition of done
 
-1. E2E: `tests/e2e-hover.test.ts` serves a page with a CSS `:hover` menu, an `onmouseover` menu, a `mouseenter` menu, a 150 ms hover-intent menu, and a custom element whose open shadow root holds a button that sets an inner node's text on `mouseenter`. After `hover` on each, all but the CSS menu are open and the CSS menu is closed. `hover` on the CSS menu answers `hovered eN; the page did not change within 200 ms (bowser cannot trigger CSS :hover)` and on the others `hovered eN`; with `--json` the CSS menu's answer has `"changed": false` and the others `"changed": true`. On main the `mouseenter` and hover-intent menus stay closed (1 of 3 of the first three open).
-2. E2E, same file: a target that logs every pointer and mouse event it receives, inside a parent that logs its enter events, logs `pointerover, pointerenter (parent), pointerenter, mouseover, mouseenter (parent), mouseenter, pointermove, mousemove` after one `hover`.
-3. Unit, `tests/browser.test.ts` with a fake view and the fake clock: a record that shows a change on the first read ends `hover` with `true` after one read; a record that never changes ends it with `false` at 200 ms; a read that finds no record answers `true`; a `doc` from another document answers gone without reading.
-4. Unit, `tests/commands.test.ts`: `cmdHover` prints the no-change text and `"changed": false` when the daemon answers `false`, and today's text with `"changed": true` when it answers `true`.
-5. Each test in items 1 to 4 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
-6. `tests/e2e-stale-ref.test.ts`, `tests/e2e-ref-window.test.ts` and the existing hover tests in `tests/commands.test.ts` and `tests/daemon-handler.test.ts` pass. They change only where the result now carries `changed`, and where they hover a control with no hover handler and expect the exact `hovered eN` (`tests/e2e-stale-ref.test.ts:229`, `:230`, `:232`; `:333` hovers a button whose handler sets text, so it keeps `hovered eN`): those expect the no-change text.
-7. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
-8. CHANGELOG `[Unreleased]` has a `Fixed` entry naming #270, and `skills/bowser/references/commands.md` documents the no-change answer.
-9. A Codex review ends with no open Critical or Required finding.
+- [x] 1. E2E: `tests/e2e-hover.test.ts` serves a page with a CSS `:hover` menu, an `onmouseover` menu, a `mouseenter` menu, a 150 ms hover-intent menu, and a custom element whose open shadow root holds a button that sets an inner node's text on `mouseenter`. After `hover` on each, all but the CSS menu are open and the CSS menu is closed. `hover` on the CSS menu answers `hovered eN; the page did not change within 200 ms (bowser cannot trigger CSS :hover)` and on the others `hovered eN`; with `--json` the CSS menu's answer has `"changed": false` and the others `"changed": true`. On main the `mouseenter` and hover-intent menus stay closed (1 of 3 of the first three open).
+- [x] 2. E2E, same file: a target that logs every pointer and mouse event it receives, inside a parent that logs its enter events, logs `pointerover, pointerenter (parent), pointerenter, mouseover, mouseenter (parent), mouseenter, pointermove, mousemove` after one `hover`.
+- [x] 3. Unit, `tests/browser.test.ts` with a fake view and the fake clock: a record that shows a change on the first read ends `hover` with `true` after one read; a record that never changes ends it with `false` at 200 ms; a read that finds no record answers `true`; a `doc` from another document answers gone without reading.
+- [x] 4. Unit, `tests/commands.test.ts`: `cmdHover` prints the no-change text and `"changed": false` when the daemon answers `false`, and today's text with `"changed": true` when it answers `true`.
+- [x] 5. Each test in items 1 to 4 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
+- [x] 6. `tests/e2e-stale-ref.test.ts`, `tests/e2e-ref-window.test.ts` and the existing hover tests in `tests/commands.test.ts` and `tests/daemon-handler.test.ts` pass. They change only where the result now carries `changed`, and where they hover a control with no hover handler and expect the exact `hovered eN` (`tests/e2e-stale-ref.test.ts:229`, `:230`, `:232`; `:333` hovers a button whose handler sets text, so it keeps `hovered eN`): those expect the no-change text.
+- [x] 7. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
+- [x] 8. CHANGELOG `[Unreleased]` has a `Fixed` entry naming #270, and `skills/bowser/references/commands.md` documents the no-change answer.
+- [x] 9. A Codex review ends with no open Critical or Required finding.
 
 ### Run before the code (2026-10-30, worktree at origin/main)
 
 - Items 1 and 2: `bun test ./tests/e2e-hover.test.ts` prints `Test filter "./tests/e2e-hover.test.ts" had no matches`; the file does not exist yet. The probe above is today's red: `[false, true, false, false]`.
 - Items 3 and 4: `git grep -n "did not change within" -- src tests` matches nothing (exit 1).
 - Items 6 and 7 pass on main today and guard against regressions; they are checked after the code.
+
+### Checked after the code (2026-10-30)
+
+- Items 1 and 2: `BOWSER_E2E=1 bun test ./tests/e2e-hover.test.ts` passes locally (2 pass) and in CI run 41087476580. With main's `src/page-scripts.ts`, `src/browser.ts`, `src/daemon/protocol.ts` and `src/commands/interaction.ts` in place it fails both tests: the CSS menu answers `hovered eN` without the no-change text, and the logger reads `mouseover, mousemove`.
+- Items 3 and 4: each test went red under one mutation; the PR body lists them.
+- Item 6: the three `tests/e2e-stale-ref.test.ts` assertions now expect the no-change text and pass in CI; `:333` is unchanged. The #117 `--json` and MCP hover tests and the ACTS hover test changed for `changed` and the read; each went red under a mutation.
+- Item 7: `bun run check` passes locally (1242 pass, 394 skip, 0 fail); CI run 41087476580 passes both jobs (e2e 302 pass, 14 skip, 0 fail).
+- Item 9: Codex approved 39a8022.
