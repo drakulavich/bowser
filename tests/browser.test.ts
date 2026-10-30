@@ -14,6 +14,7 @@ import {
   ENTRY_KEY,
   LEAVE_INITIAL_DOCUMENT,
   DOC_ID,
+  docMatches,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
@@ -2281,5 +2282,41 @@ describe("navigate caps its wait for load (ET-52)", () => {
     clock.setTimeout(() => b.cancelAction?.(), 200);
     await expect(clock.fulfilledAt(b.navigate("https://x/late"))).rejects.toThrow("request timed out before the navigation was sent");
     expect(v.calls.filter(([n]) => n === "navigate")).toEqual([]);
+  });
+});
+
+describe("a ref action on another document than its snapshot's does nothing (#111)", () => {
+  const other = () =>
+    fakeView({
+      evaluate: async (e) => {
+        if (e === docMatches("d1")) return false;
+        return e.includes(docMatches("d1")) ? { gone: true } : undefined;
+      },
+    });
+
+  test("click and type answer gone and never call the view", async () => {
+    const v = other();
+    const b = wrapView(v, fast);
+    expect(await b.click("#a", undefined, "d1")).toEqual({ gone: true });
+    expect(await b.type("hi", "d1")).toEqual({ gone: true });
+    expect(v.calls.filter(([name]) => name === "click" || name === "type")).toEqual([]);
+  });
+
+  test("hover, select and setChecked pass the page's gone answer through", async () => {
+    const b = wrapView(other(), fast);
+    expect(await b.hover("#a", "d1")).toEqual({ gone: true });
+    expect(await b.select("#a", "v", "d1")).toEqual({ gone: true });
+    expect(await b.setChecked("#a", false, "d1")).toEqual({ gone: true });
+  });
+
+  test("on the snapshot's document click and type call the view", async () => {
+    const v = fakeView({ evaluate: async (e) => e === docMatches("d1") });
+    const b = wrapView(v, fast);
+    await b.click("#a", undefined, "d1");
+    await b.type("hi", "d1");
+    expect(v.calls).toEqual([
+      ["click", ["#a"]],
+      ["type", ["hi"]],
+    ]);
   });
 });

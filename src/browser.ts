@@ -8,6 +8,7 @@ import {
   LANDED_PAGE,
   ENTRY_KEY,
   DOC_ID,
+  docMatches,
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
@@ -26,7 +27,7 @@ import {
   selectScript,
   setCheckedScript,
 } from "./page-scripts.ts";
-import type { KeyModifier } from "./daemon/protocol.ts";
+import { GONE, isGone, type Gone, type KeyModifier } from "./daemon/protocol.ts";
 
 export interface BrowserOptions {
   /** Persistent profile directory (`open --persistent`); ephemeral without. */
@@ -104,14 +105,14 @@ export interface Browser {
   evaluate(expr: string): Promise<unknown>;
   /** Bun's selector click: waits up to `timeoutMs` (Bun's default, 30 s,
    *  when absent) for the element to be the topmost at its centre. */
-  click(selector: string, timeoutMs?: number): Promise<void>;
-  type(text: string): Promise<void>;
+  click(selector: string, timeoutMs?: number, doc?: string): Promise<void | Gone>;
+  type(text: string, doc?: string): Promise<void | Gone>;
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
-  hover(selector: string): Promise<void>;
+  hover(selector: string, doc?: string): Promise<void | Gone>;
   /** False when no option's value or label is `value`; nothing changed. */
-  select(selector: string, value: string): Promise<boolean>;
+  select(selector: string, value: string, doc?: string): Promise<boolean | Gone>;
   /** false: `uncheck` of a checked radio, refused in the page (F20). */
-  setChecked(selector: string, checked: boolean): Promise<boolean>;
+  setChecked(selector: string, checked: boolean, doc?: string): Promise<boolean | Gone>;
   screenshot(): Promise<string>; // base64-encoded PNG of the viewport
   resize(width: number, height: number): Promise<void>;
   back(): Promise<void>;
@@ -784,6 +785,7 @@ export function wrapView(
     return run;
   };
   const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
+  const otherDoc = async (doc: string | undefined) => doc != null && (await evaluate(docMatches(doc))) !== true;
 
   return {
     get phase() {
@@ -799,11 +801,18 @@ export function wrapView(
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
-    click: (selector, timeoutMs) => guard(nav.act(() => view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs }))),
-    type: (text) =>
+    click: (selector, timeoutMs, doc) =>
+      guard(
+        nav.act(async () => {
+          if (await otherDoc(doc)) return GONE;
+          await view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs });
+        }),
+      ),
+    type: (text, doc) =>
       guard(
         nav
-          .act(async (): Promise<string | undefined> => {
+          .act(async (): Promise<string | Gone | undefined> => {
+            if (await otherDoc(doc)) return GONE;
             // Lexical keeps a typed "\n" as text in one paragraph (#243); an <input> in a form submits on Enter.
             if (!text.includes("\n") || (await evaluate(TYPE_TARGET_MARK)) !== true) return void (await view.type(text));
             await evaluate(KEY_CODES);
@@ -818,8 +827,9 @@ export function wrapView(
               if (line) await view.type(line);
             }
           })
-          .then((focusLeft) => {
-            if (focusLeft) throw new Error(focusLeft);
+          .then((answer) => {
+            if (isGone(answer)) return answer;
+            if (answer) throw new Error(answer);
           }),
       ),
     press: (key, modifiers = []) =>
@@ -836,14 +846,27 @@ export function wrapView(
     // A page's change or mouse handler can navigate, so the page-script
     // actions go through the watch too (#51: a select whose onchange set
     // location.href left the next snapshot on the old page).
-    hover: (selector) =>
+    hover: (selector, doc) =>
       guard(
         nav.act(async () => {
-          await evaluate(hoverScript(selector));
+          const answer = await evaluate(hoverScript(selector, doc));
+          if (isGone(answer)) return answer;
         }),
       ),
-    select: (selector, value) => guard(nav.act(async () => (await evaluate(selectScript(selector, value))) === true)),
-    setChecked: (selector, checked) => guard(nav.act(async () => (await evaluate(setCheckedScript(selector, checked))) !== false)),
+    select: (selector, value, doc) =>
+      guard(
+        nav.act(async () => {
+          const answer = await evaluate(selectScript(selector, value, doc));
+          return isGone(answer) ? answer : answer === true;
+        }),
+      ),
+    setChecked: (selector, checked, doc) =>
+      guard(
+        nav.act(async () => {
+          const answer = await evaluate(setCheckedScript(selector, checked, doc));
+          return isGone(answer) ? answer : answer !== false;
+        }),
+      ),
     screenshot: async () => {
       // Bun.WebView.screenshot() returns a Blob (image/png) of the viewport; it
       // takes no full-page option. Element-bounded screenshots are not supported.

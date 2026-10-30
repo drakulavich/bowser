@@ -857,8 +857,13 @@ export function keyCommandScript(command: "selectAll" | "undo" | "redo"): string
 })()`;
 }
 
-export function hoverScript(selector: string): string {
+export const docMatches = (doc: string): string => `(window[Symbol.for("bowser.aria-refs")]?.doc === ${JSON.stringify(doc)})`;
+
+const docGuard = (doc: string | undefined, refused = "{ gone: true }"): string => (doc == null ? "" : `if (!${docMatches(doc)}) return ${refused};`);
+
+export function hoverScript(selector: string, doc?: string): string {
   return `(() => {
+        ${docGuard(doc)}
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('hover: element not found');
         const r = el.getBoundingClientRect();
@@ -872,8 +877,9 @@ export function hoverScript(selector: string): string {
  *  text: playwright's selectOption rule. Answers false, touching nothing and
  *  firing no event, when no option matches: assigning an unknown value would
  *  deselect every option. */
-export function selectScript(selector: string, value: string): string {
+export function selectScript(selector: string, value: string, doc?: string): string {
   return `(() => {
+        ${docGuard(doc)}
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('select: element not found');
         const want = ${JSON.stringify(value)};
@@ -894,8 +900,9 @@ export function selectScript(selector: string, value: string): string {
  *  aria-checked="mixed" is off for `check`, as in playwright, and on for
  *  `uncheck`: a mixed checkbox usually goes to true on a click (the APG
  *  cycle), so `uncheck` clicks once more when it then reads true. */
-export function setCheckedScript(selector: string, checked: boolean): string {
+export function setCheckedScript(selector: string, checked: boolean, doc?: string): string {
   return `(() => {
+        ${docGuard(doc)}
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('check: element not found');
         const input = el instanceof HTMLInputElement;
@@ -917,7 +924,7 @@ const FILL_SET_TYPES = ["date", "time", "datetime-local", "month", "week", "colo
 
 /** What `fillScript` found: `type` means the caller types the text now;
  *  `set` means the page took it; the rest are refusals, value untouched. */
-export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "rejected";
+export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "rejected" | "gone";
 
 /** Readies the element `fill` has just clicked, and answers
  *  `{ outcome: FillOutcome, type }` with the input's type (or ""):
@@ -930,8 +937,8 @@ export type FillOutcome = "type" | "set" | "disabled" | "readonly" | "nan" | "re
  *    value, or a contenteditable element's content through a native delete,
  *    which editors that re-render from their own state (Lexical) apply too.
  *  The only value read is a date-like input's, never a password field's. */
-export function fillScript(selector: string, value: string): string {
-  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
+export function fillScript(selector: string, value: string, doc?: string): string {
+  return `(() => { ${docGuard(doc, "{ outcome: 'gone' }")} const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null;
     const type = el instanceof HTMLInputElement ? el.type : '';
     if (el.matches(':disabled')) return { outcome: 'disabled', type };
     if (el.readOnly === true) return { outcome: 'readonly', type };

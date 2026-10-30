@@ -32,7 +32,7 @@ import {
 import { ensureSessionDir, maxSessionNameLength, saveState, loadState, sessionDir, sessionsRoot } from "../src/state.ts";
 import { daemonPids, killDaemons, waitFor } from "./helpers/daemons.ts";
 import { longHome } from "./helpers/long-home.ts";
-import { fakeClient } from "./helpers/fake-client.ts";
+import { fakeClient, type FakeHandlers } from "./helpers/fake-client.ts";
 import { lineSocket } from "./helpers/fake-daemon.ts";
 import { fillScript, READ_VIEWPORT, resolveRefScript, runCodeScript, storageSetScript } from "../src/page-scripts.ts";
 import { UserError } from "../src/errors.ts";
@@ -1705,12 +1705,46 @@ describe("ref commands resolve the ref in the live page first", () => {
       expect(c.calls.find(([o]) => o === op)?.[1][0]).toBe(`fresh-${ref}`);
       expect(JSON.stringify(c.calls)).not.toContain("saved-");
     });
+
+    test(`${name} sends the snapshot's doc with its action (#111)`, async () => {
+      const c = fakeClient({ evaluate: resolving({ [ref]: `fresh-${ref}` }) });
+      await run({ ...ctx(), connect: async () => c });
+      expect(c.calls.find(([o]) => o === op)?.[1]).toContain("doc-1");
+    });
+
+    test(`${name} whose action answers gone fails with the #105 message, exit 1 (#111)`, async () => {
+      const c = fakeClient({ evaluate: resolving({ [ref]: `fresh-${ref}` }), [op]: () => ({ gone: true }) } as FakeHandlers);
+      const err = await run({ ...ctx(), connect: async () => c }).then(
+        (out) => {
+          throw new Error(`expected a failure, got ${out}`);
+        },
+        (e: Error) => e,
+      );
+      expect(err.message).toBe(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
+      expect(reportFailure(err).code).toBe(1);
+    });
   }
 
-  test("fill clears the fresh selector", async () => {
+  test("fill clears the fresh selector, on the snapshot's document only (#111)", async () => {
     const c = fakeClient({ evaluate: resolving({ e2: "fresh-e2" }) });
     await cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi");
-    expect(c.calls).toContainEqual(["evaluate", [fillScript("fresh-e2", "hi")]]);
+    expect(c.calls).toContainEqual(["evaluate", [fillScript("fresh-e2", "hi", "doc-1")]]);
+    expect(c.calls).toContainEqual(["type", ["hi", "doc-1"]]);
+  });
+
+  test("fill whose fill script answers gone fails with the #105 message and types nothing (#111)", async () => {
+    const c = fakeClient({ evaluate: (e) => (resolvedId(e) === "e2" ? "fresh-e2" : { outcome: "gone" }) });
+    await expect(cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi")).rejects.toThrow(
+      new Error("ref 'e2' is from a page that is no longer loaded; take a new snapshot"),
+    );
+    expect(c.calls.map(([o]) => o)).not.toContain("type");
+  });
+
+  test("fill whose type answers gone fails with the #105 message (#111)", async () => {
+    const c = fakeClient({ evaluate: resolving({ e2: "fresh-e2" }), type: () => ({ gone: true }) });
+    await expect(cmdFill({ ...ctx(), connect: async () => c }, "e2", "hi")).rejects.toThrow(
+      new Error("ref 'e2' is from a page that is no longer loaded; take a new snapshot"),
+    );
   });
 
   test("the resolve script embeds the ref, its role and its name with JSON.stringify", () => {

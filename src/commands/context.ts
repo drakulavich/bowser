@@ -3,7 +3,7 @@
 
 import type { FlagSpec } from "../cli/parser.ts";
 import { BrowserExited, browserExited, connectOrSpawn, NoDaemon, OlderDaemon, type ConnectOptions } from "../daemon/client.ts";
-import type { DaemonConnection, DialogReport, PageState } from "../daemon/protocol.ts";
+import { isGone, type DaemonConnection, type DialogReport, type Gone, type PageState } from "../daemon/protocol.ts";
 import { resolveRefScript } from "../page-scripts.ts";
 import { loadState, resolveRef, saveState, statePath, type Ref, type SessionState } from "../state.ts";
 import { markDelivered, otherHolder, readNotice } from "./restart-lock.ts";
@@ -153,9 +153,7 @@ export async function liveSelector(
 ): Promise<string> {
   const ref = target.id;
   const selector = await c.request("resolve", [resolveRefScript(target, opts)]);
-  if ((selector as { gone?: unknown } | null)?.gone === true) {
-    throw new UserError(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
-  }
+  if ((selector as { gone?: unknown } | null)?.gone === true) throw goneError(ref);
   const changed = (selector as { changed?: { role: string; name: string } } | null)?.changed;
   if (changed) {
     throw new UserError(
@@ -176,6 +174,13 @@ export async function liveSelector(
     throw new UserError(`ref '${ref}' not found in the current page snapshot. Try capturing new snapshot.`);
   }
   return selector;
+}
+
+export const goneError = (ref: string) => new UserError(`ref '${ref}' is from a page that is no longer loaded; take a new snapshot`);
+
+export function acted<T>(ref: string, answer: T | Gone): T {
+  if (isGone(answer)) throw goneError(ref);
+  return answer;
 }
 
 /** Every command answers the same way: a JSON object under --json, a line
