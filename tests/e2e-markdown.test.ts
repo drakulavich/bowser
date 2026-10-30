@@ -79,6 +79,8 @@ const LISTS = `<!doctype html><title>lists</title><main>
 const GUIDE = "# Guide\n\nSee [the server](/x) and [the spec](https://e.com/q).";
 // #154 ET-55 and ET-51.
 const TASKS = `<!doctype html><title>tasks</title><main><ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> open</li><li><input type="checkbox" checked hidden> hid</li><li><input type="checkbox" style="display: none"> styled</li><li style="visibility: hidden"><input type="checkbox" checked> gone</li></ul><p><input type="checkbox" checked> outside</p></main>`;
+// #134: links with nested marks, an image inside a link, a block link and an in-page jump.
+const LINK_TEXT = `<!doctype html><title>links</title><main><p>See <a href="/a">plain</a>, <a href="/b"><strong>bold</strong> and <code>code</code></a> and <a href="#top">top</a>.</p><p><a href="/c"><img src="/i.png" alt="Pic"></a></p><div><a href="/d" style="display: block">Block link</a></div></main>`;
 const EMPTY_REGION = `<!doctype html><title>region</title><main><p>Text</p><button aria-label="Empty"></button></main>`;
 const ALT = (href: string) => `<!doctype html><title>alt</title><link rel="alternate" type="text/markdown" href="${href}"><main><p>Rendered</p></main>`;
 
@@ -135,6 +137,7 @@ runOrSkip("e2e: markdown", () => {
         if (path === "/docs/page.html") return html(ALT("/md/guide.md"));
         if (path === "/md/guide.md") return new Response(GUIDE, { headers: { "content-type": "text/markdown" } });
         if (path === "/tasks.html") return html(TASKS);
+        if (path === "/links.html") return html(LINK_TEXT);
         if (path === "/empty-region.html") return html(EMPTY_REGION);
         if (path === "/page.md") return new Response("# From source\n\nText.\n", { headers: { "content-type": "text/markdown" } });
         return new Response("not found", { status: 404 });
@@ -372,6 +375,16 @@ runOrSkip("e2e: markdown", () => {
   test("a checkbox in a list item prints its state (#154)", async () => {
     await cmdGoto(ctx, `${base}/tasks.html`);
     expect(await cmdMarkdown(ctx)).toBe("- [x] done\n- [ ] open\n- [x] hid\n- [ ] styled\n\noutside");
+  }, 60_000);
+
+  test("--link-text keeps each link's text and marks, drops its URL, and leaves images alone (#134)", async () => {
+    await cmdGoto(ctx, `${base}/links.html`);
+    expect(await cmdMarkdown(ctx)).toBe(
+      [`See [plain](${base}/a), [**bold** and \`code\`](${base}/b) and top.`, `[![Pic](${base}/i.png)](${base}/c)`, `[Block link](${base}/d)`].join("\n\n"),
+    );
+    expect(await cmdMarkdown(ctx, undefined, { linkText: true })).toBe(
+      ["See plain, **bold** and `code` and top.", `![Pic](${base}/i.png)`, "Block link"].join("\n\n"),
+    );
   }, 60_000);
 
   test("a rel=alternate Markdown link is used as is", async () => {

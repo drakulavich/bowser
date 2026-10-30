@@ -587,8 +587,13 @@ function startHandover(
     child = Bun.spawn(command, { stdin, stdout: "pipe", stderr: "inherit", env: process.env, cwd: process.cwd() });
     const out = lines(child.stdout)[Symbol.asyncIterator]();
     if (init) {
-      toChild(JSON.stringify({ ...init, id: HANDOVER_ID }));
-      toChild(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
+      try {
+        toChild(JSON.stringify({ ...init, id: HANDOVER_ID }));
+        toChild(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
+      } catch {
+        // The child's stdin can already be closed here; how is still open (#271).
+        throw new Error("it exited");
+      }
       const answered = (async () => {
         for (let r = await out.next(); !r.done; r = await out.next()) {
           if ((JSON.parse(r.value) as { id?: unknown }).id === HANDOVER_ID) return true;
