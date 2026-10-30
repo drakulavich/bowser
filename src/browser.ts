@@ -20,6 +20,7 @@ import {
   STOP_LOADING,
   TYPE_TARGET_FOCUSED,
   TYPE_TARGET_MARK,
+  clickPollScript,
   hoverScript,
   keyCommandScript,
   keyWatchScript,
@@ -50,7 +51,7 @@ export interface ViewLike {
   readonly title: string;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
-  click(selector: string, options?: { timeout?: number }): Promise<void>;
+  click(x: number, y: number): Promise<void>;
   type(text: string): Promise<void>;
   press(key: string, options?: { modifiers: KeyModifier[] }): Promise<void>;
   resize(width: number, height: number): Promise<void>;
@@ -103,8 +104,8 @@ export interface Browser {
   realTitle(): Promise<string>;
   navigate(url: string): Promise<void>;
   evaluate(expr: string): Promise<unknown>;
-  /** Bun's selector click: waits up to `timeoutMs` (Bun's default, 30 s,
-   *  when absent) for the element to be the topmost at its centre. */
+  /** Waits up to `timeoutMs` (30 s when absent) for the element to be
+   *  stable and the topmost at its centre, then clicks that point. */
   click(selector: string, timeoutMs?: number, doc?: string): Promise<void | Gone>;
   type(text: string, doc?: string): Promise<void | Gone>;
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
@@ -307,6 +308,28 @@ const BASELINE_READ_MS = 3000;
 interface LoadWatch {
   over: boolean;
   read?: Promise<unknown>;
+}
+
+/** Bun's default for the selector click that bowser's own wait replaced (#267). */
+const CLICK_TIMEOUT_MS = 30_000;
+const CLICK_POLL_MS = 4;
+const CLICK_NAVIGATED = "click: the page navigated before the click; nothing was clicked, run 'bowser snapshot' to see the new page";
+
+/** One answer of clickPollScript. */
+export type ClickSample = [doc: unknown, frame: number, left?: number, top?: number, width?: number, height?: number, hit?: boolean];
+
+/** The click wait clicks once a sample's frame follows the previous sample's with the same box, and the target is hit at its centre. */
+export function clickStep(
+  previous: ClickSample | undefined,
+  sample: ClickSample,
+  expected: unknown,
+): { kind: "navigated" } | { kind: "retry" } | { kind: "click"; x: number; y: number } {
+  if (sample[0] !== expected) return { kind: "navigated" };
+  const [, frame, left, top, width, height, hit] = sample;
+  if (!previous || frame !== previous[1] + 1 || !hit || left === undefined || top === undefined || width === undefined || height === undefined)
+    return { kind: "retry" };
+  if (previous[2] !== left || previous[3] !== top || previous[4] !== width || previous[5] !== height) return { kind: "retry" };
+  return { kind: "click", x: left + width / 2, y: top + height / 2 };
 }
 
 /** What wrapView reads the time from and waits on. */
@@ -565,6 +588,8 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
   // A reload is a navigation the page's count never sees (#116), so its own landing is not counted.
   let armedAt = 0;
   return {
+    ask,
+    sleep,
     get phase() {
       return phase;
     },
@@ -801,11 +826,27 @@ export function wrapView(
     realTitle: () => resolveTitle(view.title, () => evaluate(READ_TITLE)),
     navigate: (url) => guard(nav.navigate(url, () => view.navigate(url))),
     evaluate: (expr) => evaluate(expr),
-    click: (selector, timeoutMs, doc) =>
+    click: (selector, timeoutMs = CLICK_TIMEOUT_MS, doc) =>
       guard(
-        nav.act(async () => {
-          if (await otherDoc(doc)) return GONE;
-          await view.click(selector, timeoutMs === undefined ? undefined : { timeout: timeoutMs });
+        nav.act(async (): Promise<void | Gone> => {
+          const poll = clickPollScript(selector, doc);
+          const end = clock.now() + timeoutMs;
+          let expected: unknown = doc;
+          let previous: ClickSample | undefined;
+          while (clock.now() < end) {
+            const answer = await nav.ask(poll, end - clock.now());
+            const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
+            if (Array.isArray(sample) && typeof sample[1] === "number") {
+              if (previous === undefined && doc != null && sample[0] !== doc) return GONE;
+              expected ??= sample[0];
+              const step = clickStep(previous, sample as ClickSample, expected);
+              if (step.kind === "navigated") throw new Error(CLICK_NAVIGATED);
+              if (step.kind === "click") return view.click(step.x, step.y);
+              previous = sample as ClickSample;
+            }
+            await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
+          }
+          throw new Error(`timeout waiting for '${selector}' to be actionable`);
         }),
       ),
     type: (text, doc) =>

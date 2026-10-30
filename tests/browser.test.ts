@@ -1,6 +1,6 @@
 // wrapView() against a fake view.
 import { describe, expect, test } from "bun:test";
-import { wrapView, type Clock, type NavTiming, type ViewLike } from "../src/browser.ts";
+import { clickStep, wrapView, type ClickSample, type Clock, type NavTiming, type ViewLike } from "../src/browser.ts";
 import { ACTS, createHandler, dispatch } from "../src/daemon/server.ts";
 import { createSerializer } from "../src/serialize.ts";
 import type { Op } from "../src/daemon/protocol.ts";
@@ -8,6 +8,7 @@ import { waitFor } from "./helpers/daemons.ts";
 import { manualClock } from "./helpers/manual-clock.ts";
 import {
   CANCEL_PENDING_NAVIGATION,
+  clickPollScript,
   keyCommandScript,
   keyWatchScript,
   LANDED_PAGE,
@@ -30,9 +31,13 @@ type Calls = Array<[string, unknown[]]>;
 /** WebKit's text for a navigation it cancelled. */
 const CANCELLED = "The operation couldn’t be completed. (NSURLErrorDomain error -999.)";
 
-type Fake = ViewLike & { calls: Calls; loading: boolean; url: string; land(url: string): void };
+/** `click` sees the selector of the last click poll in place of the point (see fakeView). */
+type FakeClick = (target: string | number, y?: number) => Promise<void>;
+type Fake = Omit<ViewLike, "click"> & { click: FakeClick; calls: Calls; loading: boolean; url: string; land(url: string): void };
 
-function fakeView(over: Partial<ViewLike> = {}): Fake {
+/** With `clickable`, the view answers every click poll, unrecorded, with a target that is ready at once,
+ *  and its `click` gets that poll's selector instead of the point. */
+function fakeView(over: Partial<Fake> = {}, { clickable = true, doc = "fake-doc" } = {}): Fake {
   const calls: Calls = [];
   const v: Fake = {
     calls,
@@ -80,20 +85,120 @@ function fakeView(over: Partial<ViewLike> = {}): Fake {
     },
     ...over,
   };
+  if (!clickable) return v;
+  let evaluate = v.evaluate;
+  let click = v.click;
+  // Each selector gets its own frame count and a 10 px box at x = 10 * its index, so the point names it.
+  const polled: Array<{ selector: string; frame: number }> = [];
+  Object.defineProperties(v, {
+    evaluate: {
+      get: () => {
+        const inner = evaluate;
+        return (expr: string) => {
+          const poll = /Symbol\.for\('bowser\.frames'\)[^]*?document\.querySelector\((".*")\);\n/.exec(expr);
+          if (!poll) return inner(expr);
+          const selector = JSON.parse(poll[1]!) as string;
+          let i = polled.findIndex((p) => p.selector === selector);
+          if (i < 0) i = polled.push({ selector, frame: 0 }) - 1;
+          const sample: ClickSample = [doc, polled[i]!.frame++, 10 * i, 0, 10, 10, true];
+          return Promise.resolve(JSON.stringify(sample));
+        };
+      },
+      set: (fn: ViewLike["evaluate"]) => {
+        evaluate = fn;
+      },
+    },
+    click: {
+      get: () => {
+        const inner = click;
+        return (x: string | number, y?: number) => inner(typeof x === "number" ? (polled[Math.floor(x / 10)]?.selector ?? x) : x, y);
+      },
+      set: (fn: FakeClick) => {
+        click = fn;
+      },
+    },
+  });
   return v;
 }
 
-describe("wrapView click", () => {
-  test("passes its timeout to the view's selector click (#112)", async () => {
-    const v = fakeView();
-    const seen: unknown[] = [];
-    v.click = async (s, o) => {
-      seen.push([s, o]);
+describe("clickStep (#267)", () => {
+  test("frames n and n + 1 with the same box and hit click at the centre", () => {
+    expect(clickStep(["d", 5, 10, 20, 100, 40, true], ["d", 6, 10, 20, 100, 40, true], "d")).toEqual({ kind: "click", x: 60, y: 40 });
+  });
+  test("frames n and n + 2 retry", () => {
+    expect(clickStep(["d", 5, 10, 20, 100, 40, true], ["d", 7, 10, 20, 100, 40, true], "d")).toEqual({ kind: "retry" });
+  });
+  test("a changed box retries", () => {
+    expect(clickStep(["d", 5, 10, 20, 100, 40, true], ["d", 6, 11, 20, 100, 40, true], "d")).toEqual({ kind: "retry" });
+  });
+  test("hit false retries", () => {
+    expect(clickStep(["d", 5, 10, 20, 100, 40, true], ["d", 6, 10, 20, 100, 40, false], "d")).toEqual({ kind: "retry" });
+  });
+  test("a missing box retries", () => {
+    expect(clickStep(["d", 5], ["d", 6, 10, 20, 100, 40, true], "d")).toEqual({ kind: "retry" });
+    expect(clickStep(["d", 5, 10, 20, 100, 40, true], ["d", 6], "d")).toEqual({ kind: "retry" });
+  });
+  test("a changed token is navigated", () => {
+    expect(clickStep(["d", 5, 10, 20, 100, 40, true], ["e", 6, 10, 20, 100, 40, true], "d")).toEqual({ kind: "navigated" });
+  });
+});
+
+describe("wrapView click waits for the target itself (#267)", () => {
+  /** A view whose poll of `#a` (with `doc`) answers `sample(n)` on its n-th call. */
+  function polled(sample: (n: number) => unknown[], doc?: string): Fake {
+    let n = 0;
+    const v = fakeView(
+      {
+        evaluate: async (expr) => {
+          v.calls.push(["evaluate", [expr]]);
+          return expr === clickPollScript("#a", doc) ? JSON.stringify(sample(n++)) : undefined;
+        },
+      },
+      { clickable: false },
+    );
+    v.click = async (...args: unknown[]) => {
+      v.calls.push(["click", args]);
     };
-    await wrapView(v).click("#a", 1234);
-    expect(seen).toEqual([["#a", { timeout: 1234 }]]);
+    return v;
+  }
+  const clicks = (v: Fake) => v.calls.filter(([op]) => op === "click");
+
+  test("clicks the target's centre by coordinates", async () => {
+    const clock = manualClock();
+    const v = polled((n) => ["d", n, 10, 20, 100, 40, true]);
+    await clock.fulfilledAt(wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000));
+    expect(clicks(v)).toEqual([["click", [60, 40]]]);
   });
 
+  test("a sample from another document fails with the navigation message and clicks nothing", async () => {
+    const clock = manualClock();
+    const v = polled((n) => [n === 0 ? "d" : "e", n, 10, 20, 100, 40, true]);
+    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000);
+    await clock.settledAt(click);
+    await expect(click).rejects.toThrow("click: the page navigated before the click; nothing was clicked, run 'bowser snapshot' to see the new page");
+    expect(clicks(v)).toEqual([]);
+  });
+
+  test("with a ref's doc, a first sample from another document is gone and nothing is clicked (#111)", async () => {
+    const clock = manualClock();
+    const v = polled((n) => ["d2", n, 10, 20, 100, 40, true], "d1");
+    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d1");
+    await clock.settledAt(click);
+    expect(await click).toEqual({ gone: true });
+    expect(clicks(v)).toEqual([]);
+  });
+
+  test("a box that never settles fails with Bun's actionability text at the timeout", async () => {
+    const clock = manualClock();
+    const v = polled((n) => ["d", n, n, 20, 100, 40, true]);
+    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000);
+    expect(await clock.settledAt(click)).toBe(1000);
+    await expect(click).rejects.toThrow("timeout waiting for '#a' to be actionable");
+    expect(clicks(v)).toEqual([]);
+  });
+});
+
+describe("wrapView click", () => {
   test("a timed-out navigation-arming read never sends the click", async () => {
     let releaseArm!: () => void;
     let armStarted!: () => void;
@@ -451,6 +556,8 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
 });
 
 const fast = { graceMs: 40, settleMs: 300 };
+/** A ready target is clicked at the click wait's second poll, one poll interval after the first (#267). */
+const CLICK_MS = 4;
 const onClock = (v: ViewLike, timing: NavTiming, clock: Clock) => wrapView(v, timing, undefined, undefined, undefined, clock);
 // For "at once" checks: any wait for a landing costs at least graceMs.
 const slow = { graceMs: 1_000, settleMs: 2_000 };
@@ -478,7 +585,7 @@ describe("wrapView mute (#227)", () => {
  *  cross-document navigation began: `page.navs` is what NAV_COUNT reads.
  *  view.loading stays false, as it does on WebKit for a navigation the page
  *  starts (measured: a link click, a form submit, a script's location change). */
-function pageNavView(over: Partial<ViewLike> = {}) {
+function pageNavView(over: Partial<Fake> = {}) {
   const page: { navs: number; to?: string } = { navs: 0 };
   const v = fakeView({
     evaluate: async (expr) => {
@@ -608,7 +715,7 @@ describe("wrapView navigation watch", () => {
       }, 20);
     };
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#l"))).toBe(20);
+    expect(await clock.settledAt(b.click("#l"))).toBe(20 + CLICK_MS);
     expect(v.url).toBe("https://x/");
   });
 
@@ -622,7 +729,7 @@ describe("wrapView navigation watch", () => {
     const b = onClock(v, { graceMs: 20, settleMs: 300 }, clock);
     const gaveUp = await clock.settledAt(b.click("#stuck"));
     expect(v.loading).toBe(true);
-    expect((await clock.settledAt(b.click("#next"))) - gaveUp).toBe(20);
+    expect((await clock.settledAt(b.click("#next"))) - gaveUp).toBe(20 + CLICK_MS);
   });
 
   test("click returns after a navigation that lands inside the grace window", async () => {
@@ -641,7 +748,7 @@ describe("wrapView navigation watch", () => {
     const v = fakeView();
     const clock = manualClock();
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs);
+    expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs + CLICK_MS);
     expect(v.url).toBe("https://x/");
   });
 
@@ -666,7 +773,7 @@ describe("wrapView navigation watch", () => {
     };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
-    expect(await clock.settledAt(b.click("#l"))).toBe(60);
+    expect(await clock.settledAt(b.click("#l"))).toBe(60 + CLICK_MS);
     expect(v.loading).toBe(true);
   });
 
@@ -690,7 +797,7 @@ describe("wrapView navigation watch", () => {
     page.navs = 1; // left over from a navigation that never landed
     const clock = manualClock();
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs);
+    expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs + CLICK_MS);
     expect(v.calls.map(([n, a]) => (n === "evaluate" ? String(a[0]) : n))).toEqual([NAV_ARM, "click", NAV_COUNT]);
   });
 
@@ -702,7 +809,7 @@ describe("wrapView navigation watch", () => {
     };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
-    expect(await clock.settledAt(b.click("#never"))).toBe(20 + 60);
+    expect(await clock.settledAt(b.click("#never"))).toBe(20 + 60 + CLICK_MS);
   });
 
   test("a navigation that replaces the one the action started is awaited, not ended by the first one's -999", async () => {
@@ -779,7 +886,7 @@ describe("wrapView navigation watch", () => {
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
     const at = await clock.settledAt(b.click("#x"));
     expect(reads).toBe(2);
-    expect(at).toBe(20 + 60);
+    expect(at).toBe(20 + 60 + CLICK_MS);
   });
 
   test("a read that act stops waiting for stays tracked: the next evaluate queues behind it instead of failing", async () => {
@@ -811,9 +918,9 @@ describe("wrapView navigation watch", () => {
     });
     const b = onClock(v, { graceMs: 100, settleMs: 150 }, clock);
     // act stopped waiting for the slow read at its settleMs bound, after the grace.
-    expect(await clock.settledAt(b.click("#btn"))).toBe(100 + 150);
+    expect(await clock.settledAt(b.click("#btn"))).toBe(100 + 150 + CLICK_MS);
     const one = b.evaluate("1");
-    expect(await clock.settledAt(one)).toBe(100 + 1000);
+    expect(await clock.settledAt(one)).toBe(100 + CLICK_MS + 1000);
     expect(await one).toBe(1);
     expect(log).toEqual(["start arm", "end arm", "start count", "end count", "start 1", "end 1"]);
   });
@@ -828,7 +935,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.onNavigationFailed?.(new Error("interrupted")), 60);
     };
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#nocontent"))).toBe(60);
+    expect(await clock.settledAt(b.click("#nocontent"))).toBe(60 + CLICK_MS);
   });
 
   test("a page that cannot answer the read costs the grace window, not a failure", async () => {
@@ -2287,12 +2394,15 @@ describe("navigate caps its wait for load (ET-52)", () => {
 
 describe("a ref action on another document than its snapshot's does nothing (#111)", () => {
   const other = () =>
-    fakeView({
-      evaluate: async (e) => {
-        if (e === docMatches("d1")) return false;
-        return e.includes(docMatches("d1")) ? { gone: true } : undefined;
+    fakeView(
+      {
+        evaluate: async (e) => {
+          if (e === docMatches("d1")) return false;
+          return e.includes(docMatches("d1")) ? { gone: true } : undefined;
+        },
       },
-    });
+      { doc: "d2" },
+    );
 
   test("click and type answer gone and never call the view", async () => {
     const v = other();
@@ -2310,7 +2420,7 @@ describe("a ref action on another document than its snapshot's does nothing (#11
   });
 
   test("on the snapshot's document click and type call the view", async () => {
-    const v = fakeView({ evaluate: async (e) => e === docMatches("d1") });
+    const v = fakeView({ evaluate: async (e) => e === docMatches("d1") }, { doc: "d1" });
     const b = wrapView(v, fast);
     await b.click("#a", undefined, "d1");
     await b.type("hi", "d1");

@@ -37,6 +37,12 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`click` no longer hangs when the page navigates while it waits for its target.** It fails
+  within its budget with "the page navigated before the click; nothing was clicked", exit 2, and
+  the next command works. Bun's click waited for the target with `requestAnimationFrame`, which
+  never fires once the old page is in the back-forward cache, so the click timed out and the
+  session was stuck until `bowser close`. bowser now waits with its own polls and clicks the
+  target's centre. (#267)
 - **A ref action no longer lands on a page that replaced its snapshot's.** When the page navigated
   between the ref lookup and the action, `click`, `fill`, `hover`, `select`, `check` and `uncheck`
   acted on the new document at the old element's CSS path. They now do nothing there and fail with
