@@ -5,6 +5,8 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-31
+
 ### Added
 
 - **`markdown --link-text` drops link URLs.** Each converted link prints as its text, with its
