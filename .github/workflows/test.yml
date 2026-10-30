@@ -28,11 +28,6 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run test --reporter=junit --reporter-outfile=unit.xml
-      - name: Repro handover flake (temporary)
-        run: |
-          (for i in 1 2 3 4 5; do bun run test >/dev/null 2>&1; done) &
-          bun test tests/mcp.test.ts -t "a child that exits at once" --rerun-each 400 2>&1 | grep -E "Received:|^ *[0-9]+ (pass|fail)" | sort | uniq -c
-          wait
       - name: Upload to Flakiness.io
         if: always()
         continue-on-error: true
