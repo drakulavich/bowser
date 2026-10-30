@@ -9,7 +9,7 @@ When the page navigates while `click` waits for its target, the command fails wi
 
 ## What happens today
 
-`Browser.click` calls Bun's `view.click(selector, { timeout })` (`src/browser.ts:595`). Bun runs its actionability check page side through WebKit's `callAsyncJavaScript` and clicks natively at the centre the check returns (`WebViewHost.cpp`, `kActionabilityJS`, `clickSelectorIPC` and `onSelectorComplete`, [oven-sh/bun@f7607a3](https://github.com/oven-sh/bun/blob/f7607a3d350b9c9488d41eab6a18d6cac74794e6/src/runtime/webview/WebViewHost.cpp#L355-L463); the same script is in the 1.4.4 binary bowser runs). Once per animation frame, until it returns or its deadline passes, the script:
+`Browser.click` calls Bun's `view.click(selector, { timeout })` (`src/browser.ts:802`). Bun runs its actionability check page side through WebKit's `callAsyncJavaScript` and clicks natively at the centre the check returns (`WebViewHost.cpp`, `kActionabilityJS`, `clickSelectorIPC` and `onSelectorComplete`, [oven-sh/bun@f7607a3](https://github.com/oven-sh/bun/blob/f7607a3d350b9c9488d41eab6a18d6cac74794e6/src/runtime/webview/WebViewHost.cpp#L355-L463); the same script is in the 1.4.4 binary bowser runs). Once per animation frame, until it returns or its deadline passes, the script:
 
 1. finds the element with `document.querySelector(sel)`;
 2. checks that its bounding box has non-zero width and height and that its centre is inside the viewport;
@@ -123,7 +123,7 @@ Today the loop is Bun's script inside one `view.click(selector)` call, which nev
 - keeps a frame counter on the window under `Symbol.for('bowser.frames')`, `{ f, armed, polled }`. Each poll writes `polled = performance.now()` and, if no rAF loop is armed, starts one whose callback increments `f` and re-arms itself while the last poll is under 100 ms old. While bowser polls, `f` therefore counts every frame; afterwards the loop stops within 100 ms. A new document starts at `f = 0`;
 - reads the document token. With `doc` (a ref's saved document, see Interplay) the token is `window[Symbol.for('bowser.aria-refs')]?.doc`. Without it, it is `DOC_ID` (`src/page-scripts.ts:797`), the per-document random number `navigate` already uses;
 - finds the element with `document.querySelector(selector)`;
-- if it is found, its box has non-zero width and height, and its centre is inside the viewport (Bun's bounds), returns `[token, f, left, top, width, height, hit]`, where `hit` is whether `document.elementFromPoint` at the centre is the element or a descendant. Otherwise it returns `[token, f]`.
+- if it is found, its computed `visibility` is `visible`, its box has non-zero width and height, and its centre is inside the viewport (Bun's bounds), returns `[token, f, left, top, width, height, hit]`, where `hit` is whether `document.elementFromPoint` at the centre is the element or a descendant. Otherwise it returns `[token, f]`.
 
 It does not await, so a document that is suspended between two polls leaves nothing pending.
 
@@ -132,12 +132,14 @@ It does not await, so a document that is suspended between two polls leaves noth
 An attempt takes a first sample, then polls every 4 ms until a sample from a later frame arrives. It succeeds when:
 
 - the second sample's frame is exactly the first's plus one (Playwright's two consecutive frames on WebKit);
-- both have a box, and the boxes are equal in left, top, width and height (Stable; Visible as far as Bun checks it);
-- the second sample's `hit` is true (Receives Events; a `visibility:hidden` element is never the hit target, so Visible's style rule is covered too).
+- both have a box, and the boxes are equal in left, top, width and height (Stable and Visible);
+- the second sample's `hit` is true (Receives Events).
+
+Visible follows `computeBox` except for `display: contents`: such an element has an empty box, so bowser never finds it clickable, as Bun does not today. The `visibility` check is new compared with Bun: a `visibility: hidden` element whose visible child is under the centre used to pass the hit test.
 
 On success bowser calls `view.click(left + width / 2, top + height / 2)` with no options (left button, one click, as today). Attached is checked by `querySelector` in every poll.
 
-The decision is a pure function, `clickStep(first, second, expected, arrivedChanged)` in `src/browser.ts`, returning `navigated`, `click` with the point, or `retry`. It is what the unit tests check.
+The decision is a pure function, `clickStep(first, second, expected, arrivedChanged)` in `src/browser.ts`, returning `navigated`, `click` with the point, or `retry`. #111 adds a fourth result, `gone` (Interplay). It is what the unit tests check.
 
 ### 3. Retries, scrolling and the budget
 
@@ -149,7 +151,7 @@ The whole wait ends at `timeoutMs` after it began: 30000 ms when absent (Bun's d
 
 ### 4. Navigation
 
-A poll whose token differs from the expected one, or an `arrived` count that changed since the wait began, ends the wait with `navigated`. The expected token is `doc` when given, else the first poll's token. `arrived` also covers a page whose `DOC_ID` answers `"sealed"` (the document refuses the symbol), where the token is the same in both documents. It counts only successful landings, so a cancelled navigation (-999) does not end the wait. A same-document navigation (`pushState`, a hash change) keeps the document, so the wait goes on, as a `Locator` would.
+A poll whose token differs from the expected one, or an `arrived` count that changed since the wait began, ends the wait with `navigated`. The expected token is the first poll's token. `arrived` also covers a page whose `DOC_ID` answers `"sealed"` (the document refuses the symbol), where the token is the same in both documents. For such a page the navigation is seen only when `onNavigated` fires, at the end of the load and after the commit, so a click in that gap can land on the new page; a page that seals its document is rare, and today it hangs the same way. It counts only successful landings, so a cancelled navigation (-999) does not end the wait. A same-document navigation (`pushState`, a hash change) keeps the document, so the wait goes on, as a `Locator` would.
 
 ### 5. Messages and exit codes
 
@@ -160,7 +162,7 @@ A poll whose token differs from the expected one, or an `arrived` count that cha
 
 ### 6. Interplay
 
-- #111 (PR #268) gives `Browser.click` the ref's saved `doc` and adds one evaluate of the store's `doc` right before the native click. With this design that check is the poll: `Browser.click(selector, timeoutMs, doc?)` passes `doc` to `clickPollScript`, and the token is compared with it on every poll. A mismatch on the first poll is #111's `{ gone: true }` (the ref is from another document); a mismatch on a later poll is the navigation error above. One document comparison per poll, and no separate pre-check evaluate. If this lands first, #111's click part is passing `doc` through; if #111 lands first, this replaces its pre-check with the poll.
+- #111 (PR #268) gives `Browser.click` the ref's saved `doc` and adds one evaluate of the store's `doc` right before the native click. With this design that check is the poll: `Browser.click(selector, timeoutMs, doc?)` passes `doc` to `clickPollScript`, whose token becomes the store's `doc`, and `clickStep` takes `doc` as the expected token. A first sample whose token differs from `doc` returns `gone`, which `Browser.click` answers as #111's `{ gone: true }` (exit 1, `ref '…' is from a page that is no longer loaded`); a later sample that differs returns `navigated` (exit 2). This change does not add `doc`; #111 does. One document comparison per poll, and no separate pre-check evaluate. If this lands first, #111's click part is passing `doc` through; if #111 lands first, this replaces its pre-check with the poll.
 - The hop: between the last poll and `view.click(x, y)` there is one daemon to page message (a poll takes 0.09 ms median, below). A document that commits in that hop is clicked at those coordinates. With Bun's selector click a commit in the same hop either clicks the new document's element at the same CSS path or hangs (#267). Playwright closes it with the in-page interceptor of step 4; bowser has no interceptor, and a new document would not carry one anyway.
 - Recovery: with no call pending in Bun, the daemon's recovery reload works on the view again after a click that overran its budget for another reason.
 - ACTS, the dialog sync before and after the op, `NAV_ARM`, and the wait for a navigation the click itself starts run as today.
@@ -186,8 +188,8 @@ Measured with `probe7.ts` (Bun 1.4.4, 60 frames a second in the view):
 
 ## Definition of done
 
-1. E2E: `tests/e2e-click-nav.test.ts` serves A, whose button moves every frame and which navigates to B 300 ms after load, and B, whose button sets `document.body.dataset.clicked`. With `BOWSER_OP_TIMEOUT_MS=3000`, `click` on A's button fails in under 3000 ms with the navigation message and exit code 2; on B, `eval document.body.dataset.clicked` prints `undefined`; then `snapshot` and `click` on B's button succeed and the mark reads `yes`, with no `bowser close` in between. On main the click times out and the next command reports `session is stuck`.
-2. Unit, decision: `tests/browser.test.ts` covers `clickStep`: frames n and n + 1 with the same box and `hit` click at the centre; frames n and n + 2 retry; a changed box retries; `hit: false` retries; a missing box retries; a changed token is `navigated`; a changed `arrived` with the same token is `navigated`; a first token that differs from a given `doc` is `navigated`.
+1. E2E: `tests/e2e-click-nav.test.ts` serves A, whose button moves every frame and which navigates to B 300 ms after load, and B, whose button sets `document.body.dataset.clicked`. With `BOWSER_OP_TIMEOUT_MS=3000`, `click` on A's button fails in under 3000 ms with the navigation message and exit code 2; on B, `eval document.body.dataset.clicked` prints `undefined`; then `snapshot` and `click` on B's button succeed and the mark reads `yes`, with no `bowser close` in between. On main the click times out and the next command reports `session is stuck`. A second test in the file clicks a `visibility: hidden` button whose visible child covers its centre: it fails with the acting timeout and the button's handler does not run; on main it is clicked.
+2. Unit, decision: `tests/browser.test.ts` covers `clickStep`: frames n and n + 1 with the same box and `hit` click at the centre; frames n and n + 2 retry; a changed box retries; `hit: false` retries; a missing box retries; a changed token is `navigated`; a changed `arrived` with the same token is `navigated`.
 3. Unit, loop: with a fake view and the fake clock, `Browser.click` calls `view.click(x, y)` with the centre and never `view.click(selector)`; failed attempts are spaced 0, 20, 100, 100, 500, 500 ms; a change of `arrived` during a backoff wait ends it at once with the navigation message and the fake records no click; a box that never settles rejects with `timeout waiting for '<selector>' to be actionable` at `timeoutMs`.
 4. Every test in items 1 to 3 fails when the production line behind its checked value is broken (one mutation each), and the PR body quotes one red line per test.
 5. Existing behaviour: `tests/e2e-covered.test.ts`, `tests/e2e-hangs.test.ts`, `tests/e2e-actions.test.ts`, `tests/e2e-far-element.test.ts` and the #122 test in `tests/browser.test.ts` pass unchanged.
