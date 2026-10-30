@@ -34,6 +34,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **A ref action no longer lands on a page that replaced its snapshot's.** When the page navigated
+  between the ref lookup and the action, `click`, `fill`, `hover`, `select`, `check` and `uncheck`
+  acted on the new document at the old element's CSS path. They now do nothing there and fail with
+  `ref 'e2' is from a page that is no longer loaded; take a new snapshot`, exit 1. (#111)
 - **`bowser mcp` after a handover: no reply to a cancelled call, and no 10 s wait at exit.** A
   call forwarded to the installed bowser and then cancelled by the client got a false "could not
   hand over" reply when the server exited; it now gets none. The server also stayed alive until

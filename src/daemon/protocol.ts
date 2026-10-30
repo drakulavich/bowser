@@ -43,6 +43,11 @@ export interface PageState {
   budgetMs?: number;
 }
 
+/** A ref action refused because the page is not the document `doc` names (#111). */
+export type Gone = { gone: true };
+export const GONE: Gone = { gone: true };
+export const isGone = (x: unknown): x is Gone => (x as Gone | null | undefined)?.gone === true;
+
 interface DaemonOps {
   /** Answers the daemon's bowser version (package.json). Every daemon
    *  through 0.7 answered "pong"; the client refuses both kinds (F2). */
@@ -55,14 +60,14 @@ interface DaemonOps {
   evaluate: { args: [expr: string]; result: unknown };
   /** `evaluate` of a ref's resolve script, after any pending navigation. */
   resolve: { args: [expr: string]; result: unknown };
-  click: { args: [selector: string, timeoutMs?: number]; result: void };
-  type: { args: [text: string]; result: void };
+  click: { args: [selector: string, doc?: string, timeoutMs?: number]; result: void | Gone };
+  type: { args: [text: string, doc?: string]; result: void | Gone };
   press: { args: [key: string, modifiers?: KeyModifier[]]; result: void };
-  hover: { args: [selector: string]; result: void };
-  select: { args: [selector: string, value: string]; result: boolean };
-  check: { args: [selector: string]; result: void };
+  hover: { args: [selector: string, doc?: string]; result: void | Gone };
+  select: { args: [selector: string, value: string, doc?: string]; result: boolean | Gone };
+  check: { args: [selector: string, doc?: string]; result: void | Gone };
   /** false: the element is a checked radio, left checked (F20). */
-  uncheck: { args: [selector: string]; result: boolean };
+  uncheck: { args: [selector: string, doc?: string]; result: boolean | Gone };
   /** The daemon writes the image to `path` and returns `{ path }`. A `scale` above
    *  the window's pixel ratio writes nothing and returns `{ dpr }` (#191).
    *  `fontsLoading` says the 5 s wait for web fonts ran out (#194). */
