@@ -1,7 +1,7 @@
 # click waits in bowser and clicks by coordinates (#267)
 
 Issue: #267. Touches the same native click as the #111 spec (PR #268).
-Status: draft, waiting for review.
+Status: implemented in this branch (PR #269).
 
 ## Goal
 
@@ -57,13 +57,21 @@ One poll sends about 0.9 KB of script and gets back under 100 bytes; it took 0.0
 
 ## Definition of done
 
-1. E2E: `tests/e2e-click-nav.test.ts` serves page A, whose button moves every frame and which navigates to B once its pending `/go` request answers, and page B, whose button sets `document.body.dataset.clicked`. The test answers `/go` 300 ms after the click starts, since a timer from load would race the open and the snapshot. With `BOWSER_OP_TIMEOUT_MS=3000`, `click` on A's button fails in under 3000 ms with the navigation message and exit 2; `eval document.body.dataset.clicked` then prints `undefined`; `snapshot` and `click` on B's button succeed and the mark reads `yes`, with no `bowser close` in between. On main the click times out and the next command reports `session is stuck`.
-2. Unit: `tests/browser.test.ts` covers `clickStep`: frames n and n + 1 with the same box and `hit` click at the centre; frames n and n + 2 retry; a changed box retries; `hit: false` retries; a missing box retries; a changed token is `navigated`.
-3. Unit: with a fake view and the fake clock, `Browser.click` calls `view.click(x, y)` at the centre and never `view.click(selector)`; a navigated sample rejects with the navigation message and records no click; a box that never settles rejects with the timeout text at `timeoutMs`.
-4. Each test in items 1 to 3 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
-5. `tests/e2e-covered.test.ts`, `tests/e2e-hangs.test.ts`, `tests/e2e-actions.test.ts`, `tests/e2e-far-element.test.ts` and the #122 test in `tests/browser.test.ts` pass unchanged.
-6. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
-7. CHANGELOG `[Unreleased]` has a `Fixed` entry naming #267.
-8. A Codex review ends with no open Critical or Required finding, and the PR closes #267.
+- [x] 1. E2E: `tests/e2e-click-nav.test.ts` serves page A, whose button moves every frame and which navigates to B once its pending `/go` request answers, and page B, whose button sets `document.body.dataset.clicked`. The test answers `/go` 300 ms after the click starts, since a timer from load would race the open and the snapshot. With `BOWSER_OP_TIMEOUT_MS=3000`, `click` on A's button fails in under 3000 ms with the navigation message and exit 2; `eval document.body.dataset.clicked` then prints `undefined`; `snapshot` and `click` on B's button succeed and the mark reads `yes`, with no `bowser close` in between. On main the click times out and the next command reports `session is stuck`.
+- [x] 2. Unit: `tests/browser.test.ts` covers `clickStep`: frames n and n + 1 with the same box and `hit` click at the centre; frames n and n + 2 retry; a changed box retries; `hit: false` retries; a missing box retries; a changed token is `navigated`.
+- [x] 3. Unit: with a fake view and the fake clock, `Browser.click` calls `view.click(x, y)` at the centre and never `view.click(selector)`; a navigated sample rejects with the navigation message and records no click; a box that never settles rejects with the timeout text at `timeoutMs`.
+- [x] 4. Each test in items 1 to 3 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
+- [x] 5. `tests/e2e-covered.test.ts`, `tests/e2e-hangs.test.ts`, `tests/e2e-actions.test.ts`, `tests/e2e-far-element.test.ts` and the #122 test in `tests/browser.test.ts` pass unchanged.
+- [x] 6. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
+- [x] 7. CHANGELOG `[Unreleased]` has a `Fixed` entry naming #267.
+- [x] 8. A Codex review ends with no open Critical or Required finding, and the PR closes #267.
 
 Before the code (2026-10-30): `tests/e2e-click-nav.test.ts` does not exist, and `git grep -n clickStep -- src tests` matches nothing.
+
+Checked after the code (2026-10-30):
+
+- Item 1 passed in CI run 41042522987. On main (CI run 41040876322, the test file alone on origin/main) the click took 3005 ms and failed `toBeLessThan(3000)`; that run stopped there, so it did not reach the next command's `session is stuck`.
+- Items 2 and 3: each test went red under one mutation of its line; the PR body lists them.
+- Item 5: the e2e files and the #122 test pass unchanged. Other unit tests did change: `fakeView` answers click polls and maps the clicked point back to the polled selector, nine timing assertions in `tests/browser.test.ts` gained one poll interval (4 ms), and the #112 test in `tests/daemon-handler.test.ts` now pins the time left to the handler deadline.
+- Item 6: `bun run check` passes locally (1208 pass, 381 skip, 0 fail); CI run 41042522987 passes both jobs.
+- Item 8: Codex approved b7b78b0 and the fixes in 91b42c3.
