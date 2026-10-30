@@ -2779,6 +2779,26 @@ describe("an empty --filename (#193)", () => {
   });
 });
 
+describe("markdown --link-text (#134)", () => {
+  test("reaches the page script as the converter's switch, off without the flag", async () => {
+    for (const [flags, line] of [
+      [{ "link-text": true }, "const linkText = true;"],
+      [{}, "const linkText = false;"],
+    ] as const) {
+      const scripts: string[] = [];
+      const c = fakeClient({
+        evaluate: (script: string) => {
+          scripts.push(script);
+          return { markdown: "x", source: "converted", url: "https://x", title: "X" };
+        },
+      });
+      await findCommand("markdown")!.run({ ...ctx(), connect: async () => c }, { positional: [], flags });
+      expect(scripts).toHaveLength(1);
+      expect(scripts[0]).toContain(line);
+    }
+  });
+});
+
 describe("wait-for (#114)", () => {
   const USAGE = "usage: bowser wait-for --url <part> or bowser wait-for --text <text>";
 
