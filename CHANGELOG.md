@@ -27,6 +27,15 @@ All notable changes to this project are documented here. This project follows
   hand over" reply when the server exited; it now gets none. The server also stayed alive until
   10 s after the handover began, though stdin had closed and the installed bowser had exited; it
   now exits once both are done. (ET-40, ET-39, #153)
+- **`bowser mcp` hands over only to a newer installed version.** After a downgrade it keeps
+  running its own version, and the first tool result starts with a line saying the installed
+  bowser is older and that restarting the MCP server switches to it. It used to hand over to the
+  older version, which then refused the server's own sessions. (ET-43, #153)
+- **`bowser mcp` keeps answering `ping` and `tools/list` after a failed handover.** They used to
+  get the "could not hand over" error until a restart. A call the installed bowser was running
+  when it exited now says so: "the installed bowser <v> exited (code N) while running this call".
+  During the handover's drain the server answers `ping` at once instead of after the slowest
+  running call. (ET-41, ET-42, #153)
 
 ## [0.12.0] — 2026-10-21
 

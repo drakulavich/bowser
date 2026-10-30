@@ -203,8 +203,8 @@ function prepareToolCall(id: unknown, params: unknown): PreparedCall {
 }
 
 /** The response, and what to call once it is written: `acks` mark its notices delivered. */
-async function runToolCall(id: unknown, argv: string[], deps: McpDeps): Promise<{ res: object; acks: (() => void)[] }> {
-  const notices: string[] = [];
+async function runToolCall(id: unknown, argv: string[], deps: McpDeps, notice?: string): Promise<{ res: object; acks: (() => void)[] }> {
+  const notices: string[] = notice === undefined ? [] : [notice];
   const acks: (() => void)[] = [];
   const first = (text: string) => [...notices, text].filter(Boolean).join("\n");
   try {
@@ -261,6 +261,7 @@ export interface McpServer {
   accept(line: string): void;
   /** Resolves once every accepted line has been answered and written. */
   idle(): Promise<void>;
+  notice(text: string): void;
 }
 
 /** The server behind `bowser mcp`, minus stdin/stdout.
@@ -284,6 +285,7 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
   const chains = new Map<string, Promise<void>>();
   const inFlight = new Map<unknown, { cancelled: boolean }>();
   const running = new Set<Promise<unknown>>();
+  let pending: string | undefined;
 
   const send = async (res: object): Promise<boolean> => {
     try {
@@ -313,11 +315,14 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     const tail: Promise<void> = prev
       .then(async () => {
         if (token.cancelled) return;
-        const { res, acks } = await runToolCall(id, argv, deps);
+        const notice = pending;
+        pending = undefined;
+        const { res, acks } = await runToolCall(id, argv, deps, notice);
         // Keep this session's chain behind stdout completion. If the peer
         // closed its pipe, the write callback reports EPIPE before a queued
         // command can start and cause another side effect.
         if (!token.cancelled && (await send(res))) for (const ack of acks) ack();
+        else pending ??= notice;
       })
       .finally(() => {
         if (inFlight.get(id) === token) inFlight.delete(id);
@@ -359,7 +364,13 @@ export function createMcpServer(deps: McpDeps, write: (line: string) => void | P
     while (running.size > 0) await Promise.all(running);
   }
 
-  return { accept, idle };
+  return {
+    accept,
+    idle,
+    notice: (text) => {
+      pending = text;
+    },
+  };
 }
 
 /** Make the cwd a directory the server can write to (F37). Tool calls resolve
@@ -465,6 +476,7 @@ export async function serveLines(
 ): Promise<number> {
   let init: { id?: unknown } | undefined;
   let handover: Handover | undefined;
+  let warned = false;
   for await (const line of input) {
     let req: { id?: unknown; method?: unknown } | undefined;
     try {
@@ -473,16 +485,24 @@ export async function serveLines(
     if (handover) {
       // A call it cancels may still be running here.
       if (req?.method === "notifications/cancelled") server.accept(line);
-      handover.send(line);
+      if (req?.method === "ping" && !handover.forwarding()) server.accept(line);
+      else handover.send(line);
       continue;
     }
     if (req?.method === "initialize") init = req;
     if (req?.method === "tools/call") {
       const installed = await opts.installed();
-      if (installed !== undefined && installed !== opts.version) {
+      const order = installed !== undefined && /^\d+\.\d+\.\d+/.test(installed) ? Bun.semver.order(installed, opts.version) : 0;
+      if (installed !== undefined && order > 0) {
         handover = startHandover(server, write, opts.child, init, installed);
         handover.send(line);
         continue;
+      }
+      if (installed !== undefined && order < 0 && !warned) {
+        warned = true;
+        server.notice(
+          `the installed bowser ${installed} is older than this MCP server (${opts.version}), which keeps running ${opts.version}; restart the MCP server to use ${installed}`,
+        );
       }
     }
     server.accept(line);
@@ -491,11 +511,14 @@ export async function serveLines(
     await server.idle();
     return 0;
   }
-  return handover.end();
+  const code = await handover.end();
+  await server.idle();
+  return code;
 }
 
 interface Handover {
   send(line: string): void;
+  forwarding(): boolean;
   end(): Promise<number>;
 }
 
@@ -514,6 +537,7 @@ function startHandover(
   const encoder = new TextEncoder();
   const toChild = (line: string) => input.enqueue(encoder.encode(line + "\n"));
   let failed: string | undefined;
+  let live = false;
   let forwarded: Promise<void> = Promise.resolve();
   let exited: Promise<number> = Promise.resolve(0);
   // Sent to the child and not yet answered: answered here if it exits first.
@@ -537,19 +561,23 @@ function startHandover(
     }
   };
 
-  const refuse = (line: string): Promise<void> | undefined => {
+  const refuse = (line: string, running?: string): Promise<void> | undefined => {
     let req: { id?: unknown; method?: unknown } | undefined;
     try {
       req = JSON.parse(line);
     } catch {}
     if (!req || req.id === undefined || req.id === null) return;
+    if (req.method === "ping" || req.method === "tools/list") {
+      server.accept(line);
+      return server.idle();
+    }
     const text = `bowser mcp could not hand over to the installed bowser ${installed}: ${failed}; restart the MCP server`;
-    const res = req.method === "tools/call" ? toolResult(req.id, text, true) : jsonRpcError(req.id, -32603, text);
+    const res = req.method === "tools/call" ? toolResult(req.id, running ?? text, true) : jsonRpcError(req.id, -32603, text);
     return Promise.resolve(write(JSON.stringify(res) + "\n"));
   };
 
   const ready = (async () => {
-    // The old server writes nothing after this: the child is the only writer.
+    // After this the old server writes only ping replies, until the child is up (ET-42).
     await server.idle();
     const stdin = new ReadableStream<Uint8Array>({
       start: (c) => {
@@ -575,6 +603,7 @@ function startHandover(
       clearTimeout(timer);
       if (got !== true) throw new Error(got === "timeout" ? `it did not answer initialize in ${HANDOVER_MS / 1000} s` : "it exited");
     }
+    live = true;
     forwarded = (async () => {
       for (let r = await out.next(); !r.done; r = await out.next()) {
         const id = idOf(r.value);
@@ -585,7 +614,9 @@ function startHandover(
     exited = child.exited.then(async (code) => {
       await forwarded;
       failed = `it exited (code ${code})`;
-      await Promise.all([...outstanding.values()].map(refuse));
+      live = false;
+      const running = `bowser mcp: the installed bowser ${installed} exited (code ${code}) while running this call; restart the MCP server`;
+      await Promise.all([...outstanding.values()].map((line) => refuse(line, running)));
       outstanding.clear();
       return code;
     });
@@ -596,6 +627,7 @@ function startHandover(
 
   let order: Promise<void> = ready;
   return {
+    forwarding: () => live,
     send(line) {
       order = order.then(async () => {
         if (failed !== undefined) return refuse(line);
