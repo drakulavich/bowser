@@ -118,18 +118,19 @@ The ref action ops take `doc` as their last client argument (`src/daemon/protoco
 | `check` | `[selector, doc?]` | `void \| Gone` |
 | `uncheck` | `[selector, doc?]` | `boolean \| Gone` |
 
-`Gone` is `{ gone: true }`. `doc` comes before `timeoutMs` in `click` because the daemon sets the timeout itself (`server.ts:553`); that line keeps `args[1]` and writes `args[2]`. Without `doc` (plain `type`, `press`, and any caller that has no ref) an op behaves as today. A client never talks to an older daemon: `connect` restarts it first (`OlderDaemon`, `src/commands/context.ts:80`).
+`Gone` is `{ gone: true }`. `doc` comes before `timeoutMs` in `click` because the daemon sets the timeout itself (`server.ts:553`); that line keeps `args[1]` and writes `args[2]`, and the handler maps the wire order to the method: `click: (browser, selector, doc, timeoutMs) => browser.click(selector, timeoutMs, doc)` (`server.ts:348`). Spreading the wire args straight into `browser.click` would pass `doc` as the timeout and bring back the #112 hang. Without `doc` (plain `type`, `press`, and any caller that has no ref) an op behaves as today. A client never talks to an older daemon: `connect` restarts it first (`OlderDaemon`, `src/commands/context.ts:80`).
 
 ### 2. The check in the page
 
 One page-script fragment, `docMatches(doc)`, reads `window[Symbol.for('bowser.aria-refs')]?.doc === <doc>`. `resolveRefScript` keeps its own comparison (`page-scripts.ts:1316`) and is not changed.
 
 - `hoverScript`, `selectScript`, `setCheckedScript` take `doc` and return `{ gone: true }` before `querySelector` when it does not match.
+- The `Browser` methods pass that object through before their own conversions: today `hover` drops the evaluate result, `select` keeps `=== true` and `setChecked` keeps `!== false` (`browser.ts:839-846`), and the `check` handler drops the return (`server.ts:353-355`). Without this, a refused `select` reads as `has no option` and a refused `uncheck` as success.
 - `fillScript` takes `doc` and returns `{ outcome: 'gone' }`. `FillOutcome` (`page-scripts.ts:920`) and `FILL_OUTCOMES` (`interaction.ts:75`) gain `gone`, so `readFillAnswer` does not read it as `type`.
 
 ### 3. The check before a native call
 
-`Browser.click(selector, timeoutMs, doc?)` and `Browser.type(text, doc?)` run the check as the first step of the function they pass to `nav.act`, after `NAV_ARM`: if `doc` is given and `evaluate(docMatches(doc))` is not `true`, they return `GONE` without calling `view.click` or `view.type`. An evaluate that throws propagates as today, so a crashed page keeps its own error. `type`'s line-by-line path (#243) checks once, before the first line.
+`Browser.click(selector, timeoutMs, doc?)` and `Browser.type(text, doc?)` run the check as the first step of the function they pass to `nav.act`, after `NAV_ARM`: if `doc` is given and `evaluate(docMatches(doc))` is not `true`, they return `GONE` without calling `view.click` or `view.type`. An evaluate that throws propagates as today, so a crashed page keeps its own error. `type`'s line-by-line path (#243) checks once, before the first line. After each Enter it already reads `TYPE_TARGET_FOCUSED` (`browser.ts:813-816`), whose mark lives on the old window, so an Enter that moves the page stops the loop with the existing `focus left the editor` error before the next line. The hop after that read is the same window as for `click`.
 
 ### 4. What the command does
 
@@ -143,7 +144,7 @@ A `fill` refused after its `click` landed has clicked the old document's field a
 - #105: `resolve` still refuses first. This check covers only the time after it.
 - #91 and #112 checks: they run in `resolve` and are unchanged. A role or name change in the same document between resolve and action is not covered, as today.
 - #267: a swap during Bun's actionability wait still hangs. A does not make it worse: the check runs before the wait.
-- MCP: the error becomes a tool result with `isError: true`, as for #105 (`toolResult`, `src/mcp.ts:168-172`).
+- MCP: the error becomes a tool result with `isError: true`, as for #105 (`runToolCall`'s catch, `src/mcp.ts:213`).
 - Docs: the message is the #105 one, already in README and `skills/bowser/SKILL.md`. CHANGELOG `[Unreleased]` gets a `Fixed` line.
 
 ## Out of scope
@@ -157,7 +158,7 @@ A `fill` refused after its `click` landed has clicked the old document's field a
 1. Page-script actions refuse a new document: an e2e test, `tests/e2e-ref-window.test.ts`, serves A and B with the same markup (a checkbox, a `<select>`, a button with a hover handler, each at the same CSS path). It runs `snapshot` on A, then each of `check`, `uncheck`, `select` and `hover` with a `ctx.connect` that wraps the real connection and, after the `resolve` reply, sends `navigate` to B before passing the action on. Each fails with `ref '<id>' is from a page that is no longer loaded; take a new snapshot`, and B's state is unchanged (box unchecked, option unchanged, no hover mark). On main each acts on B.
 2. `click` refuses a new document: the same test for `click` on the button: the command fails with the message and B's title is not `B clicked`. On main B's title reads `B clicked`.
 3. `fill` refuses at each step: the same wrapper navigates after `resolve`, after `click`, and (for a contenteditable target) after the `fillScript` evaluate. Each fails with the message, and B's field is empty. On main B's field holds the text.
-4. Daemon side: `tests/browser.test.ts`: with a fake view whose evaluate answers the doc check `false`, `click(selector, undefined, doc)` and `type(text, doc)` return `{ gone: true }` and the fake's `click` and `type` record no call. With a matching answer they call through as today. `tests/daemon-handler.test.ts`: the `click` override keeps `doc` at `args[1]` and puts the timeout at `args[2]`.
+4. Daemon side: `tests/browser.test.ts`: with a fake view whose evaluate answers the doc check `false`, `click(selector, undefined, doc)` and `type(text, doc)` return `{ gone: true }` and the fake's `click` and `type` record no call; `hover`, `select` and `setChecked`, whose evaluate answers `{ gone: true }`, return `{ gone: true }`. With a matching answer they call through as today. `tests/daemon-handler.test.ts`: a `click` request `["#a", "<doc>"]` with a budget reaches `browser.click` as `("#a", <time left>, "<doc>")`, and `check`, `uncheck` and `select` return a browser answer of `{ gone: true }` as their result.
 5. Client side: `tests/commands.test.ts`: each ref command sends its saved `doc` on the action request (and in `fillScript`), and an action answer of `{ gone: true }` gives the message. `tests/exit-codes.test.ts`: a `click e1` whose `click` answers `{ gone: true }` exits 1 with the message on stderr.
 6. No change without a ref: `type` and `press` send no `doc`, and the existing tests for them pass unchanged.
 7. Existing behaviour: the #105, #91, #112 and ET-10 tests (`tests/e2e-stale-ref.test.ts`, `tests/e2e-covered.test.ts`, `tests/e2e-known-state.test.ts`, `tests/e2e-hangs.test.ts`) and the MCP tests pass.
