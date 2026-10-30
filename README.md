@@ -342,7 +342,7 @@ BOWSER_E2E=1 BOWSER_E2E_NET=1 bun test         # + live-internet e2e (GitHub sea
 - [x] `resize`
 - [x] `dialog-accept`/`dismiss` — the answer is set before the action; see [Dialogs](#dialogs)
 - [x] MCP bridge subcommand for non-CLI clients (`bowser mcp`)
-- [ ] Agent skill published to [agentskills.io](https://agentskills.io): the skill and a Claude Code plugin ship from this repo ([Claude Code plugin](#claude-code-plugin)); not listed in a public catalog yet
+- [ ] Agent skill: follows the [agentskills.io](https://agentskills.io/specification) spec and ships as a Claude Code plugin from this repo's marketplace ([Claude Code plugin](#claude-code-plugin)); a listing in Anthropic's plugin directory is still open
 
 ## Migrating from 0.1.0
 
