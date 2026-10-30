@@ -12,9 +12,12 @@ import { UserError } from "../errors.ts";
 // must fit the path budget maxSessionNameLength() was sized for (`pid.99999.tmp`).
 export const LOCK = "upg";
 export const MSG = "msg";
+/** The notice once a surface printed it, for the commands that waited on the same restart (ET-44). */
+export const DELIVERED = "msg.done";
 
 const lockPath = (session: string) => join(sessionDir(session), LOCK);
 const msgPath = (session: string) => join(sessionDir(session), MSG);
+const deliveredPath = (session: string) => join(sessionDir(session), DELIVERED);
 
 export function beingRestarted(session: string): UserError {
   const lock = lockPath(session);
@@ -67,15 +70,29 @@ export function writeNotice(session: string, text: string): void {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, text);
   renameSync(tmp, path);
+  unlink(deliveredPath(session));
 }
 
-export function readNotice(session: string): string {
-  return readTrimmed(msgPath(session));
+/** The undelivered notice, or with `delivered` the last restart's notice either way. */
+export function readNotice(session: string, delivered = false): string {
+  return readTrimmed(msgPath(session)) || (delivered ? readTrimmed(deliveredPath(session)) : "");
+}
+
+export function markDelivered(session: string, text: string): void {
+  if (readNotice(session) !== text) return;
+  try {
+    renameSync(msgPath(session), deliveredPath(session));
+  } catch {}
 }
 
 export function removeNotice(session: string): void {
+  unlink(msgPath(session));
+  unlink(deliveredPath(session));
+}
+
+function unlink(path: string): void {
   try {
-    unlinkSync(msgPath(session));
+    unlinkSync(path);
   } catch {}
 }
 

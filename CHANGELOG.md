@@ -19,6 +19,14 @@ All notable changes to this project are documented here. This project follows
   not answer (stopped, or its socket removed) is listed with `answering: false`, and the text
   output marks it `<name> (not answering; run 'bowser close -s <name>')`. `list` used to leave
   it out, so an agent that checked `list` before `open` saw a free name. (ET-64, #155)
+- **`open <url>` or `goto <url>` as the first command after an upgrade loads only that URL.** The
+  restart used to reload the old page first, so it loaded twice and its load-time side effects ran
+  again. The restart line now says "page at <old url> not reloaded". An `open` whose profile the session does not have still reloads the old page before it
+  is refused. (ET-37, #152)
+- **Every command that waited on an upgrade restart prints its notice.** Of two commands or MCP
+  clients that hit the restart at once, only the one that ran it printed "restarted for bowser …",
+  so the other read an ephemeral session's lost storage with no word about it. A call that starts
+  after the restart finished still gets no notice (#261). (ET-44, #152)
 
 ### Fixed
 
