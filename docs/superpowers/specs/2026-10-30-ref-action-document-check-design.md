@@ -1,7 +1,7 @@
 # Each ref action checks the document it acts on (#111)
 
 Issue: #111. It follows the #105 spec (`2026-10-02-refs-document-identity-design.md`). Probes and the options weighed: [comment on #111](https://github.com/drakulavich/bowser/issues/111#issuecomment-6520014060).
-Status: draft, waiting for review.
+Status: implemented in PR #268.
 
 ## Goal
 
@@ -54,11 +54,11 @@ A helper in `context.ts` throws the #105 `UserError` when an action answers `{ g
 
 ## Definition of done
 
-1. `tests/e2e-ref-window.test.ts` serves A and B with the same markup (a checkbox, a `<select>`, a button with hover and click handlers, at the same CSS paths). After `snapshot` on A, a `ctx.connect` wrapper sends `navigate` to B after the `resolve` reply. `check`, `uncheck` (box starts checked), `select`, `hover` and `click` each fail with the message, and B is unchanged. On main each acts on B.
-2. `fill`, with the navigation after `resolve`, after `click` and (contenteditable) after `fillScript`, fails with the message each time and leaves B's field empty. On main B's field holds the text.
-3. `tests/browser.test.ts`: with a doc check that answers `false`, `click` and `type` return `{ gone: true }` and the fake view records no `click` or `type`; `hover`, `select` and `setChecked` pass a `{ gone: true }` evaluate answer through. `tests/daemon-handler.test.ts`: a `click` request `["#a", "<doc>"]` reaches `browser.click` as `("#a", <time left>, "<doc>")`.
-4. `tests/commands.test.ts`: each ref command sends its saved `doc`, and a `{ gone: true }` answer gives the message. `tests/exit-codes.test.ts`: that case exits 1.
-5. `type` and `press` send no `doc`; the existing tests, the #105, #91, #112 and ET-10 e2e tests and the MCP tests pass unchanged.
-6. Items 1 to 4 fail with the check line removed; one red line each in the PR body.
-7. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
-8. CHANGELOG `[Unreleased]` has a `Fixed` entry naming #111, and the PR closes #111.
+- [x] `tests/e2e-ref-window.test.ts` serves A and B with the same markup (two checkboxes, a `<select>`, a button with hover and click handlers, an input and a contenteditable, at the same CSS paths). After `snapshot` on A, a `ctx.connect` wrapper sends `navigate` to B after the `resolve` reply. `check`, `uncheck` (box starts checked), `select`, `hover` and `click` each fail with the message, and B is unchanged. With the checks removed each command succeeds.
+- [x] `fill`, with the navigation after `resolve`, after `click` and (contenteditable) after `fillScript`, fails with the message each time and leaves B's fields empty.
+- [x] `tests/browser.test.ts`: with a doc check that answers `false`, `click` and `type` return `{ gone: true }` and the fake view records no `click` or `type`; `hover`, `select` and `setChecked` pass a `{ gone: true }` evaluate answer through. `tests/daemon-handler.test.ts`: a `click` request `["#a", "<doc>"]` reaches `browser.click` as `("#a", <time left>, "<doc>")`, and `check`, `uncheck` and `select` answer the browser's `{ gone: true }`.
+- [x] `tests/commands.test.ts`: each ref command sends its saved `doc`, and a `{ gone: true }` answer gives the message. `tests/exit-codes.test.ts`: that case exits 1.
+- [x] `type` and `press` send no `doc`; the existing tests, the #105, #91, #112 and ET-10 e2e tests and the MCP tests pass unchanged.
+- [x] Items 1 to 4 fail with the check line removed; one red line each in the PR body.
+- [x] `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
+- [x] CHANGELOG `[Unreleased]` has a `Fixed` entry naming #111, and the PR closes #111.
