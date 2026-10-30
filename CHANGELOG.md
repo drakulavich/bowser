@@ -30,6 +30,13 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`click` no longer hangs when the page navigates while it waits for its target.** It fails
+  within its budget with "the page navigated before the click; nothing was clicked", exit 2, and
+  the next command works. Bun's click waited for the target with `requestAnimationFrame`, which
+  never fires once the old page is in the back-forward cache, so the click timed out and the
+  session was stuck until `bowser close`. bowser now waits with its own polls and clicks the
+  target's centre. (#267)
+
 - **`bowser mcp` after a handover: no reply to a cancelled call, and no 10 s wait at exit.** A
   call forwarded to the installed bowser and then cancelled by the client got a false "could not
   hand over" reply when the server exited; it now gets none. The server also stayed alive until
