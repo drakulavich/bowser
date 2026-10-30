@@ -37,6 +37,11 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`hover` opens menus that listen for `mouseenter` or `pointerenter`, and says when nothing changed.** It sent only
+  `mouseover` and `mousemove`, so of a CSS `:hover` menu, a `mouseover` menu and a `mouseenter` menu only the
+  second opened. It now sends the entry events a real pointer sends, the enter events to the element and each
+  ancestor. A CSS `:hover` rule still never applies (Bun.WebView has no native pointer move, oven-sh/bun#47485), so
+  when the page does not change within 200 ms the reply says so; `--json` adds `"changed"`. (#270)
 - **`click` no longer hangs when the page navigates while it waits for its target.** It fails
   within its budget with "the page navigated before the click; nothing was clicked", exit 2, and
   the next command works. Bun's click waited for the target with `requestAnimationFrame`, which

@@ -21,6 +21,7 @@ import {
   TYPE_TARGET_FOCUSED,
   TYPE_TARGET_MARK,
   clickPollScript,
+  hoverRead,
   hoverScript,
   keyCommandScript,
   keyWatchScript,
@@ -109,7 +110,8 @@ export interface Browser {
   click(selector: string, timeoutMs?: number, doc?: string): Promise<void | Gone>;
   type(text: string, doc?: string): Promise<void | Gone>;
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
-  hover(selector: string, doc?: string): Promise<void | Gone>;
+  /** true when the page changed within HOVER_WATCH_MS of the events. */
+  hover(selector: string, doc?: string): Promise<boolean | Gone>;
   /** False when no option's value or label is `value`; nothing changed. */
   select(selector: string, value: string, doc?: string): Promise<boolean | Gone>;
   /** false: `uncheck` of a checked radio, refused in the page (F20). */
@@ -314,6 +316,9 @@ interface LoadWatch {
 const CLICK_TIMEOUT_MS = 30_000;
 const CLICK_POLL_MS = 4;
 const CLICK_NAVIGATED = "click: the page navigated before the click; nothing was clicked, run 'bowser snapshot' to see the new page";
+/** Long enough for a hover-intent menu that opens 150 ms after mouseenter (#270). */
+const HOVER_WATCH_MS = 200;
+const HOVER_POLL_MS = 10;
 
 /** One answer of clickPollScript. */
 export type ClickSample = [doc: unknown, frame: number, left?: number, top?: number, width?: number, height?: number, hit?: boolean];
@@ -892,6 +897,13 @@ export function wrapView(
         nav.act(async () => {
           const answer = await evaluate(hoverScript(selector, doc));
           if (isGone(answer)) return answer;
+          const end = clock.now() + HOVER_WATCH_MS;
+          for (;;) {
+            const last = clock.now() >= end;
+            if ((await nav.ask(hoverRead(last), timing.graceMs)) !== false) return true;
+            if (last) return false;
+            await nav.sleep(Math.min(HOVER_POLL_MS, end - clock.now()));
+          }
         }),
       ),
     select: (selector, value, doc) =>

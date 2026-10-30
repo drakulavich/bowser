@@ -18,6 +18,8 @@ import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
 import { loadState } from "../src/state.ts";
 
+/** These buttons have no hover handler (#270). */
+const NO_CHANGE = "; the page did not change within 200 ms (bowser cannot trigger CSS :hover)";
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
 const FIXTURES = join(import.meta.dir, "fixtures");
@@ -226,10 +228,10 @@ runOrSkip("e2e: a stale ref fails at once", () => {
       const send = await refNamed("Send now");
       const post = await refNamed("Post");
       await cmdEval(ctx, `(['save', 'send', 'post'].forEach((id) => document.getElementById(id).style.${hide}), 1)`);
-      expect(await cmdHover(ctx, save)).toBe(`hovered ${save}`);
-      expect(await cmdHover(ctx, send)).toBe(`hovered ${send}`);
+      expect(await cmdHover(ctx, save)).toBe(`hovered ${save}${NO_CHANGE}`);
+      expect(await cmdHover(ctx, send)).toBe(`hovered ${send}${NO_CHANGE}`);
       // #95: its own visibility:hidden reads the same as one inherited from the button.
-      expect(await cmdHover(ctx, post)).toBe(`hovered ${post}`);
+      expect(await cmdHover(ctx, post)).toBe(`hovered ${post}${NO_CHANGE}`);
     }, 60_000);
   }
 

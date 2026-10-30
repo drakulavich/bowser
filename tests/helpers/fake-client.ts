@@ -43,6 +43,7 @@ export function fakeClient(handlers: FakeHandlers = {}, opts: { dialogs?: Dialog
     ping: () => pkg.version,
     state: () => ({ url: currentUrl, title: currentTitle }),
     select: () => true,
+    hover: () => true,
   };
 
   const c: FakeClient = {
