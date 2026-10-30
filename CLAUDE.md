@@ -11,6 +11,7 @@ Every line below traces to a real failure that no test or type check catches. Wh
 ## Code traps
 
 - An op that acts on the page belongs in `ACTS` (`src/daemon/server.ts`). (#7, F10 in PR #46, #51)
+- The plugin's MCP server stays inline in `.claude-plugin/plugin.json`. The plugin root is the repo root, so a root `.mcp.json` would also become a project MCP server for everyone who opens this repo in Claude Code. (#147)
 
 ## Git
 
