@@ -43,7 +43,7 @@ On `click` bowser calls `view.click(left + width / 2, top + height / 2)` with no
 
 With #111: a first sample whose token differs from the ref's `doc` is #111's `{ gone: true }` (exit 1) instead of `navigated`; this replaces #111's separate pre-check evaluate. Whichever PR lands second adapts to the other.
 
-`resolve` still scrolls the target into view and refuses a covered or disabled one before the click (#112). ACTS, the dialog sync, `NAV_ARM` and the wait for a navigation the click starts run as today.
+Both callers of the `click` op, `cmdClick` and `cmdFill` (`src/commands/interaction.ts:35`, `:95`), resolve the ref with `liveSelector` first, which scrolls the target into view and refuses a covered or disabled one (#112). The wait does not scroll; Bun's does not either (`bun.d.ts`: the element "must be ... in the viewport"). ACTS, the dialog sync, `NAV_ARM` and the wait for a navigation the click starts run as today.
 
 ### Cost
 
