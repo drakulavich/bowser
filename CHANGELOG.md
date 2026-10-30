@@ -29,8 +29,11 @@ All notable changes to this project are documented here. This project follows
   is refused. (ET-37, #152)
 - **Every command that waited on an upgrade restart prints its notice.** Of two commands or MCP
   clients that hit the restart at once, only the one that ran it printed "restarted for bowser …",
-  so the other read an ephemeral session's lost storage with no word about it. A call that starts
-  after the restart finished still gets no notice (#261). (ET-44, #152)
+  so the other read an ephemeral session's lost storage with no word about it. (ET-44, #152)
+- **A `bowser mcp` server that was running when the restart finished gets its notice.** Its next
+  call to that session starts with the restart line, once, even after another server printed it.
+  It used to read an ephemeral session's lost storage with no word about it. A CLI command started
+  after the restart still gets no line. (#261)
 
 ### Fixed
 

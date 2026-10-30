@@ -1340,3 +1340,28 @@ describe("a restart's notice is delivered only by a written response (#152)", ()
     expect(acked.n).toBe(1);
   });
 });
+
+test("a handover child counts every restart as news (#261)", async () => {
+  const since = async (id: string) => {
+    const got: number[] = [];
+    const before = Date.now();
+    await serve(
+      [
+        JSON.stringify({ jsonrpc: "2.0", id, method: "initialize", params: { protocolVersion: "2025-06-18" } }),
+        JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "eval", arguments: { expression: "1" } } }),
+      ],
+      {
+        run: async (_argv, base) => {
+          got.push(base?.restarts?.since ?? -1);
+          return "1";
+        },
+        version: "9.9.9",
+      },
+    );
+    return { before, got };
+  };
+  expect((await since("bowser-handover")).got).toEqual([0]);
+  const other = await since("client-1");
+  expect(other.got).toHaveLength(1);
+  expect(other.got[0]).toBeGreaterThanOrEqual(other.before);
+});
