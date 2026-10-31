@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `click` that times out while it waits for its target says nothing was sent.** It said
+  `the click may have been delivered`, though the click had not been sent, and it could still
+  click after the timeout was answered. Now it answers `'click' timed out after <n>ms` and does not
+  click once the request has timed out; `fill`, which clicks first, answers `'fill' timed out
+  after <n>ms (in its 'click' step)`. A click that was sent still says it may have been delivered. (#282)
+
 ## [0.13.0] — 2026-10-31
 
 ### Added

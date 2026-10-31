@@ -259,7 +259,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
         waiting?.delete(onStuck);
         let res = await lane.handle(req, deadline);
         if (!res.ok && req.op === "click" && res.error === `timeout waiting for '${req.args?.[0]}' to be actionable`) {
-          res = { ...res, error: timeoutMessage(req, budget, "acting") };
+          res = { ...res, error: timeoutMessage(req, budget) };
         }
         settled = true;
         if (lane.mark?.stuck === mine) lane.mark.stuck = undefined;
