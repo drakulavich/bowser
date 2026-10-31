@@ -84,14 +84,17 @@ describe("docs claim no command that is gone", () => {
 describe("docs/commands.md matches the registry and the README links", () => {
   const headings = [...DETAILS.matchAll(/^## (.+)$/gm)].map((m) => m[1]!);
 
-  test("every one-word heading is a registered command, and its usage line starts with it", () => {
+  // A command section has a lowercase one-word heading or a usage line under it; `## Dialogs` has neither.
+  test("every command section is headed by a registered command, and its usage line names it", () => {
     const lines = DETAILS.split("\n");
     const wrong: string[] = [];
-    for (const name of headings.filter((h) => /^[a-z][a-z-]*$/.test(h))) {
+    lines.forEach((line, i) => {
+      const name = /^## (.+)$/.exec(line)?.[1];
+      const usage = lines[i + 2] ?? "";
+      if (!name || !(/^[a-z][a-z-]*$/.test(name) || usage.startsWith("`"))) return;
       if (!REGISTERED.has(name)) wrong.push(name);
-      const usage = lines[lines.indexOf(`## ${name}`) + 2]!;
-      for (const m of usage.startsWith("`") ? usage.matchAll(/(?:^|\/ )`([a-z][a-z-]*)/g) : []) if (m[1] !== name) wrong.push(`${name}: ${m[1]}`);
-    }
+      for (const m of usage.matchAll(/(?:^|\/ )`([a-z][a-z-]*)/g)) if (m[1] !== name) wrong.push(`${name}: ${m[1]}`);
+    });
     expect(wrong).toEqual([]);
   });
 
