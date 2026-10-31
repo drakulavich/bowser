@@ -1,7 +1,7 @@
 # hover, check, uncheck and select wait for their target as click does (#270)
 
 Issue: #270. Builds on the click wait of #267 (PR #269) and the hover events of PR #275.
-Status: draft, implementation follows on this branch.
+Status: implemented in this branch (PR #290).
 
 ## Goal
 
@@ -97,21 +97,21 @@ No storage. The page keeps only the existing `bowser.frames` record. The poll gr
 
 ## Definition of done
 
-- [ ] 1. E2E, `tests/e2e-action-wait.test.ts`, hover: a button with a `mouseenter` handler that marks `document.body.dataset.hovered` moves every frame until 600 ms after the test starts it. `hover` on it answers `hovered eN` no sooner than 600 ms after the start and the mark reads `yes`. On main `hover` answers before the button stops.
-- [ ] 2. E2E, same file: on a button that moves every frame and never stops, with `BOWSER_OP_TIMEOUT_MS=3000`, `hover` fails within 4000 ms with `'hover' timed out after 3000ms`, exit 2, and the mark reads `undefined`. On main the mark reads `yes`.
-- [ ] 3. E2E, same file, check and uncheck: a checkbox hidden with `visibility: hidden` after the snapshot and shown again 500 ms later is checked by `check` (and, in a second case, unchecked by `uncheck`) no sooner than 500 ms after the hide. One that stays hidden fails `check` and `uncheck` with `'check' timed out after 3000ms` and `'uncheck' timed out after 3000ms`, exit 2, its state unchanged. On main the hidden checkbox changes state at once.
-- [ ] 4. E2E, same file, select: a `<select>` hidden after the snapshot and shown 500 ms later gets the value and one `change` event; one that stays hidden fails with `'select' timed out after 3000ms`, exit 2, value and change count unchanged. A disabled `<select>` fails at once with `ref 'eN' is disabled`, exit 1, value unchanged. On main all three change the value.
-- [ ] 5. E2E, same file, click: a `visibility: hidden` button whose visible child covers its centre fails `click` with `'click' timed out after 3000ms`, exit 2, and its handler does not run. On main the handler runs.
-- [ ] 6. E2E, same file, the two poll rules: a checkbox inside a `<details>` closed after the snapshot (a non-zero box, `checkVisibility()` false) fails `check` with `'check' timed out after 3000ms` and stays unchecked; on main it is checked. A checkbox far below the fold, hidden after the snapshot, is shown again 500 ms later while the page scrolls back to the top; `check` checks it with its centre outside the viewport; with a poll that drops the box outside the viewport it times out.
-- [ ] 7. Unit, `tests/browser.test.ts`: `clickStep` with `pointer` false acts on the first sample with a box and retries one without; the `pointer` true cases of #267 pass unchanged.
-- [ ] 8. Unit, same file, fake view and fake clock: `hover`, `select` and `setChecked` evaluate their page script only after the poll is ready; a target that never gets a box rejects at `timeoutMs` with the timeout text and the script is never evaluated; a changed token rejects with that op's navigated message and the script is never evaluated.
-- [ ] 9. Unit, `tests/daemon-handler.test.ts`: `hover`, `select`, `check` and `uncheck` receive the time left to the handler deadline as their last arg, and their wait's timeout text reaches the client as `'<op>' timed out after <budget>ms`.
-- [ ] 10. Unit, `tests/commands.test.ts`: `cmdSelect` resolves with `enabled: true`.
-- [ ] 11. Each test in items 1 to 10 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
-- [ ] 12. `tests/e2e-stale-ref.test.ts:204` and the two `#80` tests at `:224` change to expect the timeout, with `BOWSER_OP_TIMEOUT_MS=2000`, in place of the action going through: a hidden ref is still not refused as changed or gone. `tests/e2e-click-nav.test.ts`, `tests/e2e-covered.test.ts`, `tests/e2e-hover.test.ts`, `tests/e2e-forms.test.ts` and `tests/e2e-actions.test.ts` pass unchanged.
-- [ ] 13. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
-- [ ] 14. CHANGELOG `[Unreleased]` has a `Changed` entry naming #270, and the command tables in `README.md` and `skills/bowser/references/commands.md` say that `hover`, `check`, `uncheck` and `select` wait for a visible target and that `select` refuses a disabled one (`docs/commands.md` has no section for these commands).
-- [ ] 15. A Codex review ends with no open Critical or Required finding, and the PR closes #270.
+- [x] 1. E2E, `tests/e2e-action-wait.test.ts`, hover: a button with a `mouseenter` handler that marks `document.body.dataset.hovered` moves every frame until 600 ms after the test starts it. `hover` on it answers `hovered eN` no sooner than 600 ms after the start and the mark reads `yes`. On main `hover` answers before the button stops.
+- [x] 2. E2E, same file: on a button that moves every frame and never stops, with `BOWSER_OP_TIMEOUT_MS=3000`, `hover` fails within 4000 ms with `'hover' timed out after 3000ms`, exit 2, and the mark reads `undefined`. On main the mark reads `yes`.
+- [x] 3. E2E, same file, check and uncheck: a checkbox hidden with `visibility: hidden` after the snapshot and shown again 500 ms later is checked by `check` (and, in a second case, unchecked by `uncheck`) no sooner than 500 ms after the hide. One that stays hidden fails `check` and `uncheck` with `'check' timed out after 3000ms` and `'uncheck' timed out after 3000ms`, exit 2, its state unchanged. On main the hidden checkbox changes state at once.
+- [x] 4. E2E, same file, select: a `<select>` hidden after the snapshot and shown 500 ms later gets the value and one `change` event; one that stays hidden fails with `'select' timed out after 3000ms`, exit 2, value and change count unchanged. A disabled `<select>` fails at once with `ref 'eN' is disabled`, exit 1, value unchanged. On main all three change the value.
+- [x] 5. E2E, same file, click: a `visibility: hidden` button whose visible child covers its centre fails `click` with `'click' timed out after 3000ms`, exit 2, and its handler does not run. On main the handler runs.
+- [x] 6. E2E, same file, the two poll rules: a checkbox inside a `<details>` closed after the snapshot (a non-zero box, `checkVisibility()` false) fails `check` with `'check' timed out after 3000ms` and stays unchecked; on main it is checked. A checkbox far below the fold, hidden after the snapshot, is shown again 500 ms later while the page scrolls back to the top; `check` checks it with its centre outside the viewport; with a poll that drops the box outside the viewport it times out.
+- [x] 7. Unit, `tests/browser.test.ts`: `clickStep` with `pointer` false acts on the first sample with a box and retries one without; the `pointer` true cases of #267 pass unchanged.
+- [x] 8. Unit, same file, fake view and fake clock: `hover`, `select` and `setChecked` evaluate their page script only after the poll is ready; a target that never gets a box rejects at `timeoutMs` with the timeout text and the script is never evaluated; a changed token rejects with that op's navigated message and the script is never evaluated.
+- [x] 9. Unit, `tests/daemon-handler.test.ts`: `hover`, `select`, `check` and `uncheck` receive the time left to the handler deadline as their last arg, and their wait's timeout text reaches the client as `'<op>' timed out after <budget>ms`.
+- [x] 10. Unit, `tests/commands.test.ts`: `cmdSelect` resolves with `enabled: true`.
+- [x] 11. Each test in items 1 to 10 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
+- [x] 12. `tests/e2e-stale-ref.test.ts:204` and the two `#80` tests at `:224` change to expect the timeout, with `BOWSER_OP_TIMEOUT_MS=2000`, in place of the action going through: a hidden ref is still not refused as changed or gone. `tests/e2e-click-nav.test.ts`, `tests/e2e-covered.test.ts`, `tests/e2e-hover.test.ts`, `tests/e2e-forms.test.ts` and `tests/e2e-actions.test.ts` pass unchanged.
+- [x] 13. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
+- [x] 14. CHANGELOG `[Unreleased]` has a `Changed` entry naming #270, and the command tables in `README.md` and `skills/bowser/references/commands.md` say that `hover`, `check`, `uncheck` and `select` wait for a visible target and that `select` refuses a disabled one (`docs/commands.md` has no section for these commands).
+- [x] 15. A Codex review ends with no open Critical or Required finding, and the PR closes #270.
 
 ### Run before the code (2026-10-31, worktree at origin/main ae2a0ad)
 
@@ -119,3 +119,10 @@ No storage. The page keeps only the existing `bowser.frames` record. The poll gr
 - Items 7 to 9: `git grep -n -e "the page navigated before the hover" -e checkVisibility -- src tests` matches nothing (exit 1).
 - Item 10: `git grep -n "enabled: true" -- src/commands/interaction.ts` lists `click` (`:54`), `check` (`:220`) and `uncheck` (`:229`), not `select` (`:210`).
 - Items 12 and 13 pass on main today and are checked after the code.
+
+### Checked after the code (2026-10-31)
+
+- Items 1 to 6 and 12: pass in CI run 41188132841 (e2e 312 pass, 14 skip, 0 fail). With origin/main's `src` (CI run 41189548379) all twelve new or changed e2e tests fail; with a poll that drops `checkVisibility()` and the out-of-view box (CI run 41188825797) only the two item 6 tests fail.
+- Items 7 to 10: each test went red under one mutation of its line; the PR body lists them. The three hover-watch timings in `tests/browser.test.ts` gained the wait's one poll interval (4 ms), and the #111 gone test in `tests/daemon-handler.test.ts` reads the doc by index now that a time-left arg follows it.
+- Item 13: `bun run check` passes locally (1276 pass, 406 skip, 0 fail).
+- Item 15: Codex approved 955c50d.
