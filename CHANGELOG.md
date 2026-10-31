@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`click` and `hover` wait for a hidden target instead of calling it covered.** On an element
+  with `display: none` or `visibility: hidden` they failed at once with
+  `ref 'eN' (…) is covered by document <html> at its click point`, so the wait for the target to
+  be shown never started. Now only a visible element is checked for what covers it; a hidden one
+  is waited for until the budget runs out. (#293)
+
 ## [0.14.0] — 2026-10-31
 
 ### Changed

@@ -1336,7 +1336,7 @@ export function runCodeScript(code: string): string {
  *  point is covered (a fixed header), as playwright-cli does before acting:
  *  WebKit's native click waits for its target to be hittable, so a link below
  *  the fold timed out (spec F8). Here it costs no round trip. With `hit`,
- *  an element still covered at its centre after the scroll answers
+ *  a visible element still covered at its centre after the scroll answers
  *  { covered: { role, name, tag } } for what covers it: the native click
  *  would wait out the budget for it, or press what the page put there (#112). */
 export function resolveRefScript(
@@ -1355,7 +1355,8 @@ export function resolveRefScript(
   const covered = opts.hit
     ? String.raw`
   const area = el.getBoundingClientRect();
-  const top = document.elementFromPoint(area.left + area.width / 2, area.top + area.height / 2);
+  const shown = area.width > 0 && area.height > 0 && el.checkVisibility() && getComputedStyle(el).visibility === 'visible';
+  const top = shown ? document.elementFromPoint(area.left + area.width / 2, area.top + area.height / 2) : null;
   if (top && top !== el && !el.contains(top)) {
     return { covered: { role: ariaRole(top) || 'generic', name: nameOf(top), tag: tagOf(top).toLowerCase() } };
   }`
