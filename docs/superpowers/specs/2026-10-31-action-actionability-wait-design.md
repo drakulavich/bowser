@@ -30,7 +30,7 @@ Playwright's checks are from `docs/src/actionability.md` and `server/dom.ts` at 
 | `click` (reference) | Visible, Stable, Receives Events, Enabled | Visible, Stable, Receives Events; disabled is refused before the wait | Enabled: see the next section |
 | `hover` | Visible, Stable, Receives Events | the same | |
 | `check`, `uncheck` | Visible, Stable, Receives Events, Enabled; returns at once when the state already matches | Visible; disabled is refused before the wait | Playwright presses the mouse at the centre, so the point must hold still and reach the target. bowser calls `el.click()` on the element, which hits it wherever it is. Waiting for a hit would also stall the common styled checkbox whose `<input>` sits under its label's decoration, which `el.click()` checks today. The state is read in `setCheckedScript`, after the wait, so a checkbox already in the asked state still waits to be visible. |
-| `select` | Visible, Enabled; waits until the option exists (`error:optionsnotfound` retries) | Visible; disabled is refused before the wait; a missing option is refused after it | Enabled: see the next section. Missing option: `ref 'eN' has no option "x"` stays immediate (`docs/superpowers/specs/2026-09-27-p1-fixes-design.md:91`); waiting the budget for a typo would cost an agent 30 s. |
+| `select` | Visible, Enabled; waits until the option exists (`error:optionsnotfound` retries) | Visible; disabled is refused before the wait; a missing option is refused after it | Enabled: see the next section. Missing option: `ref 'eN' has no option "x"` stays immediate for a visible `<select>` (`docs/superpowers/specs/2026-09-27-p1-fixes-design.md:91`); waiting the budget for a typo would cost an agent 30 s. `selectScript` reads the options only after the wait, so a `<select>` that stays hidden fails with the timeout, exit 2, even when the option is missing. |
 
 `fill` sends `click` first, so its click step gets the visibility change too. `type` and `press` wait for nothing, as in Playwright.
 
@@ -55,7 +55,7 @@ Open question for review. If disabled targets are waited for instead, the poll a
 
 ### The loop
 
-The loop inside `Browser.click` moves to one function in `wrapView`, `untilActionable(op, selector, timeoutMs, doc, pointer)`. It runs inside `nav.waiting`, polls every 4 ms as `click` does today, and answers the box centre, or #111's gone when the first sample's token is not `doc`. When `doc` is absent the first sample's token is the expected one. Each action calls it, then acts:
+The loop inside `Browser.click` moves to one function in `wrapView`, `untilActionable(op, selector, timeoutMs, doc, pointer)`. It runs inside `nav.waiting`, polls every 4 ms as `click` does today, and answers the box centre, or #111's gone when the first sample's token is not `doc`. `click`'s `doc` is required, and today's loop answers gone when the first token is not `doc` (`src/browser.ts:854`). The other four take an optional `doc`: when it is absent there is no gone check, and the first sample's token is the one a later sample is compared with for `navigated`. Each action calls it, then acts:
 
 | Browser method | `pointer` | then |
 | --- | --- | --- |
@@ -70,7 +70,7 @@ No new option, no scroll on each attempt and no retry backoff. Playwright waits 
 
 ### The daemon
 
-The protocol's `hover`, `select`, `check` and `uncheck` args gain a last `timeoutMs?`, as `click` has. `runShimmed` (`src/daemon/server.ts:552`) gives each of the five ops the time left to its handler deadline, so the wait's own timeout answers before the budget's timer, for the reason #267 found. The mapping at `src/daemon/server.ts:260` turns `timeout waiting for '<selector>' to be actionable` into `timeoutMessage(req, budget)` for all five, not only `click`.
+The protocol's `hover`, `select`, `check` and `uncheck` args gain a `timeoutMs?` after `doc`, as `click` has: `[selector, doc?, timeoutMs?]`, and `[selector, value, doc?, timeoutMs?]` for `select`. `runShimmed` writes it at that index and leaves `doc` in place, `undefined` included. `runShimmed` (`src/daemon/server.ts:552`) gives each of the five ops the time left to its handler deadline, so the wait's own timeout answers before the budget's timer, for the reason #267 found. The mapping at `src/daemon/server.ts:260` turns `timeout waiting for '<selector>' to be actionable` into `timeoutMessage(req, budget)` for all five, not only `click`.
 
 ### Messages
 
@@ -102,19 +102,20 @@ No storage. The page keeps only the existing `bowser.frames` record. The poll gr
 - [ ] 3. E2E, same file, check and uncheck: a checkbox hidden with `visibility: hidden` after the snapshot and shown again 500 ms later is checked by `check` (and, in a second case, unchecked by `uncheck`) no sooner than 500 ms after the hide. One that stays hidden fails `check` and `uncheck` with `'check' timed out after 3000ms` and `'uncheck' timed out after 3000ms`, exit 2, its state unchanged. On main the hidden checkbox changes state at once.
 - [ ] 4. E2E, same file, select: a `<select>` hidden after the snapshot and shown 500 ms later gets the value and one `change` event; one that stays hidden fails with `'select' timed out after 3000ms`, exit 2, value and change count unchanged. A disabled `<select>` fails at once with `ref 'eN' is disabled`, exit 1, value unchanged. On main all three change the value.
 - [ ] 5. E2E, same file, click: a `visibility: hidden` button whose visible child covers its centre fails `click` with `'click' timed out after 3000ms`, exit 2, and its handler does not run. On main the handler runs.
-- [ ] 6. Unit, `tests/browser.test.ts`: `clickStep` with `pointer` false acts on the first sample with a box and retries one without; the `pointer` true cases of #267 pass unchanged.
-- [ ] 7. Unit, same file, fake view and fake clock: `hover`, `select` and `setChecked` evaluate their page script only after the poll is ready; a target that never gets a box rejects at `timeoutMs` with the timeout text and the script is never evaluated; a changed token rejects with that op's navigated message and the script is never evaluated.
-- [ ] 8. Unit, `tests/daemon-handler.test.ts`: `hover`, `select`, `check` and `uncheck` receive the time left to the handler deadline as their last arg, and their wait's timeout text reaches the client as `'<op>' timed out after <budget>ms`.
-- [ ] 9. Unit, `tests/commands.test.ts`: `cmdSelect` resolves with `enabled: true`.
-- [ ] 10. Each test in items 1 to 9 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
-- [ ] 11. `tests/e2e-stale-ref.test.ts:204` and the two `#80` tests at `:224` change to expect the timeout, with `BOWSER_OP_TIMEOUT_MS=2000`, in place of the action going through: a hidden ref is still not refused as changed or gone. `tests/e2e-click-nav.test.ts`, `tests/e2e-covered.test.ts`, `tests/e2e-hover.test.ts`, `tests/e2e-forms.test.ts` and `tests/e2e-actions.test.ts` pass unchanged.
-- [ ] 12. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
-- [ ] 13. CHANGELOG `[Unreleased]` has a `Changed` entry naming #270, and `docs/commands.md` says that `hover`, `check`, `uncheck` and `select` wait for a visible target and that `select` refuses a disabled one.
-- [ ] 14. A Codex review ends with no open Critical or Required finding, and the PR closes #270.
+- [ ] 6. E2E, same file, the two poll rules: a checkbox inside a `<details>` closed after the snapshot (a non-zero box, `checkVisibility()` false) fails `check` with `'check' timed out after 3000ms` and stays unchecked; on main it is checked. A checkbox far below the fold, hidden after the snapshot, is shown again 500 ms later while the page scrolls back to the top; `check` checks it with its centre outside the viewport; with a poll that drops the box outside the viewport it times out.
+- [ ] 7. Unit, `tests/browser.test.ts`: `clickStep` with `pointer` false acts on the first sample with a box and retries one without; the `pointer` true cases of #267 pass unchanged.
+- [ ] 8. Unit, same file, fake view and fake clock: `hover`, `select` and `setChecked` evaluate their page script only after the poll is ready; a target that never gets a box rejects at `timeoutMs` with the timeout text and the script is never evaluated; a changed token rejects with that op's navigated message and the script is never evaluated.
+- [ ] 9. Unit, `tests/daemon-handler.test.ts`: `hover`, `select`, `check` and `uncheck` receive the time left to the handler deadline as their last arg, and their wait's timeout text reaches the client as `'<op>' timed out after <budget>ms`.
+- [ ] 10. Unit, `tests/commands.test.ts`: `cmdSelect` resolves with `enabled: true`.
+- [ ] 11. Each test in items 1 to 10 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
+- [ ] 12. `tests/e2e-stale-ref.test.ts:204` and the two `#80` tests at `:224` change to expect the timeout, with `BOWSER_OP_TIMEOUT_MS=2000`, in place of the action going through: a hidden ref is still not refused as changed or gone. `tests/e2e-click-nav.test.ts`, `tests/e2e-covered.test.ts`, `tests/e2e-hover.test.ts`, `tests/e2e-forms.test.ts` and `tests/e2e-actions.test.ts` pass unchanged.
+- [ ] 13. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
+- [ ] 14. CHANGELOG `[Unreleased]` has a `Changed` entry naming #270, and `docs/commands.md` says that `hover`, `check`, `uncheck` and `select` wait for a visible target and that `select` refuses a disabled one.
+- [ ] 15. A Codex review ends with no open Critical or Required finding, and the PR closes #270.
 
 ### Run before the code (2026-10-31, worktree at origin/main ae2a0ad)
 
-- Items 1 to 5: `bun test ./tests/e2e-action-wait.test.ts` prints `Test filter "./tests/e2e-action-wait.test.ts" had no matches`; the file does not exist yet. The probe in "What happens today" is today's red for items 4 and 5.
-- Items 6 to 8: `git grep -n -e "the page navigated before the hover" -e checkVisibility -- src tests` matches nothing (exit 1).
-- Item 9: `git grep -n "enabled: true" -- src/commands/interaction.ts` lists `click` (`:54`), `check` (`:220`) and `uncheck` (`:229`), not `select` (`:210`).
-- Items 11 and 12 pass on main today and are checked after the code.
+- Items 1 to 6: `bun test ./tests/e2e-action-wait.test.ts` prints `Test filter "./tests/e2e-action-wait.test.ts" had no matches`; the file does not exist yet. The probe in "What happens today" is today's red for items 4 and 5; the details probe for item 6.
+- Items 7 to 9: `git grep -n -e "the page navigated before the hover" -e checkVisibility -- src tests` matches nothing (exit 1).
+- Item 10: `git grep -n "enabled: true" -- src/commands/interaction.ts` lists `click` (`:54`), `check` (`:220`) and `uncheck` (`:229`), not `select` (`:210`).
+- Items 12 and 13 pass on main today and are checked after the code.
