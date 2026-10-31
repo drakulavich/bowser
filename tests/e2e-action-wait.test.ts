@@ -58,6 +58,7 @@ const FORM = `<!doctype html><title>form</title>
 <select id="never" aria-label="Never" onchange="changes[this.id] = (changes[this.id] || 0) + 1"><option>red</option><option>blue</option></select>
 <select id="off" aria-label="Off" disabled onchange="changes[this.id] = (changes[this.id] || 0) + 1"><option>red</option><option>blue</option></select>
 <button id="ghost" style="position: relative; width: 120px; height: 40px" onclick="document.body.dataset.clicked = 'yes'"><span style="visibility: visible; position: absolute; left: 0; top: 0; width: 120px; height: 40px">Ghost</span></button>
+<button id="shy" onclick="document.body.dataset.shy = (+(document.body.dataset.shy ?? 0) + 1) + ''">Shy</button>
 <details open id="more"><summary>More</summary><label><input type="checkbox" id="inner"> Inner</label></details>
 <div style="height: 3000px"></div>
 <label><input type="checkbox" id="far"> Far</label>
@@ -233,4 +234,20 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     await cmdCheck(ctx, far);
     expect(await evalText("String(far.checked) + ' ' + (far.getBoundingClientRect().top > innerHeight)")).toBe("true true");
   }, 30_000);
+
+  for (const [how, hide, show] of [
+    ["display: none", "shy.style.display = 'none'", "shy.style.display = ''"],
+    ["visibility: hidden", "shy.style.visibility = 'hidden'", "shy.style.visibility = ''"],
+  ] as const) {
+    test(`click on a button hidden with ${how} waits for it to be shown, then clicks it (#293)`, async () => {
+      await cmdOpen(ctx, `${base}/form`);
+      await cmdSnapshot(ctx);
+      const shy = await refNamed("Shy");
+      const t0 = performance.now();
+      await evalText(`(${hide}, setTimeout(() => { ${show}; }, 300), 1)`);
+      expect(await cmdClick(ctx, shy)).toBe(`clicked ${shy} (button "Shy")`);
+      expect(performance.now() - t0).toBeGreaterThanOrEqual(300);
+      expect(await evalText("String(document.body.dataset.shy)")).toBe("1");
+    }, 30_000);
+  }
 });
