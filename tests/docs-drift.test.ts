@@ -1,5 +1,5 @@
-// The registry is the source of truth for what commands exist; README and
-// SKILL.md are hand-written. Both directions drift, so both are checked: a
+// The registry is the source of truth for what commands exist; README,
+// SKILL.md and docs/commands.md are hand-written. Both directions drift, so both are checked: a
 // command added without a doc row, and a doc row left behind by a command
 // that was renamed or removed.
 import { describe, expect, test } from "bun:test";
@@ -11,6 +11,7 @@ import pkg from "../package.json";
 const ROOT = join(import.meta.dir, "..");
 const README = readFileSync(join(ROOT, "README.md"), "utf8");
 const SKILL = readFileSync(join(ROOT, "skills/bowser/SKILL.md"), "utf8");
+const DETAILS = readFileSync(join(ROOT, "docs/commands.md"), "utf8");
 
 /** The command names in a file's command-reference table: the section under
  *  its `## Command reference` heading (either case), up to the next `## `.
@@ -71,6 +72,44 @@ describe("docs claim no command that is gone", () => {
 
   test("SKILL.md", () => {
     expect(claimed(SKILL).filter((n) => !REGISTERED.has(n))).toEqual([]);
+  });
+
+  test("docs/commands.md", () => {
+    expect(claimed(DETAILS).filter((n) => !REGISTERED.has(n))).toEqual([]);
+  });
+});
+
+// docs/commands.md has a `## <name>` section per command with more to say, and
+// the README links into it by anchor; a rename leaves either one stale.
+describe("docs/commands.md matches the registry and the README links", () => {
+  const headings = [...DETAILS.matchAll(/^## (.+)$/gm)].map((m) => m[1]!);
+
+  // A command section has a lowercase one-word heading or a usage line under it; `## Dialogs` has neither.
+  test("every command section is headed by a registered command, and its usage line names it", () => {
+    const lines = DETAILS.split("\n");
+    const wrong: string[] = [];
+    lines.forEach((line, i) => {
+      const name = /^## (.+)$/.exec(line)?.[1];
+      const usage = lines[i + 2] ?? "";
+      if (!name || !(/^[a-z][a-z-]*$/.test(name) || usage.startsWith("`"))) return;
+      if (!REGISTERED.has(name)) wrong.push(name);
+      for (const m of usage.matchAll(/(?:^|\/ )`([A-Za-z][A-Za-z-]*)/g)) if (m[1] !== name) wrong.push(`${name}: ${m[1]}`);
+    });
+    expect(wrong).toEqual([]);
+  });
+
+  test("every README link into it names one of its headings", () => {
+    const anchors = new Set(
+      headings.map((h) =>
+        h
+          .toLowerCase()
+          .replace(/[^a-z0-9 -]/g, "")
+          .replaceAll(" ", "-"),
+      ),
+    );
+    const links = [...README.matchAll(/docs\/commands\.md#([a-z0-9-]+)/g)].map((m) => m[1]!);
+    expect(links.length).toBeGreaterThan(0);
+    expect(links.filter((a) => !anchors.has(a))).toEqual([]);
   });
 });
 
