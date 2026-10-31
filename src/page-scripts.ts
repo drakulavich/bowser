@@ -796,9 +796,9 @@ export const MUTE_MEDIA = String.raw`(() => {
 /** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
 export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
 export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
-/** One poll of the click wait (#267), as PAGE_JSON text: `[doc, frame]` (`doc` is the ref store's when one is given, #111), plus `left, top, width, height, hit` when the target has a box with its centre in view.
+/** One poll of the click wait (#267), as PAGE_JSON text: `[doc, frame]` (`doc` is the ref store's, #111), plus `left, top, width, height, hit` when the target has a box with its centre in view.
  *  Synchronous: an evaluate that awaits a frame never settles once its page is in the back-forward cache. */
-export function clickPollScript(selector: string, doc?: string): string {
+export function clickPollScript(selector: string): string {
   return String.raw`${PAGE_JSON}((() => {
   const k = Symbol.for('bowser.frames');
   const c = window[k] ??= { f: 0, armed: false, polled: 0 };
@@ -812,7 +812,7 @@ export function clickPollScript(selector: string, doc?: string): string {
     };
     requestAnimationFrame(tick);
   }
-  const doc = ${doc == null ? DOC_ID : `window[Symbol.for('bowser.aria-refs')]?.doc ?? null`};
+  const doc = window[Symbol.for('bowser.aria-refs')]?.doc ?? null;
   const el = document.querySelector(${JSON.stringify(selector)});
   if (!el) return [doc, c.f];
   const r = el.getBoundingClientRect();

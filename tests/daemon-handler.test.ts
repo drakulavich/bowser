@@ -329,7 +329,7 @@ describe("createHandler", () => {
   test("a click is given the time left until the handler's deadline, so its own timeout is answered before the budget's timer (#112, #267)", async () => {
     const b = fakeBrowser();
     const deadline = Date.now() + 1000;
-    await createHandler(b)(req("click", ["#a"]), deadline);
+    await createHandler(b)(req("click", ["#a", "d1"]), deadline);
     const [, args] = b.calls.find(([name]) => name === "click")!;
     expect(args[0]).toBe("#a");
     expect(args[1]).toBeGreaterThan(950);
@@ -364,8 +364,8 @@ describe("createHandler", () => {
 
   test("a click with no budget is given no timeout", async () => {
     const b = fakeBrowser();
-    await createHandler(b)(req("click", ["#a"]));
-    expect(b.calls.find(([name]) => name === "click")).toEqual(["click", ["#a", undefined]]);
+    await createHandler(b)(req("click", ["#a", "d1"]));
+    expect(b.calls.find(([name]) => name === "click")).toEqual(["click", ["#a", undefined, "d1"]]);
   });
 
   test("a throwing browser method becomes { ok: false, error }", async () => {
@@ -374,7 +374,7 @@ describe("createHandler", () => {
         throw new Error("click: element not found");
       },
     });
-    expect(await createHandler(b)(req("click", ["#nope"]))).toEqual({
+    expect(await createHandler(b)(req("click", ["#nope", "d1"]))).toEqual({
       id: 7,
       ok: false,
       error: "click: element not found",
@@ -390,7 +390,7 @@ describe("createHandler", () => {
     const crashed = "the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'";
     const b = fakeBrowser({ evaluate: dead, click: dead });
     expect(await createHandler(b)(req("evaluate", ["1+1"]))).toEqual({ id: 7, ok: false, error: crashed });
-    expect(await createHandler(b)(req("click", ["#a"]))).toEqual({ id: 7, ok: false, error: crashed });
+    expect(await createHandler(b)(req("click", ["#a", "d1"]))).toEqual({ id: 7, ok: false, error: crashed });
     const other = fakeBrowser({
       evaluate: async () => {
         throw new Error("TypeError: x is not a function");

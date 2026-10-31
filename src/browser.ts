@@ -108,7 +108,7 @@ export interface Browser {
   evaluate(expr: string): Promise<unknown>;
   /** Waits up to `timeoutMs` (30 s when absent) for the element to be
    *  stable and the topmost at its centre, then clicks that point. */
-  click(selector: string, timeoutMs?: number, doc?: string): Promise<void | Gone>;
+  click(selector: string, timeoutMs: number | undefined, doc: string): Promise<void | Gone>;
   type(text: string, doc?: string): Promise<void | Gone>;
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
   /** true when the page changed within HOVER_WATCH_MS of the events. */
@@ -844,17 +844,15 @@ export function wrapView(
       guard(
         nav.act(async (): Promise<void | Gone> => {
           const target = await nav.waiting(async (): Promise<{ x: number; y: number } | Gone> => {
-            const poll = clickPollScript(selector, doc);
+            const poll = clickPollScript(selector);
             const end = clock.now() + timeoutMs;
-            let expected: unknown = doc;
             let previous: ClickSample | undefined;
             while (clock.now() < end) {
               const answer = await nav.ask(poll, end - clock.now());
               const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
               if (Array.isArray(sample) && typeof sample[1] === "number") {
-                if (previous === undefined && doc != null && sample[0] !== doc) return GONE;
-                expected ??= sample[0];
-                const step = clickStep(previous, sample as ClickSample, expected);
+                if (previous === undefined && sample[0] !== doc) return GONE;
+                const step = clickStep(previous, sample as ClickSample, doc);
                 if (step.kind === "navigated") throw new Error(CLICK_NAVIGATED);
                 if (step.kind === "click") return step;
                 previous = sample as ClickSample;

@@ -18,6 +18,7 @@ import { cmdEval, cmdRunCode } from "../src/commands/scripting.ts";
 import { opTimeoutMs } from "../src/budget.ts";
 import { cmdScreenshot, cmdSnapshot, maxCaptureHeight } from "../src/commands/snapshot.ts";
 import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
+import type { SnapshotResult } from "../src/snapshot.ts";
 import { loadState } from "../src/state.ts";
 
 const E2E = process.env.BOWSER_E2E === "1";
@@ -276,9 +277,10 @@ runOrSkip("e2e: real browser", () => {
     };
     try {
       await timed(b.navigate(`data:text/html,${encodeURIComponent(html)}`));
-      await timed(b.evaluate(SNAPSHOT_SCRIPT));
-      await timed(b.click("#go"));
-      await timed(b.click("#more"));
+      let doc = "";
+      await timed(b.evaluate(SNAPSHOT_SCRIPT).then((snap) => (doc = (snap as SnapshotResult).doc)));
+      await timed(b.click("#go", undefined, doc));
+      await timed(b.click("#more", undefined, doc));
       await timed(b.realUrl());
       await timed(b.screenshot());
       await Bun.sleep(1500);

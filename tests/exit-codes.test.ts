@@ -63,6 +63,7 @@ async function seed(session: string): Promise<void> {
     url: "https://x/",
     title: "X",
     updatedAt: Date.now(),
+    doc: "d1",
     refs: [
       { id: "e1", role: "button", name: "Go", tag: "button" },
       { id: "e2", role: "textbox", name: "Email", tag: "input" },
@@ -76,8 +77,8 @@ async function seed(session: string): Promise<void> {
  *  every other script with `other`. */
 function resolvesThen(other: unknown) {
   return (expr: string): unknown =>
-    expr === resolveRefScript({ id: "e2", role: "textbox", name: "Email" }, { hit: true }) ||
-    expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true })
+    expr === resolveRefScript({ id: "e2", role: "textbox", name: "Email" }, { doc: "d1", hit: true }) ||
+    expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true, doc: "d1" })
       ? "input"
       : other;
 }

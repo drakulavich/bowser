@@ -635,6 +635,7 @@ describe("F21: a timeout names the command", () => {
       url: "https://x",
       title: "X",
       updatedAt: 1,
+      doc: "d1",
       refs: [{ id: "e2", role: "textbox", name: "Under", tag: "input" }],
     });
   }

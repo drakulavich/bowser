@@ -64,6 +64,7 @@ async function seedRefs() {
       { id: "e3", role: "combobox", name: "Color", tag: "select" },
       { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
     ],
+    doc: "d1",
     updatedAt: Date.now(),
   });
 }
@@ -445,7 +446,7 @@ describe("too many arguments", () => {
     const c = fakeClient({ evaluate: resolving({ e2: "input", e3: "select" }), select: () => true });
     const base = { connect: async () => c };
     expect(await run(["select", "e3", ""], base)).toContain(`selected e3 -> ""`);
-    expect(c.calls).toContainEqual(["select", ["select", ""]]);
+    expect(c.calls).toContainEqual(["select", ["select", "", "d1"]]);
     expect(await run(["fill", "e2", ""], base)).toContain("filled e2");
     expect(await run(["-s", session, "localstorage-set", "k", ""], base)).toContain("set k");
     expect(c.calls).toContainEqual(["evaluate", [storageSetScript("localStorage", "k", "")]]);
@@ -1047,6 +1048,7 @@ describe("cmdClick", () => {
         title: "Example",
         tree: [],
         refs: [{ id: "e1", role: "button", name: "Go", tag: "button" }],
+        doc: "d1",
       }),
     });
     // Use cmdSnapshot (new name) for setup
@@ -1079,6 +1081,7 @@ describe("cmdFill", () => {
         title: "Example",
         tree: [],
         refs: [{ id: "e1", role: "textbox", name: "Email", tag: "input" }],
+        doc: "d1",
       }),
     });
     await cmdSnapshot({ ...ctx(), connect: async () => snapC }, {});
@@ -1114,12 +1117,13 @@ describe("click", () => {
       url: "https://x",
       title: "X",
       refs: [{ id: "e1", role: "link", name: "Home", tag: "a" }],
+      doc: "d1",
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e1: "a" }) });
     const out = await cmdClick({ ...ctx(), connect: async () => c }, "e1");
     expect(out).toContain("clicked e1");
-    expect(c.calls).toContainEqual(["click", ["a"]]);
+    expect(c.calls).toContainEqual(["click", ["a", "d1"]]);
   });
 });
 
@@ -1139,7 +1143,7 @@ describe("--json of every ref command names the element (#117)", () => {
     [["uncheck", "e4"], { ok: true, ref: "e4", element: { role: "checkbox", name: "Agree" } }],
   ] as const) {
     test(`bowser --json ${argv.join(" ")}`, async () => {
-      await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+      await saveState({ name: session, url: "https://x", title: "X", refs: REFS, doc: "d1", updatedAt: Date.now() });
       const c = fakeClient({ evaluate: () => "sel" });
       const out = await run(["-s", session, "--json", ...argv], { connect: async () => c });
       expect(JSON.parse(out)).toEqual(expected);
@@ -1154,6 +1158,7 @@ describe("fill", () => {
       url: "https://x",
       title: "X",
       refs: [{ id: "e2", role: "textbox", name: "Email", tag: "input" }],
+      doc: "d1",
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: resolving({ e2: "input" }) });
@@ -1175,6 +1180,7 @@ describe("fill", () => {
       url: "https://x",
       title: "X",
       refs: [{ id: "e2", role: "textbox", name: "Email", tag: "input" }],
+      doc: "d1",
       updatedAt: Date.now(),
     });
     const c = fakeClient({ evaluate: answering(answer) });
@@ -1221,6 +1227,7 @@ describe("fill", () => {
       url: "https://x",
       title: "X",
       refs: [{ id: "e2", role: "textbox", name: "Email", tag: "input" }],
+      doc: "d1",
       updatedAt: Date.now(),
     });
     const resolve = resolving({ e2: "input" });
@@ -1231,7 +1238,7 @@ describe("fill", () => {
       },
     });
     const err = await cmdFill({ ...ctx(), connect: async () => c }, "e2", SECRET).catch((e: Error) => e);
-    expect(c.calls).toContainEqual(["evaluate", [fillScript("input", SECRET)]]);
+    expect(c.calls).toContainEqual(["evaluate", [fillScript("input", SECRET, "d1")]]);
     expect((err as Error).message).not.toContain(SECRET);
   });
 });
@@ -1441,7 +1448,7 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
     { id: "e5", role: "radio", name: "Large", tag: "input" },
   ];
   beforeEach(async () => {
-    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, doc: "d1", updatedAt: Date.now() });
   });
 
   for (const [name, ref, run, hit] of [
@@ -1451,7 +1458,7 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
   ] as const) {
     const resolve = resolveRefScript(
       REFS.find((r) => r.id === ref)!,
-      { enabled: true, ...(hit ? { hit } : {}) },
+      { enabled: true, doc: "d1", ...(hit ? { hit } : {}) },
     );
     test(`${name} on a disabled element: exit 1, and the resolve is the only request`, async () => {
       const c = fakeClient({ evaluate: (expr) => (expr === resolve ? { disabled: true } : undefined) });
@@ -1583,6 +1590,7 @@ describe("actions refuse a ref of the wrong kind", () => {
   });
 
   test("fill accepts textbox, textarea, searchbox, spinbutton, input combobox and contenteditable", async () => {
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, doc: "d1", updatedAt: Date.now() });
     for (const id of ["e8", "e9", "e10", "e11", "e12", "e13"]) {
       await cmdFill(actx(), id, "hi");
     }
@@ -2287,7 +2295,7 @@ describe("fill --stdin", () => {
     connected = false;
     reads = 0;
     c = fakeClient({ evaluate: resolving({ e2: "input" }) });
-    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() });
+    await saveState({ name: session, url: "https://x", title: "X", refs: REFS, doc: "d1", updatedAt: Date.now() });
   });
 
   const CASES: Array<[string, string, string]> = [
@@ -2453,7 +2461,7 @@ describe("fill --stdin", () => {
       }
     };
     try {
-      await inHome(() => saveState({ name: "stdin", url: "https://x", title: "X", refs: REFS, updatedAt: Date.now() }));
+      await inHome(() => saveState({ name: "stdin", url: "https://x", title: "X", refs: REFS, doc: "d1", updatedAt: Date.now() }));
       const p = Bun.spawn({
         cmd: [process.execPath, join(import.meta.dir, "../src/cli.ts"), "-s", "stdin", "fill", "e2", "x", "--stdin"],
         env: { ...process.env, HOME: home },
@@ -2487,6 +2495,7 @@ describe("dialogs", () => {
       url: "https://x",
       title: "X",
       updatedAt: Date.now(),
+      doc: "d1",
       refs: [
         { id: "e1", role: "button", name: "go", tag: "button" },
         { id: "e2", role: "textbox", name: "Email", tag: "input" },
@@ -2604,6 +2613,7 @@ describe("dialogs", () => {
       url: "https://x",
       title: "X",
       updatedAt: Date.now(),
+      doc: "d1",
       refs: [
         { id: "e2", role: "textbox", name: "Email", tag: "input" },
         { id: "e3", role: "combobox", name: "Color", tag: "select" },
@@ -2717,6 +2727,7 @@ describe("a failed page command still reports its dialogs", () => {
       url: "https://x",
       title: "X",
       updatedAt: Date.now(),
+      doc: "d1",
       refs: [{ id: "e1", role: "button", name: "go", tag: "button" }],
     });
     const c = fakeClient({ evaluate: () => null }, { dialogs: [dismissed] });
@@ -2766,6 +2777,7 @@ describe("fill and type errors never carry the entered text", () => {
       url: "https://x",
       title: "X",
       updatedAt: Date.now(),
+      doc: "d1",
       refs: [{ id: "e2", role: "textbox", name: "Password", tag: "input" }],
     });
   });
