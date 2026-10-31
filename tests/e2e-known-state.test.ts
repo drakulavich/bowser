@@ -68,7 +68,8 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
           // sessionStorage outlives a reload; window.added does not.
           const add = "sessionStorage.n = +(sessionStorage.n ?? 0) + 1; window.added = (window.added ?? 0) + 1;";
           return html(`<title>Cart</title><button onclick="${add}">Add</button>
-            <button onclick="${add} const t = Date.now(); while (Date.now() - t < 1000);">Slow add</button>`);
+            <button onclick="${add} const t = Date.now(); while (Date.now() - t < 1000);">Slow add</button>
+            <button onclick="${add} setTimeout(() => { const t = Date.now(); while (Date.now() - t < 1000); });">Add, busy</button>`);
         }
         // "Never, busy": the page's script runs for 300 ms right after the click (#170).
         return html(`<title>Home</title><a href="/never">Never</a> <a href="/slow">Slow</a>
@@ -265,11 +266,11 @@ runOrSkip("e2e: a known state after a timeout (#78)", () => {
   }, 60_000);
 
   test("#115: a click that returned within the budget says it was delivered, and its page is not reloaded", async () => {
-    // Under the watch's 100 ms wait for a navigation the click may start.
-    const budget = 80;
+    // The page is busy after the click, so the watch for a navigation outlasts the budget (#281).
+    const budget = 500;
     const s = session("115delivered");
     await ok(s, ["open", `${base}/cart`], 3000);
-    const add = refOf(await ok(s, ["snapshot"], 3000), "button", "Add");
+    const add = refOf(await ok(s, ["snapshot"], 3000), "button", "Add, busy");
 
     const click = await run(s, ["click", add], budget);
     expect([click.code, click.err]).toEqual([2, `bowser: 'click' timed out after ${budget}ms; the click was delivered, check the page before retrying`]);
