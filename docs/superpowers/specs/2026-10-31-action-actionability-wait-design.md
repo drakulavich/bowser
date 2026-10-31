@@ -27,10 +27,10 @@ Playwright's checks are from `docs/src/actionability.md` and `server/dom.ts` at 
 
 | Action | Playwright waits for | bowser after this change | Why it differs |
 | --- | --- | --- | --- |
-| `click` (reference) | Visible, Stable, Receives Events, Enabled | Visible, Stable, Receives Events; disabled is refused before the wait | Enabled: see the next section |
+| `click` (reference) | Visible, Stable, Receives Events, Enabled | Visible, Stable, Receives Events; disabled is refused before the wait | Playwright waits for Enabled until the budget runs out. bowser refuses at once with `ref 'eN' is disabled`, exit 1: its timeout says only `'<op>' timed out after Nms` (#282), so waiting would trade a reason the agent gets in milliseconds for a 30 s timeout without one. |
 | `hover` | Visible, Stable, Receives Events | the same | |
-| `check`, `uncheck` | Visible, Stable, Receives Events, Enabled; returns at once when the state already matches | Visible; disabled is refused before the wait | Playwright presses the mouse at the centre, so the point must hold still and reach the target. bowser calls `el.click()` on the element, which hits it wherever it is. Waiting for a hit would also stall the common styled checkbox whose `<input>` sits under its label's decoration, which `el.click()` checks today. The state is read in `setCheckedScript`, after the wait, so a checkbox already in the asked state still waits to be visible. |
-| `select` | Visible, Enabled; waits until the option exists (`error:optionsnotfound` retries) | Visible; disabled is refused before the wait; a missing option is refused after it | Enabled: see the next section. Missing option: `ref 'eN' has no option "x"` stays immediate for a visible `<select>` (`docs/superpowers/specs/2026-09-27-p1-fixes-design.md:91`); waiting the budget for a typo would cost an agent 30 s. `selectScript` reads the options only after the wait, so a `<select>` that stays hidden fails with the timeout, exit 2, even when the option is missing. |
+| `check`, `uncheck` | Visible, Stable, Receives Events, Enabled; returns at once when the state already matches | Visible; disabled is refused before the wait | Enabled: as for `click`. Playwright presses the mouse at the centre, so the point must hold still and reach the target. bowser calls `el.click()` on the element, which hits it wherever it is. Waiting for a hit would also stall the common styled checkbox whose `<input>` sits under its label's decoration, which `el.click()` checks today. The state is read in `setCheckedScript`, after the wait, so a checkbox already in the asked state still waits to be visible. |
+| `select` | Visible, Enabled; waits until the option exists (`error:optionsnotfound` retries) | Visible; disabled is refused before the wait; a missing option is refused after it | Enabled: as for `click`. Missing option: `ref 'eN' has no option "x"` stays immediate for a visible `<select>` (`docs/superpowers/specs/2026-09-27-p1-fixes-design.md:91`); waiting the budget for a typo would cost an agent 30 s with the same reasonless timeout. The wait for the option is #291. `selectScript` reads the options only after the wait, so a `<select>` that stays hidden fails with the timeout, exit 2, even when the option is missing. |
 
 `fill` sends `click` first, so its click step gets the visibility change too. `type` and `press` wait for nothing, as in Playwright.
 
@@ -38,7 +38,7 @@ Playwright's checks are from `docs/src/actionability.md` and `server/dom.ts` at 
 
 A disabled target is refused at once with `ref 'eN' is disabled`, exit 1, nothing sent, as F20 does today for `click`, `check` and `uncheck`. `select` joins them: `cmdSelect` passes `enabled: true` to `liveSelector`. Playwright waits for Enabled until the budget runs out, then fails with "element is not enabled". bowser's waiting timeout says only `'check' timed out after 30000ms` (#282), so waiting would turn a reason the agent gets in milliseconds into a 30 s timeout without one.
 
-Open question for review. If disabled targets are waited for instead, the poll answers a `disabled` flag, the step function retries on it, and the E2E items below gain an "enabled within the budget" case.
+This narrows #270's What item: no E2E test has a target that becomes enabled within the budget, since none is waited for.
 
 ## Design
 
@@ -93,7 +93,7 @@ No storage. The page keeps only the existing `bowser.frames` record. The poll gr
 - A hit-target check inside the page while the pointer events arrive (`setupHitTargetInterceptor`): #289.
 - `display: contents` targets, which Playwright counts visible through their children; they have no box, so bowser waits them out, as `click` does today.
 - Reading the checked state before the wait, so a `check` on an already checked, hidden checkbox returns at once as in Playwright.
-- Waiting for a `select` option to appear.
+- Waiting for a `select` option to appear: #291.
 
 ## Definition of done
 
