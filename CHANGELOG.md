@@ -5,6 +5,16 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`hover`, `check`, `uncheck` and `select` wait for their target, as `click` does.** They acted at
+  once, on a hidden or moving element too. Now `hover` waits for the element to be visible, still
+  for two frames and on top at its centre; `check`, `uncheck` and `select` wait for it to be
+  visible. A wait that runs out sends nothing and answers `'<command>' timed out after <n>ms`
+  (exit 2). A disabled `<select>` fails at once with `ref 'eN' is disabled` (exit 1); it used to
+  take the value. `click` no longer presses a `visibility: hidden` element whose visible child
+  covers its centre. (#270)
+
 ### Fixed
 
 - **A `click` that times out while it waits for its target says nothing was sent.** It said

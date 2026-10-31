@@ -111,12 +111,12 @@ export interface Browser {
   click(selector: string, timeoutMs: number | undefined, doc: string): Promise<void | Gone>;
   type(text: string, doc?: string): Promise<void | Gone>;
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
-  /** true when the page changed within HOVER_WATCH_MS of the events. */
-  hover(selector: string, doc?: string): Promise<boolean | Gone>;
-  /** False when no option's value or label is `value`; nothing changed. */
-  select(selector: string, value: string, doc?: string): Promise<boolean | Gone>;
-  /** false: `uncheck` of a checked radio, refused in the page (F20). */
-  setChecked(selector: string, checked: boolean, doc?: string): Promise<boolean | Gone>;
+  /** Waits as click does, then dispatches the events; true when the page changed within HOVER_WATCH_MS of them. */
+  hover(selector: string, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
+  /** Waits up to `timeoutMs` for the element to be visible. False when no option's value or label is `value`; nothing changed. */
+  select(selector: string, value: string, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
+  /** Waits as select does. false: `uncheck` of a checked radio, refused in the page (F20). */
+  setChecked(selector: string, checked: boolean, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
   screenshot(): Promise<string>; // base64-encoded PNG of the viewport
   resize(width: number, height: number): Promise<void>;
   back(): Promise<void>;
@@ -316,7 +316,7 @@ interface LoadWatch {
 /** Bun's default for the selector click that bowser's own wait replaced (#267). */
 const CLICK_TIMEOUT_MS = 30_000;
 const CLICK_POLL_MS = 4;
-const CLICK_NAVIGATED = "click: the page navigated before the click; nothing was clicked, run 'bowser snapshot' to see the new page";
+const navigatedBefore = (op: string) => `${op}: the page navigated before the ${op}; nothing was ${op}ed, run 'bowser snapshot' to see the new page`;
 /** Long enough for a hover-intent menu that opens 150 ms after mouseenter (#270). */
 const HOVER_WATCH_MS = 200;
 const HOVER_POLL_MS = 10;
@@ -324,16 +324,18 @@ const HOVER_POLL_MS = 10;
 /** One answer of clickPollScript. */
 export type ClickSample = [doc: unknown, frame: number, left?: number, top?: number, width?: number, height?: number, hit?: boolean];
 
-/** The click wait clicks once a sample's frame follows the previous sample's with the same box, and the target is hit at its centre. */
+/** A `pointer` wait acts once a sample's frame follows the previous sample's with the same box, and the target is hit at its centre; any other acts on the first sample with a box (#270). */
 export function clickStep(
   previous: ClickSample | undefined,
   sample: ClickSample,
   expected: unknown,
+  pointer = true,
 ): { kind: "navigated" } | { kind: "retry" } | { kind: "click"; x: number; y: number } {
   if (sample[0] !== expected) return { kind: "navigated" };
   const [, frame, left, top, width, height, hit] = sample;
-  if (!previous || frame !== previous[1] + 1 || !hit || left === undefined || top === undefined || width === undefined || height === undefined)
-    return { kind: "retry" };
+  if (left === undefined || top === undefined || width === undefined || height === undefined) return { kind: "retry" };
+  if (!pointer) return { kind: "click", x: left + width / 2, y: top + height / 2 };
+  if (!previous || frame !== previous[1] + 1 || !hit) return { kind: "retry" };
   if (previous[2] !== left || previous[3] !== top || previous[4] !== width || previous[5] !== height) return { kind: "retry" };
   return { kind: "click", x: left + width / 2, y: top + height / 2 };
 }
@@ -825,6 +827,28 @@ export function wrapView(
   };
   const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
   const otherDoc = async (doc: string | undefined) => doc != null && (await evaluate(docMatches(doc))) !== true;
+  /** Inside act: poll until the target is actionable (see clickStep), in the waiting phase. Without `doc` the first sample's token is the expected one. */
+  const untilActionable = (op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean) =>
+    nav.waiting(async (): Promise<{ x: number; y: number } | Gone> => {
+      const poll = clickPollScript(selector);
+      const end = clock.now() + timeoutMs;
+      let previous: ClickSample | undefined;
+      let expected: unknown = doc;
+      while (clock.now() < end) {
+        const answer = await nav.ask(poll, end - clock.now());
+        const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
+        if (Array.isArray(sample) && typeof sample[1] === "number") {
+          if (previous === undefined && doc === undefined) expected = sample[0];
+          if (previous === undefined && sample[0] !== expected) return GONE;
+          const step = clickStep(previous, sample as ClickSample, expected, pointer);
+          if (step.kind === "navigated") throw new Error(navigatedBefore(op));
+          if (step.kind === "click") return step;
+          previous = sample as ClickSample;
+        }
+        await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
+      }
+      throw new Error(`timeout waiting for '${selector}' to be actionable`);
+    });
 
   return {
     get phase() {
@@ -843,24 +867,7 @@ export function wrapView(
     click: (selector, timeoutMs = CLICK_TIMEOUT_MS, doc) =>
       guard(
         nav.act(async (): Promise<void | Gone> => {
-          const target = await nav.waiting(async (): Promise<{ x: number; y: number } | Gone> => {
-            const poll = clickPollScript(selector);
-            const end = clock.now() + timeoutMs;
-            let previous: ClickSample | undefined;
-            while (clock.now() < end) {
-              const answer = await nav.ask(poll, end - clock.now());
-              const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
-              if (Array.isArray(sample) && typeof sample[1] === "number") {
-                if (previous === undefined && sample[0] !== doc) return GONE;
-                const step = clickStep(previous, sample as ClickSample, doc);
-                if (step.kind === "navigated") throw new Error(CLICK_NAVIGATED);
-                if (step.kind === "click") return step;
-                previous = sample as ClickSample;
-              }
-              await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
-            }
-            throw new Error(`timeout waiting for '${selector}' to be actionable`);
-          });
+          const target = await untilActionable("click", selector, timeoutMs, doc, true);
           return isGone(target) ? target : view.click(target.x, target.y);
         }),
       ),
@@ -902,9 +909,11 @@ export function wrapView(
     // A page's change or mouse handler can navigate, so the page-script
     // actions go through the watch too (#51: a select whose onchange set
     // location.href left the next snapshot on the old page).
-    hover: (selector, doc) =>
+    hover: (selector, doc, timeoutMs = CLICK_TIMEOUT_MS) =>
       guard(
         nav.act(async () => {
+          const target = await untilActionable("hover", selector, timeoutMs, doc, true);
+          if (isGone(target)) return target;
           const answer = await evaluate(hoverScript(selector, doc));
           if (isGone(answer)) return answer;
           const end = clock.now() + HOVER_WATCH_MS;
@@ -916,16 +925,20 @@ export function wrapView(
           }
         }),
       ),
-    select: (selector, value, doc) =>
+    select: (selector, value, doc, timeoutMs = CLICK_TIMEOUT_MS) =>
       guard(
         nav.act(async () => {
+          const target = await untilActionable("select", selector, timeoutMs, doc, false);
+          if (isGone(target)) return target;
           const answer = await evaluate(selectScript(selector, value, doc));
           return isGone(answer) ? answer : answer === true;
         }),
       ),
-    setChecked: (selector, checked, doc) =>
+    setChecked: (selector, checked, doc, timeoutMs = CLICK_TIMEOUT_MS) =>
       guard(
         nav.act(async () => {
+          const target = await untilActionable(checked ? "check" : "uncheck", selector, timeoutMs, doc, false);
+          if (isGone(target)) return target;
           const answer = await evaluate(setCheckedScript(selector, checked, doc));
           return isGone(answer) ? answer : answer !== false;
         }),

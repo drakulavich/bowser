@@ -63,11 +63,11 @@ interface DaemonOps {
   click: { args: [selector: string, doc: string, timeoutMs?: number]; result: void | Gone };
   type: { args: [text: string, doc?: string]; result: void | Gone };
   press: { args: [key: string, modifiers?: KeyModifier[]]; result: void };
-  hover: { args: [selector: string, doc?: string]; result: boolean | Gone };
-  select: { args: [selector: string, value: string, doc?: string]; result: boolean | Gone };
-  check: { args: [selector: string, doc?: string]; result: void | Gone };
+  hover: { args: [selector: string, doc?: string, timeoutMs?: number]; result: boolean | Gone };
+  select: { args: [selector: string, value: string, doc?: string, timeoutMs?: number]; result: boolean | Gone };
+  check: { args: [selector: string, doc?: string, timeoutMs?: number]; result: void | Gone };
   /** false: the element is a checked radio, left checked (F20). */
-  uncheck: { args: [selector: string, doc?: string]; result: boolean | Gone };
+  uncheck: { args: [selector: string, doc?: string, timeoutMs?: number]; result: boolean | Gone };
   /** The daemon writes the image to `path` and returns `{ path }`. A `scale` above
    *  the window's pixel ratio writes nothing and returns `{ dpr }` (#191).
    *  `fontsLoading` says the 5 s wait for web fonts ran out (#194). */

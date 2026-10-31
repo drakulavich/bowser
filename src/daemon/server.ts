@@ -258,7 +258,7 @@ export function dispatch(req: DaemonRequest, lane: Lane): void {
         running = true;
         waiting?.delete(onStuck);
         let res = await lane.handle(req, deadline);
-        if (!res.ok && req.op === "click" && res.error === `timeout waiting for '${req.args?.[0]}' to be actionable`) {
+        if (!res.ok && WAITS[req.op] !== undefined && res.error === `timeout waiting for '${req.args?.[0]}' to be actionable`) {
           res = { ...res, error: timeoutMessage(req, budget) };
         }
         settled = true;
@@ -349,13 +349,13 @@ const handlers: Handlers = {
   click: (browser, selector, doc, timeoutMs) => browser.click(selector, timeoutMs, doc),
   type: (browser, text, doc) => browser.type(text, doc),
   press: (browser, key, modifiers) => browser.press(key, modifiers),
-  hover: (browser, selector, doc) => browser.hover(selector, doc),
-  select: (browser, selector, value, doc) => browser.select(selector, value, doc),
-  check: async (browser, selector, doc) => {
-    const answer = await browser.setChecked(selector, true, doc);
+  hover: (browser, selector, doc, timeoutMs) => browser.hover(selector, doc, timeoutMs),
+  select: (browser, selector, value, doc, timeoutMs) => browser.select(selector, value, doc, timeoutMs),
+  check: async (browser, selector, doc, timeoutMs) => {
+    const answer = await browser.setChecked(selector, true, doc, timeoutMs);
     if (isGone(answer)) return answer;
   },
-  uncheck: (browser, selector, doc) => browser.setChecked(selector, false, doc),
+  uncheck: (browser, selector, doc, timeoutMs) => browser.setChecked(selector, false, doc, timeoutMs),
   screenshot: async (browser, path, scale) => {
     // The daemon writes the PNG itself so the ~140 KB base64 never crosses the socket.
     const fontsLoading = (await browser.evaluate(AWAIT_FONTS)) === true;
@@ -549,9 +549,12 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
     // page's answer: a document the back-forward cache restores still has
     // its shim and answer. Not left to the navigation callback alone.
     if (NAVIGATES.has(req.op)) shimmed = false;
-    // A click's own wait ends at the deadline, so its timeout is answered before the budget's timer reads the phase as idle (#112, #267).
+    // An action's own wait ends at the deadline, so its timeout is answered before the budget's timer reads the phase as idle (#112, #267).
+    const at = WAITS[req.op];
     const res = await run(
-      req.op === "click" && deadline !== Infinity ? { ...req, args: [req.args?.[0], req.args?.[1], Math.max(0, deadline - clock.now())] } : req,
+      at !== undefined && deadline !== Infinity
+        ? { ...req, args: [...Array.from({ length: at }, (_, i) => req.args?.[i]), Math.max(0, deadline - clock.now())] }
+        : req,
     );
     await sync();
     return res;
@@ -618,6 +621,9 @@ export function createHandler(browser: Browser, state: DaemonState = {}, clock: 
 
 /** The ops that act on the current document by native input or a page
  *  script of their own: the shim must be there first. */
+/** The ops that wait for their target, and the index of their `timeoutMs` arg (#270). */
+const WAITS: Partial<Record<Op, number>> = { click: 2, hover: 2, select: 3, check: 2, uncheck: 2 };
+
 export const ACTS: ReadonlySet<Op> = new Set<Op>(["click", "type", "press", "hover", "select", "check", "uncheck"]);
 
 /** The ops that navigate the page themselves. */

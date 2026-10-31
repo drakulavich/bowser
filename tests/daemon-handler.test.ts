@@ -345,6 +345,48 @@ describe("createHandler", () => {
     expect(args[2]).toBe("d1");
   });
 
+  for (const [op, args, name, at] of [
+    ["hover", ["#a", "d1"], "hover", 2],
+    ["select", ["#a", "v", "d1"], "select", 3],
+    ["check", ["#a", "d1"], "setChecked", 3],
+    ["uncheck", ["#a", "d1"], "setChecked", 3],
+  ] as const) {
+    test(`${op} is given the time left until the handler's deadline, after its doc (#270)`, async () => {
+      const b = fakeBrowser();
+      await createHandler(b)(req(op, [...args]), Date.now() + 1000);
+      const [, got] = b.calls.find(([n]) => n === name)!;
+      expect(got[at - 1]).toBe("d1");
+      expect(got[at]).toBeGreaterThan(950);
+      expect(got[at]).toBeLessThanOrEqual(1000);
+    });
+
+    test(`${op}'s own wait running out answers '${op}' timed out after the budget (#270)`, async () => {
+      const timedOut = async (selector: unknown) => {
+        throw new Error(`timeout waiting for '${selector}' to be actionable`);
+      };
+      const replies: DaemonResponse[] = [];
+      const lane = {
+        handle: createHandler(fakeBrowser({ hover: timedOut, select: timedOut, setChecked: timedOut })),
+        serialize: createSerializer(),
+        timeoutMs: 5000,
+        reply: (r: DaemonResponse) => {
+          replies.push(r);
+        },
+      };
+      dispatch({ id: 1, op, args: [...args] } as DaemonRequest, lane);
+      await waitFor(() => replies.length === 1);
+      expect(replies).toEqual([{ id: 1, ok: false, error: `'${op}' timed out after 5000ms` }]);
+    });
+  }
+
+  test("a hover with no doc gets the time left at its own index, and doc stays undefined (#270)", async () => {
+    const b = fakeBrowser();
+    await createHandler(b)(req("hover", ["#a"]), Date.now() + 1000);
+    const [, got] = b.calls.find(([n]) => n === "hover")!;
+    expect(got[1]).toBeUndefined();
+    expect(got[2]).toBeGreaterThan(950);
+  });
+
   for (const [op, args] of [
     ["check", ["#a", "d1"]],
     ["uncheck", ["#a", "d1"]],
@@ -353,7 +395,7 @@ describe("createHandler", () => {
     test(`${op} answers the browser's gone and passes it the doc (#111)`, async () => {
       const seen: unknown[] = [];
       const gone = async (...a: unknown[]) => {
-        seen.push(a.at(-1));
+        seen.push(a[2]);
         return { gone: true } as const;
       };
       const b = fakeBrowser({ setChecked: gone, select: gone });
