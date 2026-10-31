@@ -193,7 +193,7 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
     const v = fakeView(
       {
         evaluate: async (expr) => {
-          if (expr === clickPollScript("#a")) {
+          if (expr === clickPollScript("#a", true) || expr === clickPollScript("#a", false)) {
             log.push("poll");
             return JSON.stringify(sample(n++));
           }
@@ -244,7 +244,7 @@ describe("wrapView click waits for the target itself (#267)", () => {
       {
         evaluate: async (expr) => {
           v.calls.push(["evaluate", [expr]]);
-          return expr === clickPollScript("#a") ? JSON.stringify(sample(n++)) : undefined;
+          return expr === clickPollScript("#a", true) ? JSON.stringify(sample(n++)) : undefined;
         },
       },
       { clickable: false },

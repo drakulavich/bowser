@@ -796,9 +796,9 @@ export const MUTE_MEDIA = String.raw`(() => {
 /** A document the page made non-extensible keeps no id: it reads "sealed", the same on every read (#248). */
 export const DOC_ID = `(() => { try { const k = Symbol.for('bowser.doc'); if (document[k] == null) document[k] = Math.random(); return document[k] ?? "sealed"; } catch { return "sealed"; } })()`;
 export const LOAD_STATE = `[${DOC_ID}, document.readyState]`;
-/** One poll of the action wait (#267, #270), as PAGE_JSON text: `[doc, frame]` (`doc` is the ref store's, #111), plus `left, top, width, height, hit` when the target is visible as Playwright counts it; `hit` is false when the centre is out of view.
+/** One poll of the action wait (#267, #270), as PAGE_JSON text: `[doc, frame]` (`doc` is the ref store's, #111), plus `left, top, width, height, hit` when the target is visible as Playwright counts it; `hit` is false when the centre is out of view, and with `pointer` the poll then scrolls the target to the centre for the next one (#288).
  *  Synchronous: an evaluate that awaits a frame never settles once its page is in the back-forward cache. */
-export function clickPollScript(selector: string): string {
+export function clickPollScript(selector: string, pointer: boolean): string {
   return String.raw`${PAGE_JSON}((() => {
   const k = Symbol.for('bowser.frames');
   const c = window[k] ??= { f: 0, armed: false, polled: 0 };
@@ -818,7 +818,8 @@ export function clickPollScript(selector: string): string {
   const r = el.getBoundingClientRect();
   if (!(r.width > 0 && r.height > 0) || !el.checkVisibility() || getComputedStyle(el).visibility !== 'visible') return [doc, c.f];
   const x = r.left + r.width / 2, y = r.top + r.height / 2;
-  const hit = x >= 0 && y >= 0 && x < innerWidth && y < innerHeight ? document.elementFromPoint(x, y) : null;
+  const inView = x >= 0 && y >= 0 && x < innerWidth && y < innerHeight;
+  const hit = inView ? document.elementFromPoint(x, y) : null;${pointer ? "\n  if (!inView) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });" : ""}
   return [doc, c.f, r.left, r.top, r.width, r.height, !!hit && el.contains(hit)];
 })())`;
 }

@@ -7,6 +7,10 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`click` and `hover` scroll to a target that ends up below the fold while they wait.** They
+  scrolled once, before the wait, so a target that moved out of view afterwards was never under
+  its click point and the command timed out. Now each poll that finds the target visible with its
+  centre outside the viewport scrolls it to the centre. (#288)
 - **`click` and `hover` wait for a hidden target instead of calling it covered.** On an element
   with `display: none` or `visibility: hidden` they failed at once with
   `ref 'eN' (…) is covered by document <html> at its click point`, so the wait for the target to
