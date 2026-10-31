@@ -165,6 +165,36 @@ describe("wrapView click waits for the target itself (#267)", () => {
   }
   const clicks = (v: Fake) => v.calls.filter(([op]) => op === "click");
 
+  test("the phase is waiting while the click waits for its target, and acting once it is sent (#282)", async () => {
+    const clock = manualClock();
+    const phases: string[] = [];
+    let b!: ReturnType<typeof wrapView>;
+    const v = polled((n) => {
+      phases.push(b.phase);
+      return ["d", n, 10, 20, 100, 40, true];
+    });
+    v.click = async () => {
+      phases.push(`click ${b.phase}`);
+    };
+    b = wrapView(v, fast, undefined, undefined, undefined, clock);
+    await clock.fulfilledAt(b.click("#a", 1000));
+    expect(phases).toEqual(["waiting", "waiting", "click acting"]);
+  });
+
+  test("a click whose request timed out while it waited sends nothing (#282)", async () => {
+    const clock = manualClock();
+    let b!: ReturnType<typeof wrapView>;
+    const v = polled((n) => {
+      if (n === 1) b.cancelAction?.();
+      return ["d", n, 10, 20, 100, 40, true];
+    });
+    b = wrapView(v, fast, undefined, undefined, undefined, clock);
+    const click = b.click("#a", 1000);
+    await clock.settledAt(click);
+    await expect(click).rejects.toThrow("request timed out before the action was sent");
+    expect(clicks(v)).toEqual([]);
+  });
+
   test("clicks the target's centre by coordinates", async () => {
     const clock = manualClock();
     const v = polled((n) => ["d", n, 10, 20, 100, 40, true]);
@@ -243,7 +273,7 @@ describe("wrapView click", () => {
     expect(v.calls.filter(([op]) => op === "click")).toEqual([]);
   });
 
-  test("Bun's actionability timeout answers as bowser's own timeout of the acting phase (#122)", async () => {
+  test("the click wait's own timeout answers as bowser's timeout, with nothing delivered (#122, #282)", async () => {
     const v = fakeView({
       click: async (s) => {
         throw new Error(`timeout waiting for '${s}' to be actionable`);
@@ -266,13 +296,12 @@ describe("wrapView click", () => {
       {
         id: 1,
         ok: false,
-        error: "'click' timed out after 5000ms; the click may have been delivered, check the page before retrying",
+        error: "'click' timed out after 5000ms",
       },
       {
         id: 2,
         ok: false,
-        error:
-          "'fill' timed out after 5000ms (in its 'click' step); the click may have been delivered but the fill did not finish, check the page before retrying",
+        error: "'fill' timed out after 5000ms (in its 'click' step)",
       },
     ]);
   });

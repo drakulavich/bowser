@@ -96,9 +96,10 @@ export async function resolveTitle(viewTitle: string, evalTitle: () => Promise<u
   }
 }
 
-/** `acting`: the action was sent and has not returned. `delivered`: it
+/** `waiting`: the action waits for its target and has sent nothing (#282).
+ *  `acting`: the action was sent and has not returned. `delivered`: it
  *  returned, and the watch has seen no navigation it started yet. */
-export type ActPhase = "idle" | "acting" | "delivered" | "awaiting-navigation";
+export type ActPhase = "idle" | "waiting" | "acting" | "delivered" | "awaiting-navigation";
 
 export interface Browser {
   realUrl(): Promise<string>;
@@ -604,6 +605,14 @@ function navigationWatch(view: ViewLike, timing: NavTiming, onNavigation: () => 
     resetActionCancellation() {
       actionCancelled = false;
     },
+    /** Inside act: run `wait` in the waiting phase, then send nothing if the request timed out meanwhile. */
+    async waiting<T>(wait: () => Promise<T>): Promise<T> {
+      phase = "waiting";
+      const result = await wait();
+      if (actionCancelled) throw new Error("request timed out before the action was sent");
+      phase = "acting";
+      return result;
+    },
     get pending() {
       return pendingAt === landed;
     },
@@ -834,24 +843,27 @@ export function wrapView(
     click: (selector, timeoutMs = CLICK_TIMEOUT_MS, doc) =>
       guard(
         nav.act(async (): Promise<void | Gone> => {
-          const poll = clickPollScript(selector, doc);
-          const end = clock.now() + timeoutMs;
-          let expected: unknown = doc;
-          let previous: ClickSample | undefined;
-          while (clock.now() < end) {
-            const answer = await nav.ask(poll, end - clock.now());
-            const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
-            if (Array.isArray(sample) && typeof sample[1] === "number") {
-              if (previous === undefined && doc != null && sample[0] !== doc) return GONE;
-              expected ??= sample[0];
-              const step = clickStep(previous, sample as ClickSample, expected);
-              if (step.kind === "navigated") throw new Error(CLICK_NAVIGATED);
-              if (step.kind === "click") return view.click(step.x, step.y);
-              previous = sample as ClickSample;
+          const target = await nav.waiting(async (): Promise<{ x: number; y: number } | Gone> => {
+            const poll = clickPollScript(selector, doc);
+            const end = clock.now() + timeoutMs;
+            let expected: unknown = doc;
+            let previous: ClickSample | undefined;
+            while (clock.now() < end) {
+              const answer = await nav.ask(poll, end - clock.now());
+              const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
+              if (Array.isArray(sample) && typeof sample[1] === "number") {
+                if (previous === undefined && doc != null && sample[0] !== doc) return GONE;
+                expected ??= sample[0];
+                const step = clickStep(previous, sample as ClickSample, expected);
+                if (step.kind === "navigated") throw new Error(CLICK_NAVIGATED);
+                if (step.kind === "click") return step;
+                previous = sample as ClickSample;
+              }
+              await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
             }
-            await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
-          }
-          throw new Error(`timeout waiting for '${selector}' to be actionable`);
+            throw new Error(`timeout waiting for '${selector}' to be actionable`);
+          });
+          return isGone(target) ? target : view.click(target.x, target.y);
         }),
       ),
     type: (text, doc) =>

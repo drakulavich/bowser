@@ -566,6 +566,7 @@ test("a timeout while awaiting navigation says the click was delivered", async (
 describe("a timeout says how far the action got, per phase", () => {
   const cases: Array<[ActPhase, string, string]> = [
     ["idle", "'click' timed out after 20ms", "'fill' timed out after 20ms (in its 'click' step)"],
+    ["waiting", "'click' timed out after 20ms", "'fill' timed out after 20ms (in its 'click' step)"],
     [
       "acting",
       "'click' timed out after 20ms; the click may have been delivered, check the page before retrying",
