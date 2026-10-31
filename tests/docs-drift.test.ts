@@ -96,7 +96,14 @@ describe("docs/commands.md matches the registry and the README links", () => {
   });
 
   test("every README link into it names one of its headings", () => {
-    const anchors = new Set(headings.map((h) => h.toLowerCase().replace(/[^a-z0-9 -]/g, "").replaceAll(" ", "-")));
+    const anchors = new Set(
+      headings.map((h) =>
+        h
+          .toLowerCase()
+          .replace(/[^a-z0-9 -]/g, "")
+          .replaceAll(" ", "-"),
+      ),
+    );
     const links = [...README.matchAll(/docs\/commands\.md#([a-z0-9-]+)/g)].map((m) => m[1]!);
     expect(links.length).toBeGreaterThan(0);
     expect(links.filter((a) => !anchors.has(a))).toEqual([]);
