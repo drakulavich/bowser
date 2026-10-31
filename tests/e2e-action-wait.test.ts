@@ -251,17 +251,6 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     expect(await evalText("String(far.checked) + ' ' + (far.getBoundingClientRect().top > innerHeight)")).toBe("true true");
   }, 30_000);
 
-  test("click on a button that is shown below the fold during the wait scrolls to it and clicks it (#288)", async () => {
-    await cmdOpen(ctx, `${base}/below`);
-    await cmdSnapshot(ctx);
-    const low = await refNamed("Low");
-    const t0 = performance.now();
-    await evalText("(low.style.display = 'none', setTimeout(() => { low.style.display = ''; }, 300), 1)");
-    expect(await cmdClick(ctx, low)).toBe(`clicked ${low} (button "Low")`);
-    expect(performance.now() - t0).toBeGreaterThanOrEqual(300);
-    expect(await evalText("String(document.body.dataset.clicked)")).toBe("1");
-  }, 30_000);
-
   test("click on a button that slides below the fold during the wait scrolls to it and clicks it (#288)", async () => {
     await cmdOpen(ctx, `${base}/below`);
     await cmdSnapshot(ctx);

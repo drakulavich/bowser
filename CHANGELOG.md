@@ -5,6 +5,13 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`click` and `hover` scroll to a target that ends up below the fold while they wait.** They
+  scrolled once, before the wait, so a target that moved out of view afterwards was never under
+  its click point and the command timed out. Now each poll that finds the target visible with its
+  centre outside the viewport scrolls it to the centre. (#288)
+
 ## [0.14.0] — 2026-10-31
 
 ### Changed
