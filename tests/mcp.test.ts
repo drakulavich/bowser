@@ -396,10 +396,11 @@ describe("MCP positionals are data, never flags", () => {
           url: "https://x",
           title: "X",
           updatedAt: Date.now(),
+          doc: "d1",
           refs: [{ id: "e1", role: "textbox", name: "Email", tag: "input" }],
         });
         const c = fakeClient({
-          evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }, { hit: true }) ? "input" : undefined),
+          evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Email" }, { doc: "d1", hit: true }) ? "input" : undefined),
         });
         const deps: McpDeps = {
           run: (argv) =>
@@ -426,7 +427,7 @@ describe("MCP positionals are data, never flags", () => {
           ref: "e1",
           element: { role: "textbox", name: "Email" },
         });
-        expect(c.calls.filter(([op]) => op === "type")).toEqual([["type", [text]]]);
+        expect(c.calls.filter(([op]) => op === "type")).toEqual([["type", [text, "d1"]]]);
       } finally {
         process.env.HOME = prevHome;
         await rm(home, { recursive: true, force: true });
@@ -586,15 +587,16 @@ describe("MCP fill and type never echo the entered text", () => {
           url: "https://x",
           title: "X",
           updatedAt: Date.now(),
+          doc: "d1",
           refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }],
         });
         const c = fakeClient({
-          evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined),
+          evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { doc: "d1", hit: true }) ? "input" : undefined),
         });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
         const res: any = await callTool({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: tool, arguments: args } }, deps);
         expect(res.result.isError).toBeFalsy();
-        expect(c.calls).toContainEqual(["type", [SECRET]]);
+        expect(c.calls).toContainEqual(["type", tool === "fill" ? [SECRET, "d1"] : [SECRET]]);
         expect(JSON.stringify(res)).not.toContain(SECRET);
       } finally {
         process.env.HOME = prevHome;
@@ -620,10 +622,11 @@ describe("MCP fill and type errors never carry the entered text", () => {
         url: "https://x",
         title: "X",
         updatedAt: Date.now(),
+        doc: "d1",
         refs: [{ id: "e1", role: "textbox", name: "Password", tag: "input" }],
       });
       const c = fakeClient({
-        evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { hit: true }) ? "input" : undefined),
+        evaluate: (e) => (e === resolveRefScript({ id: "e1", role: "textbox", name: "Password" }, { doc: "d1", hit: true }) ? "input" : undefined),
         type: () => {
           throw new Error(message);
         },
@@ -864,7 +867,7 @@ describe("MCP ref tools name the element they acted on (#117)", () => {
       const prevHome = process.env.HOME;
       process.env.HOME = home;
       try {
-        await saveState({ name: "el", url: "https://x", title: "X", updatedAt: Date.now(), refs: REFS });
+        await saveState({ name: "el", url: "https://x", title: "X", updatedAt: Date.now(), doc: "d1", refs: REFS });
         const c = fakeClient({ evaluate: () => "sel" });
         const deps: McpDeps = { run: (argv) => run(argv, { connect: async () => c }), version: "9.9.9" };
         const res: any = await callTool(

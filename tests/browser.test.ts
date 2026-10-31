@@ -146,14 +146,14 @@ describe("clickStep (#267)", () => {
 });
 
 describe("wrapView click waits for the target itself (#267)", () => {
-  /** A view whose poll of `#a` (with `doc`) answers `sample(n)` on its n-th call. */
-  function polled(sample: (n: number) => unknown[], doc?: string): Fake {
+  /** A view whose poll of `#a` answers `sample(n)` on its n-th call. */
+  function polled(sample: (n: number) => unknown[]): Fake {
     let n = 0;
     const v = fakeView(
       {
         evaluate: async (expr) => {
           v.calls.push(["evaluate", [expr]]);
-          return expr === clickPollScript("#a", doc) ? JSON.stringify(sample(n++)) : undefined;
+          return expr === clickPollScript("#a") ? JSON.stringify(sample(n++)) : undefined;
         },
       },
       { clickable: false },
@@ -177,7 +177,7 @@ describe("wrapView click waits for the target itself (#267)", () => {
       phases.push(`click ${b.phase}`);
     };
     b = wrapView(v, fast, undefined, undefined, undefined, clock);
-    await clock.fulfilledAt(b.click("#a", 1000));
+    await clock.fulfilledAt(b.click("#a", 1000, "d"));
     expect(phases).toEqual(["waiting", "waiting", "click acting"]);
   });
 
@@ -189,7 +189,7 @@ describe("wrapView click waits for the target itself (#267)", () => {
       return ["d", n, 10, 20, 100, 40, true];
     });
     b = wrapView(v, fast, undefined, undefined, undefined, clock);
-    const click = b.click("#a", 1000);
+    const click = b.click("#a", 1000, "d");
     await clock.settledAt(click);
     await expect(click).rejects.toThrow("request timed out before the action was sent");
     expect(clicks(v)).toEqual([]);
@@ -198,14 +198,14 @@ describe("wrapView click waits for the target itself (#267)", () => {
   test("clicks the target's centre by coordinates", async () => {
     const clock = manualClock();
     const v = polled((n) => ["d", n, 10, 20, 100, 40, true]);
-    await clock.fulfilledAt(wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000));
+    await clock.fulfilledAt(wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d"));
     expect(clicks(v)).toEqual([["click", [60, 40]]]);
   });
 
   test("a sample from another document fails with the navigation message and clicks nothing", async () => {
     const clock = manualClock();
     const v = polled((n) => [n === 0 ? "d" : "e", n, 10, 20, 100, 40, true]);
-    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000);
+    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d");
     await clock.settledAt(click);
     await expect(click).rejects.toThrow("click: the page navigated before the click; nothing was clicked, run 'bowser snapshot' to see the new page");
     expect(clicks(v)).toEqual([]);
@@ -213,7 +213,7 @@ describe("wrapView click waits for the target itself (#267)", () => {
 
   test("with a ref's doc, a first sample from another document is gone and nothing is clicked (#111)", async () => {
     const clock = manualClock();
-    const v = polled((n) => ["d2", n, 10, 20, 100, 40, true], "d1");
+    const v = polled((n) => ["d2", n, 10, 20, 100, 40, true]);
     const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d1");
     await clock.settledAt(click);
     expect(await click).toEqual({ gone: true });
@@ -223,7 +223,7 @@ describe("wrapView click waits for the target itself (#267)", () => {
   test("a box that never settles fails with Bun's actionability text at the timeout", async () => {
     const clock = manualClock();
     const v = polled((n) => ["d", n, n, 20, 100, 40, true]);
-    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000);
+    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d");
     expect(await clock.settledAt(click)).toBe(1000);
     await expect(click).rejects.toThrow("timeout waiting for '#a' to be actionable");
     expect(clicks(v)).toEqual([]);
@@ -289,8 +289,8 @@ describe("wrapView click", () => {
         replies.push(r);
       },
     };
-    dispatch({ id: 1, op: "click", args: ["main > button:nth-child(2)"], cmd: "click" }, lane);
-    dispatch({ id: 2, op: "click", args: ["#go"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
+    dispatch({ id: 1, op: "click", args: ["main > button:nth-child(2)", "fake-doc"], cmd: "click" }, lane);
+    dispatch({ id: 2, op: "click", args: ["#go", "fake-doc"], cmd: "fill" }, { ...lane, serialize: createSerializer() });
     await waitFor(() => replies.length === 2);
     expect(replies).toEqual([
       {
@@ -477,7 +477,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     });
     const clock = manualClock();
     const b = wrapView(v, { graceMs: 40, settleMs: 5000 }, undefined, 0, lazy(fakeKicker(host)), clock);
-    expect(await clock.fulfilledAt(b.click("a"))).toBeLessThan(5000);
+    expect(await clock.fulfilledAt(b.click("a", undefined, "fake-doc"))).toBeLessThan(5000);
     expect(v.url).toBe("https://x/next");
   });
 
@@ -546,7 +546,7 @@ describe("wrapView stalled replies (oven-sh/bun#44134)", () => {
     const b = wrapView(v, fast, undefined, 0, stalls, clock);
     await clock.fulfilledAt(b.navigate("https://x/a"));
     await clock.fulfilledAt(b.evaluate("1"));
-    await clock.fulfilledAt(b.click("a"));
+    await clock.fulfilledAt(b.click("a", undefined, "fake-doc"));
     await clock.settledAt(b.screenshot().catch(() => {}));
     // Negative check: no kicker opens after afterMs has passed.
     await clock.settledAt(
@@ -746,7 +746,7 @@ describe("wrapView navigation watch", () => {
       }, 20);
     };
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#l"))).toBe(20 + CLICK_MS);
+    expect(await clock.settledAt(b.click("#l", undefined, "fake-doc"))).toBe(20 + CLICK_MS);
     expect(v.url).toBe("https://x/");
   });
 
@@ -758,9 +758,9 @@ describe("wrapView navigation watch", () => {
     };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 300 }, clock);
-    const gaveUp = await clock.settledAt(b.click("#stuck"));
+    const gaveUp = await clock.settledAt(b.click("#stuck", undefined, "fake-doc"));
     expect(v.loading).toBe(true);
-    expect((await clock.settledAt(b.click("#next"))) - gaveUp).toBe(20 + CLICK_MS);
+    expect((await clock.settledAt(b.click("#next", undefined, "fake-doc"))) - gaveUp).toBe(20 + CLICK_MS);
   });
 
   test("click returns after a navigation that lands inside the grace window", async () => {
@@ -771,7 +771,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.land("https://x/two"), 10);
     };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.click("#l"));
+    await clock.settledAt(b.click("#l", undefined, "fake-doc"));
     expect(v.url).toBe("https://x/two");
   });
 
@@ -779,7 +779,7 @@ describe("wrapView navigation watch", () => {
     const v = fakeView();
     const clock = manualClock();
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs + CLICK_MS);
+    expect(await clock.settledAt(b.click("#btn", undefined, "fake-doc"))).toBe(fast.graceMs + CLICK_MS);
     expect(v.url).toBe("https://x/");
   });
 
@@ -792,7 +792,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.land("https://x/slow"), 120);
     };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.click("#l"));
+    await clock.settledAt(b.click("#l", undefined, "fake-doc"));
     expect(v.url).toBe("https://x/slow");
   });
 
@@ -804,7 +804,7 @@ describe("wrapView navigation watch", () => {
     };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
-    expect(await clock.settledAt(b.click("#l"))).toBe(60 + CLICK_MS);
+    expect(await clock.settledAt(b.click("#l", undefined, "fake-doc"))).toBe(60 + CLICK_MS);
     expect(v.loading).toBe(true);
   });
 
@@ -819,7 +819,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.land("https://x/slow"), 150);
     };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.click("#slow"));
+    await clock.settledAt(b.click("#slow", undefined, "fake-doc"));
     expect(v.url).toBe("https://x/slow");
   });
 
@@ -828,7 +828,7 @@ describe("wrapView navigation watch", () => {
     page.navs = 1; // left over from a navigation that never landed
     const clock = manualClock();
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#btn"))).toBe(fast.graceMs + CLICK_MS);
+    expect(await clock.settledAt(b.click("#btn", undefined, "fake-doc"))).toBe(fast.graceMs + CLICK_MS);
     expect(v.calls.map(([n, a]) => (n === "evaluate" ? String(a[0]) : n))).toEqual([NAV_ARM, "click", NAV_COUNT]);
   });
 
@@ -840,7 +840,7 @@ describe("wrapView navigation watch", () => {
     };
     const clock = manualClock();
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
-    expect(await clock.settledAt(b.click("#never"))).toBe(20 + 60 + CLICK_MS);
+    expect(await clock.settledAt(b.click("#never", undefined, "fake-doc"))).toBe(20 + 60 + CLICK_MS);
   });
 
   test("a navigation that replaces the one the action started is awaited, not ended by the first one's -999", async () => {
@@ -856,7 +856,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.land("https://x/second"), 160);
     };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.click("#twice"));
+    await clock.settledAt(b.click("#twice", undefined, "fake-doc"));
     expect(v.url).toBe("https://x/second");
   });
 
@@ -891,7 +891,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.land("https://x/third"), 200);
     };
     const b = onClock(v, fast, clock);
-    await clock.settledAt(b.click("#thrice"));
+    await clock.settledAt(b.click("#thrice", undefined, "fake-doc"));
     expect(v.url).toBe("https://x/third");
   });
 
@@ -915,7 +915,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.onNavigationFailed?.(new Error("-999")), 40);
     };
     const b = onClock(v, { graceMs: 20, settleMs: 60 }, clock);
-    const at = await clock.settledAt(b.click("#x"));
+    const at = await clock.settledAt(b.click("#x", undefined, "fake-doc"));
     expect(reads).toBe(2);
     expect(at).toBe(20 + 60 + CLICK_MS);
   });
@@ -949,7 +949,7 @@ describe("wrapView navigation watch", () => {
     });
     const b = onClock(v, { graceMs: 100, settleMs: 150 }, clock);
     // act stopped waiting for the slow read at its settleMs bound, after the grace.
-    expect(await clock.settledAt(b.click("#btn"))).toBe(100 + 150 + CLICK_MS);
+    expect(await clock.settledAt(b.click("#btn", undefined, "fake-doc"))).toBe(100 + 150 + CLICK_MS);
     const one = b.evaluate("1");
     expect(await clock.settledAt(one)).toBe(100 + CLICK_MS + 1000);
     expect(await one).toBe(1);
@@ -966,7 +966,7 @@ describe("wrapView navigation watch", () => {
       clock.setTimeout(() => v.onNavigationFailed?.(new Error("interrupted")), 60);
     };
     const b = onClock(v, fast, clock);
-    expect(await clock.settledAt(b.click("#nocontent"))).toBe(60 + CLICK_MS);
+    expect(await clock.settledAt(b.click("#nocontent", undefined, "fake-doc"))).toBe(60 + CLICK_MS);
   });
 
   test("a page that cannot answer the read costs the grace window, not a failure", async () => {
@@ -976,7 +976,7 @@ describe("wrapView navigation watch", () => {
       },
     });
     const b = wrapView(v, fast);
-    await b.click("#btn");
+    await b.click("#btn", undefined, "fake-doc");
     expect(v.url).toBe("https://x/");
   });
 
@@ -1177,7 +1177,7 @@ describe("wrapView navigation watch", () => {
       v.loading = true;
     };
     expect(b.phase).toBe("idle");
-    const clicked = b.click("#go");
+    const clicked = b.click("#go", undefined, "fake-doc");
     await waitFor(() => b.phase === "awaiting-navigation", 3000);
     expect([during, b.phase]).toEqual(["acting", "awaiting-navigation"]);
     v.land("https://x/next");
@@ -1194,7 +1194,7 @@ describe("wrapView navigation watch", () => {
       },
     });
     const b = wrapView(v, fast);
-    await b.click("#go");
+    await b.click("#go", undefined, "fake-doc");
     expect([atRead, b.phase]).toEqual(["delivered", "idle"]);
   });
 
@@ -1205,7 +1205,7 @@ describe("wrapView navigation watch", () => {
       },
     });
     const b = wrapView(v, fast);
-    const clicked = b.click("#go");
+    const clicked = b.click("#go", undefined, "fake-doc");
     await waitFor(() => b.phase === "awaiting-navigation", 3000);
     expect(b.phase).toBe("awaiting-navigation");
     v.land("https://x/next");
@@ -1220,7 +1220,7 @@ describe("wrapView navigation watch", () => {
       },
     });
     const b = wrapView(v, fast);
-    await expect(b.click("#missing")).rejects.toThrow("no element");
+    await expect(b.click("#missing", undefined, "fake-doc")).rejects.toThrow("no element");
     expect(b.phase).toBe("idle");
   });
 });
@@ -1461,7 +1461,7 @@ describe("a navigation a previous command left pending", () => {
       const clock = manualClock();
       const b = onClock(v, slow, clock);
       expect(b.navigationPending).toBe(false);
-      await clock.fulfilledAt(b.click("#send"));
+      await clock.fulfilledAt(b.click("#send", undefined, "fake-doc"));
       expect(b.navigationPending).toBe(true);
       if (end === "landed") v.land("https://x/never");
       else {
@@ -1481,7 +1481,7 @@ describe("a navigation a previous command left pending", () => {
     };
     const clock = manualClock();
     const b = onClock(v, slow, clock);
-    await clock.fulfilledAt(b.click("#send"));
+    await clock.fulfilledAt(b.click("#send", undefined, "fake-doc"));
     page.navs++;
     page.to = "https://x/never2";
     v.onNavigationFailed?.(new Error("-999"));
@@ -1527,7 +1527,7 @@ describe("a navigation a previous command left pending", () => {
     };
     const clock = manualClock();
     const b = onClock(v, slow, clock);
-    await clock.fulfilledAt(b.click("#send"));
+    await clock.fulfilledAt(b.click("#send", undefined, "fake-doc"));
 
     v.onNavigationFailed?.(new Error("-999"));
     await firstFailureReadStarted;
@@ -1572,7 +1572,7 @@ describe("a navigation a previous command left pending", () => {
     };
     const clock = manualClock();
     const b = onClock(v, slow, clock);
-    await clock.fulfilledAt(b.click("#send"));
+    await clock.fulfilledAt(b.click("#send", undefined, "fake-doc"));
 
     page.navs++;
     v.onNavigationFailed?.(new Error("-999"));
@@ -1596,7 +1596,7 @@ describe("a navigation a previous command left pending", () => {
     const v = submitted();
     const clock = manualClock();
     const b = onClock(v, slow, clock);
-    await clock.fulfilledAt(b.click("#other"));
+    await clock.fulfilledAt(b.click("#other", undefined, "fake-doc"));
     expect(b.navigationPending).toBe(false);
   });
 
@@ -1615,9 +1615,9 @@ describe("a navigation a previous command left pending", () => {
   test("an action waits for a navigation a previous command left pending, then fails with 'page is still loading'", async () => {
     const v = submitted();
     const { clock, send } = onHandler(v);
-    expect((await send({ id: 1, op: "click", args: ["#send"] })).ok).toBe(true);
+    expect((await send({ id: 1, op: "click", args: ["#send", "fake-doc"] })).ok).toBe(true);
     const t0 = clock.now();
-    const res = await send({ id: 2, op: "click", args: ["#b"] }, 150);
+    const res = await send({ id: 2, op: "click", args: ["#b", "fake-doc"] }, 150);
     expect(res).toEqual({ id: 2, ok: false, error: stillLoading("https://x/never") });
     expect(clock.now() - t0).toBe(150);
     expect(clicks(v)).toEqual(["#send"]);
@@ -1626,17 +1626,17 @@ describe("a navigation a previous command left pending", () => {
   test("a page that cannot say where its navigation goes is named by the view's url", async () => {
     const v = submitted(null);
     const { send } = onHandler(v);
-    await send({ id: 1, op: "click", args: ["#send"] });
-    const res = await send({ id: 2, op: "click", args: ["#b"] }, 50);
+    await send({ id: 1, op: "click", args: ["#send", "fake-doc"] });
+    const res = await send({ id: 2, op: "click", args: ["#b", "fake-doc"] }, 50);
     expect(res.error).toBe(stillLoading("https://x/"));
   });
 
   test("an action waits for a pending navigation that lands, then acts on the new page", async () => {
     const v = submitted();
     const { clock, send } = onHandler(v);
-    await send({ id: 1, op: "click", args: ["#send"] });
+    await send({ id: 1, op: "click", args: ["#send", "fake-doc"] });
     clock.setTimeout(() => v.land("https://x/answered"), 100);
-    const res = await send({ id: 2, op: "click", args: ["#b"] }, 2000);
+    const res = await send({ id: 2, op: "click", args: ["#b", "fake-doc"] }, 2000);
     expect(res.ok).toBe(true);
     expect(clicks(v)).toEqual(["#send", "#b"]);
     expect(v.url).toBe("https://x/answered");
@@ -1646,7 +1646,7 @@ describe("a navigation a previous command left pending", () => {
     test(`${op} waits for a pending navigation, as every ACTS op does`, async () => {
       const v = submitted();
       const { send } = onHandler(v);
-      await send({ id: 1, op: "click", args: ["#send"] });
+      await send({ id: 1, op: "click", args: ["#send", "fake-doc"] });
       const res = await send({ id: 2, op, args: ACT_ARGS[op] ?? [] }, 30);
       expect(res.error).toBe(stillLoading("https://x/never"));
     });
@@ -1659,7 +1659,7 @@ describe("a navigation a previous command left pending", () => {
       v.reload = async () => {
         clock.setTimeout(() => v.land(v.url), 5);
       };
-      await send({ id: 1, op: "click", args: ["#send"] });
+      await send({ id: 1, op: "click", args: ["#send", "fake-doc"] });
       const res = await send({ id: 2, op, args: op === "evaluate" ? ["1"] : op === "navigate" ? ["https://x/b"] : [] }, 30);
       expect(res.error).toBeUndefined();
     });
@@ -1965,7 +1965,7 @@ describe("wrapView watchNavigation", () => {
     };
     const b = onClock(v, { graceMs: 40, settleMs: 300 }, clock);
     b.watchNavigation(() => seen.push("navigation"));
-    await clock.fulfilledAt(b.click("a"));
+    await clock.fulfilledAt(b.click("a", undefined, "fake-doc"));
     expect(seen).toEqual(["navigation", "landed", "navigation"]);
   });
 });
@@ -1977,7 +1977,7 @@ describe("wrapView watchNavigation", () => {
 // action, NAV_COUNT after it. Driven through createHandler, so the op-to-
 // method mapping is the daemon's own.
 const ACT_ARGS: Partial<Record<Op, string[]>> = {
-  click: ["#act-target"],
+  click: ["#act-target", "fake-doc"],
   type: ["act-text"],
   press: ["act-key"],
   hover: ["#act-target"],
@@ -2187,7 +2187,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
     await clock.fulfilledAt(b.navigate("https://x/hang"));
     const skip = v.calls.length;
     const start = clock.now();
-    const done = await clock.fulfilledAt(b.click("#l"));
+    const done = await clock.fulfilledAt(b.click("#l", undefined, "fake-doc"));
     expect(after(v, skip)).toEqual([
       ["evaluate", [STOP_LOADING]],
       ["click", ["#l"]],
@@ -2251,7 +2251,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
     const b = onClock(v, fast, clock);
     await clock.fulfilledAt(b.navigate("https://x/hang"));
     v.loading = false;
-    await clock.settledAt(b.click("#l"));
+    await clock.settledAt(b.click("#l", undefined, "fake-doc"));
     expect(evaluated(v, STOP_LOADING)).toBe(0);
   });
 
@@ -2263,7 +2263,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
     // Past the watcher's last read, which ends it.
     await clock.settledAt(new Promise((r) => clock.setTimeout(() => r(undefined), 1000)));
     v.loading = true;
-    await clock.settledAt(b.click("#l"));
+    await clock.settledAt(b.click("#l", undefined, "fake-doc"));
     expect(evaluated(v, STOP_LOADING)).toBe(0);
   });
 

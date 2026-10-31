@@ -42,8 +42,14 @@ function requireKind(kind: keyof typeof KINDS, ref: string, target: Ref): void {
   if (!k.ok(target)) throw new UserError(`ref '${ref}' is not ${k.what} (${target.role})`);
 }
 
+function snapshotDoc(ctx: CommandContext, ref: string, doc: string | undefined): string {
+  if (doc === undefined) throw new UserError(`ref '${ref}' not found in last snapshot of session '${ctx.session}'. Run 'bowser snapshot' to refresh.`);
+  return doc;
+}
+
 export async function cmdClick(ctx: CommandContext, ref: string): Promise<string> {
-  const { prev, target, doc } = await loadRef(ctx.session, ref);
+  const { prev, target, doc: saved } = await loadRef(ctx.session, ref);
+  const doc = snapshotDoc(ctx, ref, saved);
   return withPageClient(ctx, async (c) => {
     acted(ref, await c.request("click", [await liveSelector(c, target, { enabled: true, doc, hit: true }), doc]));
     const state = await c.request("state");
@@ -101,8 +107,9 @@ export async function cmdFill(ctx: CommandContext, ref: string, text: string | u
   if (opts.stdin && text !== undefined) throw new UserError(`${FILL_USAGE} (not both)`);
   if (!opts.stdin && text === undefined) throw new UserError(FILL_USAGE);
   const value = opts.stdin ? withoutFinalNewline(await (ctx.readStdin ?? readStdin)()) : text!;
-  const { target, doc } = await loadRef(ctx.session, ref);
+  const { target, doc: saved } = await loadRef(ctx.session, ref);
   requireKind("fill", ref, target);
+  const doc = snapshotDoc(ctx, ref, saved);
   return withPageClient(ctx, async (c) => {
     const selector = await liveSelector(c, target, { doc, hit: true });
     acted(ref, await c.request("click", [selector, doc]));
