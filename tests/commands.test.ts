@@ -1441,11 +1441,12 @@ describe("check / uncheck", () => {
   });
 });
 
-describe("F20: click, check and uncheck refuse a disabled element and uncheck a checked radio", () => {
+describe("F20: click, check, uncheck and select refuse a disabled element, and uncheck a checked radio", () => {
   const REFS = [
     { id: "e1", role: "button", name: "Go", tag: "button" },
     { id: "e4", role: "checkbox", name: "Agree", tag: "input" },
     { id: "e5", role: "radio", name: "Large", tag: "input" },
+    { id: "e6", role: "combobox", name: "Size", tag: "select" },
   ];
   beforeEach(async () => {
     await saveState({ name: session, url: "https://x", title: "X", refs: REFS, doc: "d1", updatedAt: Date.now() });
@@ -1455,6 +1456,7 @@ describe("F20: click, check and uncheck refuse a disabled element and uncheck a 
     ["click", "e1", (x: CommandContext) => cmdClick(x, "e1"), true],
     ["check", "e4", (x: CommandContext) => cmdCheck(x, "e4"), false],
     ["uncheck", "e4", (x: CommandContext) => cmdUncheck(x, "e4"), false],
+    ["select", "e6", (x: CommandContext) => cmdSelect(x, "e6", "M"), false],
   ] as const) {
     const resolve = resolveRefScript(
       REFS.find((r) => r.id === ref)!,
@@ -1639,14 +1641,14 @@ describe("ref commands resolve the ref in the live page first", () => {
   ];
   // Each ref command, the ref it acts on, and the action op that must carry the fresh selector.
   // The fifth column: whether the resolve script also refuses a disabled
-  // element (F20). fill keeps its own disabled message; hover and select
-  // do not refuse. The last: whether it refuses a covered one, for the
+  // element (F20, and #270 for select). fill keeps its own disabled message;
+  // hover does not refuse. The last: whether it refuses a covered one, for the
   // commands that click at the element's centre (#112).
   const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>, boolean, boolean]> = [
     ["click", "e1", "click", (x) => cmdClick(x, "e1"), true, true],
     ["fill", "e2", "click", (x) => cmdFill(x, "e2", "hi"), false, true],
     ["hover", "e1", "hover", (x) => cmdHover(x, "e1"), false, false],
-    ["select", "e3", "select", (x) => cmdSelect(x, "e3", "red"), false, false],
+    ["select", "e3", "select", (x) => cmdSelect(x, "e3", "red"), true, false],
     ["check", "e4", "check", (x) => cmdCheck(x, "e4"), true, false],
     ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4"), true, false],
   ];

@@ -207,7 +207,7 @@ export async function cmdSelect(ctx: CommandContext, ref: string, value: string)
   const { target, doc } = await loadRef(ctx.session, ref);
   requireKind("select", ref, target);
   return withPageClient(ctx, async (c) => {
-    const found = acted(ref, await c.request("select", [await liveSelector(c, target, { doc }), value, doc]));
+    const found = acted(ref, await c.request("select", [await liveSelector(c, target, { enabled: true, doc }), value, doc]));
     if (!found) throw new UserError(`ref '${ref}' has no option ${JSON.stringify(value)}`);
     return replyPage(ctx, c, { ok: true, ref, element: element(target), value }, `selected ${ref} -> "${value}"`);
   });

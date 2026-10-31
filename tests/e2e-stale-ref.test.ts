@@ -18,8 +18,6 @@ import { cmdSnapshot } from "../src/commands/snapshot.ts";
 import { SNAPSHOT_SCRIPT } from "../src/page-scripts.ts";
 import { loadState } from "../src/state.ts";
 
-/** These buttons have no hover handler (#270). */
-const NO_CHANGE = "; the page did not change within 200 ms (bowser cannot trigger CSS :hover)";
 const E2E = process.env.BOWSER_E2E === "1";
 const runOrSkip = E2E ? describe : describe.skip;
 const FIXTURES = join(import.meta.dir, "fixtures");
@@ -201,18 +199,32 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     expect(code).toBe(1);
   }, 60_000);
 
-  test("a hidden element is not stale: its ref keeps today's behaviour", async () => {
+  /** The error `p` fails with, with BOWSER_OP_TIMEOUT_MS at 2000 for its request. */
+  const timedOut = async (p: () => Promise<string>): Promise<string> => {
+    process.env.BOWSER_OP_TIMEOUT_MS = "2000";
+    try {
+      return await p().then(
+        (out) => {
+          throw new Error(`expected a failure, got: ${out}`);
+        },
+        (e: Error) => e.message,
+      );
+    } finally {
+      delete process.env.BOWSER_OP_TIMEOUT_MS;
+    }
+  };
+
+  test("a hidden element is not stale: its ref resolves, and the action waits for it to be visible (#270)", async () => {
     await cmdOpen(ctx, `${base}/form.html`);
     await cmdSnapshot(ctx);
     const agree = await refNamed("Agree");
     const hover = await refNamed("Hover me");
-    // Still connected, no longer visible. check and hover act through page
-    // scripts that do not wait for visibility, so today both go through.
+    // Still connected, no longer visible: not refused as stale, but never visible within the budget.
     await cmdEval(ctx, "(document.getElementById('agree').style.visibility = 'hidden', document.getElementById('hoverme').style.display = 'none')");
-    await cmdCheck(ctx, agree);
-    expect(await checked("Agree")).toBe("true");
-    await cmdHover(ctx, hover);
-    expect(await cmdEval(ctx, "document.getElementById('hovered').textContent")).toBe("hovered");
+    expect(await timedOut(() => cmdCheck(ctx, agree))).toBe("'check' timed out after 2000ms");
+    expect(await checked("Agree")).toBe("false");
+    expect(await timedOut(() => cmdHover(ctx, hover))).toBe("'hover' timed out after 2000ms");
+    expect(await cmdEval(ctx, "document.getElementById('hovered').textContent")).toBe("");
   }, 60_000);
 
   // The name of an element hidden now leaves out only descendants hidden in
@@ -221,17 +233,17 @@ runOrSkip("e2e: a stale ref fails at once", () => {
     ["display", "display = 'none'"],
     ["visibility", "visibility = 'hidden'"],
   ] as const) {
-    test(`#80: a ref hidden by ${how} since the snapshot keeps its name and is not refused`, async () => {
+    test(`#80: a ref hidden by ${how} since the snapshot keeps its name and is not refused; the hover waits it out (#270)`, async () => {
       await cmdOpen(ctx, `${base}/relabel.html`);
       await cmdSnapshot(ctx);
       const save = await refNamed("Save");
       const send = await refNamed("Send now");
       const post = await refNamed("Post");
       await cmdEval(ctx, `(['save', 'send', 'post'].forEach((id) => document.getElementById(id).style.${hide}), 1)`);
-      expect(await cmdHover(ctx, save)).toBe(`hovered ${save}${NO_CHANGE}`);
-      expect(await cmdHover(ctx, send)).toBe(`hovered ${send}${NO_CHANGE}`);
+      expect(await timedOut(() => cmdHover(ctx, save))).toBe("'hover' timed out after 2000ms");
+      expect(await timedOut(() => cmdHover(ctx, send))).toBe("'hover' timed out after 2000ms");
       // #95: its own visibility:hidden reads the same as one inherited from the button.
-      expect(await cmdHover(ctx, post)).toBe(`hovered ${post}${NO_CHANGE}`);
+      expect(await timedOut(() => cmdHover(ctx, post))).toBe("'hover' timed out after 2000ms");
     }, 60_000);
   }
 

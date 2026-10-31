@@ -23,6 +23,8 @@ import {
   NAV_ARM,
   NAV_COUNT,
   NAV_DESTINATION,
+  selectScript,
+  setCheckedScript,
   STOP_LOADING,
   TYPE_TARGET_FOCUSED,
   TYPE_TARGET_MARK,
@@ -143,6 +145,95 @@ describe("clickStep (#267)", () => {
   test("a changed token is navigated", () => {
     expect(clickStep(["d", 5, 10, 20, 100, 40, true], ["e", 6, 10, 20, 100, 40, true], "d")).toEqual({ kind: "navigated" });
   });
+});
+
+describe("clickStep without pointer (#270)", () => {
+  test("acts on the first sample with a box, whatever its frame or hit", () => {
+    expect(clickStep(undefined, ["d", 9, 10, 20, 100, 40, false], "d", false)).toEqual({ kind: "click", x: 60, y: 40 });
+  });
+  test("a sample without a box retries", () => {
+    expect(clickStep(undefined, ["d", 9], "d", false)).toEqual({ kind: "retry" });
+  });
+  test("a changed token is navigated", () => {
+    expect(clickStep(undefined, ["e", 9, 10, 20, 100, 40, true], "d", false)).toEqual({ kind: "navigated" });
+  });
+});
+
+describe("wrapView hover, select, check and uncheck wait for their target (#270)", () => {
+  const ACTIONS = [
+    [
+      "hover",
+      hoverScript("#a", "d"),
+      (b: ReturnType<typeof wrapView>) => b.hover("#a", "d", 1000),
+      "hover: the page navigated before the hover; nothing was hovered",
+    ],
+    [
+      "select",
+      selectScript("#a", "v", "d"),
+      (b: ReturnType<typeof wrapView>) => b.select("#a", "v", "d", 1000),
+      "select: the page navigated before the select; nothing was selected",
+    ],
+    [
+      "check",
+      setCheckedScript("#a", true, "d"),
+      (b: ReturnType<typeof wrapView>) => b.setChecked("#a", true, "d", 1000),
+      "check: the page navigated before the check; nothing was checked",
+    ],
+    [
+      "uncheck",
+      setCheckedScript("#a", false, "d"),
+      (b: ReturnType<typeof wrapView>) => b.setChecked("#a", false, "d", 1000),
+      "uncheck: the page navigated before the uncheck; nothing was unchecked",
+    ],
+  ] as const;
+  /** A view whose poll of `#a` answers `sample(n)` on its n-th call; it logs polls and the action's script, in order. */
+  function polled(script: string, sample: (n: number) => unknown[]) {
+    const log: string[] = [];
+    let n = 0;
+    const v = fakeView(
+      {
+        evaluate: async (expr) => {
+          if (expr === clickPollScript("#a")) {
+            log.push("poll");
+            return JSON.stringify(sample(n++));
+          }
+          if (expr === script) log.push("script");
+          return expr === hoverRead(false) || expr === hoverRead(true) ? true : undefined;
+        },
+      },
+      { clickable: false },
+    );
+    return { v, log };
+  }
+
+  for (const [op, script, act, navigated] of ACTIONS) {
+    const pointer = op === "hover";
+    test(`${op} sends its script only once the poll is ready`, async () => {
+      const clock = manualClock();
+      // No box, then a box: ready for select and check; hover needs the same box on the next frame too.
+      const { v, log } = polled(script, (n) => (n === 0 ? ["d", 0] : ["d", n, 10, 20, 100, 40, true]));
+      await clock.fulfilledAt(act(wrapView(v, fast, undefined, undefined, undefined, clock)));
+      expect(log).toEqual(pointer ? ["poll", "poll", "poll", "script"] : ["poll", "poll", "script"]);
+    });
+
+    test(`${op} on a target that never gets a box fails at timeoutMs with the timeout text and sends nothing`, async () => {
+      const clock = manualClock();
+      const { v, log } = polled(script, (n) => ["d", n]);
+      const action = act(wrapView(v, fast, undefined, undefined, undefined, clock));
+      expect(await clock.settledAt(action)).toBe(1000);
+      await expect(action).rejects.toThrow("timeout waiting for '#a' to be actionable");
+      expect(log).not.toContain("script");
+    });
+
+    test(`${op} after the document changed fails with its own navigation message and sends nothing`, async () => {
+      const clock = manualClock();
+      const { v, log } = polled(script, (n) => (n === 0 ? ["d", 0] : ["e", n, 10, 20, 100, 40, true]));
+      const action = act(wrapView(v, fast, undefined, undefined, undefined, clock));
+      await clock.settledAt(action);
+      await expect(action).rejects.toThrow(`${navigated}, run 'bowser snapshot' to see the new page`);
+      expect(log).not.toContain("script");
+    });
+  }
 });
 
 describe("wrapView click waits for the target itself (#267)", () => {
@@ -2442,13 +2533,14 @@ describe("wrapView hover watches whether the page changed (#270)", () => {
     return { b: wrapView(v, fast, undefined, undefined, undefined, clock), at };
   }
 
+  // The events go out after the wait's second poll, at 4 ms.
   test("a change seen on the first read answers true after that one read", async () => {
     const clock = manualClock();
     const { b, at } = watched([true], clock);
     const hover = b.hover("#a");
     await clock.settledAt(hover);
     expect(await hover).toBe(true);
-    expect(at).toEqual([[0, false]]);
+    expect(at).toEqual([[4, false]]);
   });
 
   test("no change answers false after the last read at 200 ms", async () => {
@@ -2457,7 +2549,7 @@ describe("wrapView hover watches whether the page changed (#270)", () => {
     const hover = b.hover("#a");
     await clock.settledAt(hover);
     expect(await hover).toBe(false);
-    expect(at.at(-1)).toEqual([200, true]);
+    expect(at.at(-1)).toEqual([204, true]);
     expect(at.length).toBe(21);
   });
 
@@ -2468,8 +2560,8 @@ describe("wrapView hover watches whether the page changed (#270)", () => {
     await clock.settledAt(hover);
     expect(await hover).toBe(true);
     expect(at).toEqual([
-      [0, false],
-      [10, false],
+      [4, false],
+      [14, false],
     ]);
   });
 

@@ -110,7 +110,7 @@ No storage. The page keeps only the existing `bowser.frames` record. The poll gr
 - [ ] 11. Each test in items 1 to 10 fails when the production line behind its checked value is broken, and the PR body quotes one red line per test.
 - [ ] 12. `tests/e2e-stale-ref.test.ts:204` and the two `#80` tests at `:224` change to expect the timeout, with `BOWSER_OP_TIMEOUT_MS=2000`, in place of the action going through: a hidden ref is still not refused as changed or gone. `tests/e2e-click-nav.test.ts`, `tests/e2e-covered.test.ts`, `tests/e2e-hover.test.ts`, `tests/e2e-forms.test.ts` and `tests/e2e-actions.test.ts` pass unchanged.
 - [ ] 13. `bun run check` passes, and `BOWSER_E2E=1 bun test` passes in CI.
-- [ ] 14. CHANGELOG `[Unreleased]` has a `Changed` entry naming #270, and `docs/commands.md` says that `hover`, `check`, `uncheck` and `select` wait for a visible target and that `select` refuses a disabled one.
+- [ ] 14. CHANGELOG `[Unreleased]` has a `Changed` entry naming #270, and the command tables in `README.md` and `skills/bowser/references/commands.md` say that `hover`, `check`, `uncheck` and `select` wait for a visible target and that `select` refuses a disabled one (`docs/commands.md` has no section for these commands).
 - [ ] 15. A Codex review ends with no open Critical or Required finding, and the PR closes #270.
 
 ### Run before the code (2026-10-31, worktree at origin/main ae2a0ad)
