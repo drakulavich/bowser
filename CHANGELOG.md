@@ -5,6 +5,8 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-31
+
 ### Changed
 
 - **`hover`, `check`, `uncheck` and `select` wait for their target, as `click` does.** They acted at
