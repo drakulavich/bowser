@@ -5,6 +5,8 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-10-31
+
 ### Fixed
 
 - **`click` and `hover` scroll to a target that ends up below the fold while they wait.** They
