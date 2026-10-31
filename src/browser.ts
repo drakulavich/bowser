@@ -830,7 +830,7 @@ export function wrapView(
   /** Inside act: poll until the target is actionable (see clickStep), in the waiting phase. Without `doc` the first sample's token is the expected one. */
   const untilActionable = (op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean) =>
     nav.waiting(async (): Promise<{ x: number; y: number } | Gone> => {
-      const poll = clickPollScript(selector);
+      const poll = clickPollScript(selector, pointer);
       const end = clock.now() + timeoutMs;
       let previous: ClickSample | undefined;
       let expected: unknown = doc;

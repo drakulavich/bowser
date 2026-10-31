@@ -49,6 +49,23 @@ const HIDE = String.raw`<script>
   window.changes = {};
 </script>`;
 
+/** A button 2000px down, past the fold: `slide(ms)` moves it there from the top over `ms`. */
+const BELOW = `<!doctype html><title>below</title>
+<button id="low" style="position: absolute; left: 0; top: 2000px; width: 120px; height: 40px" onclick="document.body.dataset.clicked = (+(document.body.dataset.clicked ?? 0) + 1) + ''">Low</button>
+<div style="height: 4000px"></div>
+<script>
+  window.slide = (ms) => {
+    const t0 = performance.now();
+    const tick = () => {
+      const p = Math.min(1, (performance.now() - t0) / ms);
+      low.style.top = 50 + p * 1950 + 'px';
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    low.style.top = '50px';
+    requestAnimationFrame(tick);
+  };
+</script>`;
+
 const FORM = `<!doctype html><title>form</title>
 <label><input type="checkbox" id="alpha"> Alpha</label>
 <label><input type="checkbox" id="beta" checked> Beta</label>
@@ -81,7 +98,7 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     server = Bun.serve({
       port: 0,
       fetch: (req) =>
-        new Response(new URL(req.url).pathname === "/mover" ? MOVER : FORM, {
+        new Response({ "/mover": MOVER, "/below": BELOW }[new URL(req.url).pathname] ?? FORM, {
           headers: { "content-type": "text/html; charset=utf-8" },
         }),
     });
@@ -232,5 +249,16 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     await evalText("(hide('far', 500, () => scrollTo(0, 0)), 1)");
     await cmdCheck(ctx, far);
     expect(await evalText("String(far.checked) + ' ' + (far.getBoundingClientRect().top > innerHeight)")).toBe("true true");
+  }, 30_000);
+
+  test("click on a button that slides below the fold during the wait scrolls to it and clicks it (#288)", async () => {
+    await cmdOpen(ctx, `${base}/below`);
+    await cmdSnapshot(ctx);
+    const low = await refNamed("Low");
+    const t0 = performance.now();
+    await evalText("(slide(300), 1)");
+    expect(await cmdClick(ctx, low)).toBe(`clicked ${low} (button "Low")`);
+    expect(performance.now() - t0).toBeGreaterThanOrEqual(300);
+    expect(await evalText("String(document.body.dataset.clicked)")).toBe("1");
   }, 30_000);
 });
