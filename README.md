@@ -12,7 +12,7 @@ bowser snapshot                          # the page's accessibility tree, with r
 bowser click e3                          # click the element with ref e3
 ```
 
-It drives the WebKit engine macOS already has, through [`Bun.WebView`](https://bun.com/docs/runtime/webview), so there is no browser to download. The commands, flags and snapshot format are those of Microsoft's [`playwright-cli`](https://github.com/microsoft/playwright-cli): replace `playwright` with `bowser` and existing playwright-cli skills work unchanged. bowser runs on macOS only. For Chromium, Linux or Windows, use playwright-cli.
+It drives the WebKit engine macOS already has, through [`Bun.WebView`](https://bun.com/docs/runtime/webview), so there is no browser to download. The commands, flags and snapshot format are those of Microsoft's [`playwright-cli`](https://github.com/microsoft/playwright-cli): replace `playwright` with `bowser` and the core loop of a playwright-cli skill (`open`, `snapshot`, `click`, `fill`, `press`) works unchanged. The differences: a dialog's answer is set before the action ([Dialogs](#dialogs)), there are no cookie or tab commands, and `run-code` runs in the page, not in Node. bowser runs on macOS only. For Chromium, Linux or Windows, use playwright-cli.
 
 ## Password values stay out of snapshots
 
@@ -34,8 +34,10 @@ A prototype of the converter was measured on 7 pages in [#130](https://github.co
 
 What sets it apart from `playwright-cli`:
 
+- **No browser to download.** It uses the WebKit macOS already has.
+- **Password values stay out of snapshots.** See [above](#password-values-stay-out-of-snapshots).
+- **`markdown` reads a page for a fraction of a snapshot's size.** See [above](#read-a-page-cheaply-with-markdown).
 - **Fewer tokens than playwright-cli.** In the [agent benchmark](docs/benchmark.md) (10 browser tasks, 3 runs each, Claude Sonnet 5.5, 2026-10-21), an agent used 413k tokens and $0.41 with bowser against 445k and $0.51 with playwright-cli, summed over the per-task medians. Both passed all 30 runs.
-- **Persistent sessions.** Each named session keeps a long-lived browser process so multi-step flows survive between commands.
 
 ## Install
 
@@ -66,8 +68,9 @@ Inside a session, `/plugin install bowser --marketplace drakulavich/bowser` does
 ## Quickstart
 
 ```bash
-bowser open https://example.com          # navigate, save state
-bowser fill e5 "hello@bowser.dev"        # fill a form field
+bowser open https://example.com          # start a session and load the page
+bowser snapshot                          # refs for the page's elements
+bowser fill e5 "hello@bowser.dev"        # fill the field whose ref the snapshot gave as e5
 bowser press Enter                       # submit
 bowser screenshot --filename=shot.png    # capture
 bowser close                             # end session
@@ -77,7 +80,7 @@ Each session runs one persistent browser process (spawned lazily on first comman
 
 If the page's web process crashes, WebKit relaunches it and reloads the page once. That reload looks like the page reloading itself, so bowser does not report it: page state is gone, and old refs fail with `not found in the current page snapshot`. If the process dies again, WebKit does not reload the page, and every page command fails with `the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'` (exit 2). bowser does not reload it for you; `reload`, `goto` or `open <url>` recover it.
 
-If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1), or gives the recorded `bowser open --persistent` / `bowser open --profile=<dir>` command when session state records a profile; paths are quoted when needed. State from an older bowser has no profile record, so bowser falls back to checking the default profile directory. This avoids quietly starting an empty browser. `bowser open` (with the same profile option again, when one was recorded) starts it anew; `bowser close` clears it. A session that never ran a browser still starts one on its first command.
+If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1). [More](https://github.com/drakulavich/bowser/blob/main/docs/commands.md#a-session-whose-browser-exited).
 
 ### Multiple sessions
 
@@ -122,22 +125,7 @@ bowser click e8
 - ["prompt" dialog with message "Your name?"]: accepted
 ```
 
-The command that caused the dialog reports it under `### Modal state`. With `--json` it reports it as `"dialogs": [...]`. A report lists the first 20 dialogs and then `- and N more dialogs` (`"dialogsOmitted": N` with `--json`), so a page timer that opens a dialog every 100 ms does not flood the next command. If the command fails, the report follows its error on stderr and the exit code is unchanged. `dismissed (run dialog-accept before the action to accept it)` means no answer was set. An answer covers one dialog and is dropped when the page navigates.
-
-**Differences from `playwright-cli`:**
-
-- In `playwright-cli`, the dialog stays open and `dialog-accept` answers it *after* the action. In bowser, `dialog-accept` after the action prepares the *next* dialog. It does not answer the one already reported.
-- WebKit has no dialog events, so bowser replaces `window.alert`/`confirm`/`prompt` in the page, and in every same-origin iframe it can reach, before it acts there. A dialog in such an iframe is reported like the page's own and takes the prepared answer. A dialog that fires between commands (a timer) is reported by the next command that prints dialogs, even when that command leaves the page (`reload`, `goto`, `open`, `go-back`, `press Enter` on a form).
-- A function the page defined itself (`window.confirm = m => …`) is left alone and runs, as in `playwright-cli`; its calls are not dialogs and are not reported.
-- A page function made with `.bind()` from the browser's own (`window.confirm = confirm.bind(window)`) looks native to bowser: the shim replaces it, and the dialog is reported.
-- Not reported, and dismissed by WebKit:
-  - a dialog the page opens while loading, before bowser's first command on that document;
-  - a dialog in a cross-origin iframe, or in an iframe that loaded after bowser's last command;
-  - a dialog opened through a reference the page saved at load time (`const c = window.confirm`), including a page wrapper around it (`window.confirm = m => c(m)`).
-
-  In each of these cases a prepared answer stays set until the next dialog bowser sees or a navigation.
-- A dialog whose handler then navigates the page (`if (confirm('Leave?')) location = …`) is answered but not reported, because the report leaves with the old page.
-- `beforeunload` is not handled.
+The command that caused the dialog reports it under `### Modal state`. In `playwright-cli` the dialog stays open and `dialog-accept` answers it *after* the action; in bowser, `dialog-accept` after the action prepares the *next* dialog. [More](https://github.com/drakulavich/bowser/blob/main/docs/commands.md#dialogs): `--json`, iframes, page-defined dialog functions, and the dialogs bowser cannot see.
 
 ### Snapshot output
 
@@ -181,7 +169,7 @@ bowser --json snapshot | jq -r .snapshot | grep 'button'
 
 ### Screenshots
 
-Screenshots are written as PNG files, or JPEG when `--filename` ends in `.jpg` or `.jpeg` (quality 80); any other extension, or none, fails with exit code 1. `bowser screenshot --filename out.png` writes to `out.png` (relative paths resolve against your current directory); without `--filename` it writes `screenshot-<session>.png`, auto-incrementing (`-1`, `-2`, …) if that file already exists. The reply names the absolute path written and the image's size in pixels (`wrote /…/out.png (1600×1200)`, `{"ok":true,"filename":"/…/out.png","width":1600,"height":1200}`); `snapshot --filename` names the path too. The size follows the display's pixel ratio: an 800×600 viewport is 1600×1200 on a Retina display and 800×600 on one at ratio 1. `--scale=N` fixes it at `innerWidth·N × innerHeight·N` by scaling the capture down, or fails with exit code 1 when N is above the display's ratio, since bowser cannot render more pixels than the display has. A capture is the viewport, as in `playwright-cli` without `--full-page`: bowser has no full-page or element-bounded screenshots (`Bun.WebView` captures only the viewport). Use `resize` to capture more. WebKit cannot capture a viewport whose pixels fill 4 GiB. On a Retina display (pixel ratio 2) that is reached only near `resize`'s maximum: `resize 16384 16384` cannot be captured, `resize 16384 16383` can. `screenshot` then fails with exit code 1 and names the size to resize to. Before it captures, `screenshot` waits up to 5 s for the web fonts the page itself has asked for (not those of its iframes), such as a font first used by text a script added after the page loaded. If they are still loading after 5 s it captures anyway and adds `; fonts still loading` to the reply (`"fontsLoading":true` under `--json`): the image may show text in a fallback font or none at all, so retry, or check that the font URL answers.
+Screenshots are written as PNG files, or JPEG when `--filename` ends in `.jpg` or `.jpeg` (quality 80). A capture is the viewport, as in `playwright-cli` without `--full-page`; use `resize` to capture more. [More](https://github.com/drakulavich/bowser/blob/main/docs/commands.md#screenshot): file names, pixel size and `--scale`, the 4 GiB limit, and the wait for web fonts.
 
 ## Command reference
 
@@ -226,20 +214,11 @@ With `--json`, and so over MCP, `click`, `fill`, `hover`, `select`, `check` and 
 
 Global flags: `-s=<name>` / `--session=<name>`, `--json`, `-h/--help`, `--version` (prints the version and runs nothing). A session name uses letters, digits, `.`, `_` and `-`, and does not start with `.` or `-`. It is at most 255 characters, or fewer under a very long `HOME`: `<HOME>/.bowser/sessions/<name>/pid.<pid>.tmp` must fit Bun's 1016-character path limit. A longer name is a usage error that gives the limit.
 
-`bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and
-flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text
-like any other argument.
+`bowser <command> --help` (or `-h` anywhere before `--`) prints that command's usage, arguments and flags and runs nothing; `bowser mcp --help` does not start the server. After `--`, `--help` is text like any other argument.
 
-A command given more arguments than it takes fails before it runs, with
-`usage: too many arguments for '<cmd>': expected <n>, received <m>` and exit code 1. Quote an
-argument that has spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. Words after `--`
-count too, so `fill e1 -- a b` is too many. `bowser mcp` with any extra word fails the same way and
-does not start the server.
+A command given more arguments than it takes fails before it runs, with `usage: too many arguments for '<cmd>': expected <n>, received <m>` and exit code 1. Quote an argument that has spaces: `bowser eval "1 + 1"`, `bowser fill e4 "hello world"`. Words after `--` count too, so `fill e1 -- a b` is too many. `bowser mcp` with any extra word fails the same way and does not start the server.
 
-A command given fewer arguments than it requires fails the same way, with its usage line:
-`bowser select e3` fails with `usage: bowser select <ref> <value>` and exit code 1. An empty
-argument is a value, as in `playwright-cli`: `bowser select e3 ""` selects the option whose value
-is empty, and `bowser localstorage-set k ""` stores an empty string.
+A command given fewer arguments than it requires fails the same way, with its usage line: `bowser select e3` fails with `usage: bowser select <ref> <value>` and exit code 1. An empty argument is a value, as in `playwright-cli`: `bowser select e3 ""` selects the option whose value is empty, and `bowser localstorage-set k ""` stores an empty string.
 
 ## MCP bridge
 
@@ -285,7 +264,15 @@ bowser's scripts run in the page's own JavaScript world, and WebKit returns thei
 
 ### Timeouts
 
-`BOWSER_OP_TIMEOUT_MS`: Per-command timeout in milliseconds (default `30000`; `0` disables). It covers the whole command: each step of a command gets the time the command has left, and time spent queued behind another command counts, so a wedged browser makes a command exit with a timeout error instead of blocking forever. The daemon reads it once, when the session starts, and a value set on a later command applies to that command only when it is smaller. To raise it, `close` the session and `open` it again with the new value. An upgrade restart keeps it (see [Upgrading](https://github.com/drakulavich/bowser/blob/main/docs/install.md#upgrading)). A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2). When the time runs out after an action was sent, the timeout says the action may have reached the page: `'click' timed out after 3000ms; the click may have been delivered, check the page before retrying`. Once the action has returned it says `the click was delivered`, and `waiting for the page it opened` when the action started a navigation that has not loaded yet. Retrying without checking may act twice. If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser (in a session that has not loaded a page yet, where a reload does nothing, it leaves the blank page instead). A command whose client goes away (killed, or its terminal closed) gets 5 s more to finish once its connection closes (or what is left of its budget, if less), and is then ended the same way, with or without a budget. If the command outlives that reload, every other command fails at once with `session is stuck: '<cmd>' is still running after a reload; run 'bowser close'` (exit 2) until it ends; `close` always works. A command sent during the 2 s and the reload waits for them, so the first such failure can take up to 12 s after the timeout (up to 22 s in a session that has not loaded a page yet, where leaving the blank page can take two 10 s tries). An action such as `click` or `fill` on a page still loading a navigation that an earlier command started waits for it, and fails with `page is still loading <url>; retry later, or run 'bowser close'` (exit 2) if the time runs out first. If the daemon itself stops answering mid-command (frozen or swapped out), the command gives up 2 s after its budget with `daemon for session '<s>' did not answer; run 'bowser close -s <s>' to stop it` (exit 2), and `bowser close -s <s>` ends it.
+`BOWSER_OP_TIMEOUT_MS`: Per-command timeout in milliseconds (default `30000`; `0` disables). It covers the whole command: each step of a command gets the time the command has left, and time spent queued behind another command counts, so a wedged browser makes a command exit with a timeout error instead of blocking forever. The daemon reads it once, when the session starts, and a value set on a later command applies to that command only when it is smaller. To raise it, `close` the session and `open` it again with the new value. An upgrade restart keeps it (see [Upgrading](https://github.com/drakulavich/bowser/blob/main/docs/install.md#upgrading)).
+
+- A timeout names the command and, when it differs, the step that overran: `'fill' timed out after 3000ms (in its 'click' step)` (exit 2).
+- When the time runs out after an action was sent, the timeout says the action may have reached the page: `'click' timed out after 3000ms; the click may have been delivered, check the page before retrying`. Once the action has returned it says `the click was delivered`, and `waiting for the page it opened` when the action started a navigation that has not loaded yet. Retrying without checking may act twice.
+- If a timed-out command is still running 2 s later (or after the budget, if shorter), the daemon reloads the page once to free the browser (in a session that has not loaded a page yet, where a reload does nothing, it leaves the blank page instead).
+- A command whose client goes away (killed, or its terminal closed) gets 5 s more to finish once its connection closes (or what is left of its budget, if less), and is then ended the same way, with or without a budget.
+- If the command outlives that reload, every other command fails at once with `session is stuck: '<cmd>' is still running after a reload; run 'bowser close'` (exit 2) until it ends; `close` always works. A command sent during the 2 s and the reload waits for them, so the first such failure can take up to 12 s after the timeout (up to 22 s in a session that has not loaded a page yet, where leaving the blank page can take two 10 s tries).
+- An action such as `click` or `fill` on a page still loading a navigation that an earlier command started waits for it, and fails with `page is still loading <url>; retry later, or run 'bowser close'` (exit 2) if the time runs out first.
+- If the daemon itself stops answering mid-command (frozen or swapped out), the command gives up 2 s after its budget with `daemon for session '<s>' did not answer; run 'bowser close -s <s>' to stop it` (exit 2), and `bowser close -s <s>` ends it.
 
 ## Tests
 
