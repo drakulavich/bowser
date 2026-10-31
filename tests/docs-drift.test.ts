@@ -93,7 +93,7 @@ describe("docs/commands.md matches the registry and the README links", () => {
       const usage = lines[i + 2] ?? "";
       if (!name || !(/^[a-z][a-z-]*$/.test(name) || usage.startsWith("`"))) return;
       if (!REGISTERED.has(name)) wrong.push(name);
-      for (const m of usage.matchAll(/(?:^|\/ )`([a-z][a-z-]*)/g)) if (m[1] !== name) wrong.push(`${name}: ${m[1]}`);
+      for (const m of usage.matchAll(/(?:^|\/ )`([A-Za-z][A-Za-z-]*)/g)) if (m[1] !== name) wrong.push(`${name}: ${m[1]}`);
     });
     expect(wrong).toEqual([]);
   });
