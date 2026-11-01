@@ -16,7 +16,7 @@ A CLI that drives a real headless WebKit browser (macOS only) through shell comm
 4. Snapshot again whenever the page changes.
 5. `bowser close` when done.
 
-To read a page rather than act on it, `bowser markdown` costs a fraction of a snapshot; `bowser markdown eN` reads one section. On a claude.ai artifact it prints the artifact's own Markdown, and on a YouTube video with captions its transcript.
+To read a page rather than act on it, `bowser markdown` costs a fraction of a snapshot; `bowser markdown eN` reads one section. On a claude.ai Markdown artifact it prints the artifact's own Markdown, and on a YouTube video with captions its transcript.
 
 ## Command reference
 
