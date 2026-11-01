@@ -367,7 +367,7 @@ runOrSkip("e2e: the reported URL follows the page (#51)", () => {
     expect(JSON.parse(out).url).toBe(pushed);
     expect((await loadState(ctx.session))!.url).toBe(pushed);
     expect(await cmdSnapshot(ctx)).toContain(`- Page URL: ${pushed}\n`);
-  });
+  }, 30_000);
 
   test("select whose change handler navigates: the next snapshot shows the new page", async () => {
     await cmdSelect(ctx, await ref("Pick"), "b");

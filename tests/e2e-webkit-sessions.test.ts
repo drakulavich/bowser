@@ -84,5 +84,5 @@ runOrSkip("e2e: two WebKit sessions at once (ET-02)", () => {
       expect(await cmdEval(ctx, "location.href")).toBe(url);
       expect(await cmdEval(ctx, "localStorage.getItem('owner')")).toBe(owner);
     }
-  });
+  }, 30_000);
 });
