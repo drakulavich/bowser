@@ -382,8 +382,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
         }
       }
     },
-    // Bun reports a bounce that lands during our goto under our URL; retried until oven-sh/bun#47396 is fixed (#256).
-    { timeout: openTimeout(8000, 60_000), retry: 2 },
+    openTimeout(8000, 60_000),
   );
   // #248 review: the cap stores its document id on the page's document, which a page can make non-extensible.
   test(
