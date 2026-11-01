@@ -80,7 +80,7 @@ Each session runs one persistent browser process (spawned lazily on first comman
 
 If the page's web process crashes, WebKit relaunches it and reloads the page once. That reload looks like the page reloading itself, so bowser does not report it: page state is gone, and old refs fail with `not found in the current page snapshot`. If the process dies again, WebKit does not reload the page, and every page command fails with `the page crashed (its web process exited); run 'bowser reload' or 'bowser goto <url>'` (exit 2). bowser does not reload it for you; `reload`, `goto` or `open <url>` recover it.
 
-If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1). [More](https://github.com/drakulavich/bowser/blob/main/docs/commands.md#a-session-whose-browser-exited).
+If a session's browser exits (it crashed, or was killed), every command but `open` and `close` fails with `session '<name>' is not open (its browser exited); run 'bowser open'` (exit 1). A session opened with `--persistent` or `--profile=<dir>` names that option in the command instead. [More](https://github.com/drakulavich/bowser/blob/main/docs/commands.md#a-session-whose-browser-exited).
 
 ### Multiple sessions
 
