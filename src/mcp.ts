@@ -604,7 +604,7 @@ function startHandover(
       }
       const answered = (async () => {
         for (let r = await out.next(); !r.done; r = await out.next()) {
-          if ((JSON.parse(r.value) as { id?: unknown }).id === HANDOVER_ID) return true;
+          if (idOf(r.value) === JSON.stringify(HANDOVER_ID)) return true;
         }
         return false;
       })();

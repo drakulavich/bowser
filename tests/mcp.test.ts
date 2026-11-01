@@ -1153,6 +1153,19 @@ describe("serveLines: handover to the installed bowser after an upgrade (#145)",
     expect(exited).toBe("exited");
   });
 
+  test("handover: a child that writes a non-JSON line and exits ends the process without the 10 s wait (#297)", async () => {
+    const script = `
+      import { serveLines, createMcpServer } from ${JSON.stringify(join(import.meta.dir, "..", "src", "mcp.ts"))};
+      async function* feed() { yield ${JSON.stringify(INIT)}; yield ${JSON.stringify(call(7, "snapshot"))}; }
+      const server = createMcpServer({ run: async () => "old server", version: "1.0.0" }, () => {});
+      await serveLines(feed(), server, () => {}, { version: "1.0.0", installed: async () => "2.0.0", child: [process.execPath, "-e", ${JSON.stringify('process.stdout.write("nope\\n")')}] });
+    `;
+    const proc = Bun.spawn([process.execPath, "-e", script], { stdout: "ignore", stderr: "inherit" });
+    const exited = await Promise.race([proc.exited.then(() => "exited"), Bun.sleep(3000).then(() => "still running after 3 s")]);
+    proc.kill();
+    expect(exited).toBe("exited");
+  });
+
   const request = (id: number, method: string) => JSON.stringify({ jsonrpc: "2.0", id, method });
 
   test("handover: after the child exited, ping and tools/list are answered and a later call is refused (ET-41)", async () => {
