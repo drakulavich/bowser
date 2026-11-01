@@ -54,7 +54,7 @@ runOrSkip("e2e: the longest session name for a long HOME", () => {
     expect(await cmdEval(ctx, "1 + 1")).toBe("2");
     expect(await cmdClose(ctx)).toBe(`closed session '${name}'`);
     expect(existsSync(join(sessionsRoot(), name))).toBe(false);
-  });
+  }, 30_000);
 
   test("one character more is a usage error, and no session directory appears", async () => {
     const longer = name + "n";

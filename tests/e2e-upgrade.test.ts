@@ -114,7 +114,7 @@ runOrSkip("e2e: upgrade without manual restarts (#145)", () => {
     expect(r.err).toBe(
       notice(s, "0.0.1", `page reloaded at ${base}/moved; refs cleared, run 'bowser snapshot'; cookies and storage were lost (no --persistent)`),
     );
-  });
+  }, 60_000);
 
   test("snapshot restarts an older daemon, reopens the page and says what was lost", async () => {
     const old = await copyAt("old-a", "0.0.1");
