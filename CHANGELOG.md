@@ -5,6 +5,13 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`bowser mcp` exits at once when the installed bowser it hands over to prints a line that is
+  not JSON and exits.** That line failed the wait for the child's `initialize` answer, and its
+  10 s timer was left running, so the process stayed alive for 10 s more. Now a line that does
+  not parse is skipped like any other line that is not the answer. (#297)
+
 ## [0.14.1] — 2026-10-31
 
 ### Fixed
