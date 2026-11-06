@@ -769,7 +769,11 @@ export const NO_OP = "0";
 // The API is reached only as `window.navigation`: a page's own global
 // `let navigation` shadows the bare name in any script run there. A missing
 // or broken API leaves the count at 0, which reads as "no navigation".
+// It also removes a click guard an earlier click left (#289): the guard would
+// cancel this action's trusted click, and a late arm is ahead of this in wrapView's queue.
 export const NAV_ARM = String.raw`(() => {
+  window[Symbol.for('bowser.click-guard')]?.stop();
+  delete window[Symbol.for('bowser.click-guard')];
   const KEY = Symbol.for('bowser.nav');
   let s = window[KEY];
   if (!s) {

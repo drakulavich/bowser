@@ -40,7 +40,7 @@ const CANCELLED = "The operation couldn’t be completed. (NSURLErrorDomain erro
 type FakeClick = (target: string | number, y?: number) => Promise<void>;
 type Fake = Omit<ViewLike, "click"> & { click: FakeClick; calls: Calls; loading: boolean; url: string; land(url: string): void };
 
-const arming = (expr: string) => expr.includes("bowser.click-guard") && expr.includes("addEventListener");
+const arming = (expr: string) => expr !== NAV_ARM && expr.includes("bowser.click-guard") && expr.includes("addEventListener");
 
 /** With `clickable`, the view answers every click poll, unrecorded, with a target that is ready at once,
  *  and its `click` gets that poll's selector instead of the point. */
@@ -312,6 +312,39 @@ describe("wrapView click waits for the target itself (#267)", () => {
     const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d");
     await clock.settledAt(click);
     await expect(click).rejects.toThrow("click: a <div> took the target's place as the click arrived; nothing was clicked");
+  });
+
+  test("the next action removes a guard left by a click whose request timed out (#289)", async () => {
+    const clock = manualClock();
+    const key = Symbol.for("bowser.click-guard");
+    const win: Record<symbol, unknown> = {};
+    let stops = 0;
+    let b!: ReturnType<typeof wrapView>;
+    const v = polled(
+      (n) => ["d", n, 10, 20, 100, 40, true],
+      () => {
+        win[key] = { stop: () => stops++ };
+        b.cancelAction?.();
+        return true;
+      },
+    );
+    const evaluate = v.evaluate;
+    v.evaluate = (expr) => (expr === NAV_ARM ? Promise.resolve(new Function("window", `return ${NAV_ARM}`)(win)) : evaluate(expr));
+    let guardAtPress: unknown = "press not sent";
+    v.press = async () => {
+      guardAtPress = win[key];
+    };
+    b = wrapView(v, fast, undefined, undefined, undefined, clock);
+
+    const click = b.click("#a", 1000, "d");
+    await clock.settledAt(click);
+    await expect(click).rejects.toThrow("request timed out before the action was sent");
+    expect(stops).toBe(0);
+
+    b.resetActionCancellation?.();
+    await clock.fulfilledAt(b.press("Enter"));
+    expect(stops).toBe(1);
+    expect(guardAtPress).toBeUndefined();
   });
 
   test("clicks the target's centre by coordinates", async () => {

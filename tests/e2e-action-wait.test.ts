@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
-import { cmdCheck, cmdClick, cmdHover, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdHover, cmdPress, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -111,6 +111,7 @@ const PAGES: Record<string, string> = {
   "/overlay-on-arrival": GUARDED({ onArm: SHOW_OVERLAY }),
   "/page-clicks-other": GUARDED({ onOver: "other.click();" }),
   "/overlay-on-pointerdown": GUARDED({ onDown: SHOW_OVERLAY }),
+  "/slow-arm": GUARDED({ onArm: "const t = performance.now(); while (performance.now() - t < 3500);" }),
 };
 
 runOrSkip("e2e: actions wait for their target (#270)", () => {
@@ -332,6 +333,19 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     const { target: onTarget, overlay } = await heard();
     expect(onTarget).toEqual(["pointerdown", "mousedown"]);
     expect(overlay).toEqual(["pointerup", "mouseup"]);
+  }, 30_000);
+
+  test("a guard left by a click that timed out does not cancel the next action's click (#289)", async () => {
+    await cmdOpen(ctx, `${base}/slow-arm`);
+    await cmdSnapshot(ctx);
+    const target = await refNamed("Target");
+    const err = await timedOut(() => cmdClick(ctx, target));
+    expect(err.message).toBe("'click' timed out after 3000ms");
+    // Queued behind the guard's own evaluate, so this reads the page after it.
+    expect(await evalText("String(!!window[Symbol.for('bowser.click-guard')])")).toBe("true");
+    await evalText("(other.focus(), 1)");
+    expect(await cmdPress(ctx, "Enter")).toBe("pressed Enter");
+    expect(await heard()).toEqual({ target: [], overlay: [], other: ["click"] });
   }, 30_000);
 
   for (const [how, hide, show] of [
