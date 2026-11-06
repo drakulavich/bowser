@@ -831,7 +831,7 @@ export function wrapView(
   const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
   const otherDoc = async (doc: string | undefined) => doc != null && (await evaluate(docMatches(doc))) !== true;
   /** Inside act: poll until the target is actionable (see clickStep) and `ready`, a read-only script, answers true, in the waiting phase.
-   *  null: at timeoutMs the target was actionable and `ready` was not. Without `doc` the first sample's token is the expected one. */
+   *  null: at timeoutMs, the target had been actionable while `ready` was not. Without `doc` the first sample's token is the expected one. */
   type Point = { x: number; y: number };
   function untilActionable(op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean): Promise<Point | Gone>;
   function untilActionable(
@@ -857,8 +857,10 @@ export function wrapView(
           if (previous === undefined && sample[0] !== expected) return GONE;
           const step = clickStep(previous, sample as ClickSample, expected, pointer);
           if (step.kind === "navigated") throw new Error(navigatedBefore(op));
-          unready = step.kind === "click" && ready !== undefined && (await nav.ask(ready, end - clock.now())) !== true;
-          if (step.kind === "click" && !unready) return step;
+          if (step.kind === "click") {
+            if (ready === undefined || (await nav.ask(ready, end - clock.now())) === true) return step;
+            unready = true;
+          }
           previous = sample as ClickSample;
         }
         await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));

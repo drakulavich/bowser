@@ -250,6 +250,19 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
     expect(log).toEqual(["poll", "check", "poll", "check", "poll", "check", "script"]);
   });
 
+  test("select seen without its option, then hidden until timeoutMs, still answers false (#291)", async () => {
+    const clock = manualClock();
+    const { v, log } = polled(
+      selectScript("#a", "v", "d"),
+      (n) => (n === 0 ? box(n) : ["d", n]),
+      () => false,
+    );
+    const select = wrapView(v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000);
+    expect(await clock.settledAt(select)).toBe(1000);
+    expect(await select).toBe(false);
+    expect(log).not.toContain("script");
+  });
+
   test("select whose option never appears answers false at timeoutMs and sends nothing (#291)", async () => {
     const clock = manualClock();
     const { v, log } = polled(selectScript("#a", "v", "d"), box, () => false);
