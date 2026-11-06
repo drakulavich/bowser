@@ -220,6 +220,24 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     expect(await evalText("off.value + ' ' + changes.off")).toBe("red undefined");
   }, 30_000);
 
+  test("select waits for its option to appear, and fails at the budget naming an option that never does (#291)", async () => {
+    await cmdOpen(ctx, `${base}/form`);
+    await cmdSnapshot(ctx);
+    const late = await refNamed("Late");
+    const t0 = performance.now();
+    await evalText("(setTimeout(() => late.add(new Option('Green', 'g')), 500), 1)");
+    expect(await cmdSelect(ctx, late, "Green")).toBe(`selected ${late} -> "Green"`);
+    expect(performance.now() - t0).toBeGreaterThanOrEqual(500);
+    expect(await evalText("late.value + ' ' + changes.late")).toBe("g 1");
+
+    const t1 = performance.now();
+    const err = await timedOut(() => cmdSelect(ctx, late, "nosuch"));
+    expect(performance.now() - t1).toBeGreaterThanOrEqual(2900);
+    expect(err.message).toBe(`ref '${late}' has no option "nosuch"`);
+    expect(reportFailure(err).code).toBe(1);
+    expect(await evalText("late.value + ' ' + changes.late")).toBe("g 1");
+  }, 30_000);
+
   test("click on a visibility: hidden button whose visible child covers its centre fails at the budget, and its handler does not run", async () => {
     await cmdOpen(ctx, `${base}/form`);
     await cmdSnapshot(ctx);

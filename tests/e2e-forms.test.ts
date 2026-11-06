@@ -87,19 +87,6 @@ runOrSkip("e2e: forms on WebKit", () => {
       await cmdSelect(ctx, await ref("Color"), "Blue");
       expect(await value("color")).toBe("b");
     });
-
-    test("no matching option: exit 1 at once, value kept, no event", async () => {
-      const e = await ref("Color");
-      await cmdSelect(ctx, e, "g");
-      await cmdEval(ctx, "window.log = []");
-      const started = Date.now();
-      const err = await failure(cmdSelect(ctx, e, "nosuch"));
-      expect(Date.now() - started).toBeLessThan(3000);
-      expect(err.message).toBe(`ref '${e}' has no option "nosuch"`);
-      expect(reportFailure(err).code).toBe(1);
-      expect(await value("color")).toBe("g");
-      expect(await log()).toBe("[]");
-    });
   });
 
   describe("F13: fill refuses an element that cannot be edited", () => {

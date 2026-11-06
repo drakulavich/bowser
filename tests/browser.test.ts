@@ -17,6 +17,7 @@ import {
   DOC_ID,
   docMatches,
   hoverRead,
+  hasOptionScript,
   hoverScript,
   LOAD_STATE,
   MUTE_MEDIA,
@@ -100,7 +101,8 @@ function fakeView(over: Partial<Fake> = {}, { clickable = true, doc = "fake-doc"
         const inner = evaluate;
         return (expr: string) => {
           const poll = /Symbol\.for\('bowser\.frames'\)[^]*?document\.querySelector\((".*")\);\n/.exec(expr);
-          if (!poll) return inner(expr);
+          // A select here has every option asked for (#291).
+          if (!poll) return /if \(!el\?\.options\) return false;/.test(expr) ? Promise.resolve(true) : inner(expr);
           const selector = JSON.parse(poll[1]!) as string;
           let i = polled.findIndex((p) => p.selector === selector);
           if (i < 0) i = polled.push({ selector, frame: 0 }) - 1;
@@ -186,16 +188,21 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
       "uncheck: the page navigated before the uncheck; nothing was unchecked",
     ],
   ] as const;
-  /** A view whose poll of `#a` answers `sample(n)` on its n-th call; it logs polls and the action's script, in order. */
-  function polled(script: string, sample: (n: number) => unknown[]) {
+  /** A view whose poll of `#a` answers `sample(n)` on its n-th call, and its n-th check for option "v" `option(n)`; it logs polls, checks and the action's script, in order. */
+  function polled(script: string, sample: (n: number) => unknown[], option: (n: number) => boolean = () => true) {
     const log: string[] = [];
     let n = 0;
+    let checks = 0;
     const v = fakeView(
       {
         evaluate: async (expr) => {
           if (expr === clickPollScript("#a", true) || expr === clickPollScript("#a", false)) {
             log.push("poll");
             return JSON.stringify(sample(n++));
+          }
+          if (expr === hasOptionScript("#a", "v")) {
+            log.push("check");
+            return option(checks++);
           }
           if (expr === script) log.push("script");
           return expr === hoverRead(false) || expr === hoverRead(true) ? true : undefined;
@@ -213,7 +220,7 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
       // No box, then a box: ready for select and check; hover needs the same box on the next frame too.
       const { v, log } = polled(script, (n) => (n === 0 ? ["d", 0] : ["d", n, 10, 20, 100, 40, true]));
       await clock.fulfilledAt(act(wrapView(v, fast, undefined, undefined, undefined, clock)));
-      expect(log).toEqual(pointer ? ["poll", "poll", "poll", "script"] : ["poll", "poll", "script"]);
+      expect(log).toEqual(pointer ? ["poll", "poll", "poll", "script"] : op === "select" ? ["poll", "poll", "check", "script"] : ["poll", "poll", "script"]);
     });
 
     test(`${op} on a target that never gets a box fails at timeoutMs with the timeout text and sends nothing`, async () => {
@@ -234,6 +241,24 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
       expect(log).not.toContain("script");
     });
   }
+
+  const box = (n: number) => ["d", n, 10, 20, 100, 40, true];
+  test("select waits for its option to appear, then selects (#291)", async () => {
+    const clock = manualClock();
+    const { v, log } = polled(selectScript("#a", "v", "d"), box, (n) => n === 2);
+    await clock.fulfilledAt(wrapView(v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000));
+    expect(log).toEqual(["poll", "check", "poll", "check", "poll", "check", "script"]);
+  });
+
+  test("select whose option never appears answers false at timeoutMs and sends nothing (#291)", async () => {
+    const clock = manualClock();
+    const { v, log } = polled(selectScript("#a", "v", "d"), box, () => false);
+    const select = wrapView(v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000);
+    expect(await clock.settledAt(select)).toBe(1000);
+    expect(await select).toBe(false);
+    expect(log).toContain("check");
+    expect(log).not.toContain("script");
+  });
 });
 
 describe("wrapView click waits for the target itself (#267)", () => {

@@ -928,8 +928,21 @@ export function hoverRead(last: boolean): string {
       })()`;
 }
 
-/** Selects the first option, in document order, whose value or label is the
- *  text: playwright's selectOption rule. Answers false, touching nothing and
+/** Sets `opt` to the first option of `el`, in document order, whose value or label is `value`: playwright's selectOption rule. */
+const findOption = (value: string) => `const want = ${JSON.stringify(value)};
+        const opt = Array.from(el.options).find((o) => o.value === want || o.label === want);`;
+
+/** Whether the select has an option findOption picks; reads only (#291). */
+export function hasOptionScript(selector: string, value: string): string {
+  return `(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el?.options) return false;
+        ${findOption(value)}
+        return !!opt;
+      })()`;
+}
+
+/** Selects the option findOption picks. Answers false, touching nothing and
  *  firing no event, when no option matches: assigning an unknown value would
  *  deselect every option. */
 export function selectScript(selector: string, value: string, doc?: string): string {
@@ -937,8 +950,7 @@ export function selectScript(selector: string, value: string, doc?: string): str
         ${docGuard(doc)}
         const el = document.querySelector(${JSON.stringify(selector)});
         if (!el) throw new Error('select: element not found');
-        const want = ${JSON.stringify(value)};
-        const opt = Array.from(el.options).find((o) => o.value === want || o.label === want);
+        ${findOption(value)}
         if (!opt) return false;
         el.selectedIndex = opt.index;
         el.dispatchEvent(new Event('input', { bubbles: true }));

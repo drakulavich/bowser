@@ -5,6 +5,13 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`select` waits for its option to appear, as Playwright does.** A `<select>` whose options
+  load after the page used to fail at once with `ref 'eN' has no option "…"`. Now `select`
+  waits for a matching option within the command timeout, and fails with the same message
+  (exit 1) only when none appears by then; the select keeps its value and gets no event. (#291)
+
 ### Fixed
 
 - **`bowser mcp` exits at once when the installed bowser it hands over to prints a line that is

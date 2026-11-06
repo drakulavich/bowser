@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   fillScript,
+  hasOptionScript,
   hoverScript,
   runCodeScript,
   selectScript,
@@ -23,10 +24,11 @@ const quoted = JSON.stringify(nasty);
 
 describe("page scripts quote their inputs", () => {
   test("selector builders embed JSON.stringify(selector)", () => {
-    for (const s of [hoverScript(nasty), selectScript(nasty, "v"), setCheckedScript(nasty, true), fillScript(nasty, "v")]) {
+    for (const s of [hoverScript(nasty), selectScript(nasty, "v"), hasOptionScript(nasty, "v"), setCheckedScript(nasty, true), fillScript(nasty, "v")]) {
       expect(s).toContain(`document.querySelector(${quoted})`);
     }
     expect(selectScript("#s", nasty)).toContain(`const want = ${quoted};`);
+    expect(hasOptionScript("#s", nasty)).toContain(`const want = ${quoted};`);
     expect(fillScript("#s", nasty)).toContain(`const text = ${quoted};`);
   });
 

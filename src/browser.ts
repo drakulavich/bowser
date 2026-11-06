@@ -21,6 +21,7 @@ import {
   TYPE_TARGET_FOCUSED,
   TYPE_TARGET_MARK,
   clickPollScript,
+  hasOptionScript,
   hoverRead,
   hoverScript,
   keyCommandScript,
@@ -113,7 +114,7 @@ export interface Browser {
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
   /** Waits as click does, then dispatches the events; true when the page changed within HOVER_WATCH_MS of them. */
   hover(selector: string, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
-  /** Waits up to `timeoutMs` for the element to be visible. False when no option's value or label is `value`; nothing changed. */
+  /** Waits up to `timeoutMs` for the element to be visible and to have an option whose value or label is `value`. False when it was visible and had none by then; nothing changed. */
   select(selector: string, value: string, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
   /** Waits as select does. false: `uncheck` of a checked radio, refused in the page (F20). */
   setChecked(selector: string, checked: boolean, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
@@ -320,6 +321,8 @@ const navigatedBefore = (op: string) => `${op}: the page navigated before the ${
 /** Long enough for a hover-intent menu that opens 150 ms after mouseenter (#270). */
 const HOVER_WATCH_MS = 200;
 const HOVER_POLL_MS = 10;
+/** Thrown, not returned: act would then wait for a navigation past the deadline the wait used up (#291). */
+const NO_OPTION = new Error("select: no option matched by the deadline");
 
 /** One answer of clickPollScript. */
 export type ClickSample = [doc: unknown, frame: number, left?: number, top?: number, width?: number, height?: number, hit?: boolean];
@@ -827,13 +830,25 @@ export function wrapView(
   };
   const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
   const otherDoc = async (doc: string | undefined) => doc != null && (await evaluate(docMatches(doc))) !== true;
-  /** Inside act: poll until the target is actionable (see clickStep), in the waiting phase. Without `doc` the first sample's token is the expected one. */
-  const untilActionable = (op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean) =>
-    nav.waiting(async (): Promise<{ x: number; y: number } | Gone> => {
+  /** Inside act: poll until the target is actionable (see clickStep) and `ready`, a read-only script, answers true, in the waiting phase.
+   *  null: at timeoutMs the target was actionable and `ready` was not. Without `doc` the first sample's token is the expected one. */
+  type Point = { x: number; y: number };
+  function untilActionable(op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean): Promise<Point | Gone>;
+  function untilActionable(
+    op: string,
+    selector: string,
+    timeoutMs: number,
+    doc: string | undefined,
+    pointer: boolean,
+    ready: string,
+  ): Promise<Point | Gone | null>;
+  function untilActionable(op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean, ready?: string) {
+    return nav.waiting(async (): Promise<Point | Gone | null> => {
       const poll = clickPollScript(selector, pointer);
       const end = clock.now() + timeoutMs;
       let previous: ClickSample | undefined;
       let expected: unknown = doc;
+      let unready = false;
       while (clock.now() < end) {
         const answer = await nav.ask(poll, end - clock.now());
         const sample: unknown = typeof answer === "string" ? JSON.parse(answer) : undefined;
@@ -842,13 +857,16 @@ export function wrapView(
           if (previous === undefined && sample[0] !== expected) return GONE;
           const step = clickStep(previous, sample as ClickSample, expected, pointer);
           if (step.kind === "navigated") throw new Error(navigatedBefore(op));
-          if (step.kind === "click") return step;
+          unready = step.kind === "click" && ready !== undefined && (await nav.ask(ready, end - clock.now())) !== true;
+          if (step.kind === "click" && !unready) return step;
           previous = sample as ClickSample;
         }
         await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
       }
+      if (unready) return null;
       throw new Error(`timeout waiting for '${selector}' to be actionable`);
     });
+  }
 
   return {
     get phase() {
@@ -927,12 +945,18 @@ export function wrapView(
       ),
     select: (selector, value, doc, timeoutMs = CLICK_TIMEOUT_MS) =>
       guard(
-        nav.act(async () => {
-          const target = await untilActionable("select", selector, timeoutMs, doc, false);
-          if (isGone(target)) return target;
-          const answer = await evaluate(selectScript(selector, value, doc));
-          return isGone(answer) ? answer : answer === true;
-        }),
+        nav
+          .act(async () => {
+            const target = await untilActionable("select", selector, timeoutMs, doc, false, hasOptionScript(selector, value));
+            if (target === null) throw NO_OPTION;
+            if (isGone(target)) return target;
+            const answer = await evaluate(selectScript(selector, value, doc));
+            return isGone(answer) ? answer : answer === true;
+          })
+          .catch((err: unknown) => {
+            if (err === NO_OPTION) return false;
+            throw err;
+          }),
       ),
     setChecked: (selector, checked, doc, timeoutMs = CLICK_TIMEOUT_MS) =>
       guard(
