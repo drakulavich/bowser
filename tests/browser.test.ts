@@ -8,6 +8,7 @@ import { waitFor } from "./helpers/daemons.ts";
 import { manualClock } from "./helpers/manual-clock.ts";
 import {
   CANCEL_PENDING_NAVIGATION,
+  CLICK_GUARD_RESULT,
   clickPollScript,
   keyCommandScript,
   keyWatchScript,
@@ -38,6 +39,8 @@ const CANCELLED = "The operation couldn’t be completed. (NSURLErrorDomain erro
 /** `click` sees the selector of the last click poll in place of the point (see fakeView). */
 type FakeClick = (target: string | number, y?: number) => Promise<void>;
 type Fake = Omit<ViewLike, "click"> & { click: FakeClick; calls: Calls; loading: boolean; url: string; land(url: string): void };
+
+const arming = (expr: string) => expr.includes("bowser.click-guard") && expr.includes("addEventListener");
 
 /** With `clickable`, the view answers every click poll, unrecorded, with a target that is ready at once,
  *  and its `click` gets that poll's selector instead of the point. */
@@ -99,6 +102,7 @@ function fakeView(over: Partial<Fake> = {}, { clickable = true, doc = "fake-doc"
       get: () => {
         const inner = evaluate;
         return (expr: string) => {
+          if (arming(expr)) return Promise.resolve(true);
           const poll = /Symbol\.for\('bowser\.frames'\)[^]*?document\.querySelector\((".*")\);\n/.exec(expr);
           if (!poll) return inner(expr);
           const selector = JSON.parse(poll[1]!) as string;
@@ -238,12 +242,13 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
 
 describe("wrapView click waits for the target itself (#267)", () => {
   /** A view whose poll of `#a` answers `sample(n)` on its n-th call. */
-  function polled(sample: (n: number) => unknown[]): Fake {
+  function polled(sample: (n: number) => unknown[], armed: (expr: string) => boolean = () => true): Fake {
     let n = 0;
     const v = fakeView(
       {
         evaluate: async (expr) => {
           v.calls.push(["evaluate", [expr]]);
+          if (arming(expr)) return armed(expr);
           return expr === clickPollScript("#a", true) ? JSON.stringify(sample(n++)) : undefined;
         },
       },
@@ -284,6 +289,29 @@ describe("wrapView click waits for the target itself (#267)", () => {
     await clock.settledAt(click);
     await expect(click).rejects.toThrow("request timed out before the action was sent");
     expect(clicks(v)).toEqual([]);
+  });
+
+  test("a guard the page refuses goes on polling and clicks only once one is armed (#289)", async () => {
+    const clock = manualClock();
+    let arms = 0;
+    const v = polled(
+      (n) => ["d", n, 10, 20, 100, 40, true],
+      () => ++arms === 2,
+    );
+    await clock.fulfilledAt(wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d"));
+    expect(arms).toBe(2);
+    expect(clicks(v)).toEqual([["click", [60, 40]]]);
+    expect(v.calls[v.calls.findIndex(([op]) => op === "click") + 1]).toEqual(["evaluate", [CLICK_GUARD_RESULT]]);
+  });
+
+  test("a guard that cancelled the click fails it, named by the tag it cancelled it on (#289)", async () => {
+    const clock = manualClock();
+    const v = polled((n) => ["d", n, 10, 20, 100, 40, true]);
+    const evaluate = v.evaluate;
+    v.evaluate = (expr) => (expr === CLICK_GUARD_RESULT ? Promise.resolve("div") : evaluate(expr));
+    const click = wrapView(v, fast, undefined, undefined, undefined, clock).click("#a", 1000, "d");
+    await clock.settledAt(click);
+    await expect(click).rejects.toThrow("click: a <div> took the target's place as the click arrived; nothing was clicked");
   });
 
   test("clicks the target's centre by coordinates", async () => {
@@ -920,7 +948,7 @@ describe("wrapView navigation watch", () => {
     const clock = manualClock();
     const b = onClock(v, fast, clock);
     expect(await clock.settledAt(b.click("#btn", undefined, "fake-doc"))).toBe(fast.graceMs + CLICK_MS);
-    expect(v.calls.map(([n, a]) => (n === "evaluate" ? String(a[0]) : n))).toEqual([NAV_ARM, "click", NAV_COUNT]);
+    expect(v.calls.map(([n, a]) => (n === "evaluate" ? String(a[0]) : n))).toEqual([NAV_ARM, "click", CLICK_GUARD_RESULT, NAV_COUNT]);
   });
 
   test("a page-started navigation that never lands is given up after settleMs", async () => {
@@ -1044,7 +1072,7 @@ describe("wrapView navigation watch", () => {
     const one = b.evaluate("1");
     expect(await clock.settledAt(one)).toBe(100 + CLICK_MS + 1000);
     expect(await one).toBe(1);
-    expect(log).toEqual(["start arm", "end arm", "start count", "end count", "start 1", "end 1"]);
+    expect(log).toEqual(["start arm", "end arm", `start ${CLICK_GUARD_RESULT}`, `end ${CLICK_GUARD_RESULT}`, "start count", "end count", "start 1", "end 1"]);
   });
 
   test("a failure with no navigation after it still ends the wait", async () => {
@@ -2096,11 +2124,12 @@ describe("every ACTS op runs inside the navigation watch", () => {
         if (name === "evaluate" && a[0] === NAV_ARM) return "arm";
         if (name === "evaluate" && a[0] === NAV_COUNT) return "count";
         if (name === "evaluate" && (a[0] === hoverRead(false) || a[0] === hoverRead(true))) return "watch";
+        if (name === "evaluate" && a[0] === CLICK_GUARD_RESULT) return "guard";
         return a.some((x) => String(x).includes(args[0]!)) ? "act" : "other";
       });
       const arm = seq.indexOf("arm");
       expect(arm).toBeGreaterThanOrEqual(0);
-      expect(seq.slice(arm + 1, seq.indexOf("count", arm))).toEqual(op === "hover" ? ["act", "watch"] : ["act"]);
+      expect(seq.slice(arm + 1, seq.indexOf("count", arm))).toEqual(op === "hover" ? ["act", "watch"] : op === "click" ? ["act", "guard"] : ["act"]);
     });
   }
 
@@ -2282,6 +2311,7 @@ describe("navigate caps its wait for load (ET-52)", () => {
     expect(after(v, skip)).toEqual([
       ["evaluate", [STOP_LOADING]],
       ["click", ["#l"]],
+      ["evaluate", [CLICK_GUARD_RESULT]],
     ]);
     // The stop's -999 lands 5 ms in; the click's own landing 30 ms after the click.
     expect(done - start).toBeGreaterThanOrEqual(35);
