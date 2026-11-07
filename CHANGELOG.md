@@ -5,6 +5,8 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-07
+
 ### Changed
 
 - **`select` waits for its option to appear.** It failed at once with `ref 'eN' has no option "x"`
@@ -24,6 +26,10 @@ All notable changes to this project are documented here. This project follows
   not JSON and exits.** That line failed the wait for the child's `initialize` answer, and its
   10 s timer was left running, so the process stayed alive for 10 s more. Now a line that does
   not parse is skipped like any other line that is not the answer. (#297)
+- **README and the skill describe two messages as the code prints them.** The README said every
+  command prints `run 'bowser open'` once the browser exits; a session opened with `--persistent`
+  or `--profile=<dir>` gets that option in the command. `SKILL.md` said `markdown` prints any
+  claude.ai artifact's own Markdown; it does so only for a `text/markdown` artifact. (#298)
 
 ## [0.14.1] — 2026-10-31
 
