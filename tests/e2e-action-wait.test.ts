@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
-import { cmdCheck, cmdClick, cmdHover, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdHover, cmdPress, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -82,6 +82,38 @@ const FORM = `<!doctype html><title>form</title>
 <div style="height: 3000px"></div>
 ${HIDE}`;
 
+/** `heard` lists what each element got, cancelled events aside. `onArm` runs as bowser adds its capture listener: after its last check of the target, before the native click.
+ *  `onOver` runs in the native click's own `mouseover`: WebKit has hit-tested that press by then, so an overlay shown there is not what it lands on (measured, Bun 1.4.4). */
+const GUARDED = ({ onArm = "", onOver = "", onDown = "" }) => `<!doctype html><title>guarded</title>
+<button id="target" style="position: absolute; left: 400px; top: 300px; width: 120px; height: 40px">Target</button>
+<button id="other" style="position: absolute; left: 0; top: 0; width: 120px; height: 40px">Other</button>
+<div id="overlay" style="display: none; position: fixed; inset: 0"></div>
+<script>
+  window.heard = { target: [], overlay: [], other: [] };
+  for (const id of Object.keys(heard))
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'])
+      document.getElementById(id).addEventListener(type, () => heard[id].push(type));
+  target.addEventListener('mouseover', () => { ${onOver} }, { once: true });
+  target.addEventListener('pointerdown', () => { ${onDown} }, { once: true });
+  const add = window.addEventListener;
+  let armed = false;
+  window.addEventListener = function (type, ...rest) {
+    add.call(this, type, ...rest);
+    if (armed || type !== 'click') return;
+    armed = true;
+    ${onArm}
+  };
+</script>`;
+const SHOW_OVERLAY = "overlay.style.display = 'block';";
+const PAGES: Record<string, string> = {
+  "/mover": MOVER,
+  "/below": BELOW,
+  "/overlay-on-arrival": GUARDED({ onArm: SHOW_OVERLAY }),
+  "/page-clicks-other": GUARDED({ onOver: "other.click();" }),
+  "/overlay-on-pointerdown": GUARDED({ onDown: SHOW_OVERLAY }),
+  "/slow-arm": GUARDED({ onArm: "const t = performance.now(); while (performance.now() - t < 3500);" }),
+};
+
 runOrSkip("e2e: actions wait for their target (#270)", () => {
   const ctx: CommandContext = { session: `action-wait-${process.pid}`, json: false };
   let tmp: string;
@@ -99,7 +131,7 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     server = Bun.serve({
       port: 0,
       fetch: (req) =>
-        new Response({ "/mover": MOVER, "/below": BELOW }[new URL(req.url).pathname] ?? FORM, {
+        new Response(PAGES[new URL(req.url).pathname] ?? FORM, {
           headers: { "content-type": "text/html; charset=utf-8" },
         }),
     });
@@ -261,6 +293,59 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     expect(await cmdClick(ctx, low)).toBe(`clicked ${low} (button "Low")`);
     expect(performance.now() - t0).toBeGreaterThanOrEqual(300);
     expect(await evalText("String(document.body.dataset.clicked)")).toBe("1");
+  }, 30_000);
+
+  const heard = async () => JSON.parse(await evalText("JSON.stringify(heard)")) as Record<string, string[]>;
+  const FULL_CLICK = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"];
+
+  test("an overlay that appears after the last poll does not get the click, and click says nothing was clicked (#289)", async () => {
+    await cmdOpen(ctx, `${base}/overlay-on-arrival`);
+    await cmdSnapshot(ctx);
+    const target = await refNamed("Target");
+    const err = await cmdClick(ctx, target).then(
+      (out) => {
+        throw new Error(`expected a failure, got: ${out}`);
+      },
+      (e: Error) => e,
+    );
+    expect(err.message).toBe("click: a <div> took the target's place as the click arrived; nothing was clicked, run 'bowser snapshot' to see the page");
+    expect(reportFailure(err).code).toBe(2);
+    expect(await heard()).toEqual({ target: [], overlay: [], other: [] });
+
+    await evalText("(overlay.style.display = 'none', 1)");
+    expect(await cmdClick(ctx, target)).toBe(`clicked ${target} (button "Target")`);
+    expect(await heard()).toEqual({ target: FULL_CLICK, overlay: [], other: [] });
+  }, 30_000);
+
+  test("the page's own click on another element as the native click arrives neither decides nor gets cancelled (#289)", async () => {
+    await cmdOpen(ctx, `${base}/page-clicks-other`);
+    await cmdSnapshot(ctx);
+    const target = await refNamed("Target");
+    expect(await cmdClick(ctx, target)).toBe(`clicked ${target} (button "Target")`);
+    expect(await heard()).toEqual({ target: FULL_CLICK, overlay: [], other: ["click"] });
+  }, 30_000);
+
+  test("a target that shows an overlay on its own pointerdown is clicked: the first event decides (#289)", async () => {
+    await cmdOpen(ctx, `${base}/overlay-on-pointerdown`);
+    await cmdSnapshot(ctx);
+    const target = await refNamed("Target");
+    expect(await cmdClick(ctx, target)).toBe(`clicked ${target} (button "Target")`);
+    const { target: onTarget, overlay } = await heard();
+    expect(onTarget).toEqual(["pointerdown", "mousedown"]);
+    expect(overlay).toEqual(["pointerup", "mouseup"]);
+  }, 30_000);
+
+  test("a guard left by a click that timed out does not cancel the next action's click (#289)", async () => {
+    await cmdOpen(ctx, `${base}/slow-arm`);
+    await cmdSnapshot(ctx);
+    const target = await refNamed("Target");
+    const err = await timedOut(() => cmdClick(ctx, target));
+    expect(err.message).toBe("'click' timed out after 3000ms");
+    // Queued behind the guard's own evaluate, so this reads the page after it.
+    expect(await evalText("String(!!window[Symbol.for('bowser.click-guard')])")).toBe("true");
+    await evalText("(other.focus(), 1)");
+    expect(await cmdPress(ctx, "Enter")).toBe("pressed Enter");
+    expect(await heard()).toEqual({ target: [], overlay: [], other: ["click"] });
   }, 30_000);
 
   for (const [how, hide, show] of [

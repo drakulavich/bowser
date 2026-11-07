@@ -769,7 +769,11 @@ export const NO_OP = "0";
 // The API is reached only as `window.navigation`: a page's own global
 // `let navigation` shadows the bare name in any script run there. A missing
 // or broken API leaves the count at 0, which reads as "no navigation".
+// It also removes a click guard an earlier click left (#289): the guard would
+// cancel this action's trusted click, and a late arm is ahead of this in wrapView's queue.
 export const NAV_ARM = String.raw`(() => {
+  window[Symbol.for('bowser.click-guard')]?.stop();
+  delete window[Symbol.for('bowser.click-guard')];
   const KEY = Symbol.for('bowser.nav');
   let s = window[KEY];
   if (!s) {
@@ -823,6 +827,47 @@ export function clickPollScript(selector: string, pointer: boolean): string {
   return [doc, c.f, r.left, r.top, r.width, r.height, !!hit && el.contains(hit)];
 })())`;
 }
+/** Before the native click: true when the document is still `doc` and the target is on top at the point, and then a capture listener cancels a trusted pointer sequence whose first event hits anything else.
+ *  The first event decides, as in Playwright's setupHitTargetInterceptor: a target that moves during its own pointerdown still gets the rest (#289). */
+export function armClickGuard(selector: string, doc: unknown, x: number, y: number): string {
+  return String.raw`(() => {
+  const k = Symbol.for('bowser.click-guard');
+  window[k]?.stop();
+  delete window[k];
+  if ((window[Symbol.for('bowser.aria-refs')]?.doc ?? null) !== ${JSON.stringify(doc)}) return false;
+  const el = document.querySelector(${JSON.stringify(selector)});
+  const hit = document.elementFromPoint(${x}, ${y});
+  if (!el || !hit || !el.contains(hit)) return false;
+  const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+  let decided = false;
+  const guard = {
+    blocked: null,
+    stop: () => events.forEach((type) => removeEventListener(type, on, true)),
+  };
+  const on = (e) => {
+    if (!e.isTrusted) return;
+    if (!decided) {
+      decided = true;
+      if (!el.contains(e.target)) guard.blocked = String(e.target.localName);
+    }
+    if (guard.blocked === null) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  events.forEach((type) => addEventListener(type, on, true));
+  window[k] = guard;
+  return true;
+})()`;
+}
+/** After the native click: removes the guard and answers the tag it cancelled the click on, else null. The document the click opened has no guard. */
+export const CLICK_GUARD_RESULT = `(() => {
+  const k = Symbol.for('bowser.click-guard');
+  const guard = window[k];
+  if (!guard) return null;
+  guard.stop();
+  delete window[k];
+  return guard.blocked;
+})()`;
 /** The history entry's key: a location.replace keeps it, a navigate() pushes a new one (ET-13, measured on Bun 1.4.4). */
 export const ENTRY_KEY = "globalThis.navigation?.currentEntry?.key";
 export const LANDED_PAGE = `[location.href, document.referrer, ${ENTRY_KEY}]`;

@@ -12,6 +12,7 @@ import {
   LOAD_STATE,
   MUTE_MEDIA,
   NAV_ARM,
+  CLICK_GUARD_RESULT,
   NAV_COUNT,
   NAV_DESTINATION,
   NO_OP,
@@ -20,6 +21,7 @@ import {
   STOP_LOADING,
   TYPE_TARGET_FOCUSED,
   TYPE_TARGET_MARK,
+  armClickGuard,
   clickPollScript,
   hoverRead,
   hoverScript,
@@ -827,8 +829,9 @@ export function wrapView(
   };
   const nav = navigationWatch(view, timing, () => navigated(), evaluate, clock);
   const otherDoc = async (doc: string | undefined) => doc != null && (await evaluate(docMatches(doc))) !== true;
-  /** Inside act: poll until the target is actionable (see clickStep), in the waiting phase. Without `doc` the first sample's token is the expected one. */
-  const untilActionable = (op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean) =>
+  /** Inside act: poll until the target is actionable (see clickStep), in the waiting phase. Without `doc` the first sample's token is the expected one.
+   *  With `guarded`, the wait also ends on the guard armed at that point; a refused guard goes on polling, and the next sample names a navigation. */
+  const untilActionable = (op: string, selector: string, timeoutMs: number, doc: string | undefined, pointer: boolean, guarded = false) =>
     nav.waiting(async (): Promise<{ x: number; y: number } | Gone> => {
       const poll = clickPollScript(selector, pointer);
       const end = clock.now() + timeoutMs;
@@ -842,7 +845,8 @@ export function wrapView(
           if (previous === undefined && sample[0] !== expected) return GONE;
           const step = clickStep(previous, sample as ClickSample, expected, pointer);
           if (step.kind === "navigated") throw new Error(navigatedBefore(op));
-          if (step.kind === "click") return step;
+          if (step.kind === "click" && (!guarded || (await nav.ask(armClickGuard(selector, expected, step.x, step.y), end - clock.now())) === true))
+            return step;
           previous = sample as ClickSample;
         }
         await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
@@ -867,8 +871,12 @@ export function wrapView(
     click: (selector, timeoutMs = CLICK_TIMEOUT_MS, doc) =>
       guard(
         nav.act(async (): Promise<void | Gone> => {
-          const target = await untilActionable("click", selector, timeoutMs, doc, true);
-          return isGone(target) ? target : view.click(target.x, target.y);
+          const target = await untilActionable("click", selector, timeoutMs, doc, true, true);
+          if (isGone(target)) return target;
+          await view.click(target.x, target.y);
+          const blocked = await nav.ask(CLICK_GUARD_RESULT, timing.graceMs);
+          if (typeof blocked === "string")
+            throw new Error(`click: a <${blocked}> took the target's place as the click arrived; nothing was clicked, run 'bowser snapshot' to see the page`);
         }),
       ),
     type: (text, doc) =>

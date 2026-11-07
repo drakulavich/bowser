@@ -7,6 +7,11 @@ All notable changes to this project are documented here. This project follows
 
 ### Fixed
 
+- **`click` no longer lands on an overlay that appears after its last check.** The wait polled the
+  target and then sent the native click in a separate call, so whatever appeared in between got
+  the click. Now a capture listener in the page cancels a click whose first event hits anything
+  else, and `click` fails with `click: a <div> took the target's place as the click arrived;
+  nothing was clicked`. (#289)
 - **`bowser mcp` exits at once when the installed bowser it hands over to prints a line that is
   not JSON and exits.** That line failed the wait for the child's `initialize` answer, and its
   10 s timer was left running, so the process stayed alive for 10 s more. Now a line that does

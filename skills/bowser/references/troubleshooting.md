@@ -11,6 +11,7 @@
 - **"ref 'eN' has no option \"…\""**: `select` found no option with that value or label. Read the options in the snapshot and pass one of them.
 - **"ref 'eN' is not an editable element (disabled)"** or `(readonly)`: the page does not let that field be edited now; enable it first (e.g. fill the field that unlocks it) or pick another.
 - **"ref 'eN' (…) is covered by … at its click point"**: `click` or `fill` found another element on top of the ref's centre: a backdrop, a dialog, or a control the page swapped in (a `+` stepper where "Add to cart" was); nothing was clicked. Close what covers it, or take a new snapshot and use the ref of what is there now.
+- **"click: a <div> took the target's place as the click arrived"**: something appeared over the target in the last moment before the click, and the page's events were cancelled; nothing was clicked. Take a new snapshot, then close what covers it or use the ref of what is there now.
 - **"ref 'eN' is disabled"**: `click`, `check`, `uncheck` or `select` on an element the page has disabled (`[disabled]` in the snapshot); nothing was clicked. Do what enables it first, then act again.
 - **"ref 'eN' is a radio button; select another option in its group to uncheck it"**: a radio cannot be unchecked on its own: `check` another radio in its group.
 - **"did not accept the value for input[type=date]"** or **"needs a number"**: use the input's own format: `YYYY-MM-DD` for `date`, `HH:MM` for `time`, `#rrggbb` (lowercase) for `color`, digits for `number`.
