@@ -1399,7 +1399,7 @@ describe("select", () => {
   });
 
   // F12: the page answers false when no option's value or label is the text.
-  test("no matching option fails at once with exit 1", async () => {
+  test("no matching option fails with exit 1", async () => {
     await saveState({
       name: session,
       url: "https://x",
