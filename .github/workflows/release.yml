@@ -29,7 +29,7 @@ jobs:
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: echo "name=$TAG" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@v3.0.4
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: Bowser ${{ steps.tag.outputs.name }}
@@ -47,14 +47,14 @@ jobs:
       contents: read
       id-token: write # the OIDC token npm exchanges for a publish credential
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5.1.0
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           persist-credentials: false
       # Trusted publishing needs npm 11.5.1 or newer, which Node 24 bundles.
       # Nothing is installed from the network into the job that holds the
       # OIDC token.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.5.0
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
