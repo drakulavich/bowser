@@ -47,7 +47,7 @@ jobs:
       contents: read
       id-token: write # the OIDC token npm exchanges for a publish credential
     steps:
-      - uses: actions/checkout@v5.1.0
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           persist-credentials: false
