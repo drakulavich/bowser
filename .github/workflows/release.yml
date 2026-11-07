@@ -54,7 +54,7 @@ jobs:
       # Trusted publishing needs npm 11.5.1 or newer, which Node 24 bundles.
       # Nothing is installed from the network into the job that holds the
       # OIDC token.
-      - uses: actions/setup-node@v6.5.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
