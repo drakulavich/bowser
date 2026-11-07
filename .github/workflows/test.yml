@@ -20,8 +20,8 @@ jobs:
       contents: read
       id-token: write # GitHub OIDC for Flakiness.io
     steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v5.1.0
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
@@ -43,8 +43,8 @@ jobs:
     env:
       BOWSER_E2E: "1"
     steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v5.1.0
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
