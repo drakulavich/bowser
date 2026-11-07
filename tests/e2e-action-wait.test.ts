@@ -73,6 +73,8 @@ const FORM = `<!doctype html><title>form</title>
 <label><input type="checkbox" id="delta" checked> Delta</label>
 <select id="late" aria-label="Late" onchange="changes[this.id] = (changes[this.id] || 0) + 1"><option>red</option><option>blue</option></select>
 <select id="never" aria-label="Never" onchange="changes[this.id] = (changes[this.id] || 0) + 1"><option>red</option><option>blue</option></select>
+<select id="grows" aria-label="Grows" onchange="changes[this.id] = (changes[this.id] || 0) + 1"><option>red</option></select>
+<select id="fixed" aria-label="Fixed" onchange="changes[this.id] = (changes[this.id] || 0) + 1"><option>red</option></select>
 <select id="off" aria-label="Off" disabled onchange="changes[this.id] = (changes[this.id] || 0) + 1"><option>red</option><option>blue</option></select>
 <button id="ghost" style="position: relative; width: 120px; height: 40px" onclick="document.body.dataset.clicked = 'yes'"><span style="visibility: visible; position: absolute; left: 0; top: 0; width: 120px; height: 40px">Ghost</span></button>
 <button id="shy" onclick="document.body.dataset.shy = (+(document.body.dataset.shy ?? 0) + 1) + ''">Shy</button>
@@ -250,6 +252,31 @@ runOrSkip("e2e: actions wait for their target (#270)", () => {
     expect(disabled.message).toBe(`ref '${off}' is disabled`);
     expect(reportFailure(disabled).code).toBe(1);
     expect(await evalText("off.value + ' ' + changes.off")).toBe("red undefined");
+  }, 30_000);
+
+  test("select waits for an option added 500 ms after it starts, and gets that value (#291)", async () => {
+    await cmdOpen(ctx, `${base}/form`);
+    await cmdSnapshot(ctx);
+    const grows = await refNamed("Grows");
+    const t0 = performance.now();
+    await evalText("(setTimeout(() => document.getElementById('grows').add(new Option('green')), 500), 1)");
+    await cmdSelect(ctx, grows, "green");
+    expect(performance.now() - t0).toBeGreaterThanOrEqual(500);
+    expect(await evalText("grows.value + ' ' + changes.grows")).toBe("green 1");
+  }, 30_000);
+
+  test("select on an option that never appears fails at the budget, naming the option, value unchanged (#291)", async () => {
+    await cmdOpen(ctx, `${base}/form`);
+    await cmdSnapshot(ctx);
+    const fixed = await refNamed("Fixed");
+    const t0 = performance.now();
+    const err = await timedOut(() => cmdSelect(ctx, fixed, "nosuch"));
+    const took = performance.now() - t0;
+    expect(err.message).toBe(`ref '${fixed}' has no option "nosuch"`);
+    expect(reportFailure(err).code).toBe(1);
+    expect(took).toBeGreaterThanOrEqual(2900);
+    expect(took).toBeLessThan(4000);
+    expect(await evalText("fixed.value + ' ' + changes.fixed")).toBe("red undefined");
   }, 30_000);
 
   test("click on a visibility: hidden button whose visible child covers its centre fails at the budget, and its handler does not run", async () => {

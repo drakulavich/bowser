@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`select` waits for its option to appear.** It failed at once with `ref 'eN' has no option "x"`
+  when the option was not there yet, so a `<select>` whose options load after the page could not be
+  filled. Now it tries again until the option exists; when the timeout runs out it fails with the
+  same message (exit 1) and the select keeps its value. A typo now costs the whole timeout, so lower
+  it with `BOWSER_OP_TIMEOUT_MS` where that matters. (#291)
+
 ### Fixed
 
 - **`click` no longer lands on an overlay that appears after its last check.** The wait polled the

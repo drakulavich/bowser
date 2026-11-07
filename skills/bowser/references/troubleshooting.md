@@ -8,7 +8,7 @@
 - **"ref 'eN' now points to …; take a new snapshot"**: the element behind the ref now has another role or name (a button relabelled itself); nothing was done. Run `bowser snapshot` and pick the ref you mean.
 - **"'f1e3' is a playwright-cli frame ref"**: bowser does not snapshot iframe contents, so it has no frame refs. Click the iframe's own ref, then use `press` or `type`.
 - **"ref 'eN' is not a checkbox or radio button"** (or `<select>`, or `<input>`…): the ref is the wrong kind for `check`/`uncheck`/`select`/`fill`, e.g. the listitem around a checkbox. Use the control's own ref from the snapshot.
-- **"ref 'eN' has no option \"…\""**: `select` found no option with that value or label. Read the options in the snapshot and pass one of them.
+- **"ref 'eN' has no option \"…\""**: `select` waited out its timeout and found no option with that value or label. Read the options in the snapshot and pass one of them.
 - **"ref 'eN' is not an editable element (disabled)"** or `(readonly)`: the page does not let that field be edited now; enable it first (e.g. fill the field that unlocks it) or pick another.
 - **"ref 'eN' (…) is covered by … at its click point"**: `click` or `fill` found another element on top of the ref's centre: a backdrop, a dialog, or a control the page swapped in (a `+` stepper where "Add to cart" was); nothing was clicked. Close what covers it, or take a new snapshot and use the ref of what is there now.
 - **"click: a <div> took the target's place as the click arrived"**: something appeared over the target in the last moment before the click, and the page's events were cancelled; nothing was clicked. Take a new snapshot, then close what covers it or use the ref of what is there now.

@@ -1,6 +1,7 @@
 // wrapView() against a fake view.
 import { describe, expect, test } from "bun:test";
 import { clickStep, wrapView, type ClickSample, type Clock, type NavTiming, type ViewLike } from "../src/browser.ts";
+import { GONE } from "../src/daemon/protocol.ts";
 import { ACTS, createHandler, dispatch } from "../src/daemon/server.ts";
 import { createSerializer } from "../src/serialize.ts";
 import type { Op } from "../src/daemon/protocol.ts";
@@ -191,8 +192,9 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
     ],
   ] as const;
   /** A view whose poll of `#a` answers `sample(n)` on its n-th call; it logs polls and the action's script, in order. */
-  function polled(script: string, sample: (n: number) => unknown[]) {
+  function polled(script: string, sample: (n: number) => unknown[], answer: (n: number) => unknown = () => undefined) {
     const log: string[] = [];
+    let sent = 0;
     let n = 0;
     const v = fakeView(
       {
@@ -201,7 +203,10 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
             log.push("poll");
             return JSON.stringify(sample(n++));
           }
-          if (expr === script) log.push("script");
+          if (expr === script) {
+            log.push("script");
+            return answer(sent++);
+          }
           return expr === hoverRead(false) || expr === hoverRead(true) ? true : undefined;
         },
       },
@@ -238,6 +243,57 @@ describe("wrapView hover, select, check and uncheck wait for their target (#270)
       expect(log).not.toContain("script");
     });
   }
+
+  const SELECT = selectScript("#a", "v", "d");
+  const visible = (n: number) => ["d", n, 10, 20, 100, 40, true];
+
+  test("select polls and runs its script again while the option is missing, and takes it once it appears (#291)", async () => {
+    const clock = manualClock();
+    const { v, log } = polled(SELECT, visible, (n) => n === 2);
+    const action = wrapView(v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000);
+    await clock.fulfilledAt(action);
+    expect(await action).toBe(true);
+    expect(log).toEqual(["poll", "script", "poll", "script", "poll", "script"]);
+  });
+
+  test("select on an option that never appears answers false at timeoutMs, without the wait for a navigation (#291)", async () => {
+    const clock = manualClock();
+    const { v, log } = polled(SELECT, visible, () => false);
+    const action = wrapView(v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000);
+    expect(await clock.settledAt(action)).toBe(1000);
+    expect(await action).toBe(false);
+    expect(log.filter((x) => x === "script").length).toBeGreaterThan(1);
+  });
+
+  test("a select hidden while its option is awaited fails with the plain timeout at timeoutMs (#291)", async () => {
+    const clock = manualClock();
+    const { v, log } = polled(
+      SELECT,
+      (n) => (n === 0 ? visible(n) : ["d", n]),
+      () => false,
+    );
+    const action = wrapView(v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000);
+    expect(await clock.settledAt(action)).toBe(1000);
+    await expect(action).rejects.toThrow("timeout waiting for '#a' to be actionable");
+    expect(log.filter((x) => x === "script")).toEqual(["script"]);
+  });
+
+  test("select stops at once when its script answers gone or throws (#291)", async () => {
+    const clock = manualClock();
+    const gone = polled(SELECT, visible, () => GONE);
+    const goneAction = wrapView(gone.v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000);
+    await clock.fulfilledAt(goneAction);
+    expect(await goneAction).toBe(GONE);
+    expect(gone.log).toEqual(["poll", "script"]);
+
+    const missing = polled(SELECT, visible, () => {
+      throw new Error("select: element not found");
+    });
+    const missingAction = wrapView(missing.v, fast, undefined, undefined, undefined, clock).select("#a", "v", "d", 1000);
+    await clock.settledAt(missingAction);
+    await expect(missingAction).rejects.toThrow("select: element not found");
+    expect(missing.log).toEqual(["poll", "script"]);
+  });
 });
 
 describe("wrapView click waits for the target itself (#267)", () => {

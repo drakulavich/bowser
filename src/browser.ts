@@ -115,7 +115,7 @@ export interface Browser {
   press(key: string, modifiers?: KeyModifier[]): Promise<void>;
   /** Waits as click does, then dispatches the events; true when the page changed within HOVER_WATCH_MS of them. */
   hover(selector: string, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
-  /** Waits up to `timeoutMs` for the element to be visible. False when no option's value or label is `value`; nothing changed. */
+  /** Waits up to `timeoutMs` for the element to be visible and to have an option whose value or label is `value`. False when the option never came; nothing changed. */
   select(selector: string, value: string, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
   /** Waits as select does. false: `uncheck` of a checked radio, refused in the page (F20). */
   setChecked(selector: string, checked: boolean, doc?: string, timeoutMs?: number): Promise<boolean | Gone>;
@@ -318,6 +318,7 @@ interface LoadWatch {
 /** Bun's default for the selector click that bowser's own wait replaced (#267). */
 const CLICK_TIMEOUT_MS = 30_000;
 const CLICK_POLL_MS = 4;
+const NO_OPTION = new Error("select: no such option");
 const navigatedBefore = (op: string) => `${op}: the page navigated before the ${op}; nothing was ${op}ed, run 'bowser snapshot' to see the new page`;
 /** Long enough for a hover-intent menu that opens 150 ms after mouseenter (#270). */
 const HOVER_WATCH_MS = 200;
@@ -935,12 +936,23 @@ export function wrapView(
       ),
     select: (selector, value, doc, timeoutMs = CLICK_TIMEOUT_MS) =>
       guard(
-        nav.act(async () => {
-          const target = await untilActionable("select", selector, timeoutMs, doc, false);
-          if (isGone(target)) return target;
-          const answer = await evaluate(selectScript(selector, value, doc));
-          return isGone(answer) ? answer : answer === true;
-        }),
+        nav
+          .act(async () => {
+            const end = clock.now() + timeoutMs;
+            for (;;) {
+              const target = await untilActionable("select", selector, end - clock.now(), doc, false);
+              if (isGone(target)) return target;
+              const answer = await evaluate(selectScript(selector, value, doc));
+              if (answer !== false) return isGone(answer) ? answer : answer === true;
+              await nav.sleep(Math.min(CLICK_POLL_MS, Math.max(0, end - clock.now())));
+              // Thrown, not returned: act's wait for a navigation would outlast the budget's timer.
+              if (clock.now() >= end) throw NO_OPTION;
+            }
+          })
+          .catch((err: unknown) => {
+            if (err === NO_OPTION) return false;
+            throw err;
+          }),
       ),
     setChecked: (selector, checked, doc, timeoutMs = CLICK_TIMEOUT_MS) =>
       guard(
