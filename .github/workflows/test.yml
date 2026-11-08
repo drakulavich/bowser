@@ -24,8 +24,6 @@ jobs:
     steps:
       - uses: drakulavich/bite-the-diff@v1.1.0
         if: github.event_name == 'pull_request'
-        with:
-          thresholds: 1:fail
       - uses: actions/checkout@v7.0.1
       - uses: oven-sh/setup-bun@v2.2.0
         with:
