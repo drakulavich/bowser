@@ -358,6 +358,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
     await cmdGoto(ctx, `${base}/image`);
     expect(await cmdGoto(ctx, `${base}/`)).toContain(`${base}/`);
   }, 60_000);
+  // Retried until https://github.com/oven-sh/bun/issues/47396 is fixed (#256): the page's own navigation can land under our URL.
   test(
     "ET-13: a goto during the page's own script navigation lands where asked or says it was replaced; a redirect still lands",
     async () => {
@@ -382,7 +383,7 @@ runOrSkip("e2e: a session never hangs, never reports a page it has not reached",
         }
       }
     },
-    openTimeout(8000, 60_000),
+    { timeout: openTimeout(8000, 60_000), retry: 2 },
   );
   // #248 review: the cap stores its document id on the page's document, which a page can make non-extensible.
   test(
