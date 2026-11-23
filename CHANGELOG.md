@@ -5,6 +5,8 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-11-23
+
 ### Fixed
 
 - **`hover`, `check`, `uncheck` and `select` refuse a ref another element covers, as `click` and `fill`
