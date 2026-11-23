@@ -149,7 +149,7 @@ export async function loadRef(session: string, ref: string) {
 export async function liveSelector(
   c: DaemonConnection,
   target: Ref,
-  opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {},
+  opts: { enabled?: boolean; doc?: string; hit?: boolean | "label"; scroll?: boolean } = {},
 ): Promise<string> {
   const ref = target.id;
   const selector = await c.request("resolve", [resolveRefScript(target, opts)]);

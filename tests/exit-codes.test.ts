@@ -78,7 +78,7 @@ async function seed(session: string): Promise<void> {
 function resolvesThen(other: unknown) {
   return (expr: string): unknown =>
     expr === resolveRefScript({ id: "e2", role: "textbox", name: "Email" }, { doc: "d1", hit: true }) ||
-    expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true, doc: "d1" })
+    expr === resolveRefScript({ id: "e4", role: "radio", name: "A" }, { enabled: true, doc: "d1", hit: "label" })
       ? "input"
       : other;
 }

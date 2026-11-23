@@ -1384,10 +1384,11 @@ export function runCodeScript(code: string): string {
  *  the fold timed out (spec F8). Here it costs no round trip. With `hit`,
  *  a visible element still covered at its centre after the scroll answers
  *  { covered: { role, name, tag } } for what covers it: the native click
- *  would wait out the budget for it, or press what the page put there (#112). */
+ *  would wait out the budget for it, or press what the page put there (#112).
+ *  With `hit: "label"`, the element's own <label> on top counts as the element (#113). */
 export function resolveRefScript(
   ref: { id: string; role: string; name: string },
-  opts: { enabled?: boolean; doc?: string; hit?: boolean; scroll?: boolean } = {},
+  opts: { enabled?: boolean; doc?: string; hit?: boolean | "label"; scroll?: boolean } = {},
 ): string {
   // With `enabled`, a disabled element (DISABLED, the snapshot's rule)
   // answers { disabled: true } instead, before any scroll: click, check and
@@ -1403,7 +1404,7 @@ export function resolveRefScript(
   const area = el.getBoundingClientRect();
   const shown = area.width > 0 && area.height > 0 && el.checkVisibility() && getComputedStyle(el).visibility === 'visible';
   const top = shown ? document.elementFromPoint(area.left + area.width / 2, area.top + area.height / 2) : null;
-  if (top && top !== el && !el.contains(top)) {
+  if (top && top !== el && !el.contains(top)${opts.hit === "label" ? " && ![...(el.labels || [])].some((l) => l.contains(top))" : ""}) {
     return { covered: { role: ariaRole(top) || 'generic', name: nameOf(top), tag: tagOf(top).toLowerCase() } };
   }`
     : "";
