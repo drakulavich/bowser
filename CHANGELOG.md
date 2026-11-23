@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`hover`, `check`, `uncheck` and `select` refuse a ref another element covers, as `click` and `fill`
+  do.** Under a full-page layer, `check` and `select` changed the control through the layer and
+  `hover` waited out the timeout. Now each fails at once with `ref 'eN' (…) is covered by … at its
+  click point` (exit 1) and the page gets no event. A checkbox or select under its own `<label>`
+  is not covered. (#113)
+
 ## [0.15.0] — 2026-11-07
 
 ### Changed

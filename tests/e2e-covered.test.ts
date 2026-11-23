@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { reportFailure } from "../src/cli.ts";
 import type { CommandContext } from "../src/commands/context.ts";
-import { cmdCheck, cmdClick, cmdFill } from "../src/commands/interaction.ts";
+import { cmdCheck, cmdClick, cmdFill, cmdHover, cmdSelect, cmdUncheck } from "../src/commands/interaction.ts";
 import { cmdClose, cmdOpen } from "../src/commands/navigation.ts";
 import { cmdEval } from "../src/commands/scripting.ts";
 import { cmdSnapshot } from "../src/commands/snapshot.ts";
@@ -75,6 +75,27 @@ const LATE = `<!doctype html><title>late</title>
   });
 </script>`;
 
+/** #113: controls under a full-page layer, each counting the events it gets. */
+const CONTROLS = `<!doctype html><title>controls</title>
+<input type="checkbox" aria-label="Agree">
+<input type="checkbox" aria-label="News" checked>
+<select aria-label="Color"><option>red</option><option>blue</option></select>
+<button>Hover me</button>
+<div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.3); z-index: 10"></div>
+<script>
+  window.events = 0;
+  for (const el of document.querySelectorAll("input, select, button")) {
+    for (const type of ["click", "input", "change", "pointerover", "mouseover", "pointermove", "mousemove"]) el.addEventListener(type, () => events++);
+  }
+</script>`;
+
+/** A styled switch: its label's decoration sits on the checkbox's centre. */
+const SWITCH = `<!doctype html><title>switch</title>
+<label style="position: relative; display: inline-block; width: 60px; height: 30px">
+  <input type="checkbox" aria-label="Dark mode" style="position: absolute; inset: 0; width: 60px; height: 30px; margin: 0; opacity: 0">
+  <span style="position: absolute; inset: 0; background: #888; border-radius: 15px"></span>
+</label>`;
+
 /** Targets whose click point is the target, a descendant, or nothing that
  *  takes pointer events: none of these may be refused. */
 const HITTABLE = `<!doctype html><title>hittable</title>
@@ -115,9 +136,13 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     server = Bun.serve({
       port: 0,
       fetch: (req) =>
-        new Response({ "/backdrop": BACKDROP, "/swap": SWAP, "/smooth": SMOOTH, "/late": LATE }[new URL(req.url).pathname] ?? HITTABLE, {
-          headers: { "content-type": "text/html; charset=utf-8" },
-        }),
+        new Response(
+          { "/backdrop": BACKDROP, "/controls": CONTROLS, "/switch": SWITCH, "/swap": SWAP, "/smooth": SMOOTH, "/late": LATE }[new URL(req.url).pathname] ??
+            HITTABLE,
+          {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          },
+        ),
     });
     base = server.url.toString().replace(/\/$/, "");
   });
@@ -213,6 +238,42 @@ runOrSkip("e2e: a ref under another element (#112)", () => {
     expect(err.message).toBe("'click' timed out after 3000ms");
     expect(reportFailure(err).code).toBe(2);
     expect(await cmdEval(ctx, "String(document.body.dataset.clicked) + ' ' + window.covered")).toBe("undefined true");
+  }, 30_000);
+
+  test.each([
+    ["check", "Agree", "checkbox", (ref: string) => cmdCheck(ctx, ref)],
+    ["uncheck", "News", "checkbox", (ref: string) => cmdUncheck(ctx, ref)],
+    ["select", "Color", "combobox", (ref: string) => cmdSelect(ctx, ref, "blue")],
+    ["hover", "Hover me", "button", (ref: string) => cmdHover(ctx, ref)],
+  ] as const)(
+    "%s under a full-page layer is refused at once, exit 1, and the controls get no event (#113)",
+    async (_, name, role, run) => {
+      await cmdOpen(ctx, `${base}/controls`);
+      await cmdSnapshot(ctx);
+      const ref = await refNamed(name);
+      const t0 = performance.now();
+      const err = await failure(run(ref));
+      expect(performance.now() - t0).toBeLessThan(2000);
+      expect(err.message).toBe(`ref '${ref}' (${role} "${name}") is covered by generic <div> at its click point; take a new snapshot or close what covers it`);
+      expect(reportFailure(err).code).toBe(1);
+      expect(
+        await cmdEval(
+          ctx,
+          "JSON.stringify([events, ...[...document.querySelectorAll('input')].map((i) => i.checked), document.querySelector('select').value])",
+        ),
+      ).toBe('[0,false,true,"red"]');
+    },
+    30_000,
+  );
+
+  test("check and uncheck a checkbox its own label's decoration covers (#113)", async () => {
+    await cmdOpen(ctx, `${base}/switch`);
+    await cmdSnapshot(ctx);
+    const ref = await refNamed("Dark mode");
+    await cmdCheck(ctx, ref);
+    expect(await cmdEval(ctx, "document.querySelector('input').checked")).toBe("true");
+    await cmdUncheck(ctx, ref);
+    expect(await cmdEval(ctx, "document.querySelector('input').checked")).toBe("false");
   }, 30_000);
 
   test("a target hit at itself, a descendant, its shadow content or through a pointer-events:none layer is clicked", async () => {

@@ -1454,9 +1454,9 @@ describe("F20: click, check, uncheck and select refuse a disabled element, and u
 
   for (const [name, ref, run, hit] of [
     ["click", "e1", (x: CommandContext) => cmdClick(x, "e1"), true],
-    ["check", "e4", (x: CommandContext) => cmdCheck(x, "e4"), false],
-    ["uncheck", "e4", (x: CommandContext) => cmdUncheck(x, "e4"), false],
-    ["select", "e6", (x: CommandContext) => cmdSelect(x, "e6", "M"), false],
+    ["check", "e4", (x: CommandContext) => cmdCheck(x, "e4"), "label"],
+    ["uncheck", "e4", (x: CommandContext) => cmdUncheck(x, "e4"), "label"],
+    ["select", "e6", (x: CommandContext) => cmdSelect(x, "e6", "M"), "label"],
   ] as const) {
     const resolve = resolveRefScript(
       REFS.find((r) => r.id === ref)!,
@@ -1642,15 +1642,15 @@ describe("ref commands resolve the ref in the live page first", () => {
   // Each ref command, the ref it acts on, and the action op that must carry the fresh selector.
   // The fifth column: whether the resolve script also refuses a disabled
   // element (F20, and #270 for select). fill keeps its own disabled message;
-  // hover does not refuse. The last: whether it refuses a covered one, for the
-  // commands that click at the element's centre (#112).
-  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>, boolean, boolean]> = [
+  // hover does not refuse. The last: whether it refuses a covered one (#112,
+  // #113); "label" when the element's own label on top does not count.
+  const COMMANDS: Array<[string, string, string, (x: CommandContext) => Promise<string>, boolean, boolean | "label"]> = [
     ["click", "e1", "click", (x) => cmdClick(x, "e1"), true, true],
     ["fill", "e2", "click", (x) => cmdFill(x, "e2", "hi"), false, true],
-    ["hover", "e1", "hover", (x) => cmdHover(x, "e1"), false, false],
-    ["select", "e3", "select", (x) => cmdSelect(x, "e3", "red"), true, false],
-    ["check", "e4", "check", (x) => cmdCheck(x, "e4"), true, false],
-    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4"), true, false],
+    ["hover", "e1", "hover", (x) => cmdHover(x, "e1"), false, true],
+    ["select", "e3", "select", (x) => cmdSelect(x, "e3", "red"), true, "label"],
+    ["check", "e4", "check", (x) => cmdCheck(x, "e4"), true, "label"],
+    ["uncheck", "e4", "uncheck", (x) => cmdUncheck(x, "e4"), true, "label"],
   ];
 
   beforeEach(async () => {
